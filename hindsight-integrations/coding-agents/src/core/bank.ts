@@ -23,6 +23,7 @@
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { basename, dirname, join, normalize, sep } from "node:path";
+import { applyTemplate } from "./template";
 
 export interface BankConfig {
   bankId?: string;
@@ -38,7 +39,6 @@ const DEFAULT_BANK_NAME = "coding";
 // banks and avoid collisions with other Hindsight banks. Deliberately NOT `{harness}::…` (that would
 // split memory per agent, defeating cross-agent sharing).
 const DEFAULT_TEMPLATE = "coding-agent::{gitProject}";
-const PLACEHOLDER = /\{([a-zA-Z]+)\}/g;
 
 /** Main-worktree root for a directory inside a git repo (worktree- and bare-repo-aware), else null. */
 export function getProjectRootFromGit(directory: string): string | null {
@@ -103,18 +103,5 @@ export function deriveBankId(config: BankConfig, directory: string, harness = "c
     channel: () => process.env.HINDSIGHT_CHANNEL_ID || "default",
     user: () => process.env.HINDSIGHT_USER_ID || "anonymous",
   };
-  return (config.bankIdTemplate || DEFAULT_TEMPLATE).replace(PLACEHOLDER, (_, name: string) => {
-    const r = resolvers[name];
-    if (!r) {
-      console.error(
-        `hindsight: unknown bankIdTemplate placeholder "{${name}}" — valid: ` +
-          Object.keys(resolvers)
-            .sort()
-            .map((k) => `{${k}}`)
-            .join(", ")
-      );
-      return "unknown";
-    }
-    return r();
-  });
+  return applyTemplate(config.bankIdTemplate || DEFAULT_TEMPLATE, resolvers, "bankIdTemplate");
 }

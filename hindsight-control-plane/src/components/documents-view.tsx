@@ -719,6 +719,7 @@ export function DocumentsView() {
   const t = useTranslations("documentsView");
   const tCommon = useTranslations("common");
   const tBank = useTranslations("bank");
+  const tApiError = useTranslations("api.errors.documents");
   const { currentBank } = useBank();
   const { features } = useFeatures();
   const [documents, setDocuments] = useState<any[]>([]);
@@ -1223,8 +1224,9 @@ export function DocumentsView() {
       triggerDownload(blob, `${currentBank}${suffix}.zip`);
       toast.success(t("exportSuccess"));
       setExportDialogOpen(false);
-    } catch {
-      // Errors surface via the API client / route; nothing extra to do here.
+    } catch (error) {
+      // Binary transfer requests bypass the API client's shared error interceptor.
+      toast.error(error instanceof Error ? error.message : tApiError("export"));
     } finally {
       setExporting(false);
     }
@@ -1264,8 +1266,9 @@ export function DocumentsView() {
       loadDocuments(currentPage);
       setImportDialogOpen(false);
       setImportFile(null);
-    } catch {
-      // Error toast handled by the API client.
+    } catch (error) {
+      // Multipart transfer requests bypass the API client's shared error interceptor.
+      toast.error(error instanceof Error ? error.message : tApiError("import"));
     } finally {
       setImporting(false);
     }
@@ -1374,13 +1377,18 @@ export function DocumentsView() {
             <DialogDescription>{t("importDialogDescription")}</DialogDescription>
           </DialogHeader>
           <div className="py-2 space-y-4">
-            <input
-              type="file"
-              accept=".zip,application/zip"
-              disabled={importing}
-              onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
-              className="block w-full text-sm text-muted-foreground file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-muted/80"
-            />
+            <div className="grid gap-1.5">
+              <input
+                type="file"
+                accept=".zip,application/zip"
+                disabled={importing}
+                onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
+                className="block w-full text-sm text-muted-foreground file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-muted/80"
+              />
+              {/* Spelled out because "Import from zip" reads like a bulk upload
+                  of ordinary files, which this is not — that's Add Document. */}
+              <p className="text-xs text-muted-foreground">{t("importFileHint")}</p>
+            </div>
             <div className="grid gap-1.5">
               <Label htmlFor="import-on-conflict">{t("importConflictLabel")}</Label>
               <Select

@@ -20,8 +20,8 @@ import logging
 import sys
 import time
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Literal, NoReturn, ParamSpec, TypeVar, cast, overload
@@ -37,6 +37,7 @@ from ..config import (
     DEFAULT_RECALL_INCLUDE_CHUNKS,
     DEFAULT_RECALL_MAX_TOKENS,
     DEFAULT_REFLECT_SOURCE_FACTS_MAX_TOKENS,
+    DEFAULT_RETAIN_CHUNK_SIZE,
     DEFAULT_STORE_DOCUMENT_TEXT,
     ENV_MODEL_INIT_TIMEOUT,
     HindsightConfig,
@@ -103,6 +104,32 @@ class _BankTemplateImportAuthorizationState:
 _bank_template_import_authorization: contextvars.ContextVar[_BankTemplateImportAuthorizationState | None] = (
     contextvars.ContextVar("bank_template_import_authorization", default=None)
 )
+
+# Set by a knowledge-base engine method that has already run its own validator
+# gate, so the nested bank read/write and mental-model hooks it triggers are not
+# invoked a second time. Keeps each knowledge-base route to exactly one validator
+# hook: create_knowledge_page validates once, then creates its backing mental
+# model; export_knowledge_base validates once, then reads every page.
+_nested_operation_authorized: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "nested_operation_authorized", default=False
+)
+
+
+@contextmanager
+def _authorize_nested_operations() -> "Iterator[None]":
+    """Suppress validator hooks on nested engine calls within this scope.
+
+    The outer operation has already validated the caller's access to the bank, so
+    the reads/writes it performs internally (its backing mental model, or every
+    page during an export) must not re-invoke the validator.
+    """
+    token = _nested_operation_authorized.set(True)
+    try:
+        yield
+    finally:
+        _nested_operation_authorized.reset(token)
+
+
 MENTAL_MODEL_PENDING_CONTENT = "Generating content..."
 
 
@@ -493,6 +520,7 @@ def _member_to_llm(member: "LLMMemberConfig", config: HindsightConfig, defaults:
         reasoning_effort=member.reasoning_effort or config.llm_reasoning_effort,
         extra_body=member.extra_body,
         default_headers=member.default_headers or config.llm_default_headers,
+        cache_affinity=member.cache_affinity or config.llm_cache_affinity,
         ollama_num_ctx=config.llm_ollama_num_ctx,
         bedrock_service_tier=member.bedrock_service_tier,
         gemini_service_tier=member.gemini_service_tier or config.llm_gemini_service_tier,
@@ -573,11 +601,19 @@ class _SubBatchSplit:
     orchestrator uses this as the ``documents.original_text`` payload
     so that slicing an item across sub-batches does not persist a
     partial body (see issue #1838).
+
+    ``chunk_counts[i]`` is how many native chunks ``sub_batches[i]``
+    holds. The splitter knows this exactly (it cut on native chunk
+    boundaries), so callers must read it from here rather than
+    re-deriving it: the orchestrator consumes each item's ``content``
+    while streaming, and re-chunking afterwards silently yields 1
+    (see issue #1888).
     """
 
     sub_batches: list[list[RetainContentDict]]
     origin_indices: list[list[int]]
     document_body_overrides: list[str | None] = field(default_factory=list)
+    chunk_counts: list[int] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -586,20 +622,128 @@ class _RetainChunkingConfig:
     structured_chunk_size: int | None
 
 
+def _pack_native_chunks(chunks: list[str], tokens_per_batch: int) -> list[list[str]]:
+    """Group consecutive native chunks into runs of at most ``tokens_per_batch``.
+
+    A single chunk over the budget becomes a run of its own: the native chunk is
+    the atom of the retain pipeline and must never be cut (see
+    ``_split_contents_into_sub_batches``).
+    """
+    runs: list[list[str]] = []
+    current: list[str] = []
+    current_tokens = 0
+    for chunk in chunks:
+        chunk_tokens = count_tokens(chunk)
+        if current and current_tokens + chunk_tokens > tokens_per_batch:
+            runs.append(current)
+            current, current_tokens = [], 0
+        current.append(chunk)
+        current_tokens += chunk_tokens
+    if current:
+        runs.append(current)
+    return runs
+
+
+def _rejoin_native_chunks(
+    chunks: list[str],
+    chunk_size: int,
+    structured_chunk_size: int | None,
+) -> str | None:
+    """Rebuild the sub-batch text for a run of consecutive native chunks.
+
+    Returns the joined text only when re-chunking it reproduces ``chunks``
+    exactly — the alignment the whole split depends on. ``None`` means no
+    faithful join exists for this run and the caller must fall back to one
+    sub-batch per chunk, which ``chunk_text``'s idempotency guarantees.
+    """
+    from .retain import fact_extraction
+
+    if len(chunks) == 1:
+        return chunks[0]
+
+    candidates: list[str] = []
+    # A JSON conversation array is re-serialized per chunk, so its pieces have
+    # to be merged back into one array — concatenating them as text yields
+    # "[...]\n[...]", which is not valid JSON and re-chunks as prose (#2409).
+    try:
+        merged: list[Any] = []
+        for chunk in chunks:
+            parsed = json.loads(chunk)
+            if not isinstance(parsed, list):
+                raise ValueError("not a conversation array")
+            merged.extend(parsed)
+        candidates.append(json.dumps(merged, ensure_ascii=False))
+    except (json.JSONDecodeError, ValueError, TypeError):
+        pass
+    candidates.append("\n\n".join(chunks))
+    candidates.append("\n".join(chunks))
+
+    for text in candidates:
+        if fact_extraction.chunk_text(text, chunk_size, structured_chunk_size=structured_chunk_size) == chunks:
+            return text
+    return None
+
+
+def _screen_document_body_overrides(
+    overrides: list[str | None],
+    config: HindsightConfig,
+) -> list[str | None]:
+    """Memory Defense screen each distinct document body override once.
+
+    The splitter hands every slice of an oversized item the same body, so
+    screening it inside the retain path would rescan the whole document once
+    per sub-batch (issue #3282). Screen here instead — the orchestrator takes
+    an override as already screened (see ``redact_document_body``).
+    """
+    from .retain.orchestrator import redact_document_body
+
+    screened: dict[str, str] = {}
+    result: list[str | None] = []
+    for body in overrides:
+        if body is None:
+            result.append(None)
+            continue
+        if body not in screened:
+            screened[body] = redact_document_body(body, config)
+        result.append(screened[body])
+    return result
+
+
 def _split_contents_into_sub_batches(
     contents: list[RetainContentDict],
     tokens_per_batch: int,
+    *,
+    chunk_size: int,
+    structured_chunk_size: int | None = None,
 ) -> _SubBatchSplit:
     """Pack retain contents into sub-batches whose combined token count
     stays at or below ``tokens_per_batch``.
 
-    Any single item that already exceeds the budget is chunked via
-    ``fact_extraction.chunk_text`` (paragraph/sentence aware, or
-    conversation-turn aware for JSON arrays and JSONL) and each chunk becomes its
-    own single-item sub-batch. Without this, an oversized single item
-    would pass through as a ``1/1`` sub-batch holding the entire
-    payload — which contradicts the splitter's log and lets the
-    orchestrator OOM under realistic memory limits (see issue #1571).
+    Any single item that already exceeds the budget is cut into slices, because
+    passing it through as one ``1/1`` sub-batch contradicts the splitter's log
+    and OOMs the orchestrator under realistic memory limits (see issue #1571).
+
+    **Slices are always cut on native chunk boundaries** — the same
+    ``chunk_text(chunk_size, structured_chunk_size)`` boundaries the retain
+    pipeline itself uses — and every slice is verified to re-chunk back to
+    exactly the chunks it holds. That keeps one invariant true no matter how a
+    document arrives:
+
+        the chunks stored for a document depend only on its body,
+        never on how transport split it.
+
+    Everything downstream is built on that invariant and silently degrades
+    without it: delta retain and the streaming recovery pass both match stored
+    chunks by content hash (a slice cutting mid-chunk matches nothing, so
+    unchanged history is re-extracted — issue #3282), and ``chunk_index``
+    bookkeeping assumes a slice contributes a whole number of chunks (#1888).
+    A slice therefore honours ``tokens_per_batch`` only down to one native
+    chunk; below that, ``retain_chunk_size`` is the real bound.
+
+    ``chunk_size``/``structured_chunk_size`` have no default on purpose: they
+    must be the bank's resolved retain chunking settings, and quietly falling
+    back to the global default would reintroduce exactly the misalignment this
+    function exists to prevent.
 
     Used by the in-process ``retain_batch_async`` path, which processes
     the returned sub-batches SEQUENTIALLY with ``is_first_batch=(i==1)``.
@@ -609,52 +753,54 @@ def _split_contents_into_sub_batches(
     """
     from .retain import fact_extraction
 
-    # chunk_text takes a char budget; cl100k_base averages ~3-4 chars
-    # per token on natural-language input. Use 3x for headroom so a
-    # chunk's token count is comfortably under tokens_per_batch even
-    # when content tokenizes denser than average (code, JSON).
-    char_budget = max(tokens_per_batch * 3, 1)
+    def _chunks_of(text: str) -> list[str]:
+        return fact_extraction.chunk_text(text, chunk_size, structured_chunk_size=structured_chunk_size)
 
     sub_batches: list[list[RetainContentDict]] = []
     origin_indices: list[list[int]] = []
     document_body_overrides: list[str | None] = []
+    chunk_counts: list[int] = []
     current_batch: list[RetainContentDict] = []
     current_batch_origins: list[int] = []
     current_batch_tokens = 0
+    current_batch_chunks = 0
 
     def _flush() -> None:
-        nonlocal current_batch, current_batch_origins, current_batch_tokens
+        nonlocal current_batch, current_batch_origins, current_batch_tokens, current_batch_chunks
         if current_batch:
             sub_batches.append(current_batch)
             origin_indices.append(current_batch_origins)
             document_body_overrides.append(None)
+            chunk_counts.append(current_batch_chunks)
             current_batch = []
             current_batch_origins = []
             current_batch_tokens = 0
+            current_batch_chunks = 0
 
     for original_idx, item in enumerate(contents):
         content_str = item.get("content", "") or ""
         item_tokens = count_tokens(content_str)
 
         if item_tokens > tokens_per_batch:
-            # Oversized single item: flush anything in flight, then
-            # chunk the content and emit each chunk as its own
-            # single-item sub-batch. The sub-batches share the
-            # original item's document_id and metadata so the
-            # orchestrator's first-batch document tracking still
-            # cascade-deletes the prior document version on slice 1.
-            # Each slice carries ``content_str`` as the document body
-            # override so the orchestrator writes the full original
-            # text to documents.original_text — not just its own slice
-            # (otherwise the last slice would clobber the body with a
-            # truncated payload; see issue #1838).
+            # Oversized single item: flush anything in flight, then emit runs of
+            # whole native chunks as single-item sub-batches. The sub-batches
+            # share the original item's document_id and metadata so the
+            # orchestrator's first-batch document tracking still cascade-deletes
+            # the prior document version on slice 1. Each slice carries
+            # ``content_str`` as the document body override so the orchestrator
+            # writes the full original text to documents.original_text — not
+            # just its own slice (otherwise the last slice would clobber the
+            # body with a truncated payload; see issue #1838).
             _flush()
-            chunks = fact_extraction.chunk_text(content_str, char_budget)
-            for chunk in chunks:
-                chunk_item = cast(RetainContentDict, {**item, "content": chunk})
-                sub_batches.append([chunk_item])
-                origin_indices.append([original_idx])
-                document_body_overrides.append(content_str)
+            for run in _pack_native_chunks(_chunks_of(content_str), tokens_per_batch):
+                joined = _rejoin_native_chunks(run, chunk_size, structured_chunk_size)
+                slices = [(joined, len(run))] if joined is not None else [(chunk, 1) for chunk in run]
+                for slice_text, slice_chunk_count in slices:
+                    chunk_item = cast(RetainContentDict, {**item, "content": slice_text})
+                    sub_batches.append([chunk_item])
+                    origin_indices.append([original_idx])
+                    document_body_overrides.append(content_str)
+                    chunk_counts.append(slice_chunk_count)
             continue
 
         if current_batch and current_batch_tokens + item_tokens > tokens_per_batch:
@@ -662,12 +808,14 @@ def _split_contents_into_sub_batches(
         current_batch.append(item)
         current_batch_origins.append(original_idx)
         current_batch_tokens += item_tokens
+        current_batch_chunks += len(_chunks_of(content_str))
 
     _flush()
     return _SubBatchSplit(
         sub_batches=sub_batches,
         origin_indices=origin_indices,
         document_body_overrides=document_body_overrides,
+        chunk_counts=chunk_counts,
     )
 
 
@@ -1187,6 +1335,28 @@ class _MemoryRevertPlan:
     embedding: str | None = None
 
 
+@dataclass
+class KnowledgeBaseExportPage:
+    """A single page's rendered inputs for a knowledge-base export bundle."""
+
+    node_id: str
+    page: dict[str, Any]  # node merged with its mental model's content
+    mental_model_id: str | None
+    history: list[dict[str, Any]]
+
+
+@dataclass
+class KnowledgeBaseExport:
+    """Everything needed to render an export bundle, gathered under a single gate.
+
+    ``nodes`` is every folder/page node (for the index); ``pages`` carries each
+    page's content and refresh history.
+    """
+
+    nodes: list[dict[str, Any]]
+    pages: list[KnowledgeBaseExportPage]
+
+
 class MemoryEngine(MemoryEngineInterface):
     """
     Advanced memory system using temporal and semantic linking with PostgreSQL.
@@ -1407,6 +1577,7 @@ class MemoryEngine(MemoryEngineInterface):
             reasoning_effort=config.llm_reasoning_effort,
             extra_body=config.llm_extra_body,
             default_headers=config.llm_default_headers,
+            cache_affinity=config.llm_cache_affinity,
             ollama_num_ctx=config.llm_ollama_num_ctx,
             litellmrouter_config=config.llm_litellmrouter_config,
             bedrock_service_tier=config.llm_bedrock_service_tier,
@@ -1452,6 +1623,7 @@ class MemoryEngine(MemoryEngineInterface):
             reasoning_effort=config.retain_llm_reasoning_effort or config.llm_reasoning_effort,
             extra_body=config.retain_llm_extra_body or config.llm_extra_body,
             default_headers=config.llm_default_headers,
+            cache_affinity=config.retain_llm_cache_affinity or config.llm_cache_affinity,
             ollama_num_ctx=config.llm_ollama_num_ctx,
             litellmrouter_config=config.retain_llm_litellmrouter_config or config.llm_litellmrouter_config,
             bedrock_service_tier=config.llm_bedrock_service_tier,
@@ -1491,6 +1663,7 @@ class MemoryEngine(MemoryEngineInterface):
             reasoning_effort=config.reflect_llm_reasoning_effort or config.llm_reasoning_effort,
             extra_body=config.reflect_llm_extra_body or config.llm_extra_body,
             default_headers=config.llm_default_headers,
+            cache_affinity=config.reflect_llm_cache_affinity or config.llm_cache_affinity,
             ollama_num_ctx=config.llm_ollama_num_ctx,
             litellmrouter_config=config.reflect_llm_litellmrouter_config or config.llm_litellmrouter_config,
             bedrock_service_tier=config.llm_bedrock_service_tier,
@@ -1530,6 +1703,7 @@ class MemoryEngine(MemoryEngineInterface):
             reasoning_effort=config.consolidation_llm_reasoning_effort or config.llm_reasoning_effort,
             extra_body=config.consolidation_llm_extra_body or config.llm_extra_body,
             default_headers=config.llm_default_headers,
+            cache_affinity=config.consolidation_llm_cache_affinity or config.llm_cache_affinity,
             ollama_num_ctx=config.llm_ollama_num_ctx,
             litellmrouter_config=config.consolidation_llm_litellmrouter_config or config.llm_litellmrouter_config,
             bedrock_service_tier=config.llm_bedrock_service_tier,
@@ -1815,6 +1989,119 @@ class MemoryEngine(MemoryEngineInterface):
             await self._file_storage.delete(storage_key)
         except Exception:
             logger.warning("Failed to delete import archive %s", storage_key, exc_info=True)
+
+    async def _handle_export_documents(self, task_dict: dict[str, Any]):
+        """Handler for async document-export tasks.
+
+        Builds the transfer ZIP for the bank (heavy load + compression, kept off
+        the request path — issue #3321), stores it in file storage, and records
+        the storage key, download URL, and archive size in the operation's
+        ``result_metadata``. ``execute_task`` marks the operation completed. The
+        client retrieves the archive later via GET /v1/default/files/download/{key}.
+        """
+        import json
+
+        bank_id = task_dict.get("bank_id")
+        operation_id = task_dict.get("operation_id")
+        document_ids = task_dict.get("document_ids")
+        include_observations = task_dict.get("include_observations", False)
+        if not bank_id:
+            raise ValueError("bank_id is required for export_documents task")
+
+        from hindsight_api.models import RequestContext
+
+        context = RequestContext(
+            internal=True,
+            user_initiated=True,
+            tenant_id=task_dict.get("_tenant_id"),
+            api_key_id=task_dict.get("_api_key_id"),
+            retry_count=task_dict.get("_retry_count", 0),
+        )
+
+        archive_bytes = await self.export_documents_async(
+            bank_id, context, document_ids, include_observations=include_observations
+        )
+
+        # A fresh uuid per export keeps concurrent/repeat exports of the same bank
+        # from clobbering each other's archive.
+        storage_key = f"banks/{bank_id}/exports/{uuid.uuid4()}/transfer.zip"
+        await self._file_storage.store(
+            file_data=archive_bytes,
+            key=storage_key,
+            metadata={"content_type": "application/zip", "bank_id": bank_id},
+        )
+        download_url = await self._file_storage.get_download_url(storage_key)
+
+        if operation_id:
+            result = {
+                "storage_key": storage_key,
+                "download_url": download_url,
+                "byte_size": len(archive_bytes),
+                "filename": f"{bank_id}-documents.zip",
+            }
+            backend = await self._get_backend()
+            async with acquire_with_retry(backend) as conn:
+                await conn.execute(
+                    f"UPDATE {fq_table('async_operations')} "
+                    f"SET result_metadata = COALESCE(result_metadata, '{{}}'::jsonb) || $1::jsonb "
+                    f"WHERE operation_id = $2",
+                    json.dumps(result, default=_json_default),
+                    uuid.UUID(operation_id),
+                )
+
+    async def _delete_operation_export_archive(self, result_metadata: Any) -> None:
+        """Best-effort delete of an export operation's stored archive.
+
+        Export archives live in file storage keyed by ``result_metadata.storage_key``
+        and the operation row is their only handle, so they must be removed whenever
+        that row is (user delete or retention prune). A no-op for non-export ops
+        (no storage_key) and swallowing failures so cleanup never blocks the delete.
+        """
+        if not result_metadata:
+            return
+        if isinstance(result_metadata, str):
+            try:
+                result_metadata = json.loads(result_metadata)
+            except (json.JSONDecodeError, TypeError):
+                return
+        if not isinstance(result_metadata, dict):
+            return
+        storage_key = result_metadata.get("storage_key")
+        if not storage_key:
+            return
+        try:
+            await self._file_storage.delete(storage_key)
+        except Exception:
+            logger.warning("Failed to delete export archive %s", storage_key, exc_info=True)
+
+    async def purge_expired_export_archives(self, conn: Any, table: str, cutoff: Any) -> int:
+        """Delete stored archives of export operations retention is about to prune.
+
+        Mirrors ``prune_terminal_operations``' predicate (terminal status +
+        ``updated_at < cutoff``) so an export's archive is removed in step with its
+        operation row, instead of being orphaned in file storage when the row is
+        pruned. Called by the maintenance sweep before the row prune, on the same
+        (schema-scoped) connection. Returns the number of archives deleted.
+        """
+        rows = await conn.fetch(
+            f"""SELECT result_metadata FROM {table}
+                WHERE operation_type = 'export_documents'
+                  AND status IN ('completed', 'failed', 'cancelled')
+                  AND updated_at < $1""",
+            cutoff,
+        )
+        purged = 0
+        for row in rows:
+            meta = row["result_metadata"]
+            if isinstance(meta, str):
+                try:
+                    meta = json.loads(meta)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+            if isinstance(meta, dict) and meta.get("storage_key"):
+                await self._delete_operation_export_archive(meta)
+                purged += 1
+        return purged
 
     async def _handle_batch_retain(self, task_dict: dict[str, Any]):
         """
@@ -2283,6 +2570,8 @@ class MemoryEngine(MemoryEngineInterface):
                     await self._handle_file_convert_retain(task_dict)
                 elif task_type == "import_documents":
                     await self._handle_import_documents(task_dict)
+                elif task_type == "export_documents":
+                    await self._handle_export_documents(task_dict)
                 elif task_type == "consolidation":
                     consolidation_result = await self._handle_consolidation(task_dict)
                 elif task_type == "graph_maintenance":
@@ -4025,10 +4314,26 @@ class MemoryEngine(MemoryEngineInterface):
                 f"Large batch detected ({total_tokens:,} tokens from {len(contents)} items). Splitting into sub-batches of ~{tokens_per_batch:,} tokens each..."
             )
 
-            split = _split_contents_into_sub_batches(contents, tokens_per_batch)
+            # Slices are cut on the bank's own chunk boundaries, so resolve the
+            # retain config before splitting — the splitter and the orchestrator
+            # must chunk identically for the slices to line up with what gets
+            # stored (see _split_contents_into_sub_batches).
+            retain_config = await self._resolve_retain_config(bank_id, request_context, strategy)
+            chunking_config = self._retain_chunking_config(retain_config)
+
+            split = _split_contents_into_sub_batches(
+                contents,
+                tokens_per_batch,
+                chunk_size=chunking_config.chunk_size,
+                structured_chunk_size=chunking_config.structured_chunk_size,
+            )
             sub_batches = split.sub_batches
             origin_indices = split.origin_indices
-            document_body_overrides = split.document_body_overrides
+            # Every slice of an oversized item carries the same full body as its
+            # documents.original_text payload, and that body never goes through
+            # per-item screening. Screen each distinct body once here rather than
+            # inside every sub-batch (issue #3282).
+            document_body_overrides = _screen_document_body_overrides(split.document_body_overrides, retain_config)
 
             sub_batch_sizes = [len(b) for b in sub_batches]
             # Keep the per-sub-batch sizes log compact when an oversize
@@ -4054,12 +4359,10 @@ class MemoryEngine(MemoryEngineInterface):
             # chunk_index sequence rather than restart at 0 — otherwise the
             # derived chunk_id ({bank}_{doc}_{index}) collides and later
             # sub-batches overwrite earlier chunks, leaving only one sub-batch's
-            # worth of chunks/memories (issue #1888). Counting uses the same
-            # bank-resolved, strategy-applied chunk size the orchestrator chunks
-            # with, so the offsets match the chunk_index values it assigns.
+            # worth of chunks/memories (issue #1888). The counts come from the
+            # splitter, which cut the slices on those very chunk boundaries.
             from .retain import fact_extraction, fact_storage
 
-            chunking_config = await self._resolve_retain_chunking_config(bank_id, request_context, strategy)
             chunk_offsets: dict[str, int] = {}
 
             # In update_mode="append", retain_batch prepends the existing document
@@ -4116,27 +4419,13 @@ class MemoryEngine(MemoryEngineInterface):
                 sub_doc_id = document_id or (sub_batch[0].get("document_id") if len(sub_batch) == 1 else None)
                 sub_offset = chunk_offsets.get(sub_doc_id, 0) if sub_doc_id else 0
 
-                # Count the chunks this sub-batch will produce BEFORE handing it
-                # to the orchestrator. retain_batch consumes (pops) each item's
-                # "content" while streaming, so reading it back after the call
-                # yields "" — and chunk_text("") returns [""] (count 1),
-                # advancing the per-document cursor by 1 regardless of the real
-                # chunk count. For slices that each span several chunks the next
-                # sub-batch then restarts ~1 slot in, colliding chunk_ids and
-                # overwriting earlier chunks (only ~1 new chunk survives per
-                # sub-batch). Capture it here while content is still present.
-                sub_chunk_count = 0
-                if sub_doc_id:
-                    sub_chunk_count = sum(
-                        len(
-                            fact_extraction.chunk_text(
-                                item.get("content", "") or "",
-                                chunking_config.chunk_size,
-                                structured_chunk_size=chunking_config.structured_chunk_size,
-                            )
-                        )
-                        for item in sub_batch
-                    )
+                # How many chunks this sub-batch contributes, from the splitter.
+                # It must NOT be re-derived here: retain_batch consumes (pops)
+                # each item's "content" while streaming, so reading it back
+                # after the call yields "" — and chunk_text("") returns [""]
+                # (count 1), advancing the per-document cursor by 1 regardless
+                # of the real chunk count (issue #1888).
+                sub_chunk_count = split.chunk_counts[i - 1]
 
                 sub_results, sub_usage, sub_processed = await self._retain_batch_async_internal(
                     bank_id=bank_id,
@@ -4271,19 +4560,18 @@ class MemoryEngine(MemoryEngineInterface):
         except Exception as e:
             logger.warning(f"Failed to submit graph maintenance task for bank {bank_id}: {e}")
 
-    async def _resolve_retain_chunking_config(
+    async def _resolve_retain_config(
         self,
         bank_id: str,
         request_context: "RequestContext",
         strategy: str | None,
-    ) -> _RetainChunkingConfig:
-        """Resolve the effective retain chunking settings for a bank.
+    ) -> HindsightConfig:
+        """Resolve the config a retain runs under, strategy overrides applied.
 
-        Mirrors the bank-config + strategy resolution that
-        ``_retain_batch_async_internal`` applies before handing config to the
-        orchestrator, so chunk-count estimates used for per-document
-        chunk_index offsets match the chunk_index values the orchestrator
-        actually assigns.
+        Mirrors what ``_retain_batch_async_internal`` resolves before handing
+        config to the orchestrator, so anything the splitting caller derives
+        from it (chunk boundaries, Memory Defense screening) matches what the
+        orchestrator then does with each sub-batch.
         """
         from hindsight_api.config_resolver import apply_strategy
 
@@ -4291,9 +4579,14 @@ class MemoryEngine(MemoryEngineInterface):
         effective_strategy = strategy or resolved_config.retain_default_strategy
         if effective_strategy:
             resolved_config = apply_strategy(resolved_config, effective_strategy)
+        return resolved_config
+
+    @staticmethod
+    def _retain_chunking_config(config: HindsightConfig) -> _RetainChunkingConfig:
+        """The chunk boundaries ``config`` implies, as the retain pipeline uses them."""
         return _RetainChunkingConfig(
-            chunk_size=getattr(resolved_config, "retain_chunk_size", 3000),
-            structured_chunk_size=getattr(resolved_config, "retain_structured_chunk_size", None),
+            chunk_size=getattr(config, "retain_chunk_size", DEFAULT_RETAIN_CHUNK_SIZE),
+            structured_chunk_size=getattr(config, "retain_structured_chunk_size", None),
         )
 
     async def _retain_batch_async_internal(
@@ -4412,6 +4705,70 @@ class MemoryEngine(MemoryEngineInterface):
 
         await self._get_backend()
         return await export_documents(self._backend, bank_id, document_ids, include_observations=include_observations)
+
+    async def submit_export_documents_async(
+        self,
+        bank_id: str,
+        request_context: "RequestContext",
+        document_ids: list[str] | None = None,
+        include_observations: bool = False,
+    ) -> dict[str, Any]:
+        """Submit an async document-export operation and return its ``operation_id``.
+
+        Building a whole-bank archive loads every unit into memory, holds a
+        connection, and blocks the event loop while the ZIP is compressed — enough
+        to take down the shared API on a large bank (issue #3321). So the work runs
+        in a worker (or inline under a ``SyncTaskBackend`` in tests) instead of on
+        the request. Poll GET /operations/{operation_id}; on completion the
+        operation's ``result_metadata`` carries ``download_url`` / ``storage_key``
+        / ``byte_size`` for the archive, served by GET /v1/default/files/download/{key}.
+        """
+        # Reject the incoherent combination up front — same guard export_documents
+        # raises — so the caller gets an immediate 400 rather than a failed task.
+        if include_observations and document_ids is not None:
+            raise ValueError("include_observations is only supported when exporting the whole bank (omit document_id)")
+
+        await self._authenticate_tenant(request_context)
+        await self._get_backend()
+
+        task_payload: dict[str, Any] = {
+            "document_ids": list(document_ids) if document_ids else None,
+            "include_observations": include_observations,
+        }
+        if request_context.tenant_id:
+            task_payload["_tenant_id"] = request_context.tenant_id
+        if request_context.api_key_id:
+            task_payload["_api_key_id"] = request_context.api_key_id
+
+        return await self._submit_async_operation(
+            bank_id,
+            operation_type="export_documents",
+            task_type="export_documents",
+            task_payload=task_payload,
+        )
+
+    async def retrieve_bank_file(
+        self,
+        bank_id: str,
+        storage_key: str,
+        request_context: "RequestContext",
+    ) -> bytes | None:
+        """Retrieve a bank-scoped stored file (e.g. an async export archive).
+
+        Authorizes the caller against ``bank_id`` first (via ``get_bank_profile``,
+        which authenticates the tenant), so a caller can't read another tenant's or
+        bank's file even if they guess the key. Returns ``None`` when the bank is
+        not visible to the caller or the file does not exist — the handler maps
+        both to 404 (indistinguishable on purpose, so keys can't be probed).
+        """
+        profile = await self.get_bank_profile(bank_id, request_context=request_context, create_if_missing=False)
+        if profile is None:
+            return None
+        await self._get_backend()
+        try:
+            return await self._file_storage.retrieve(storage_key)
+        except FileNotFoundError:
+            return None
 
     async def import_bank_async(
         self,
@@ -8864,6 +9221,10 @@ class MemoryEngine(MemoryEngineInterface):
         Returns None if the memory is not found or is not an observation.
         Returns a list of history entries (most recent first), each with source_facts resolved.
         """
+        try:
+            memory_uuid = uuid.UUID(memory_id)
+        except ValueError:
+            raise ValueError(f"Invalid memory_id: '{memory_id}' is not a valid UUID")
         await self._authenticate_tenant(request_context)
         if self._operation_validator:
             from hindsight_api.extensions import BankReadContext, BankReadOperation
@@ -8880,7 +9241,7 @@ class MemoryEngine(MemoryEngineInterface):
                 FROM {fq_table("memory_units")}
                 WHERE id = $1 AND bank_id = $2
                 """,
-                uuid.UUID(memory_id),
+                memory_uuid,
                 bank_id,
             )
             if not row:
@@ -8898,7 +9259,7 @@ class MemoryEngine(MemoryEngineInterface):
                 WHERE observation_id = $1
                 ORDER BY changed_at ASC, id ASC
                 """,
-                uuid.UUID(memory_id),
+                memory_uuid,
             )
             if not history_rows:
                 return []
@@ -11533,6 +11894,10 @@ class MemoryEngine(MemoryEngineInterface):
         request_context: "RequestContext",
     ) -> dict[str, Any] | None:
         """Get entity details including metadata and observations."""
+        try:
+            entity_uuid = uuid.UUID(entity_id)
+        except ValueError:
+            raise ValueError(f"Invalid entity_id: '{entity_id}' is not a valid UUID")
         await self._authenticate_tenant(request_context)
         if self._operation_validator:
             from hindsight_api.extensions import BankReadContext, BankReadOperation
@@ -11551,7 +11916,7 @@ class MemoryEngine(MemoryEngineInterface):
                 WHERE bank_id = $1 AND id = $2
                 """,
                 bank_id,
-                uuid.UUID(entity_id),
+                entity_uuid,
             )
 
         if not entity_row:
@@ -11810,7 +12175,7 @@ class MemoryEngine(MemoryEngineInterface):
             The created pinned mental model dict
         """
         await self._authenticate_tenant(request_context)
-        if self._operation_validator:
+        if self._operation_validator and not _nested_operation_authorized.get():
             from hindsight_api.extensions import BankWriteContext, BankWriteOperation
 
             if not self._consume_preauthorized_bank_write(
@@ -12777,7 +13142,7 @@ class MemoryEngine(MemoryEngineInterface):
             Updated pinned mental model dict or None if not found
         """
         await self._authenticate_tenant(request_context)
-        if self._operation_validator:
+        if self._operation_validator and not _nested_operation_authorized.get():
             from hindsight_api.extensions import BankWriteContext, BankWriteOperation
 
             if not self._consume_preauthorized_bank_write(
@@ -13080,7 +13445,7 @@ class MemoryEngine(MemoryEngineInterface):
             True if deleted, False if not found
         """
         await self._authenticate_tenant(request_context)
-        if self._operation_validator:
+        if self._operation_validator and not _nested_operation_authorized.get():
             from hindsight_api.extensions import BankWriteContext, BankWriteOperation
 
             ctx = BankWriteContext(
@@ -13230,6 +13595,15 @@ class MemoryEngine(MemoryEngineInterface):
         ``managed`` lets a client tag a node as system-owned vs. hand-authored.
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator and not _nested_operation_authorized.get():
+            from hindsight_api.extensions import BankWriteContext, BankWriteOperation
+
+            ctx = BankWriteContext(
+                bank_id=bank_id,
+                operation=BankWriteOperation.CREATE_KNOWLEDGE_FOLDER,
+                request_context=request_context,
+            )
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         backend = await self._get_backend()
         folder_id = f"kf-{uuid.uuid4().hex}"
         async with acquire_with_retry(backend) as conn:
@@ -13277,45 +13651,57 @@ class MemoryEngine(MemoryEngineInterface):
         "already exists" (surfaced by the API as a 409).
         """
         await self._authenticate_tenant(request_context)
-        # The mental model carries the content (and is created+validated by the
-        # existing path, including lazy bank creation); the node only refs it.
-        mm = await self.create_mental_model(
-            bank_id=bank_id,
-            name=name,
-            source_query=source_query,
-            content=content,
-            mental_model_id=mental_model_id,
-            tags=tags,
-            max_tokens=max_tokens if max_tokens is not None else self.KNOWLEDGE_PAGE_DEFAULT_MAX_TOKENS,
-            trigger=trigger if trigger is not None else dict(self.KNOWLEDGE_PAGE_DEFAULT_TRIGGER),
-            request_context=request_context,
-        )
-        backend = await self._get_backend()
-        page_id = f"kp-{uuid.uuid4().hex}"
-        try:
-            async with acquire_with_retry(backend) as conn:
-                async with conn.transaction():
-                    await self._kp_assert_folder_parent(conn, bank_id, parent_id)
-                    row = await conn.fetchrow(
-                        f"""
-                        INSERT INTO {fq_table("knowledge_pages")}
-                            (id, bank_id, parent_id, kind, name, mental_model_id, managed)
-                        VALUES ($1, $2, $3, 'page', $4, $5, $6)
-                        RETURNING {self._KP_COLUMNS}
-                        """,
-                        page_id,
-                        bank_id,
-                        parent_id,
-                        name,
-                        mm["id"],
-                        managed,
-                    )
-        except asyncpg.UniqueViolationError:
-            # Duplicate page name in this folder (uq_kp_folder_pagename). Roll back
-            # by deleting the orphan mental model we just created, then signal the
-            # caller that the page already exists.
-            await self.delete_mental_model(bank_id, mm["id"], request_context=request_context)
-            return None
+        if self._operation_validator and not _nested_operation_authorized.get():
+            from hindsight_api.extensions import BankWriteContext, BankWriteOperation
+
+            ctx = BankWriteContext(
+                bank_id=bank_id,
+                operation=BankWriteOperation.CREATE_KNOWLEDGE_PAGE,
+                request_context=request_context,
+            )
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
+        # The mental model carries the content (and is created by the existing
+        # path, including lazy bank creation); the node only refs it. The write is
+        # already authorized above, so the nested mental-model create/delete run
+        # without invoking the validator a second time.
+        with _authorize_nested_operations():
+            mm = await self.create_mental_model(
+                bank_id=bank_id,
+                name=name,
+                source_query=source_query,
+                content=content,
+                mental_model_id=mental_model_id,
+                tags=tags,
+                max_tokens=max_tokens if max_tokens is not None else self.KNOWLEDGE_PAGE_DEFAULT_MAX_TOKENS,
+                trigger=trigger if trigger is not None else dict(self.KNOWLEDGE_PAGE_DEFAULT_TRIGGER),
+                request_context=request_context,
+            )
+            backend = await self._get_backend()
+            page_id = f"kp-{uuid.uuid4().hex}"
+            try:
+                async with acquire_with_retry(backend) as conn:
+                    async with conn.transaction():
+                        await self._kp_assert_folder_parent(conn, bank_id, parent_id)
+                        row = await conn.fetchrow(
+                            f"""
+                            INSERT INTO {fq_table("knowledge_pages")}
+                                (id, bank_id, parent_id, kind, name, mental_model_id, managed)
+                            VALUES ($1, $2, $3, 'page', $4, $5, $6)
+                            RETURNING {self._KP_COLUMNS}
+                            """,
+                            page_id,
+                            bank_id,
+                            parent_id,
+                            name,
+                            mm["id"],
+                            managed,
+                        )
+            except asyncpg.UniqueViolationError:
+                # Duplicate page name in this folder (uq_kp_folder_pagename). Roll back
+                # by deleting the orphan mental model we just created, then signal the
+                # caller that the page already exists.
+                await self.delete_mental_model(bank_id, mm["id"], request_context=request_context)
+                return None
         node = self._row_to_knowledge_node(row)
         # Surface the mental-model metadata so the caller can render markdown or
         # schedule a content refresh without a second fetch.
@@ -13340,6 +13726,15 @@ class MemoryEngine(MemoryEngineInterface):
         stays on the single mental-model read, which is where a user asks for it.
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator and not _nested_operation_authorized.get():
+            from hindsight_api.extensions import BankReadContext, BankReadOperation
+
+            ctx = BankReadContext(
+                bank_id=bank_id,
+                operation=BankReadOperation.GET_KNOWLEDGE_BASE_TREE,
+                request_context=request_context,
+            )
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         # Resolve the watermark before taking a connection — on a cache miss it
         # acquires one of its own, and holding two is how the pool deadlocks.
         watermark = await self._bank_write_watermark(bank_id) if with_staleness else None
@@ -13368,6 +13763,15 @@ class MemoryEngine(MemoryEngineInterface):
     ) -> dict[str, Any] | None:
         """Return a page node merged with its mental model's content (for markdown rendering)."""
         await self._authenticate_tenant(request_context)
+        if self._operation_validator and not _nested_operation_authorized.get():
+            from hindsight_api.extensions import BankReadContext, BankReadOperation
+
+            ctx = BankReadContext(
+                bank_id=bank_id,
+                operation=BankReadOperation.GET_KNOWLEDGE_PAGE,
+                request_context=request_context,
+            )
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         backend = await self._get_backend()
         async with acquire_with_retry(backend) as conn:
             row = await conn.fetchrow(
@@ -13402,6 +13806,15 @@ class MemoryEngine(MemoryEngineInterface):
         erroring.
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator and not _nested_operation_authorized.get():
+            from hindsight_api.extensions import BankReadContext, BankReadOperation
+
+            ctx = BankReadContext(
+                bank_id=bank_id,
+                operation=BankReadOperation.SEARCH_KNOWLEDGE_BASE,
+                request_context=request_context,
+            )
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         query = (query or "").strip()
         if not query:
             return []
@@ -13493,6 +13906,15 @@ class MemoryEngine(MemoryEngineInterface):
     ) -> dict[str, Any] | None:
         """Rename a folder or page node."""
         await self._authenticate_tenant(request_context)
+        if self._operation_validator and not _nested_operation_authorized.get():
+            from hindsight_api.extensions import BankWriteContext, BankWriteOperation
+
+            ctx = BankWriteContext(
+                bank_id=bank_id,
+                operation=BankWriteOperation.RENAME_KNOWLEDGE_NODE,
+                request_context=request_context,
+            )
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         backend = await self._get_backend()
         async with acquire_with_retry(backend) as conn:
             row = await conn.fetchrow(
@@ -13529,6 +13951,15 @@ class MemoryEngine(MemoryEngineInterface):
         against the new question.
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator and not _nested_operation_authorized.get():
+            from hindsight_api.extensions import BankWriteContext, BankWriteOperation
+
+            ctx = BankWriteContext(
+                bank_id=bank_id,
+                operation=BankWriteOperation.UPDATE_KNOWLEDGE_PAGE,
+                request_context=request_context,
+            )
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         backend = await self._get_backend()
         async with acquire_with_retry(backend) as conn:
             row = await conn.fetchrow(
@@ -13539,15 +13970,18 @@ class MemoryEngine(MemoryEngineInterface):
             )
         if row is None or row["mental_model_id"] is None:
             return None
-        await self.update_mental_model(
-            bank_id=bank_id,
-            mental_model_id=row["mental_model_id"],
-            source_query=source_query,
-            tags=tags,
-            max_tokens=max_tokens,
-            trigger=trigger,
-            request_context=request_context,
-        )
+        # The write is already authorized above; the backing mental-model update
+        # runs without re-invoking the validator.
+        with _authorize_nested_operations():
+            await self.update_mental_model(
+                bank_id=bank_id,
+                mental_model_id=row["mental_model_id"],
+                source_query=source_query,
+                tags=tags,
+                max_tokens=max_tokens,
+                trigger=trigger,
+                request_context=request_context,
+            )
         async with acquire_with_retry(backend) as conn:
             node_row = await conn.fetchrow(
                 f"SELECT {self._KP_PAGE_SELECT} FROM {self._kp_join()} "
@@ -13562,6 +13996,15 @@ class MemoryEngine(MemoryEngineInterface):
     ) -> dict[str, Any] | None:
         """Re-parent a node, rejecting self-parenting and cycles."""
         await self._authenticate_tenant(request_context)
+        if self._operation_validator and not _nested_operation_authorized.get():
+            from hindsight_api.extensions import BankWriteContext, BankWriteOperation
+
+            ctx = BankWriteContext(
+                bank_id=bank_id,
+                operation=BankWriteOperation.MOVE_KNOWLEDGE_NODE,
+                request_context=request_context,
+            )
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         if new_parent_id == node_id:
             raise ValueError("A node cannot be its own parent")
         backend = await self._get_backend()
@@ -13605,6 +14048,15 @@ class MemoryEngine(MemoryEngineInterface):
         rows. The subtree is gathered in Python so the logic is dialect-agnostic.
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator and not _nested_operation_authorized.get():
+            from hindsight_api.extensions import BankWriteContext, BankWriteOperation
+
+            ctx = BankWriteContext(
+                bank_id=bank_id,
+                operation=BankWriteOperation.DELETE_KNOWLEDGE_NODE,
+                request_context=request_context,
+            )
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         backend = await self._get_backend()
         async with acquire_with_retry(backend) as conn:
             async with conn.transaction():
@@ -13641,6 +14093,57 @@ class MemoryEngine(MemoryEngineInterface):
                     node_id,
                 )
         return True
+
+    async def export_knowledge_base(self, bank_id: str, *, request_context: "RequestContext") -> KnowledgeBaseExport:
+        """Gather every node, page content, and refresh history for an export bundle.
+
+        Validated once as a single knowledge-base export read — the per-page reads
+        it performs run under that authorization so the whole export costs exactly
+        one validator hook and leaks no content when the caller is denied. The API
+        layer renders the returned data into a markdown bundle.
+        """
+        await self._authenticate_tenant(request_context)
+        if self._operation_validator and not _nested_operation_authorized.get():
+            from hindsight_api.extensions import BankReadContext, BankReadOperation
+
+            ctx = BankReadContext(
+                bank_id=bank_id,
+                operation=BankReadOperation.EXPORT_KNOWLEDGE_BASE,
+                request_context=request_context,
+            )
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
+
+        with _authorize_nested_operations():
+            nodes = await self.list_knowledge_nodes(bank_id=bank_id, request_context=request_context)
+            pages: list[KnowledgeBaseExportPage] = []
+            for node in nodes:
+                if node.get("kind") != "page":
+                    continue
+                page = await self.get_knowledge_page(
+                    bank_id=bank_id, page_id=node["id"], request_context=request_context
+                )
+                if page is None:
+                    continue
+                mental_model_id = node.get("mental_model_id")
+                history: list[dict[str, Any]] = []
+                if mental_model_id:
+                    history = (
+                        await self.get_mental_model_history(
+                            bank_id=bank_id,
+                            mental_model_id=mental_model_id,
+                            request_context=request_context,
+                        )
+                        or []
+                    )
+                pages.append(
+                    KnowledgeBaseExportPage(
+                        node_id=node["id"],
+                        page=page,
+                        mental_model_id=mental_model_id,
+                        history=history,
+                    )
+                )
+        return KnowledgeBaseExport(nodes=nodes, pages=pages)
 
     async def compute_mental_model_is_stale(
         self,
@@ -14569,15 +15072,18 @@ class MemoryEngine(MemoryEngineInterface):
             # can finalize as completed even though a failed child was deleted mid-batch.
             # Parent linkage lives in JSON result_metadata (no FK), so this is documented
             # rather than guarded; block child deletion here if that trade-off changes.
-            deleted = await conn.fetchval(
+            deleted = await conn.fetchrow(
                 f"""DELETE FROM {fq_table("async_operations")}
                     WHERE operation_id = $1 AND bank_id = $2
                       AND status IN ('failed', 'cancelled', 'completed')
-                    RETURNING operation_id""",
+                    RETURNING operation_id, result_metadata""",
                 op_uuid,
                 bank_id,
             )
             if deleted:
+                # An export operation owns a stored archive keyed in result_metadata;
+                # delete it with the row so the blob doesn't outlive its only handle.
+                await self._delete_operation_export_archive(deleted["result_metadata"])
                 return {
                     "success": True,
                     "message": f"Operation {operation_id} deleted",

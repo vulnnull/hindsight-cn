@@ -3,6 +3,7 @@ Link creation utilities for temporal, semantic, and entity links.
 """
 
 import logging
+import re
 import time
 from datetime import UTC
 
@@ -23,6 +24,24 @@ logger = logging.getLogger(__name__)
 
 # Sentinel UUID used in the unique index to represent NULL entity_id
 _NIL_ENTITY_UUID = "00000000-0000-0000-0000-000000000000"
+
+# Any run of whitespace, including the \n / \r / \t that extraction sometimes
+# leaves inside a candidate entity name.
+_WHITESPACE_RUN_RE = re.compile(r"\s+")
+
+
+def _normalize_entity_name(name: str) -> str:
+    """Collapse internal whitespace runs to a single space and strip the ends.
+
+    Extraction can hand back names carrying embedded newlines/tabs, which then
+    become ``entities.canonical_name`` values that shear every line-oriented
+    consumer (``psql -A`` output, log lines, exports) — issue #3275. Case is
+    deliberately untouched: the entity registry already matches on
+    ``LOWER(canonical_name)``, so lowercasing here would only lose the display
+    form.
+    """
+    return _WHITESPACE_RUN_RE.sub(" ", name).strip()
+
 
 # Maximum number of temporal links to keep per unit (from_unit_id).
 # Retrieval only reads top 10-20 per unit via LATERAL join, so keeping
@@ -151,6 +170,12 @@ def _prepare_entities_for_resolution(
     """
     Convert LLM entities into the flat format expected by entity resolver.
 
+    Candidate names are whitespace-normalized here (see ``_normalize_entity_name``)
+    and names that are empty afterwards are dropped, so no downstream stage has to
+    cope with an entity whose canonical name is blank or spans several lines.
+    Both happen before the flat list and ``entity_to_unit`` are derived, keeping
+    the resolver's positional invariant (output index-aligned with input) intact.
+
     Returns:
         Tuple of (all_entities_flat, all_entities, entity_to_unit) where:
         - all_entities_flat: flat list of entity dicts ready for resolve_entities_batch
@@ -159,14 +184,44 @@ def _prepare_entities_for_resolution(
     """
     substep_start = time.time()
     all_entities = []
+    dropped_empty = 0
     for entity_list in llm_entities:
         formatted_entities = []
+        # Normalization can make two candidates that reached here as distinct
+        # strings ("Acme\nCorp" from extraction, "Acme Corp" from the caller's
+        # own entity list) identical, and the upstream dedup in
+        # entity_processing runs on the raw text. Without this, the same entity
+        # would be resolved twice for one fact and its mention_count bumped twice.
+        seen_in_fact: set[str] = set()
         for ent in entity_list:
             if hasattr(ent, "text"):
-                formatted_entities.append({"text": ent.text, "type": "CONCEPT"})
+                raw_text, entity_type = ent.text, "CONCEPT"
             elif isinstance(ent, dict):
-                formatted_entities.append({"text": ent.get("text", ""), "type": ent.get("type", "CONCEPT")})
+                raw_text, entity_type = ent.get("text", ""), ent.get("type", "CONCEPT")
+            else:
+                continue
+
+            normalized_text = _normalize_entity_name(raw_text)
+            if not normalized_text:
+                # A blank or whitespace-only candidate would otherwise be created
+                # as an entity with an empty canonical_name — the resolver has no
+                # guard of its own.
+                dropped_empty += 1
+                continue
+
+            if normalized_text.lower() in seen_in_fact:
+                continue
+            seen_in_fact.add(normalized_text.lower())
+
+            formatted_entities.append({"text": normalized_text, "type": entity_type})
         all_entities.append(formatted_entities)
+
+    if dropped_empty:
+        _log(
+            log_buffer,
+            f"  [6.1] Dropped {dropped_empty} empty candidate entity name(s)",
+            level="debug",
+        )
 
     total_entities = sum(len(ents) for ents in all_entities)
     _log(

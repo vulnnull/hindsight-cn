@@ -503,7 +503,9 @@
       "refreshMentalModel": "メンタルモデル更新",
       "fileConvertRetain": "ファイル変換",
       "webhookDelivery": "Webhook 配信",
-      "graphMaintenance": "グラフメンテナンス"
+      "graphMaintenance": "グラフメンテナンス",
+      "exportDocuments": "ドキュメントのエクスポート",
+      "importDocuments": "ドキュメントのインポート"
     },
     "table": {
       "id": "操作 ID",
@@ -517,7 +519,8 @@
     "action": {
       "cancel": "キャンセル",
       "retry": "再試行",
-      "delete": "削除"
+      "delete": "削除",
+      "download": "ダウンロード"
     },
     "pagination": "{total} 件中 {start}-{end} 件を表示",
     "paginationPrevious": "前へ",
@@ -712,6 +715,7 @@
     "exportIncludeObservationsHint": "合成された観測もエクスポートします。オフの場合、インポート先バンクが統合時に再生成します。",
     "importDialogTitle": "ドキュメントをインポート",
     "importDialogDescription": "バンクからエクスポートした .zip をアップロードします。通常のドキュメントアップロードではなく、ファクトはこのバンクで再埋め込み・再リンクされます。インポートはバックグラウンドで実行されます。",
+    "importFileHint": "この .zip はエクスポート（このバンクまたは別のバンク）で作成されたものである必要があります。PDF・Word・テキストファイルを追加する場合は「ドキュメントを追加 → ファイルをアップロード」を使ってください。",
     "actionsButton": "アクション",
     "importConflictLabel": "ドキュメントが既に存在する場合",
     "importConflictSkip": "スキップ — 既存のドキュメントを保持",

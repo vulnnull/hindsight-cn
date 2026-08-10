@@ -684,6 +684,50 @@ export type BankTemplateConfig = {
    * Persist raw source text (documents.original_text / chunks.chunk_text). Set false to keep only derived facts.
    */
   store_document_text?: boolean | null;
+  /**
+   * Enable Auto Consolidation
+   *
+   * Automatically consolidate observations after retain
+   */
+  enable_auto_consolidation?: boolean | null;
+  /**
+   * Consolidation Max Memories Per Round
+   *
+   * Max memory units fed into a single consolidation round
+   */
+  consolidation_max_memories_per_round?: number | null;
+  /**
+   * Consolidation Llm Parallelism
+   *
+   * Number of consolidation LLM batches processed concurrently
+   */
+  consolidation_llm_parallelism?: number | null;
+  /**
+   * Recall Include Chunks
+   *
+   * Include raw chunks in recall results
+   */
+  recall_include_chunks?: boolean | null;
+  /**
+   * Recall Max Tokens
+   *
+   * Max tokens of results returned by recall
+   */
+  recall_max_tokens?: number | null;
+  /**
+   * Recall Chunks Max Tokens
+   *
+   * Max tokens of raw chunks returned by recall (when recall_include_chunks is set)
+   */
+  recall_chunks_max_tokens?: number | null;
+  /**
+   * Memory Defense
+   *
+   * Memory Defense policy for this bank (validated against the DefensePolicy schema on write)
+   */
+  memory_defense?: {
+    [key: string]: unknown;
+  } | null;
 };
 
 /**
@@ -1520,6 +1564,27 @@ export type DispositionTraits = {
    * How much to consider emotional context (1=detached, 5=empathetic)
    */
   empathy: number;
+};
+
+/**
+ * DocumentExportSubmitResponse
+ *
+ * Response for the async document-export endpoint (202).
+ *
+ * The export runs in the background; poll the operations endpoint for status.
+ * On completion the operation's ``result_metadata`` carries ``download_url``
+ * (fetch the ZIP from GET /v1/default/files/download/{key}), ``storage_key``,
+ * ``byte_size``, and ``filename``.
+ */
+export type DocumentExportSubmitResponse = {
+  /**
+   * Operation Id
+   */
+  operation_id: string;
+  /**
+   * Status
+   */
+  status?: string;
 };
 
 /**
@@ -2722,6 +2787,32 @@ export type ListTagsResponse = {
    * Offset
    */
   offset: number;
+};
+
+/**
+ * LivenessResponse
+ *
+ * Payload for the API's DB-free liveness probe.
+ */
+export type LivenessResponse = {
+  /**
+   * Status
+   *
+   * Always "alive" — reaching this handler is the check
+   */
+  status: "alive";
+  /**
+   * Version
+   *
+   * Hindsight version this process is running
+   */
+  version: string;
+  /**
+   * Uptime Seconds
+   *
+   * Seconds since the process started
+   */
+  uptime_seconds: number;
 };
 
 /**
@@ -5196,6 +5287,36 @@ export type HealthEndpointHealthGetResponses = {
    */
   200: unknown;
 };
+
+export type GetReadinessData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/health/ready";
+};
+
+export type GetReadinessResponses = {
+  /**
+   * Successful Response
+   */
+  200: unknown;
+};
+
+export type GetLivenessData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/health/live";
+};
+
+export type GetLivenessResponses = {
+  /**
+   * Successful Response
+   */
+  200: LivenessResponse;
+};
+
+export type GetLivenessResponse = GetLivenessResponses[keyof GetLivenessResponses];
 
 export type GetVersionData = {
   body?: never;
@@ -7768,7 +7889,7 @@ export type ExportBankTemplateResponses = {
 export type ExportBankTemplateResponse =
   ExportBankTemplateResponses[keyof ExportBankTemplateResponses];
 
-export type ExportDocumentsData = {
+export type ExportDocumentsSyncRemovedData = {
   body?: never;
   headers?: {
     /**
@@ -7782,35 +7903,23 @@ export type ExportDocumentsData = {
      */
     bank_id: string;
   };
-  query?: {
-    /**
-     * Document Id
-     *
-     * Document id(s) to export; omit for all
-     */
-    document_id?: Array<string> | null;
-    /**
-     * Include Observations
-     *
-     * Also export consolidated observations (restored on import)
-     */
-    include_observations?: boolean;
-  };
+  query?: never;
   url: "/v1/default/banks/{bank_id}/document-transfer";
 };
 
-export type ExportDocumentsErrors = {
+export type ExportDocumentsSyncRemovedErrors = {
   /**
    * Validation Error
    */
   422: HttpValidationError;
 };
 
-export type ExportDocumentsError = ExportDocumentsErrors[keyof ExportDocumentsErrors];
+export type ExportDocumentsSyncRemovedError =
+  ExportDocumentsSyncRemovedErrors[keyof ExportDocumentsSyncRemovedErrors];
 
-export type ExportDocumentsResponses = {
+export type ExportDocumentsSyncRemovedResponses = {
   /**
-   * Transfer archive
+   * Successful Response
    */
   200: unknown;
 };
@@ -7857,6 +7966,89 @@ export type ImportDocumentsResponses = {
 };
 
 export type ImportDocumentsResponse = ImportDocumentsResponses[keyof ImportDocumentsResponses];
+
+export type ExportDocumentsData = {
+  body?: never;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+  };
+  query?: {
+    /**
+     * Document Id
+     *
+     * Document id(s) to export; omit for all
+     */
+    document_id?: Array<string> | null;
+    /**
+     * Include Observations
+     *
+     * Also export consolidated observations (restored on import; whole-bank only)
+     */
+    include_observations?: boolean;
+  };
+  url: "/v1/default/banks/{bank_id}/document-transfer/export";
+};
+
+export type ExportDocumentsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ExportDocumentsError = ExportDocumentsErrors[keyof ExportDocumentsErrors];
+
+export type ExportDocumentsResponses = {
+  /**
+   * Successful Response
+   */
+  202: DocumentExportSubmitResponse;
+};
+
+export type ExportDocumentsResponse = ExportDocumentsResponses[keyof ExportDocumentsResponses];
+
+export type DownloadFileData = {
+  body?: never;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Key
+     */
+    key: string;
+  };
+  query?: never;
+  url: "/v1/default/files/download/{key}";
+};
+
+export type DownloadFileErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type DownloadFileError = DownloadFileErrors[keyof DownloadFileErrors];
+
+export type DownloadFileResponses = {
+  /**
+   * Stored file
+   */
+  200: unknown;
+};
 
 export type GetBankTemplateSchemaData = {
   body?: never;

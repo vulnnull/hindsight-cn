@@ -263,8 +263,10 @@ Configuration is **one JSON file**: `~/.hindsight/coding-agent.json`. Layering, 
 4. its `harnesses.<name>` section — per-agent override
 
 Environment variables are a **fallback**: the file wins wherever it sets a value, so adding env to
-an existing setup changes nothing. The map-valued settings (`mapPathToBank`, `harnesses`, `banks`)
-are file-only — nested branching doesn't survive flattening into one variable.
+an existing setup changes nothing. `retainTags` takes a comma-separated list
+(`HINDSIGHT_RETAIN_TAGS="project:{gitProject},env:work"`); entries are trimmed and blanks dropped.
+The map-valued settings (`mapPathToBank`, `harnesses`, `banks`, `retainMetadata`) are file-only —
+per-key branching doesn't survive flattening into one variable.
 
 There is deliberately no repo-carried config file — per-repo bank routing is `mapPathToBank`,
 per-agent differences are `harnesses.<name>`.
@@ -293,6 +295,8 @@ hook by Codex...), so one shared config serves several agents side by side:
 | `bankIdTemplate`        | `"coding-agent::{gitProject}"`       | dynamic bank id format; the default makes every agent share one bank per repo                                                                                                                                                       |
 | `mapPathToBank`         | —                                    | absolute path → bank; **longest prefix wins**; overrides everything                                                                                                                                                                 |
 | `resolveWorktrees`      | `true`                               | `{gitProject}`: linked worktrees share the main repo's bank                                                                                                                                                                         |
+| `retainTags`            | —                                    | extra tags on every session write-back, e.g. `["project:{gitProject}"]` — see **Recording where a memory came from** below                                                                                                          |
+| `retainMetadata`        | —                                    | extra metadata on every session write-back, e.g. `{"repo": "{gitProject}"}`                                                                                                                                                         |
 | `disabled`              | `false`                              | hard off-switch (inert plugin/hook — a no-memory baseline)                                                                                                                                                                          |
 | `reflectTimeoutMs`      | `120000`                             | session-reflect timeout (hook harnesses additionally cap it at 25s to fit the host's hook window); on timeout the session runs without reflect (recorded)                                                                           |
 | `pageRefreshEveryTurns` | `10`                                 | refetch the knowledge pages and re-inject the page roster + tool guide every N user turns                                                                                                                                           |
@@ -374,6 +378,29 @@ Coding memory is **per repository**. Resolution order for the working directory:
 
 The default `"coding-agent::{gitProject}"` is **harness-neutral**, so opencode, Claude Code, and Codex
 all share one memory per repo — use `"{harness}-{gitProject}"` to split per agent instead.
+
+### Recording where a memory came from
+
+With a bank per repo, the bank _is_ the answer to "where did this come from". On a deliberately
+**shared** bank — one bank holding cross-project knowledge so facts recall everywhere — it isn't:
+every memory looks alike. `retainTags` and `retainMetadata` stamp that provenance onto each session
+write-back:
+
+```jsonc
+{
+  "bankId": "shared", // one bank for everything
+  "retainTags": ["project:{gitProject}", "env:work"],
+  "retainMetadata": { "repo": "{gitProject}" },
+}
+```
+
+Recalls can then filter by `project:<repo>`, and every document shows which repository it came out
+of. Both accept the same placeholders as `bankIdTemplate` — `{gitProject}`, `{project}`,
+`{harness}`, `{channel}`, `{user}` — plus `{bankId}`, `{sessionId}` and `{timestamp}`.
+`{gitProject}` is worktree-aware here too, so every linked worktree of a repo stamps one name.
+
+The plugin's own `source:` and `harness:` tags are reserved: entries in those namespaces are ignored
+with a warning, so a document's agent attribution always reflects the agent that actually wrote it.
 
 ## Ingestion internals (no CLI)
 

@@ -1,11 +1,11 @@
 /**
- * ONE config file: ~/.hindsight/coding-agent.json (JSON, no environment variables — the sole
- * exception is HINDSIGHT_DIAG_FILE for the diagnostics path).
+ * ONE config file: ~/.hindsight/coding-agent.json.
  *
  * Layering, later wins per field:
  *   1. built-in defaults
- *   2. the config file's top level
- *   3. its `harnesses.<name>` section for the asking harness
+ *   2. environment variables (ENV_KEYS below) — a FALLBACK for containers, CI and secret managers
+ *   3. the config file's top level
+ *   4. its `harnesses.<name>` section for the asking harness
  *
  * There is deliberately NO project-local config: a second, repo-carried file was both a security
  * surface (untrusted repos influencing memory behavior) and a second place to look. Per-repo bank
@@ -84,6 +84,14 @@ export interface RawConfig {
    *  "full"    = messages + every recent commit's full diff (progressive batches, newest first);
    *  "none"    = git ingestion off entirely. Default "message" (cheap by default; opt into depth). */
   gitIngest?: "message" | "full" | "none";
+  /** Extra tags stamped on every session write-back, e.g. ["project:{gitProject}", "env:work"].
+   *  Placeholders: {gitProject} {project} {harness} {bankId} {sessionId} {timestamp} {channel}
+   *  {user} (see core/retain-stamp.ts). Mainly for a SHARED bank, where the bank id no longer says
+   *  which repo a memory came from. Built-in tags win on conflict. */
+  retainTags?: string[];
+  /** Extra metadata stamped on every session write-back, e.g. {"repo": "{gitProject}"}. Same
+   *  placeholders as retainTags; built-in metadata (harness attribution) wins on conflict. */
+  retainMetadata?: Record<string, string>;
   /** Per-harness overrides of any of the fields above, keyed by harness name ("opencode",
    *  "claude-code", ...). Lets one config file give each agent its own bank/settings. */
   harnesses?: Record<string, Omit<RawConfig, "harnesses">>;
@@ -129,6 +137,8 @@ export interface Config {
   surveyBudgetUsd: number;
   surveyRefreshCommits: number;
   gitIngest: "message" | "full" | "none";
+  retainTags: string[];
+  retainMetadata: Record<string, string>;
   banks: Record<string, Omit<RawConfig, "banks" | "harnesses"> & { bank?: string }>;
   logLevel: "debug" | "info" | "warn" | "error";
 }
@@ -175,6 +185,17 @@ export function resolveConfig(raw: RawConfig = {}): Config {
     gitIngest: ["message", "full", "none"].includes(raw.gitIngest as string)
       ? (raw.gitIngest as "message" | "full" | "none")
       : "message",
+    // Hostile input is a config typo, not an attack: keep only string entries so a stray number or
+    // nested object cannot reach the API as a tag and fail the whole retain.
+    retainTags: Array.isArray(raw.retainTags)
+      ? raw.retainTags.filter((t): t is string => typeof t === "string" && t.trim() !== "")
+      : [],
+    retainMetadata:
+      raw.retainMetadata && typeof raw.retainMetadata === "object"
+        ? Object.fromEntries(
+            Object.entries(raw.retainMetadata).filter(([, v]) => typeof v === "string")
+          )
+        : {},
     banks: raw.banks && typeof raw.banks === "object" ? raw.banks : {},
     logLevel: ["debug", "info", "warn", "error"].includes(raw.logLevel as string)
       ? (raw.logLevel as "debug" | "info" | "warn" | "error")
@@ -229,9 +250,9 @@ function applyLayer(raw: RawConfig, layer: RawConfig, harness?: string): RawConf
  * containers, CI, and secret managers that inject `HINDSIGHT_API_TOKEN` rather than writing a
  * credential to disk.
  *
- * The map-valued settings (mapPathToBank, harnesses, banks) are deliberately absent: they are
- * nested structures whose whole point is per-repo/per-harness branching, which does not survive
- * flattening into one env var. They stay file-only.
+ * The map-valued settings (mapPathToBank, harnesses, banks, retainMetadata) are deliberately
+ * absent: they are structures whose whole point is per-repo/per-harness/per-key branching, which
+ * does not survive flattening into one env var. They stay file-only.
  */
 const ENV_KEYS = {
   serverMode: "HINDSIGHT_SERVER_MODE",
@@ -263,9 +284,12 @@ const ENV_KEYS = {
   surveyRefreshCommits: "HINDSIGHT_SURVEY_REFRESH_COMMITS",
   logLevel: "HINDSIGHT_LOG_LEVEL",
   gitIngest: "HINDSIGHT_GIT_INGEST",
+  // Comma-separated, e.g. HINDSIGHT_RETAIN_TAGS="project:{gitProject},env:work". A LIST rather than
+  // a map, so it flattens cleanly; its sibling retainMetadata stays file-only for the reason above.
+  retainTags: "HINDSIGHT_RETAIN_TAGS",
 } as const satisfies Partial<Record<keyof RawConfig, string>>;
 
-/** Fields parsed as booleans/numbers; everything else is taken as a string. */
+/** Fields parsed as booleans/numbers/comma-separated lists; everything else is taken as a string. */
 const ENV_BOOLEANS = new Set<keyof RawConfig>([
   "dynamicBankId",
   "resolveWorktrees",
@@ -275,6 +299,7 @@ const ENV_BOOLEANS = new Set<keyof RawConfig>([
   "autoSeed",
   "codebaseSurvey",
 ]);
+const ENV_LISTS = new Set<keyof RawConfig>(["retainTags"]);
 const ENV_NUMBERS = new Set<keyof RawConfig>([
   "apiPort",
   "daemonIdleTimeout",
@@ -298,6 +323,13 @@ export function readEnvConfig(env: NodeJS.ProcessEnv = process.env): RawConfig {
     if (value === undefined || value.trim() === "") continue;
     if (ENV_BOOLEANS.has(key)) {
       out[key] = ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+    } else if (ENV_LISTS.has(key)) {
+      // Empty entries dropped, so a trailing comma or "a,,b" is a typo rather than an empty tag.
+      const items = value
+        .split(",")
+        .map((v) => v.trim())
+        .filter(Boolean);
+      if (items.length) out[key] = items;
     } else if (ENV_NUMBERS.has(key)) {
       const n = Number(value);
       if (Number.isFinite(n)) out[key] = n;

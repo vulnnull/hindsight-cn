@@ -503,7 +503,9 @@
       "refreshMentalModel": "Mental Model Refresh",
       "fileConvertRetain": "Convert File",
       "webhookDelivery": "Webhook Delivery",
-      "graphMaintenance": "Graph Maintenance"
+      "graphMaintenance": "Graph Maintenance",
+      "exportDocuments": "Export Documents",
+      "importDocuments": "Import Documents"
     },
     "table": {
       "id": "Operation ID",
@@ -517,7 +519,8 @@
     "action": {
       "cancel": "Cancel",
       "retry": "Retry",
-      "delete": "Delete"
+      "delete": "Delete",
+      "download": "Download"
     },
     "pagination": "Showing {start}-{end} of {total}",
     "paginationPrevious": "Previous",
@@ -712,6 +715,7 @@
     "exportIncludeObservationsHint": "Also export synthesized observations. If left off, the target bank regenerates them during consolidation.",
     "importDialogTitle": "Import documents",
     "importDialogDescription": "Upload a .zip archive previously exported from a bank. This isn't a regular document upload — facts are re-embedded and re-linked in this bank. The import runs in the background.",
+    "importFileHint": "The .zip must be one produced by Export — from this bank or another one. To add PDFs, Word or text files, use \"Add Document → Upload Files\" instead.",
     "actionsButton": "Actions",
     "importConflictLabel": "If a document already exists",
     "importConflictSkip": "Skip — keep the existing document",

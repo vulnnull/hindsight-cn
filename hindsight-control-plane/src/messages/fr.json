@@ -503,7 +503,9 @@
       "refreshMentalModel": "Actualisation du modèle mental",
       "fileConvertRetain": "Convertir le fichier",
       "webhookDelivery": "Livraison de webhook",
-      "graphMaintenance": "Maintenance du graphe"
+      "graphMaintenance": "Maintenance du graphe",
+      "exportDocuments": "Exporter les documents",
+      "importDocuments": "Importer les documents"
     },
     "table": {
       "id": "ID d'opération",
@@ -517,7 +519,8 @@
     "action": {
       "cancel": "Annuler",
       "retry": "Réessayer",
-      "delete": "Supprimer"
+      "delete": "Supprimer",
+      "download": "Télécharger"
     },
     "pagination": "Affichage de {start}-{end} sur {total}",
     "paginationPrevious": "Précédent",
@@ -712,6 +715,7 @@
     "exportIncludeObservationsHint": "Exporter aussi les observations synthétisées. Sinon, le bank cible les régénère lors de la consolidation.",
     "importDialogTitle": "Importer des documents",
     "importDialogDescription": "Importez une archive .zip exportée depuis un bank. Ce n'est pas un import de document classique : les faits sont ré-encodés et reliés dans ce bank. L'import s'exécute en arrière-plan.",
+    "importFileHint": "Le .zip doit provenir de l'action Exporter — de ce bank ou d'un autre. Pour ajouter des fichiers PDF, Word ou texte, utilisez « Ajouter un document → Téléverser des fichiers ».",
     "actionsButton": "Actions",
     "importConflictLabel": "Si un document existe déjà",
     "importConflictSkip": "Ignorer — conserver le document existant",

@@ -8,6 +8,7 @@ The reflect agent uses hierarchical retrieval:
 """
 
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 from .tokenization import count_cl100k_tokens
@@ -18,6 +19,20 @@ _FINAL_PROMPT_CONTEXT_FRACTION = 0.8
 
 _DEFAULT_ROLE = "You are a reflection agent that answers questions by reasoning over retrieved memories."
 _DEFAULT_FINAL_ROLE = "You are a thoughtful assistant that synthesizes answers from retrieved memories."
+
+
+def _current_utc_datetime() -> str:
+    """Return the current UTC date and time for time-relative reflect reasoning.
+
+    Minute precision (not seconds) so requests within the same minute share an
+    identical prompt string — the finest granularity that still keeps prompt
+    caching viable for bursty traffic.
+    """
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def _current_datetime_section() -> str:
+    return f"## Current Date and Time\nThe current date and time is {_current_utc_datetime()}."
 
 
 def _extract_directive_rules(directives: list[dict[str, Any]]) -> list[str]:
@@ -392,6 +407,13 @@ def build_system_prompt_for_tools(
         ]
     )
 
+    # Volatile "now" reference goes here — after all the static instructions and
+    # right before the bank-specific/custom data. Everything above is identical
+    # across banks and requests, so it stays a cacheable prefix; only this
+    # timestamp and the custom tail below fall outside the cache.
+    parts.append("")
+    parts.append(_current_datetime_section())
+
     parts.append("")
     parts.append(f"## Memory Bank: {name}")
 
@@ -570,6 +592,9 @@ def build_final_system_prompt(
     parts.append(_FINAL_SYSTEM_PROMPT_BASE.format(role_section=role_section))
     parts.append(_FINAL_LANGUAGE_RULE)
     parts.append(build_directives_reminder(directives) if directives else "")
+    # Volatile "now" reference last, so the static/per-bank instructions above
+    # remain a cacheable prefix and only this timestamp falls outside the cache.
+    parts.append(_current_datetime_section())
 
     return "\n\n".join(p.strip() for p in parts if p.strip()) + output_language_directive(llm_output_language)
 
@@ -586,7 +611,7 @@ You will be given:
 2. CURRENT DOCUMENT (JSON) — the existing structured mental model. Each section
    has a stable ``id``, a ``heading``, a ``level`` (1..6), and an ordered list
    of ``blocks``. Blocks are typed: ``paragraph``, ``bullet_list``,
-   ``ordered_list``, or ``code``.
+   ``ordered_list``, ``code``, or ``table``.
 3. NEW INFORMATION SYNTHESIS (markdown) — a synthesis showing how the new facts
    relate to the document's topic. Use it to understand context and relevance,
    but do NOT copy its formatting or wording wholesale.
@@ -648,6 +673,7 @@ Block shapes
 - ``{"type": "bullet_list", "items": ["...", "..."]}``
 - ``{"type": "ordered_list", "items": ["...", "..."]}``
 - ``{"type": "code", "language": "json", "text": "..."}``
+- ``{"type": "table", "headers": ["col1", "col2"], "rows": [["a", "b"], ["c", "d"]]}``
 
 OUTPUT FORMAT
 Return ONLY a single JSON object on its own, with no prose before or after,

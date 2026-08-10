@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadConfig, applyBankConfig, resolveConfig } from "./config";
+import { loadConfig, applyBankConfig, readEnvConfig, resolveConfig } from "./config";
 
 let root: string;
 let globalCfg: string;
@@ -210,5 +210,54 @@ describe("environment fallback", () => {
     const cfg = loadConfig({ path: globalCfg });
     expect(cfg.apiUrl).toBe("https://from-file");
     expect(cfg.surveyModel).toBe("haiku");
+  });
+});
+
+describe("retainTags / retainMetadata", () => {
+  it("default to empty, so a retain is unchanged unless configured", () => {
+    const cfg = resolveConfig({});
+    expect(cfg.retainTags).toEqual([]);
+    expect(cfg.retainMetadata).toEqual({});
+  });
+
+  it("carries templates through verbatim — resolution happens per retain", () => {
+    const cfg = resolveConfig({
+      retainTags: ["project:{gitProject}"],
+      retainMetadata: { repo: "{gitProject}" },
+    });
+    expect(cfg.retainTags).toEqual(["project:{gitProject}"]);
+    expect(cfg.retainMetadata).toEqual({ repo: "{gitProject}" });
+  });
+
+  it("ignores non-string entries rather than failing the whole retain", () => {
+    // A config typo (a number, a nested object) would otherwise reach the API as a tag.
+    const cfg = resolveConfig({
+      retainTags: ["ok", 42, null, "  "] as unknown as string[],
+      retainMetadata: { good: "x", bad: { nested: true } } as unknown as Record<string, string>,
+    });
+    expect(cfg.retainTags).toEqual(["ok"]);
+    expect(cfg.retainMetadata).toEqual({ good: "x" });
+  });
+});
+
+describe("HINDSIGHT_RETAIN_TAGS", () => {
+  it("reads a comma-separated list — the env form of retainTags (#2896)", () => {
+    expect(
+      readEnvConfig({ HINDSIGHT_RETAIN_TAGS: "project:{gitProject},env:work" }).retainTags
+    ).toEqual(["project:{gitProject}", "env:work"]);
+  });
+
+  it("trims entries and drops empties, so a trailing comma is not an empty tag", () => {
+    expect(readEnvConfig({ HINDSIGHT_RETAIN_TAGS: " a , ,b, " }).retainTags).toEqual(["a", "b"]);
+  });
+
+  it("is absent when unset or empty, leaving the file value alone", () => {
+    expect(readEnvConfig({}).retainTags).toBeUndefined();
+    expect(readEnvConfig({ HINDSIGHT_RETAIN_TAGS: "" }).retainTags).toBeUndefined();
+    expect(readEnvConfig({ HINDSIGHT_RETAIN_TAGS: " , " }).retainTags).toBeUndefined();
+  });
+
+  it("has no retainMetadata counterpart — map-valued settings stay file-only", () => {
+    expect(readEnvConfig({ HINDSIGHT_RETAIN_METADATA: "repo=x" }).retainMetadata).toBeUndefined();
   });
 });
