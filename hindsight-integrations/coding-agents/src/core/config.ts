@@ -66,7 +66,12 @@ export interface RawConfig {
   harness?: string; // runtime adapter (default "opencode")
   disabled?: boolean; // hard off-switch — inert plugin, for a no-memory baseline (default false)
   retainSessions?: boolean; // opencode plugin write-back (default true; set false to opt out). Hook harnesses always write back on Stop and ignore this flag.
-  retainEveryTurns?: number; // write-back cadence in user turns (default 1: async upsert every turn)
+  /** Write-back cadence in user turns (default 1: async upsert every turn).
+   *  Honoured by the PERSISTENT-PLUGIN harnesses only (opencode, Kilo, Cline CLI), which stay
+   *  loaded and therefore choose when to write. The hook harnesses write back on every Stop and
+   *  ignore this: the host decides when they run, and each Stop is a fresh process with no memory
+   *  of how many turns have passed. */
+  retainEveryTurns?: number;
   reflectTimeoutMs?: number; // session-start reflect timeout (default 120000; hooks cap lower internally)
   autoReflect?: boolean; // inject a one-time reflect synthesis on the session's first prompt (default true; false = the agent reflects only via the hindsight_reflect tool, and the tool guide tells it to do so on new goals)
   pageRefreshEveryTurns?: number; // knowledge-page refresh cadence in user turns (default 10)
