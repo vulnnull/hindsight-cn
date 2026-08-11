@@ -406,7 +406,7 @@ async def tool_expand(
     from ..memories import get_memories
 
     _store = get_memories()
-    if _store.writes_memory_rows_in_sql:
+    if _store.writes_memory_rows_in_sql_for(bank_id):
         memories = await conn.fetch(
             f"""
             SELECT id, text, chunk_id, document_id, fact_type, context

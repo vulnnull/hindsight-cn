@@ -104,6 +104,7 @@ const DOCUMENTS_REFRESH_EVENT = "hindsight:documents-refresh";
 const FILTER_DEBOUNCE_MS = 250;
 
 type PendingUpload = {
+  operationId: string;
   id: string;
   filename: string | null;
   status: "processing" | "failed";
@@ -720,6 +721,7 @@ export function DocumentsView() {
   const tCommon = useTranslations("common");
   const tBank = useTranslations("bank");
   const tApiError = useTranslations("api.errors.documents");
+  const tOperations = useTranslations("bankOperations");
   const { currentBank } = useBank();
   const { features } = useFeatures();
   const [documents, setDocuments] = useState<any[]>([]);
@@ -760,6 +762,7 @@ export function DocumentsView() {
   const [selectedDocument, setSelectedDocument] = useState<any>(null);
   const [loadingDocument, setLoadingDocument] = useState(false);
   const [deletingDocumentId, setDeletingDocumentId] = useState<string | null>(null);
+  const [deletingUploadOperationId, setDeletingUploadOperationId] = useState<string | null>(null);
 
   // Tag editing state
   const [editingTags, setEditingTags] = useState(false);
@@ -854,6 +857,7 @@ export function DocumentsView() {
           return false;
         })
         .map((op) => ({
+          operationId: op.id,
           id: op.document_id || op.id,
           filename: op.filename ?? null,
           status: op.status === "failed" ? "failed" : "processing",
@@ -1055,6 +1059,22 @@ export function DocumentsView() {
 
   const requestDeleteDocument = (documentId: string, memoryCount?: number) => {
     setDocumentToDelete({ id: documentId, memoryCount });
+  };
+
+  const deleteFailedUpload = async (operationId: string) => {
+    if (!currentBank) return;
+
+    setDeletingUploadOperationId(operationId);
+    try {
+      // Failed uploads have no document row to delete. Remove their terminal
+      // operation record instead, using the same API as the Operations view.
+      await client.deleteOperation(currentBank, operationId);
+      await loadPendingUploads();
+    } catch {
+      // Error toast is shown automatically by the API client interceptor
+    } finally {
+      setDeletingUploadOperationId(null);
+    }
   };
 
   const startEditTags = () => {
@@ -1552,13 +1572,31 @@ export function DocumentsView() {
                       </TableCell>
                       <TableCell className="text-card-foreground">
                         {upload.status === "failed" ? (
-                          <span
-                            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20"
-                            title={upload.error || t("pendingUploadFailed")}
-                          >
-                            <X className="w-3 h-3" />
-                            {t("pendingUploadFailedStatus")}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20"
+                              title={upload.error || t("pendingUploadFailed")}
+                            >
+                              <X className="w-3 h-3" />
+                              {t("pendingUploadFailedStatus")}
+                            </span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 text-xs text-muted-foreground hover:text-red-600 dark:hover:text-red-400"
+                              onClick={() => deleteFailedUpload(upload.operationId)}
+                              disabled={deletingUploadOperationId === upload.operationId}
+                            >
+                              {deletingUploadOperationId === upload.operationId ? (
+                                <Spinner size="xs" />
+                              ) : (
+                                <Trash2 className="w-3 h-3 mr-1" />
+                              )}
+                              {deletingUploadOperationId === upload.operationId
+                                ? ""
+                                : tOperations("action.delete")}
+                            </Button>
+                          </div>
                         ) : (
                           <span
                             className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20"

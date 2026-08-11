@@ -11,9 +11,12 @@
  * whenever that cannot be established:
  *
  *   - no cursor          first write-back of the session, or the cache was evicted.
- *   - fingerprint drift  the transcript was REWRITTEN rather than extended (Claude Code compaction,
- *                        a truncated/rotated rollout), so what we already sent is no longer a prefix
- *                        of what we hold and an append would splice two different conversations.
+ *   - fingerprint drift  the transcript was REWRITTEN rather than extended (an edited or redacted
+ *                        turn, a truncated/rotated rollout), so what we already sent is no longer a
+ *                        prefix of what we hold and an append would splice two conversations.
+ *                        NOT Claude Code compaction, which this used to cite: that appends a
+ *                        summary record and leaves every earlier record in place (#3379), so the
+ *                        prefix stays intact and the append path keeps working.
  *   - dirty              the previous retain failed, or its outcome is unknown (the client aborts at
  *                        15s while the server may well have committed it). Appending on top of an
  *                        unknown state is the one way to DUPLICATE turns inside the document, so we

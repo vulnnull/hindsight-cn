@@ -245,6 +245,17 @@ class RetainResult:
     # when the customer's client resubmits growing payloads to the same
     # document_id (e.g. a session transcript appended to on each turn).
     processed_content_tokens: int | None = None
+    # Operation ids of every submission that ran as one execution with this
+    # one, when several queued retains for a document were coalesced (see
+    # ``engine.retain.fold``). None for an ordinary, unfolded retain.
+    #
+    # A fold fires this hook once per member, in submission order, so an
+    # extension still sees every operation it was given. The execution's LLM
+    # usage cannot be attributed per member — the members were extracted as one
+    # document — so it is reported in full on the FIRST member and as zero on
+    # the rest. Summing across a fold therefore yields exactly the tokens the
+    # execution spent, the same total an unfolded run would have reported.
+    folded_with: list[str] | None = None
 
 
 @dataclass

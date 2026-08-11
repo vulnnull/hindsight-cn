@@ -348,3 +348,19 @@ class RetainBatch:
 
     # Results (populated after storage)
     unit_ids_by_content: list[list[str]] = field(default_factory=list)
+
+
+class ConcurrentAppendConflict(Exception):
+    """An append-mode retain lost its read-modify-write race for a document.
+
+    ``update_mode="append"`` reads ``documents.original_text``, concatenates the
+    new content onto it, and reprocesses the result. That read and the write
+    that follows it are separated by LLM extraction, so a second append
+    committing in between would make this request overwrite a turn it never
+    saw. Every write path that can observe the document having moved raises
+    this instead of dropping the submission, so a lost race costs a retry
+    rather than the caller's content.
+
+    Retryable by construction: the retry re-reads the (now newer) stored text
+    and re-appends the same submission on top of it.
+    """

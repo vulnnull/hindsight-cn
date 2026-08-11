@@ -25,6 +25,59 @@ from .base import DatabaseConnection
 from .result import ResultRow
 
 
+def document_serialization_sql(table: str, alias: str) -> str:
+    """SQL predicate keeping one document to a single in-flight retain.
+
+    A retain that targets exactly one document carries it in
+    ``serialization_key``. Appending to a document is a read-modify-write over
+    its whole text, so two concurrent retains for one document can only produce
+    a lost update or a wasted extraction — never more throughput. This
+    predicate makes the queue reflect that: a candidate is claimable only when
+    no peer for the same document is already ``processing``, and only when it
+    is the oldest claimable pending peer for that document.
+
+    Ordering, not just exclusion, is the point. Appends are cumulative, so the
+    order they commit in is the order the document ends up in; claiming them by
+    ``(created_at, operation_id)`` makes that the submission order. It also
+    stops a single claim batch from taking several peers at once, which
+    excluding busy documents alone would not prevent.
+
+    Rows with a NULL ``serialization_key`` — multi-document batches, and every
+    non-retain operation — are unaffected, and documents are independent of one
+    another, so this costs no parallelism across a busy bank: only the retains
+    that were racing each other for one document are put in a line.
+
+    A peer wedged in 'processing' holds its document until claim recovery
+    releases it, the same caveat ``graph_maintenance_bank_serialization_sql``
+    carries and the same general gap.
+
+    The candidate row is always 'pending' and the 'pending' branch is
+    strictly-older, so the subquery can never match the candidate itself. The
+    fragment carries no SQL comments on purpose — it is rewritten for Oracle by
+    regex (``db/oracle.py``).
+
+    Args:
+        table: Fully-qualified async_operations table.
+        alias: Alias of the outer candidate row in the calling query.
+    """
+    return f"""
+        ({alias}.serialization_key IS NULL OR NOT EXISTS (
+            SELECT 1 FROM {table} doc_peer
+            WHERE doc_peer.bank_id = {alias}.bank_id
+              AND doc_peer.serialization_key = {alias}.serialization_key
+              AND (
+                  doc_peer.status = 'processing'
+                  OR (doc_peer.status = 'pending'
+                      AND doc_peer.task_payload IS NOT NULL
+                      AND (doc_peer.next_retry_at IS NULL OR doc_peer.next_retry_at <= NOW())
+                      AND (doc_peer.created_at < {alias}.created_at
+                           OR (doc_peer.created_at = {alias}.created_at
+                               AND doc_peer.operation_id < {alias}.operation_id)))
+              )
+        ))
+    """
+
+
 def graph_maintenance_bank_serialization_sql(table: str, alias: str) -> str:
     """SQL predicate serialising ``graph_maintenance`` claims per bank (#3230).
 
@@ -665,7 +718,9 @@ class DataAccessOps(ABC):
 
         Implementations must apply :func:`graph_maintenance_bank_serialization_sql`
         to every query that can return a ``graph_maintenance`` row, so at most one
-        such row per bank is ever in flight.
+        such row per bank is ever in flight, and :func:`document_serialization_sql`
+        to every query that can return a ``retain`` row, so at most one retain per
+        document is ever in flight.
 
         Args:
             consolidation_bank_priority: Per-bank priority for consolidation scheduling.
@@ -675,8 +730,48 @@ class DataAccessOps(ABC):
                 When set, consolidation tasks are claimed in priority tiers.
                 None preserves current behavior (pure created_at ordering).
 
-        Returns claimed rows with operation_id, operation_type, task_payload, retry_count.
-        The caller is responsible for building ClaimedTask objects.
+        Returns claimed rows with operation_id, operation_type, task_payload,
+        retry_count, bank_id and serialization_key. The caller is responsible for
+        building ClaimedTask objects.
+        """
+        ...
+
+    @abstractmethod
+    async def fetch_foldable_retain_peers(
+        self,
+        conn: DatabaseConnection,
+        table: str,
+        bank_id: str,
+        serialization_key: str,
+        limit: int,
+    ) -> list[ResultRow]:
+        """Lock the pending retains queued behind a just-claimed one, in order.
+
+        Called inside the claim transaction, so the rows come back locked and
+        the caller can fold some of them into the claimed execution and leave
+        the rest pending simply by not marking them (their locks release with
+        the transaction).
+
+        ``SKIP LOCKED`` matters here for liveness, not just speed: a peer some
+        other worker is already looking at must never stall this claim.
+
+        Returns rows with operation_id, task_payload and retry_count, ordered by
+        ``(created_at, operation_id)`` — the order the fold planner requires.
+        """
+        ...
+
+    @abstractmethod
+    async def mark_operations_processing(
+        self,
+        conn: DatabaseConnection,
+        table: str,
+        worker_id: str,
+        operation_ids: list,
+    ) -> None:
+        """Claim the given pending operations for ``worker_id``.
+
+        Used to fold peers into an execution that has already been claimed;
+        runs in the same transaction that locked them.
         """
         ...
 

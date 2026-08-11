@@ -166,6 +166,36 @@ describe("readClaudeTranscript", () => {
     expect(result[0].content).not.toContain("hindsight_memories");
   });
 
+  it("drops the compaction summary — Claude Code's recap, not the user's words", () => {
+    // Written when the context window fills, as a plain type:"user" record with no isMeta flag.
+    // Measured at 29 records / 474,016 chars across local transcripts, averaging 16KB each, every
+    // one retained as if the user had typed it — and each one summarising turns already retained,
+    // since compaction APPENDS to the transcript rather than rewriting it (#3379).
+    writeFileSync(
+      file,
+      [
+        JSON.stringify({
+          type: "user",
+          isCompactSummary: true,
+          message: {
+            role: "user",
+            content:
+              "This session is being continued from a previous conversation that ran out of " +
+              "context. The summary below covers <analysis>…</analysis>",
+          },
+        }),
+        JSON.stringify({
+          type: "user",
+          message: { role: "user", content: "now add the retry backoff" },
+        }),
+      ].join("\n")
+    );
+
+    const result = readClaudeTranscript(file);
+    expect(result).toHaveLength(1);
+    expect(result[0].content).toBe("now add the retry backoff");
+  });
+
   it("drops a <task-notification>: the harness's background-task plumbing, not the user's words", () => {
     // Claude Code delivers these as an ordinary type:"user" message with a string body and no
     // isMeta flag, so nothing else filters them and extraction saw task ids and status lines as

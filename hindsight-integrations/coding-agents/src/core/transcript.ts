@@ -6,7 +6,8 @@
  * no arguments, no outputs. That keeps WHICH files/commands the session touched without burying the
  * decisions in mechanical noise; `tool_result` blocks are dropped entirely.
  *
- * Drops non-message lines (`last-prompt`, `mode`, `summary`, …), `isMeta` lines, `isSidechain`
+ * Drops non-message lines (`last-prompt`, `mode`, `summary`, …), `isMeta` lines, compaction
+ * summaries (`isCompactSummary`), `isSidechain`
  * (subagent/Task) lines, `thinking` blocks, and turns that render to nothing. Injected recall
  * context (`<hindsight_memories>` / `<hindsight_bank>` / `<relevant_memories>`) is stripped so the
  * write-back can't feed recalled memory back into the bank (a retain→recall feedback loop). A
@@ -29,6 +30,7 @@ interface TranscriptLine {
   type?: string;
   isMeta?: boolean;
   isSidechain?: boolean;
+  isCompactSummary?: boolean;
   timestamp?: string;
   message?: {
     content?: string | ContentBlock[];
@@ -95,6 +97,12 @@ export function readClaudeTranscript(path: string): TransportTurn[] {
     if (line.type !== "user" && line.type !== "assistant") continue;
     if (line.isMeta === true) continue;
     if (line.isSidechain === true) continue;
+    // Claude Code's own recap of the conversation so far, written when the context window fills.
+    // It arrives as a plain type:"user" record with NO isMeta flag, so nothing else filters it and
+    // a ~16KB machine-written summary was retained as something the user said. It is also a
+    // summary of turns ALREADY retained — compaction appends to the transcript rather than
+    // rewriting it — so keeping it extracts the same decisions twice (#3379).
+    if (line.isCompactSummary === true) continue;
     if (typeof line.message !== "object" || line.message === null) continue;
 
     // `type` is validated as "user" | "assistant" above; drive role from it (not the redundant

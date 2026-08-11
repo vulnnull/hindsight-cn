@@ -15,7 +15,7 @@ import logging
 import time
 from collections import Counter
 from collections.abc import Awaitable, Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from ..config import get_config
@@ -157,6 +157,18 @@ class ClaimedTask:
     operation_id: str
     task_dict: dict[str, Any]
     schema: str | None
+    folded_operation_ids: list[str] = field(default_factory=list)
+    """Peers coalesced into this execution (see ``engine.retain.fold``).
+
+    They were claimed by the same transaction that claimed ``operation_id`` and
+    run as part of its execution, so they must reach a terminal state with it —
+    never separately, and never not at all.
+    """
+
+    @property
+    def all_operation_ids(self) -> list[str]:
+        """Every operation this execution is responsible for completing."""
+        return [self.operation_id, *self.folded_operation_ids]
 
 
 @dataclass
@@ -552,14 +564,143 @@ class WorkerPoller:
                     db_op_type = row["operation_type"]
                     if db_op_type:
                         task_dict["operation_type"] = db_op_type
+                    folded = await self._fold_retain_peers(conn, table, row, task_dict)
                     result.append(
                         ClaimedTask(
                             operation_id=str(row["operation_id"]),
                             task_dict=task_dict,
                             schema=schema,
+                            folded_operation_ids=folded,
                         )
                     )
                 return result
+
+    async def _fold_retain_peers(self, conn, table: str, row, task_dict: dict[str, Any]) -> list[str]:
+        """Coalesce the retains queued behind ``row`` into its execution.
+
+        Runs inside the claim transaction, so the peers are locked, claimed and
+        handed over atomically with the row they join — there is no window in
+        which a peer is folded but not claimed, or claimed but not executed.
+
+        Peers this does not take stay pending and are claimed on a later cycle.
+        Purely an optimization: on any failure the execution proceeds unfolded,
+        one operation at a time, which is exactly the pre-folding behaviour.
+        """
+        from ..engine.retain.fold import (
+            FoldMember,
+            FoldMemberRef,
+            max_fold_peers_for_retry,
+            merge_fold_contents,
+            plan_retain_fold,
+        )
+
+        serialization_key = row["serialization_key"]
+        if not serialization_key or row["operation_type"] != "retain":
+            return []
+        max_peers = max_fold_peers_for_retry(row["retry_count"] or 0)
+        if max_peers <= 0:
+            return []
+
+        try:
+            from ..config import get_config
+            from ..engine.memory_engine import count_tokens
+
+            peer_rows = await self._backend.ops.fetch_foldable_retain_peers(
+                conn,
+                table,
+                row["bank_id"],
+                serialization_key,
+                max_peers,
+            )
+            if not peer_rows:
+                return []
+
+            def _member(operation_id, payload) -> FoldMember:
+                data = json.loads(payload) if isinstance(payload, str) else payload
+                return FoldMember(
+                    operation_id=str(operation_id),
+                    contents=data.get("contents", []),
+                    tenant_id=data.get("_tenant_id"),
+                    api_key_id=data.get("_api_key_id"),
+                    document_tags=data.get("document_tags"),
+                    strategy=data.get("strategy"),
+                    # A converted upload attaches its storage key to the document
+                    # afterwards, and that step only fires for a single-item
+                    # retain — so such an operation must never be folded.
+                    has_file_metadata=data.get("_file_metadata") is not None,
+                )
+
+            primary = _member(row["operation_id"], row["task_payload"])
+            peers = [_member(p["operation_id"], p["task_payload"]) for p in peer_rows]
+            plan = plan_retain_fold(
+                primary,
+                peers,
+                max_peers=max_peers,
+                token_budget=get_config().retain_batch_tokens,
+                count_tokens=count_tokens,
+            )
+            if not plan.peer_ids:
+                return []
+
+            # Everything that can fail happens before the peers are claimed, so
+            # a failure can only leave them pending — never claimed by an
+            # execution that then doesn't carry them.
+            folded_ids = set(plan.peer_ids)
+            merged_contents = merge_fold_contents(plan.members)
+            fold_members = [
+                FoldMemberRef(operation_id=m.operation_id, items_count=len(m.contents)).to_payload()
+                for m in plan.members
+            ]
+            await self._backend.ops.mark_operations_processing(
+                conn,
+                table,
+                self._worker_id,
+                [p["operation_id"] for p in peer_rows if str(p["operation_id"]) in folded_ids],
+            )
+            task_dict["contents"] = merged_contents
+            task_dict["_fold_members"] = fold_members
+            logger.info(
+                f"Folded {len(plan.peer_ids)} queued retain(s) for document "
+                f"{serialization_key} into operation {row['operation_id']}"
+                + (f" ({len(plan.deferred)} left pending)" if plan.deferred else "")
+            )
+            return plan.peer_ids
+        except Exception:
+            logger.warning(
+                f"Retain fold for document {serialization_key} failed — "
+                f"running operation {row['operation_id']} on its own",
+                exc_info=True,
+            )
+            return []
+
+    # -- Fold-aware terminal transitions -----------------------------------
+    #
+    # A folded execution is responsible for every operation the claim
+    # transaction handed it, not just the row it was keyed on. Routing all
+    # terminal transitions through these wrappers is what makes that structural:
+    # each one fans out over ``task.all_operation_ids``, so no branch can leave
+    # a folded peer stuck in 'processing' by only remembering the primary.
+    #
+    # Every member gets the same outcome, because a fold is one execution:
+    # they either all committed or none did. Retry and deferral put the whole
+    # group back to pending, so it is re-claimed (and re-folded, more narrowly
+    # each time) together.
+
+    async def _mark_all_completed(self, task: ClaimedTask) -> None:
+        for operation_id in task.all_operation_ids:
+            await self._mark_completed(operation_id, task.schema)
+
+    async def _mark_all_failed(self, task: ClaimedTask, error_message: str) -> None:
+        for operation_id in task.all_operation_ids:
+            await self._mark_failed(operation_id, error_message, task.schema)
+
+    async def _defer_all(self, task: ClaimedTask, exec_date, reason: str) -> None:
+        for operation_id in task.all_operation_ids:
+            await self._defer_operation(operation_id, exec_date, reason, task.schema)
+
+    async def _schedule_retry_all(self, task: ClaimedTask, retry_at, reason: str) -> None:
+        for operation_id in task.all_operation_ids:
+            await self._schedule_retry(operation_id, retry_at, reason, task.schema)
 
     async def _mark_completed(self, operation_id: str, schema: str | None):
         """Mark a processing task as completed, then propagate to parent if needed."""
@@ -830,7 +971,7 @@ class WorkerPoller:
                 task.task_dict["_schema"] = task.schema
             await self._run_executor(task, task_type)
             logger.debug(f"Task {task.operation_id} execution finished")
-            await self._mark_completed(task.operation_id, task.schema)
+            await self._mark_all_completed(task)
             terminal_success = True
         except _WallTimeoutExceeded as e:
             # The executor has already been cancelled; all that's left is to say so
@@ -845,21 +986,21 @@ class WorkerPoller:
                 f"if this is a legitimately long operation, or set it to 0 to disable the limit."
             )
             logger.error(f"Task {task.operation_id} timed out: {message}")
-            await self._mark_failed(task.operation_id, message, task.schema)
+            await self._mark_all_failed(task, message)
             terminal_success = False
         except DeferOperation as e:
             # Deferral is not a terminal outcome — do not record a completion.
-            await self._defer_operation(task.operation_id, e.exec_date, e.reason, task.schema)
+            await self._defer_all(task, e.exec_date, e.reason)
         except RetryTaskAt as e:
             # Retry is not a terminal outcome — do not record a completion.
-            await self._schedule_retry(task.operation_id, e.retry_at, str(e), task.schema)
+            await self._schedule_retry_all(task, e.retry_at, str(e))
         except Exception as e:
             # exc_info rather than print_exc(): the stderr copy carries no task id
             # and is the first thing lost to log rotation (issue #3218).
             error_message = format_task_error(e)
             logger.error(f"Task {task.operation_id} failed: {error_message}", exc_info=True)
             try:
-                await self._mark_failed(task.operation_id, error_message, task.schema)
+                await self._mark_all_failed(task, error_message)
             except Exception:
                 # Marking a task failed is itself a DB write, and it can fail
                 # (pool exhausted, connection reset, statement timeout). Without
@@ -868,10 +1009,11 @@ class WorkerPoller:
                 # recover_own_tasks only runs at startup, and no dead-worker logic
                 # applies because the worker is alive. See issue #3228.
                 logger.exception(f"Could not mark task {task.operation_id} failed; reconciling it for re-claim")
-                try:
-                    await self._reclaim_own_processing_tasks(task.schema, operation_id=task.operation_id)
-                except Exception:
-                    logger.exception(f"Could not reconcile task {task.operation_id}; it stays 'processing'")
+                for operation_id in task.all_operation_ids:
+                    try:
+                        await self._reclaim_own_processing_tasks(task.schema, operation_id=operation_id)
+                    except Exception:
+                        logger.exception(f"Could not reconcile task {operation_id}; it stays 'processing'")
             terminal_success = False
 
         # Record the metric outside the executor's exception scope so a metrics

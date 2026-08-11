@@ -15,6 +15,7 @@ from .ops import (
     LinkExpansionRows,
     TagListingParts,
     UpdatedWindow,
+    document_serialization_sql,
     graph_maintenance_bank_serialization_sql,
 )
 from .result import DictResultRow as ResultRow
@@ -1144,7 +1145,7 @@ class OracleOps(DataAccessOps):
             if exclude_ids:
                 return await conn.fetch(
                     f"""
-                    SELECT operation_id, operation_type, task_payload, retry_count
+                    SELECT operation_id, operation_type, task_payload, retry_count, serialization_key, bank_id
                     FROM {table}
                     WHERE status = 'pending'
                       AND task_payload IS NOT NULL
@@ -1163,7 +1164,7 @@ class OracleOps(DataAccessOps):
             else:
                 return await conn.fetch(
                     f"""
-                    SELECT operation_id, operation_type, task_payload, retry_count
+                    SELECT operation_id, operation_type, task_payload, retry_count, serialization_key, bank_id
                     FROM {table}
                     WHERE status = 'pending'
                       AND task_payload IS NOT NULL
@@ -1181,7 +1182,7 @@ class OracleOps(DataAccessOps):
             if exclude_ids:
                 return await conn.fetch(
                     f"""
-                    SELECT operation_id, operation_type, task_payload, retry_count
+                    SELECT operation_id, operation_type, task_payload, retry_count, serialization_key, bank_id
                     FROM {table}
                     WHERE status = 'pending'
                       AND task_payload IS NOT NULL
@@ -1198,7 +1199,7 @@ class OracleOps(DataAccessOps):
             else:
                 return await conn.fetch(
                     f"""
-                    SELECT operation_id, operation_type, task_payload, retry_count
+                    SELECT operation_id, operation_type, task_payload, retry_count, serialization_key, bank_id
                     FROM {table}
                     WHERE status = 'pending'
                       AND task_payload IS NOT NULL
@@ -1239,7 +1240,7 @@ class OracleOps(DataAccessOps):
         extra = " AND ".join(conditions)
         return await conn.fetch(
             f"""
-            SELECT operation_id, operation_type, task_payload, retry_count
+            SELECT operation_id, operation_type, task_payload, retry_count, serialization_key, bank_id
             FROM {table}
             WHERE status = 'pending'
               AND task_payload IS NOT NULL
@@ -1286,7 +1287,7 @@ class OracleOps(DataAccessOps):
         extra_clause = (" AND " + " AND ".join(conditions)) if conditions else ""
         return await conn.fetch(
             f"""
-            SELECT operation_id, operation_type, task_payload, retry_count
+            SELECT operation_id, operation_type, task_payload, retry_count, serialization_key, bank_id
             FROM {table}
             WHERE status = 'pending'
               AND task_payload IS NOT NULL
@@ -1338,13 +1339,14 @@ class OracleOps(DataAccessOps):
             else:
                 rows = await conn.fetch(
                     f"""
-                    SELECT o.operation_id, o.operation_type, o.task_payload, o.retry_count
+                    SELECT o.operation_id, o.operation_type, o.task_payload, o.retry_count, o.serialization_key, o.bank_id
                     FROM {table} o
                     WHERE o.status = 'pending'
                       AND o.task_payload IS NOT NULL
                       AND o.operation_type = $1
                       AND (o.next_retry_at IS NULL OR o.next_retry_at <= NOW())
                       AND {graph_maintenance_bank_serialization_sql(table, "o")}
+                      AND {document_serialization_sql(table, "o")}
                     ORDER BY o.created_at
                     LIMIT $2
                     FOR UPDATE SKIP LOCKED
@@ -1366,7 +1368,7 @@ class OracleOps(DataAccessOps):
             if claimed_ids:
                 rows = await conn.fetch(
                     f"""
-                    SELECT o.operation_id, o.operation_type, o.task_payload, o.retry_count
+                    SELECT o.operation_id, o.operation_type, o.task_payload, o.retry_count, o.serialization_key, o.bank_id
                     FROM {table} o
                     WHERE o.status = 'pending'
                       AND o.task_payload IS NOT NULL
@@ -1374,6 +1376,7 @@ class OracleOps(DataAccessOps):
                       AND (o.next_retry_at IS NULL OR o.next_retry_at <= NOW())
                       AND o.operation_id != ALL($1::uuid[])
                       AND {graph_maintenance_bank_serialization_sql(table, "o")}
+                      AND {document_serialization_sql(table, "o")}
                     ORDER BY o.created_at
                     LIMIT $2
                     FOR UPDATE SKIP LOCKED
@@ -1384,13 +1387,14 @@ class OracleOps(DataAccessOps):
             else:
                 rows = await conn.fetch(
                     f"""
-                    SELECT o.operation_id, o.operation_type, o.task_payload, o.retry_count
+                    SELECT o.operation_id, o.operation_type, o.task_payload, o.retry_count, o.serialization_key, o.bank_id
                     FROM {table} o
                     WHERE o.status = 'pending'
                       AND o.task_payload IS NOT NULL
                       AND o.operation_type != 'consolidation'
                       AND (o.next_retry_at IS NULL OR o.next_retry_at <= NOW())
                       AND {graph_maintenance_bank_serialization_sql(table, "o")}
+                      AND {document_serialization_sql(table, "o")}
                     ORDER BY o.created_at
                     LIMIT $1
                     FOR UPDATE SKIP LOCKED
@@ -1431,6 +1435,19 @@ class OracleOps(DataAccessOps):
 
         # Mark all claimed rows as processing
         operation_ids = [row["operation_id"] for row in all_rows]
+        await self.mark_operations_processing(conn, table, worker_id, operation_ids)
+
+        return all_rows
+
+    async def mark_operations_processing(
+        self,
+        conn: DatabaseConnection,
+        table: str,
+        worker_id: str,
+        operation_ids: list,
+    ) -> None:
+        if not operation_ids:
+            return
         await conn.execute(
             f"""
             UPDATE {table}
@@ -1441,4 +1458,34 @@ class OracleOps(DataAccessOps):
             operation_ids,
         )
 
-        return all_rows
+    async def fetch_foldable_retain_peers(
+        self,
+        conn: DatabaseConnection,
+        table: str,
+        bank_id: str,
+        serialization_key: str,
+        limit: int,
+    ) -> list[ResultRow]:
+        if limit <= 0:
+            return []
+        # Same ``LIMIT $n ... FOR UPDATE SKIP LOCKED`` shape the claim queries
+        # above use, which the Oracle SQL translation layer rewrites into the
+        # row-limited form Oracle accepts (a bare one raises ORA-02014).
+        return await conn.fetch(
+            f"""
+            SELECT operation_id, task_payload, retry_count
+            FROM {table}
+            WHERE status = 'pending'
+              AND task_payload IS NOT NULL
+              AND operation_type = 'retain'
+              AND bank_id = $1
+              AND serialization_key = $2
+              AND (next_retry_at IS NULL OR next_retry_at <= NOW())
+            ORDER BY created_at, operation_id
+            LIMIT $3
+            FOR UPDATE SKIP LOCKED
+            """,
+            bank_id,
+            serialization_key,
+            limit,
+        )
