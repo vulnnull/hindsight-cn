@@ -127,7 +127,10 @@ describe("runRetainHook anti-recursion guard", () => {
     // No stdin is provided/mocked here — if the guard didn't return before `readFileSync(0, ...)`,
     // this call would attempt to read the real process stdin. Resolving without calling makeClient
     // proves the guard fired first.
-    await runRetainHook({ harness: "claude-code", parse: () => ({}) }, makeClient);
+    await runRetainHook(
+      { harness: "claude-code", hostTimeoutSec: 60, parse: () => ({}) },
+      makeClient
+    );
     expect(makeClient).not.toHaveBeenCalled();
   });
 });

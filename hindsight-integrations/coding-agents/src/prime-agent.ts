@@ -146,7 +146,7 @@ export function createPrimeAgentHooks(
 function createRuntime(repoPath: string): RuntimeCore | undefined {
   let cfg = loadConfig({ harness: HARNESS });
   if (cfg.disabled) return undefined;
-  const resolved = applyBankConfig(cfg, deriveBankId(cfg, repoPath, HARNESS));
+  const resolved = applyBankConfig(cfg, deriveBankId(cfg, repoPath, HARNESS), repoPath);
   cfg = resolved.cfg;
   if (cfg.disabled) return undefined;
   const client = new HindsightClient({

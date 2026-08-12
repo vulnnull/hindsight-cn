@@ -19,7 +19,7 @@ export function buildAntigravityStatusLine(state: AntigravityStatusLineState, cf
   const cwd = state.cwd || state.workspace?.current_dir;
   if (!cwd) return brandWord();
 
-  const resolved = applyBankConfig(cfg, deriveBankId(cfg, cwd, "antigravity-cli"));
+  const resolved = applyBankConfig(cfg, deriveBankId(cfg, cwd, "antigravity-cli"), cwd);
   return resolved.cfg.disabled ? "" : `${brandWord()} · ${resolved.bankId}`;
 }
 

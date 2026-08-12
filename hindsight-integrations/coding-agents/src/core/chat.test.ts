@@ -367,6 +367,40 @@ describe("retainLiveSession — incremental write-back", () => {
     expect(retain).toHaveBeenCalledTimes(1);
   });
 
+  it("honours a long Retry-After when the caller's clock has room for it", async () => {
+    // A persistent-plugin runtime is not on a host's kill timer, so a 20s rate limit is worth
+    // waiting out rather than deferring — the fixed 6s budget this replaced could not express that.
+    vi.useFakeTimers();
+    try {
+      const { retain, client } = stubClient();
+      retain.mockRejectedValueOnce(new RateLimitedError(20_000));
+      const done = retainLiveSession(client, "s1", turns(3), "2026-01-01T00:00:00Z", "opencode", {
+        cursors: memoryCursorStore(),
+        retryUntil: Date.now() + 120_000,
+      });
+      await vi.advanceTimersByTimeAsync(20_000);
+      await done;
+      expect(retain).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not start a wait its caller's clock cannot finish", async () => {
+    // Same 20s rate limit, but a hook with ~10s of host timeout left: waiting would be killed
+    // mid-write. Defer instead — the next write-back replaces the whole document.
+    const { retain, client } = stubClient();
+    retain.mockRejectedValue(new RateLimitedError(20_000));
+
+    await expect(
+      retainLiveSession(client, "s1", turns(3), "2026-01-01T00:00:00Z", "codex", {
+        cursors: memoryCursorStore(),
+        retryUntil: Date.now() + 10_000,
+      })
+    ).rejects.toBeInstanceOf(RateLimitedError);
+    expect(retain).toHaveBeenCalledTimes(1);
+  });
+
   it("does not retry when Retry-After exceeds what a hook can wait", async () => {
     // Waiting less than the server asked would just earn another 429, and waiting the full 60s
     // risks the harness killing the hook mid-write. Leave it to the next write-back, which
@@ -374,9 +408,12 @@ describe("retainLiveSession — incremental write-back", () => {
     const { retain, client } = stubClient();
     retain.mockRejectedValue(new RateLimitedError(60_000));
 
-    await expect(write(client, turns(3), memoryCursorStore())).rejects.toBeInstanceOf(
-      RateLimitedError
-    );
+    await expect(
+      retainLiveSession(client, "s1", turns(3), "2026-01-01T00:00:00Z", "codex", {
+        cursors: memoryCursorStore(),
+        retryUntil: Date.now() + 20_000,
+      })
+    ).rejects.toBeInstanceOf(RateLimitedError);
     expect(retain).toHaveBeenCalledTimes(1);
   });
 

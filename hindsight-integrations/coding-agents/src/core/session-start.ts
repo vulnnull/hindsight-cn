@@ -345,7 +345,7 @@ export async function runSessionStartHook(
     syncCompanionSkill(harness); // keep the installed skill current with the package version
     if (cfg.disabled) return;
 
-    const resolved = applyBankConfig(cfg, deriveBankId(cfg, cwd, harness));
+    const resolved = applyBankConfig(cfg, deriveBankId(cfg, cwd, harness), cwd);
     cfg = resolved.cfg;
     const bankId = resolved.bankId;
     if (cfg.disabled) return; // per-bank opt-out (banks.<id> override)

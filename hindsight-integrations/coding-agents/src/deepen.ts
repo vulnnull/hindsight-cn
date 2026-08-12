@@ -49,7 +49,9 @@ const REPO = arg("repo");
 const cfg0 = loadConfig({ harness: arg("harness") ?? undefined, path: arg("config") });
 const BANK =
   arg("bank") ?? (REPO ? deriveBankId(cfg0, REPO, arg("harness") ?? cfg0.harness) : cfg0.bankId);
-const resolved0 = BANK ? applyBankConfig(cfg0, BANK) : { cfg: cfg0, bankId: BANK };
+const resolved0 = BANK
+  ? applyBankConfig(cfg0, BANK, REPO ?? undefined)
+  : { cfg: cfg0, bankId: BANK };
 const cfg = resolved0.cfg;
 const FINAL_BANK = resolved0.bankId ?? BANK;
 if (cfg.disabled) {

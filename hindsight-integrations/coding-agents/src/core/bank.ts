@@ -32,6 +32,8 @@ export interface BankConfig {
   bankIdTemplate?: string;
   mapPathToBank?: Record<string, string>;
   resolveWorktrees?: boolean; // default true: worktrees share the main repo's bank
+  optInOnly?: boolean; // memory runs ONLY where opted in (see isOptedIn)
+  optInPaths?: string[]; // directories opted in, matched as prefixes
 }
 
 const DEFAULT_BANK_NAME = "coding";
@@ -123,18 +125,53 @@ function gitProjectName(directory: string, resolveWorktrees: boolean): string {
   return dirName(directory);
 }
 
+/** A configured directory, `~`-expanded and normalised, without a trailing separator. */
+function configuredDir(dir: string): string {
+  const expanded = dir === "~" || dir.startsWith("~/") ? join(homedir(), dir.slice(1)) : dir;
+  return normalize(expanded).replace(new RegExp(`\\${sep}+$`), "");
+}
+
+/** Whether `directory` IS `configured`, or lives under it. */
+function isWithin(directory: string, configured: string): boolean {
+  return directory === configured || directory.startsWith(configured + sep);
+}
+
 /** Longest-prefix match of `directory` against the map's absolute paths (exact or ancestor). */
 function mapLookup(map: Record<string, string>, directory: string): string | undefined {
   const cwd = normalize(directory);
   let best: { len: number; bank: string } | undefined;
   for (const [dir, bank] of Object.entries(map)) {
-    const expanded = dir === "~" || dir.startsWith("~/") ? join(homedir(), dir.slice(1)) : dir;
-    const p = normalize(expanded).replace(new RegExp(`\\${sep}+$`), "");
-    if (cwd === p || cwd.startsWith(p + sep)) {
+    const p = configuredDir(dir);
+    if (isWithin(cwd, p)) {
       if (!best || p.length > best.len) best = { len: p.length, bank };
     }
   }
   return best?.bank;
+}
+
+/**
+ * Whether memory may run for this directory at all.
+ *
+ * Off by default: without `optInOnly` every project gets memory, which is what makes the plugin
+ * zero-setup. With it, the plugin stays inert — no bank, no retain, no seed — unless the directory
+ * was named on purpose, which means one of:
+ *
+ *   - it is under an `optInPaths` entry (prefix-matched, so approving a directory approves the
+ *     repos beneath it while each keeps its own dynamic bank), or
+ *   - it is under a `mapPathToBank` entry, since routing a path to a named bank is already a
+ *     deliberate declaration of that project.
+ *
+ * A bare `bankId` deliberately does NOT approve anything: it names a bank, not a project, so it
+ * cannot express which work is allowed to be remembered. Under `optInOnly` an unlisted project is
+ * inert even then — a privacy switch has to fail closed.
+ */
+export function isOptedIn(config: BankConfig, directory: string): boolean {
+  if (!config.optInOnly) return true;
+  if (!directory) return false;
+  const cwd = normalize(directory);
+  if ((config.optInPaths ?? []).some((dir) => dir && isWithin(cwd, configuredDir(dir))))
+    return true;
+  return Boolean(config.mapPathToBank && mapLookup(config.mapPathToBank, directory));
 }
 
 /** Derive the bank id for a working directory (see module doc for the resolution order). */

@@ -47,7 +47,7 @@ from typing import TYPE_CHECKING, Any
 from ...extensions.base import Extension
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from ..search.retrieval import GraphRetriever, SemanticBm25Result
+    from ..search.retrieval import GraphRetriever
 
 
 class MemoryTxn:
@@ -359,6 +359,50 @@ def build_fact_records(
     return records
 
 
+@dataclass
+class RelinkPassResult:
+    """What one relink drain got through.
+
+    ``queue_exhausted`` is False when the pass stopped on its deadline (or the
+    runaway-iteration cap) with rows still queued — not a failure, since every
+    batch commits before the next is claimed, but the caller needs to know the
+    queue is not empty so it can arrange for the rest to be picked up.
+    """
+
+    units_processed: int = 0
+    links_added: int = 0
+    queue_exhausted: bool = True
+
+
+@dataclass
+class EntityPrunePassResult:
+    """What one entity-prune drain got through.
+
+    ``entities_examined`` counts candidates claimed, not rows deleted: most
+    candidates turn out to be alive and are kept, which is the pass working as
+    intended rather than wasted effort.
+    """
+
+    entities_examined: int = 0
+    orphan_entities_pruned: int = 0
+    stale_cooccurrences_pruned: int = 0
+    queue_exhausted: bool = True
+
+
+@dataclass
+class RecallArms:
+    """One fact_type's per-arm candidate lists from :meth:`MemoriesExtension.recall_unified`.
+
+    Each list holds ``RetrievalResult`` items, unfused — RRF/rerank happen downstream.
+    ``temporal`` is empty unless a window was given; ``graph`` is empty when that arm is off.
+    """
+
+    semantic: list = field(default_factory=list)
+    bm25: list = field(default_factory=list)
+    graph: list = field(default_factory=list)
+    temporal: list = field(default_factory=list)
+
+
 class MemoriesExtension(Extension, ABC):
     """Storage + retrieval for memory units and their links, behind one interface.
 
@@ -620,10 +664,10 @@ class MemoriesExtension(Extension, ABC):
         """Apply partial updates. Only the fields set on each patch change."""
         raise NotImplementedError
 
-    # ------------------------------------------------------------------ recall arms
+    # ------------------------------------------------------------------ recall
 
     @abstractmethod
-    async def search(
+    async def recall_unified(
         self,
         *,
         conn,
@@ -632,6 +676,8 @@ class MemoriesExtension(Extension, ABC):
         query_embedding: str,
         query_text: str,
         limit: int,
+        temporal_window: "tuple[datetime, datetime] | None" = None,
+        temporal_semantic_threshold: float = 0.1,
         tags: list[str] | None = None,
         tags_match: str = "any",
         tag_groups: list | None = None,
@@ -639,40 +685,24 @@ class MemoriesExtension(Extension, ABC):
         created_before: datetime | None = None,
         min_semantic: float | None = None,
         min_keyword: float | None = None,
-        graph_seed_min_similarity: float | None = None,
-    ) -> "dict[str, SemanticBm25Result]":
-        """Run the semantic + BM25 arms.
+        enable_graph: bool = True,
+    ) -> "dict[str, RecallArms]":
+        """Run ALL retrieval arms for every fact_type — the whole recall interface, in one call.
 
-        Returns ``{fact_type: SemanticBm25Result(semantic, bm25, graph_seeds)}`` of
-        ``RetrievalResult`` — the contract ``retrieve_semantic_bm25_combined`` has.
-        ``graph_seed_min_similarity`` restricts which semantic hits seed the graph
-        arm (Postgres populates ``graph_seeds``; a store with its own graph arm
-        leaves it ``None``).
-        """
+        Returns ``{fact_type: RecallArms(semantic, bm25, graph, temporal)}`` of
+        ``RetrievalResult``: the four per-arm candidate lists, unfused (RRF/rerank happen
+        downstream, unchanged). ``temporal`` is empty unless ``temporal_window`` is given;
+        ``graph`` is empty when ``enable_graph`` is False.
 
-    @abstractmethod
-    async def temporal_search(
-        self,
-        *,
-        conn,
-        bank_id: str,
-        fact_types: list[str],
-        query_embedding: str,
-        start_date: datetime,
-        end_date: datetime,
-        limit: int,
-        semantic_threshold: float = 0.1,
-        tags: list[str] | None = None,
-        tags_match: str = "any",
-        tag_groups: list | None = None,
-        created_after: datetime | None = None,
-        created_before: datetime | None = None,
-    ) -> dict[str, list]:
-        """Run the temporal arm over ``[start_date, end_date]``.
+        This is the ONE method recall goes through — how a store answers the arms is entirely its
+        own business. Postgres runs the split per-arm SQL orchestration behind this (a dense+BM25
+        UNION query, a graph retriever per type, a temporal query); a store that owns its index
+        answers every arm from a single query with no per-arm round-trips. Either way the caller
+        sees only this method and its per-arm result.
 
-        Returns ``{fact_type: [RetrievalResult]}``: entry points whose effective
-        time — ``COALESCE(occurred_start, mentioned_at, occurred_end)`` — falls in
-        the window, spread one hop and scored by proximity to it.
+        ``conn`` is the store's connection handle for the call. Postgres treats it as the pool it
+        acquires its own connections from and runs the graph arm on; a store that reaches its index
+        another way (e.g. over the network) ignores it.
         """
 
     def graph_retriever(self) -> "GraphRetriever | None":
@@ -1157,17 +1187,28 @@ class MemoriesExtension(Extension, ABC):
         """
         return 0
 
-    async def relink_pass(self, *, backend, fq_table, bank_id: str, config) -> dict:
-        """Top up links for queued victims. ``{}`` when there is nothing to relink."""
-        return {}
+    async def relink_pass(
+        self, *, backend, fq_table, bank_id: str, config, deadline: float | None = None
+    ) -> "RelinkPassResult":
+        """Top up links for queued victims. All-zero when there is nothing to relink."""
+        return RelinkPassResult()
 
-    async def prune_orphan_entities(self, *, conn, fq_table, bank_id: str) -> int:
-        """Delete `entities` rows no live memory references. Returns the count."""
+    async def enqueue_entity_prune_candidates(self, *, conn, fq_table, bank_id: str, affected_unit_ids: list) -> int:
+        """Queue the entities ``affected_unit_ids`` reference as prune candidates.
+
+        Zero for a store that never wrote `unit_entities`: it has no entity
+        postings to lose, so nothing can become an orphan.
+        """
         return 0
 
-    async def prune_stale_cooccurrences(self, *, conn, fq_table, bank_id: str) -> int:
-        """Delete co-occurrence rows whose witnessing memories are all gone."""
-        return 0
+    async def entity_prune_pass(
+        self, *, backend, fq_table, bank_id: str, deadline: float | None = None
+    ) -> "EntityPrunePassResult":
+        """Prune queued candidate entities and the co-occurrences they stranded.
+
+        All-zero when the store keeps no entity postings and so queues nothing.
+        """
+        return EntityPrunePassResult()
 
 
 __all__ = [
@@ -1187,10 +1228,12 @@ __all__ = [
     "META_UPDATED_AT",
     "CausalEdgeRecord",
     "DeletePredicate",
+    "EntityPrunePassResult",
     "FactRecord",
     "MemoriesExtension",
     "MemoryPatch",
     "MemoryTxn",
+    "RelinkPassResult",
     "ScanPage",
     "StoredMemory",
     "build_fact_records",

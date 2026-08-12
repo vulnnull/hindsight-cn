@@ -109,17 +109,15 @@ async function supportsAppend(client: HindsightClient): Promise<boolean> {
   }
 }
 
-/**
- * Attempts a rate-limited write-back may make, and the most total time it may spend waiting.
- *
- * A hook process is on the host's clock — Claude Code allows 60s for a Stop hook, and a cold
- * daemon can already have eaten most of it — so honouring a long `Retry-After` here would trade a
- * deferred retain for a killed hook, which is strictly worse. Short limits mean a brief rate limit
- * is ridden out and a serious one is left to the next write-back, which replaces the whole
- * document anyway.
- */
+/** Retry window for a caller that did not supply one — a long-lived host with no external clock. */
+const DEFAULT_RETRY_WINDOW_MS = 60_000;
+
+/** Attempts a rate-limited write-back may make before giving up. */
 const RETAIN_RETRY_ATTEMPTS = 2;
-const RETAIN_RETRY_BUDGET_MS = 6000;
+
+/** What a retry must still leave room for: `req` aborts a request at 15s. Waiting past the point
+ *  where the retry itself could not finish buys nothing. */
+const REQUEST_BUDGET_MS = 15_000;
 
 /**
  * Submit a write-back, retrying while the API is rate-limiting us AND our write is still the
@@ -136,20 +134,20 @@ const RETAIN_RETRY_BUDGET_MS = 6000;
  */
 async function submitWithRetry(
   send: () => Promise<void>,
-  isStillNewest: () => boolean
+  isStillNewest: () => boolean,
+  retryUntil: number
 ): Promise<void> {
-  let spent = 0;
   for (let attempt = 0; ; attempt++) {
     try {
       return await send();
     } catch (e) {
       const limited = e instanceof RateLimitedError;
       if (!limited || attempt >= RETAIN_RETRY_ATTEMPTS || !isStillNewest()) throw e;
-      // Either honour Retry-After or do not retry: waiting less than the server asked would just
-      // earn another 429, so a wait that does not fit the budget means "not on this hook's clock".
+      // Either honour Retry-After in full or do not retry at all: waiting less than the server
+      // asked would just earn another 429. Whether it fits is the CALLER's clock, not a constant —
+      // a hook process is killed by its host at a known deadline, a long-lived runtime is not.
       const wait = e.retryAfterMs || 1000;
-      if (wait > RETAIN_RETRY_BUDGET_MS - spent) throw e;
-      spent += wait;
+      if (Date.now() + wait + REQUEST_BUDGET_MS > retryUntil) throw e;
       await sleep(wait);
     }
   }
@@ -209,13 +207,23 @@ export async function retainLiveSession(
   turns: TransportTurn[],
   startTs: string,
   harness?: string,
-  opts: { cursors?: RetainCursorStore; stamp?: RetainStamp } = {}
+  opts: { cursors?: RetainCursorStore; stamp?: RetainStamp; retryUntil?: number } = {}
 ): Promise<void> {
   const cursors = opts.cursors;
-  if (!cursors) return writeSession(client, sessionId, turns, startTs, harness, opts.stamp);
+  if (!cursors)
+    return writeSession(
+      client,
+      sessionId,
+      turns,
+      startTs,
+      harness,
+      opts.stamp,
+      undefined,
+      opts.retryUntil
+    );
   // Serialised so the plan is made against the previous write-back's CONFIRMED cursor (see above).
   return serialize(cursors, sessionId, () =>
-    writeSession(client, sessionId, turns, startTs, harness, opts.stamp, cursors)
+    writeSession(client, sessionId, turns, startTs, harness, opts.stamp, cursors, opts.retryUntil)
   );
 }
 
@@ -226,7 +234,9 @@ async function writeSession(
   startTs: string,
   harness?: string,
   stamp?: RetainStamp,
-  cursors?: RetainCursorStore
+  cursors?: RetainCursorStore,
+  /** Absolute time this write-back may keep retrying until; the caller owns its own clock. */
+  retryUntil = Date.now() + DEFAULT_RETRY_WINDOW_MS
 ): Promise<void> {
   const refId = `conversation:${sessionId}`;
   const appendSupported = Boolean(cursors) && (await supportsAppend(client));
@@ -287,7 +297,8 @@ async function writeSession(
       if (!cursors) return true;
       const now = cursors.read(sessionId);
       return now?.turns === claimed.turns && now?.fingerprint === claimed.fingerprint;
-    }
+    },
+    retryUntil
   );
   cursors?.write(sessionId, next);
 }

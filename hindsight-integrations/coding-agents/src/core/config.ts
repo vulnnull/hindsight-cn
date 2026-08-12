@@ -15,6 +15,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_SEED_LIMIT } from "./seed";
+import { isOptedIn } from "./bank";
 
 /** Default config-file path: ~/.hindsight/coding-agent.json */
 export // HINDSIGHT_CONFIG joins the two env exceptions (diag/log files): it points at THE config file,
@@ -63,6 +64,14 @@ export interface RawConfig {
   //   placeholders: {gitProject} {project} {harness} {channel} {user} (see core/bank.ts)
   mapPathToBank?: Record<string, string>; // absolute path -> bank; longest prefix wins; overrides everything
   resolveWorktrees?: boolean; // {gitProject}: worktrees share the main repo's bank (default true)
+  /** Run memory ONLY in projects that were opted in (default false: every project gets memory,
+   *  which is what makes the plugin zero-setup). With it on, an unlisted project is inert — no
+   *  bank is created, nothing is retained, no seed runs — so unrelated work leaves no trace. */
+  optInOnly?: boolean;
+  /** Directories opted in, matched as PREFIXES with `~` expanded: approving a directory approves
+   *  the repos beneath it, and each still gets its own dynamic bank. A `mapPathToBank` entry counts
+   *  as opted in too, since routing a path to a named bank already declares that project. */
+  optInPaths?: string[];
   harness?: string; // runtime adapter (default "opencode")
   disabled?: boolean; // hard off-switch — inert plugin, for a no-memory baseline (default false)
   retainSessions?: boolean; // opencode plugin write-back (default true; set false to opt out). Hook harnesses always write back on Stop and ignore this flag.
@@ -127,6 +136,8 @@ export interface Config {
   bankIdTemplate?: string;
   mapPathToBank?: Record<string, string>;
   resolveWorktrees?: boolean;
+  optInOnly: boolean;
+  optInPaths: string[];
   harness: string;
   disabled: boolean;
   retainSessions: boolean;
@@ -173,6 +184,11 @@ export function resolveConfig(raw: RawConfig = {}): Config {
     bankIdTemplate: raw.bankIdTemplate,
     mapPathToBank: raw.mapPathToBank,
     resolveWorktrees: raw.resolveWorktrees,
+    optInOnly: raw.optInOnly ?? false,
+    // Same shape as retainTags: a config typo must not become a path that silently approves nothing.
+    optInPaths: Array.isArray(raw.optInPaths)
+      ? raw.optInPaths.filter((p): p is string => typeof p === "string" && p.trim() !== "")
+      : [],
     harness: raw.harness ?? "opencode",
     disabled: raw.disabled ?? false,
     retainSessions: raw.retainSessions ?? true, // opencode: write back by default (parity with hook-harness Stop)
@@ -273,6 +289,8 @@ const ENV_KEYS = {
   dynamicBankId: "HINDSIGHT_DYNAMIC_BANK_ID",
   bankIdTemplate: "HINDSIGHT_BANK_ID_TEMPLATE",
   resolveWorktrees: "HINDSIGHT_RESOLVE_WORKTREES",
+  optInOnly: "HINDSIGHT_OPT_IN_ONLY",
+  optInPaths: "HINDSIGHT_OPT_IN_PATHS",
   harness: "HINDSIGHT_HARNESS",
   disabled: "HINDSIGHT_DISABLED",
   retainSessions: "HINDSIGHT_RETAIN_SESSIONS",
@@ -297,13 +315,14 @@ const ENV_KEYS = {
 const ENV_BOOLEANS = new Set<keyof RawConfig>([
   "dynamicBankId",
   "resolveWorktrees",
+  "optInOnly",
   "disabled",
   "retainSessions",
   "autoReflect",
   "autoSeed",
   "codebaseSurvey",
 ]);
-const ENV_LISTS = new Set<keyof RawConfig>(["retainTags"]);
+const ENV_LISTS = new Set<keyof RawConfig>(["retainTags", "optInPaths"]);
 const ENV_NUMBERS = new Set<keyof RawConfig>([
   "apiPort",
   "daemonIdleTimeout",
@@ -366,6 +385,10 @@ const BANK_OVERRIDE_EXCLUDED = [
   "mapPathToBank",
   "dynamicBankId",
   "resolveWorktrees",
+  // Approval is decided BEFORE the bank is resolved, so a `banks.<id>` section naming these could
+  // only ever arrive too late to matter — strip them rather than let them read as effective.
+  "optInOnly",
+  "optInPaths",
   "harness",
 ] as const;
 
@@ -374,7 +397,18 @@ const BANK_OVERRIDE_EXCLUDED = [
  * that runs AFTER bank resolution, giving per-repo opt-in/out (disable, retainSessions, gitIngest,
  * survey settings, ...) from the ONE global config file.
  */
-export function applyBankConfig(cfg: Config, resolvedId: string): { cfg: Config; bankId: string } {
+export function applyBankConfig(
+  cfg: Config,
+  resolvedId: string,
+  /** The directory the bank was resolved FROM. Supplying it enforces `optInOnly`; every entry
+   *  point already has it to hand, having just passed it to `deriveBankId`. */
+  directory?: string
+): { cfg: Config; bankId: string } {
+  // Rides the `disabled` gate every entry point already checks after bank resolution, rather than
+  // adding a second thing eight call sites must remember — and that gate is known to stop the run
+  // before anything creates a bank.
+  if (directory !== undefined && !isOptedIn(cfg, directory))
+    return { cfg: { ...cfg, disabled: true }, bankId: resolvedId };
   const section = cfg.banks[resolvedId];
   if (!section) return { cfg, bankId: resolvedId };
   const safe: Record<string, unknown> = { ...section };

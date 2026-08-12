@@ -1242,6 +1242,31 @@ class EntityResolver:
         else:
             return await self._link_units_to_entities_batch_impl(conn, normalized, bank_id)
 
+    async def record_unit_entity_postings(
+        self,
+        unit_entity_pairs: list[tuple[str, str]] | list[tuple[str, str, datetime | None]],
+        bank_id: str | None = None,
+    ):
+        """Store-owned variant of :meth:`link_units_to_entities_batch` that touches NO
+        Postgres connection.
+
+        For a memories store that OWNS its memory rows (an external backend), the unit→entity
+        posting is recorded by the store — ``record_unit_entities`` ignores the ``conn`` — and
+        the co-occurrence update only accumulates in memory for the post-transaction flush.
+        Neither needs a database transaction, so the retain orchestrator can run the posting in
+        its connection-free store phase and never hold the data-plane connection across the
+        object-store write. NOT for the Postgres store, whose posting is a real ``unit_entities``
+        INSERT that requires the connection.
+        """
+        if not unit_entity_pairs:
+            return
+
+        normalized: list[tuple[str, str, datetime | None]] = [
+            (t[0], t[1], t[2] if len(t) >= 3 else None)  # type: ignore[misc]
+            for t in unit_entity_pairs
+        ]
+        return await self._link_units_to_entities_batch_impl(None, normalized, bank_id)
+
     async def _link_units_to_entities_batch_impl(
         self, conn, unit_entity_pairs: list[tuple[str, str, datetime | None]], bank_id: str | None = None
     ):

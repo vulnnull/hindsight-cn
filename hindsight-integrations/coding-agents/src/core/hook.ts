@@ -228,7 +228,7 @@ export async function runHook(
   const out = (context: string | undefined, notice?: string) =>
     process.stdout.write(JSON.stringify(spec.emit(context ?? "", notice, ev)));
 
-  const resolved = applyBankConfig(cfg, deriveBankId(cfg, cwd, spec.harness));
+  const resolved = applyBankConfig(cfg, deriveBankId(cfg, cwd, spec.harness), cwd);
   cfg = resolved.cfg;
   const bankId = resolved.bankId;
   if (cfg.disabled) {
