@@ -30,10 +30,7 @@ const HARNESS = "opencode";
 export class RuntimeCore {
   private readonly injection = new Map<string, string>(); // sessionId -> this turn's injection block
   private readonly turnCount = new Map<string, number>(); // sessionId -> user-turn counter (cadence)
-  private readonly sessionState = new Map<
-    string,
-    { startTs: string; retainedUsers: number; retainedTurns: number }
-  >();
+  private readonly sessionState = new Map<string, { startTs: string; retainedTurns: number }>();
   /** Live write-back cursors. In memory, unlike the hook harnesses': this host outlives the session. */
   private readonly cursors = memoryCursorStore();
   /** Pulls a session's CURRENT transcript from the host (set by the adapter); see onSessionIdle. */
@@ -76,7 +73,16 @@ export class RuntimeCore {
 
   /** The hindsight_* knowledge + recall tools, bound to this bank, for the harness to register natively. */
   toolSpecs(): ToolSpec[] {
-    return buildKnowledgeTools(this.client, this.bankId, { harness: this.harness });
+    return buildKnowledgeTools(this.client, this.bankId, {
+      repoDir: this.projectDir,
+      harness: this.harness,
+      stampFor: () =>
+        buildRetainStamp(this.cfg, {
+          directory: this.projectDir,
+          harness: this.harness,
+          bankId: this.bankId,
+        }),
+    });
   }
 
   get writeBackEnabled(): boolean {
@@ -174,19 +180,22 @@ export class RuntimeCore {
   }
 
   /**
-   * Full normalized transcript (rich: user/assistant text + tool calls/outputs): upsert every N user
-   * turns when enabled. On by default for persistent-plugin hosts (parity with hook-harness Stop write-back),
-   * so opencode sessions compound into memory; a user can opt out with `retainSessions: false`.
+   * Full normalized transcript (rich: user/assistant text + tool calls/outputs): upsert every turn
+   * when enabled. On by default for persistent-plugin hosts (parity with hook-harness Stop
+   * write-back), so opencode sessions compound into memory; opt out with `retainSessions: false`.
+   *
+   * There is deliberately no client-side cadence. Batching write-backs meant holding turns in a
+   * process the host can close at any moment, with no reliable signal on the way out — the flush a
+   * cadence needs would have to ride a session-end hook, and those are cancelled at shutdown. The
+   * server coalesces instead: queued retains for one document fold into a single execution
+   * (`engine.retain.fold`), so submitting every turn costs one extraction, not one per turn, and
+   * nothing is ever held somewhere it can be lost.
    */
   async onTranscript(sessionId: string, turns: TransportTurn[]): Promise<void> {
     if (process.env.HINDSIGHT_DISABLE_HOOKS) return; // anti-recursion (see seedIfCold)
     if (!this.writeBackEnabled || !sessionId || !turns.length) return;
-    const users = turns.filter((t) => t.role === "user").length;
     const st = this.stateFor(sessionId);
-    if (users - st.retainedUsers >= this.cfg.retainEveryTurns) {
-      st.retainedUsers = users;
-      this.retain(sessionId, turns, st.startTs);
-    }
+    this.retain(sessionId, turns, st.startTs);
   }
 
   /**
@@ -220,18 +229,16 @@ export class RuntimeCore {
     // only retain when this transcript actually grew past what we last wrote.
     if (turns.length <= st.retainedTurns) return;
     st.retainedTurns = turns.length;
-    st.retainedUsers = turns.filter((t) => t.role === "user").length;
     this.retain(sessionId, turns, st.startTs, "idle");
   }
 
   private stateFor(sessionId: string): {
     startTs: string;
-    retainedUsers: number;
     retainedTurns: number;
   } {
     let st = this.sessionState.get(sessionId);
     if (!st) {
-      st = { startTs: new Date().toISOString(), retainedUsers: 0, retainedTurns: 0 };
+      st = { startTs: new Date().toISOString(), retainedTurns: 0 };
       this.sessionState.set(sessionId, st);
     }
     return st;

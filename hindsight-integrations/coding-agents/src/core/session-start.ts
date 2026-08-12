@@ -33,6 +33,7 @@ import { diag } from "./diag";
 import { setLogLevel } from "./log";
 import { parsePageList, buildKnowledgePreamble, type PageRef } from "./knowledge-injection";
 import type { ClientOpts, RetainOpts } from "./hindsight";
+import { buildRetainStamp } from "./retain-stamp";
 import { HindsightClient } from "./hindsight";
 import { sessionCacheFile, writeSessionCache } from "./session-cache";
 
@@ -156,6 +157,7 @@ export async function buildSessionStartContext(args: {
   const startSurvey = args.startSurvey ?? startCodebaseSurvey;
   const resolveHeadSha = args.headSha ?? gitHeadSha;
   const countCommitsSince = args.commitsSince ?? commitsSince;
+  const retainStamp = () => buildRetainStamp(cfg, { directory: cwd, harness, bankId });
 
   // Codebase-survey baseline (Option A): the bank is the only state, so the HEAD at the last survey
   // is recorded IN the bank as a tiny `survey-baseline:<sha>` marker doc (tag source:survey-baseline;
@@ -166,17 +168,22 @@ export async function buildSessionStartContext(args: {
   const recordSurveyBaseline = (sha: string): void => {
     if (!client.retain) return; // minimal client (some tests) — nothing to record
     try {
+      const stamp = retainStamp();
+      const content =
+        `🛰️ Hindsight is researching this codebase — survey started at commit ${sha.slice(0, 12)}. ` +
+        `(Internal marker: no memories are extracted from this document.)`;
+      const tags = [...new Set([...stamp.tags, SURVEY_BASELINE_TAG])];
       // Fire-and-forget; Promise.resolve tolerates a non-Promise return (e.g. a test spy).
-      void Promise.resolve(
-        client.retain(
-          `🛰️ Hindsight is researching this codebase — survey started at commit ${sha.slice(0, 12)}. ` +
-            `(Internal marker: no memories are extracted from this document.)`,
-          "hindsight codebase-survey baseline",
-          `${SURVEY_BASELINE_PREFIX}${sha}`,
-          [SURVEY_BASELINE_TAG],
-          "survey"
-        )
-      ).catch(() => {});
+      const retained = client.retain(
+        content,
+        "hindsight codebase-survey baseline",
+        `${SURVEY_BASELINE_PREFIX}${sha}`,
+        tags,
+        "survey",
+        // `retain` only sets metadata when it is truthy, so an empty stamp sends none.
+        { metadata: Object.keys(stamp.metadata).length ? stamp.metadata : undefined }
+      );
+      void Promise.resolve(retained).catch(() => {});
     } catch {
       /* best-effort — a failed baseline write never breaks SessionStart */
     }
@@ -346,7 +353,12 @@ export async function runSessionStartHook(
     // detached; we wait only briefly, so an already-running daemon is adopted immediately while a
     // cold one keeps coming up in the background and is picked up by a later turn.
     await ensureDaemon(cfg, harness, { waitMs: DAEMON_WAIT_SESSION_START_MS });
-    const client = makeClient({ apiUrl: cfg.apiUrl, apiToken: cfg.apiToken, bank: bankId });
+    const client = makeClient({
+      apiUrl: cfg.apiUrl,
+      apiToken: cfg.apiToken,
+      bank: bankId,
+      maxParallelRetains: cfg.maxParallelRetains,
+    });
 
     const out = await buildSessionStartContext({ cwd, bankId, cfg, client, harness });
     if (out.deferInitialReflect && sessionId) {

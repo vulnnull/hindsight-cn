@@ -79,6 +79,26 @@ def _cap_links_per_unit(links: list[tuple], max_per_unit: int = MAX_TEMPORAL_LIN
     return result
 
 
+def _lock_order_key(lnk: tuple) -> tuple[str, str, str, str]:
+    """Canonical lock-order key for a link row, shared by every writer.
+
+    Mirrors the total order that ``chunk_storage.delete_chunks_by_ids`` uses when
+    it locks ``memory_links`` before a cascade delete:
+
+        (LEAST(from, to), GREATEST(from, to), link_type, COALESCE(entity_id, nil))
+
+    Direction is normalised so ``(A, B)`` and ``(B, A)`` sort adjacent, and the
+    key covers the full unique index — including ``link_type`` and ``entity_id``
+    — so two edges sharing a ``(from, to)`` pair can't be locked in opposite
+    orders by concurrent inserts. UUID string ordering matches the DB's ``uuid``
+    ordering because the ids are canonical lowercase-hex form.
+    """
+    a, b = str(lnk[0]), str(lnk[1])
+    low, high = (a, b) if a <= b else (b, a)
+    entity = str(lnk[4]) if lnk[4] is not None else _NIL_ENTITY_UUID
+    return (low, high, str(lnk[2]), entity)
+
+
 async def _bulk_insert_links(
     conn,
     links: list[tuple],
@@ -89,8 +109,9 @@ async def _bulk_insert_links(
 ) -> None:
     """Bulk-insert links using sorted INSERT FROM unnest().
 
-    Sorting by (from_unit_id, to_unit_id) ensures all concurrent transactions
-    acquire index locks in the same order, eliminating circular-wait deadlocks.
+    Sorting on the full, direction-normalised unique key ensures all concurrent
+    writers — inserts and deletes alike — acquire index locks in the same order,
+    eliminating circular-wait deadlocks. See :func:`_lock_order_key`.
 
     Args:
         conn: Database connection (must be inside a transaction).
@@ -106,9 +127,9 @@ async def _bulk_insert_links(
     if not links:
         return
 
-    # Sort by (from_unit_id, to_unit_id) to guarantee consistent lock ordering
-    # across concurrent transactions — prevents deadlocks.
-    sorted_links = sorted(links, key=lambda lnk: (str(lnk[0]), str(lnk[1])))
+    # Sort on the canonical lock-order key so every concurrent writer takes the
+    # index locks in the same order — prevents circular-wait deadlocks.
+    sorted_links = sorted(links, key=_lock_order_key)
 
     exists_clause = ""
     if not skip_exists_check:

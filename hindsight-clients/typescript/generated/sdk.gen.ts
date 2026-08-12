@@ -876,7 +876,7 @@ export const updateKnowledgeNode = <ThrowOnError extends boolean = false>(
 /**
  * List directives
  *
- * List hard rules that are injected into prompts.
+ * List directive definitions. Unlike reflect, an omitted tag filter returns all directives.
  */
 export const listDirectives = <ThrowOnError extends boolean = false>(
   options: Options<ListDirectivesData, ThrowOnError>
@@ -889,7 +889,7 @@ export const listDirectives = <ThrowOnError extends boolean = false>(
 /**
  * Create directive
  *
- * Create a hard rule that will be injected into prompts.
+ * Create a global or tag-scoped hard rule for reflect prompts.
  */
 export const createDirective = <ThrowOnError extends boolean = false>(
   options: Options<CreateDirectiveData, ThrowOnError>

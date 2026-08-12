@@ -286,6 +286,9 @@ describe("buildSessionStartContext — periodic re-survey (bank-stored commit co
     `survey-baseline:${sha}`,
     ["source:survey-baseline"],
     "survey", // survey-lifecycle strategy (marker rule: zero extraction)
+    // Opts are always passed now; with no retainMetadata configured the stamp is empty, and
+    // `retain` only sets metadata when truthy, so nothing reaches the API.
+    { metadata: undefined },
   ];
 
   it(">= threshold since the latest reachable baseline -> re-surveys + records a new baseline", async () => {
@@ -307,6 +310,34 @@ describe("buildSessionStartContext — periodic re-survey (bank-stored commit co
       expect.objectContaining({ harness: "claude-code" })
     );
     expect(retain).toHaveBeenCalledWith(...marker("newsha"));
+  });
+
+  it("applies retain attribution to survey baseline markers", async () => {
+    const retain = vi.fn();
+    await buildSessionStartContext({
+      cwd: "/repo",
+      bankId: "bank-1",
+      cfg: resolveConfig({
+        surveyRefreshCommits: 20,
+        retainTags: ["project:{project}"],
+        retainMetadata: { bank: "{bankId}" },
+      }),
+      client: warmClient(["survey-baseline:oldsha"], retain),
+      hasGit: () => true,
+      startSeed: vi.fn(),
+      startSurvey: vi.fn(),
+      headSha: () => "newsha",
+      commitsSince: () => 25,
+    });
+
+    expect(retain).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      "survey-baseline:newsha",
+      ["project:repo", "source:survey-baseline"],
+      "survey",
+      { metadata: { bank: "bank-1" } }
+    );
   });
 
   it("< threshold -> no re-survey, no new baseline", async () => {

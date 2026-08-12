@@ -61,6 +61,44 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+async def _gather_or_cancel(coros: list[Any]) -> list[Any]:
+    """``asyncio.gather`` that leaves no task running behind it.
+
+    Plain ``asyncio.gather`` re-raises the first exception immediately but does
+    NOT cancel its siblings — they keep running detached. In consolidation that
+    is actively harmful: the failure propagates out of ``run_consolidation_job``
+    to the worker, which marks the operation failed and re-queues it with a 5s
+    base backoff, while the orphaned tag groups are still calling the LLM,
+    stamping ``mark_consolidated`` and committing write-groups. The per-scope
+    ``scope_locks`` are local to one dispatch, so nothing serialises an orphan
+    against the retry, and the "batches within a group run serially" invariant
+    that keeps two consolidators out of the same observation scope is broken
+    exactly when it matters.
+
+    So: cancel the outstanding tasks and await them before propagating. A
+    cancelled batch's writes stay invisible (its witness row is never
+    committed) and are resolved by the recovery sweep, which is the same state
+    a crash would leave.
+
+    Deliberately not ``asyncio.TaskGroup``: it wraps failures in an
+    ``ExceptionGroup``, and the worker's ``_is_non_retryable_task_error`` does
+    ``isinstance`` checks on the raised exception — a wrapped
+    ``IntegrityConstraintViolationError`` would be misclassified as retryable
+    and retried forever. This helper re-raises the original exception unchanged.
+    """
+    tasks = [asyncio.ensure_future(c) for c in coros]
+    try:
+        return await asyncio.gather(*tasks)
+    except BaseException:
+        for t in tasks:
+            if not t.done():
+                t.cancel()
+        # Await the cancellations before propagating: returning while they are
+        # still unwinding would reintroduce the very overlap this prevents.
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+
+
 def _native_search_vector_update(config, param: str) -> str:
     """UPDATE-clause fragment that repopulates ``search_vector`` inline, or ''
     when the backend does not maintain a native tsvector column that way.
@@ -1050,12 +1088,65 @@ async def _count_unconsolidated_rows(
     )
 
 
+def _as_op_uuid(operation_id: str | uuid.UUID) -> uuid.UUID:
+    return uuid.UUID(operation_id) if isinstance(operation_id, str) else operation_id
+
+
+async def _persist_pending_refresh_tags(conn, operation_id: str, new_tags: list[str]) -> None:
+    """Union ``new_tags`` into the consolidation op's durable ``pending_refresh_tags``.
+
+    Called inside each batch's witness transaction, so the tags of an
+    already-consolidated batch are durable the instant that batch is — a mid-round
+    worker crash no longer loses them. On retry the op re-reads ``task_payload`` and the
+    final round still refreshes those models (#3411); without this, a crash after batch 1
+    committed but before the round finished would drop batch 1's tags, because the retry
+    skips its now-consolidated rows and never re-collects them. ``SELECT ... FOR UPDATE``
+    serialises the concurrent batches of one op so their unions don't clobber each other.
+    """
+    op_uuid = _as_op_uuid(operation_id)
+    row = await conn.fetchrow(
+        f"SELECT task_payload FROM {fq_table('async_operations')} WHERE operation_id = $1 FOR UPDATE",
+        op_uuid,
+    )
+    if row is None:
+        return
+    payload = row["task_payload"]
+    payload = json.loads(payload) if isinstance(payload, str) else (payload or {})
+    existing = set(payload.get("pending_refresh_tags") or [])
+    merged = existing | set(new_tags)
+    if merged == existing:
+        return
+    payload["pending_refresh_tags"] = sorted(merged)
+    await conn.execute(
+        f"UPDATE {fq_table('async_operations')} SET task_payload = $1::jsonb, updated_at = now() "
+        f"WHERE operation_id = $2",
+        json.dumps(payload),
+        op_uuid,
+    )
+
+
+async def _read_pending_refresh_tags(pool, operation_id: str) -> set[str]:
+    """Read the op's durably-accumulated ``pending_refresh_tags`` (crash-safe source of
+    truth for the final-round flush)."""
+    async with acquire_with_retry(pool) as conn:
+        row = await conn.fetchrow(
+            f"SELECT task_payload FROM {fq_table('async_operations')} WHERE operation_id = $1",
+            _as_op_uuid(operation_id),
+        )
+    if row is None:
+        return set()
+    payload = row["task_payload"]
+    payload = json.loads(payload) if isinstance(payload, str) else (payload or {})
+    return set(payload.get("pending_refresh_tags") or [])
+
+
 async def run_consolidation_job(
     memory_engine: "MemoryEngine",
     bank_id: str,
     request_context: "RequestContext",
     operation_id: str | None = None,
     observation_scopes: list[list[str]] | None = None,
+    pending_refresh_tags: list[str] | None = None,
 ) -> dict[str, Any]:
     """
     Run consolidation job for a bank.
@@ -1070,6 +1161,9 @@ async def run_consolidation_job(
         observation_scopes: Optional list of tag scopes. When provided, only
             unconsolidated memories whose tags contain all tags in at least one
             scope are processed.
+        pending_refresh_tags: Tags of memories consolidated by earlier rounds of this
+            round-limited chain, carried through the re-queue so the final round can
+            refresh every affected mental model exactly once (#3411).
 
     Returns:
         Dict with consolidation results
@@ -1089,7 +1183,14 @@ async def run_consolidation_job(
     trace_token = set_trace_context(trace_ctx) if trace_ctx is not None else None
     try:
         return await _run_consolidation_job(
-            memory_engine, bank_id, request_context, config, llm_config, operation_id, observation_scopes
+            memory_engine,
+            bank_id,
+            request_context,
+            config,
+            llm_config,
+            operation_id,
+            observation_scopes,
+            pending_refresh_tags,
         )
     finally:
         if trace_token is not None:
@@ -1107,6 +1208,7 @@ async def _run_consolidation_job(
     llm_config: Any,
     operation_id: str | None = None,
     observation_scopes: list[list[str]] | None = None,
+    pending_refresh_tags: list[str] | None = None,
 ) -> dict[str, Any]:
     """Core consolidation flow. See ``run_consolidation_job`` for the public entrypoint."""
     perf = ConsolidationPerfLog(bank_id)
@@ -1287,21 +1389,60 @@ async def _run_consolidation_job(
             _txn_provider = get_memories()
             _batch_txn = await _txn_provider.mint_txn(bank_id=bank_id, mutating=True)
 
-            pending: list[list[dict[str, Any]]] = [llm_batch_local]
-            while pending:
-                sub_batch = pending.pop(0)
+            try:
+                pending: list[list[dict[str, Any]]] = [llm_batch_local]
+                while pending:
+                    sub_batch = pending.pop(0)
 
-                # No connection is held across the batch: recall, the main LLM call, the
-                # per-action embeds, and dedup all run connection-free; each helper acquires a
-                # short-lived connection only around its own SQL.
-                obs_tags_list = _resolve_obs_tags_list(sub_batch[0]) if sub_batch else None
+                    # No connection is held across the batch: recall, the main LLM call, the
+                    # per-action embeds, and dedup all run connection-free; each helper acquires a
+                    # short-lived connection only around its own SQL.
+                    obs_tags_list = _resolve_obs_tags_list(sub_batch[0]) if sub_batch else None
 
-                sub_deleted: int = 0
-                sub_llm_failed = False
-                if obs_tags_list:
-                    sub_results: list[dict[str, Any]] = []
-                    for obs_tags in obs_tags_list:
-                        pass_results, pass_deleted, pass_failed = await _process_memory_batch(
+                    sub_deleted: int = 0
+                    sub_llm_failed = False
+                    if obs_tags_list:
+                        sub_results: list[dict[str, Any]] = []
+                        for obs_tags in obs_tags_list:
+                            pass_results, pass_deleted, pass_failed = await _process_memory_batch(
+                                pool=pool,
+                                memory_engine=memory_engine,
+                                llm_config=llm_config,
+                                bank_id=bank_id,
+                                memories=sub_batch,
+                                request_context=request_context,
+                                perf=batch_perf,
+                                config=config,
+                                obs_tags_override=obs_tags,
+                                txn=_batch_txn,
+                            )
+                            sub_deleted += pass_deleted
+                            sub_llm_failed = sub_llm_failed or pass_failed
+                            if not sub_results:
+                                sub_results = pass_results
+                            else:
+                                for i, (existing, new) in enumerate(zip(sub_results, pass_results)):
+                                    if existing.get("action") == "skipped" and new.get("action") != "skipped":
+                                        sub_results[i] = new
+                                    elif existing.get("action") != "skipped" and new.get("action") != "skipped":
+                                        existing_created = existing.get(
+                                            "created", 1 if existing.get("action") == "created" else 0
+                                        )
+                                        existing_updated = existing.get(
+                                            "updated", 1 if existing.get("action") == "updated" else 0
+                                        )
+                                        new_created = new.get("created", 1 if new.get("action") == "created" else 0)
+                                        new_updated = new.get("updated", 1 if new.get("action") == "updated" else 0)
+                                        total = existing_created + existing_updated + new_created + new_updated
+                                        sub_results[i] = {
+                                            "action": "multiple",
+                                            "created": existing_created + new_created,
+                                            "updated": existing_updated + new_updated,
+                                            "merged": 0,
+                                            "total_actions": total,
+                                        }
+                    else:
+                        sub_results, sub_deleted, sub_llm_failed = await _process_memory_batch(
                             pool=pool,
                             memory_engine=memory_engine,
                             llm_config=llm_config,
@@ -1310,96 +1451,90 @@ async def _run_consolidation_job(
                             request_context=request_context,
                             perf=batch_perf,
                             config=config,
-                            obs_tags_override=obs_tags,
                             txn=_batch_txn,
                         )
-                        sub_deleted += pass_deleted
-                        sub_llm_failed = sub_llm_failed or pass_failed
-                        if not sub_results:
-                            sub_results = pass_results
-                        else:
-                            for i, (existing, new) in enumerate(zip(sub_results, pass_results)):
-                                if existing.get("action") == "skipped" and new.get("action") != "skipped":
-                                    sub_results[i] = new
-                                elif existing.get("action") != "skipped" and new.get("action") != "skipped":
-                                    existing_created = existing.get(
-                                        "created", 1 if existing.get("action") == "created" else 0
-                                    )
-                                    existing_updated = existing.get(
-                                        "updated", 1 if existing.get("action") == "updated" else 0
-                                    )
-                                    new_created = new.get("created", 1 if new.get("action") == "created" else 0)
-                                    new_updated = new.get("updated", 1 if new.get("action") == "updated" else 0)
-                                    total = existing_created + existing_updated + new_created + new_updated
-                                    sub_results[i] = {
-                                        "action": "multiple",
-                                        "created": existing_created + new_created,
-                                        "updated": existing_updated + new_updated,
-                                        "merged": 0,
-                                        "total_actions": total,
-                                    }
-                else:
-                    sub_results, sub_deleted, sub_llm_failed = await _process_memory_batch(
-                        pool=pool,
-                        memory_engine=memory_engine,
-                        llm_config=llm_config,
-                        bank_id=bank_id,
-                        memories=sub_batch,
-                        request_context=request_context,
-                        perf=batch_perf,
-                        config=config,
-                        txn=_batch_txn,
-                    )
 
-                all_deleted += sub_deleted
+                    all_deleted += sub_deleted
 
-                if sub_llm_failed and len(sub_batch) > 1:
-                    mid = len(sub_batch) // 2
+                    if sub_llm_failed and len(sub_batch) > 1:
+                        mid = len(sub_batch) // 2
+                        logger.warning(
+                            f"[CONSOLIDATION] bank={bank_id} LLM failed for sub-batch of {len(sub_batch)},"
+                            f" splitting into {mid}/{len(sub_batch) - mid}"
+                        )
+                        pending[0:0] = [sub_batch[:mid], sub_batch[mid:]]
+                    elif sub_llm_failed:
+                        failed_ids.append(sub_batch[0]["id"])
+                        all_results.append({"action": "failed"})
+                        logger.warning(
+                            f"[CONSOLIDATION] bank={bank_id} LLM failed for single memory"
+                            f" {sub_batch[0]['id']}, marking consolidation_failed_at"
+                        )
+                    else:
+                        succeeded_ids.extend(m["id"] for m in sub_batch)
+                        all_results.extend(sub_results)
+
+                # Mark through the store so the flag lands wherever the source facts live — tagged
+                # with this batch's txn, so the marks become visible together with the observations
+                # above. Then record the witness row and commit in this ONE short transaction (no LLM
+                # work inside it): its commit is the batch's fate, and `decide` publishes the group.
+                async with acquire_with_retry(pool) as conn:
+                    store = get_memories()
+                    now = datetime.now(timezone.utc)
+                    if succeeded_ids:
+                        await store.mark_consolidated(
+                            conn=conn,
+                            fq_table=fq_table,
+                            bank_id=bank_id,
+                            unit_ids=[str(mem_id) for mem_id in succeeded_ids],
+                            when=now,
+                            failed=False,
+                            txn=_batch_txn,
+                        )
+                    if failed_ids:
+                        await store.mark_consolidated(
+                            conn=conn,
+                            fq_table=fq_table,
+                            bank_id=bank_id,
+                            unit_ids=[str(mem_id) for mem_id in failed_ids],
+                            when=now,
+                            failed=True,
+                            txn=_batch_txn,
+                        )
+                    async with conn.transaction():
+                        await _txn_provider.write_txn_witness(_batch_txn, conn=conn, fq_table=fq_table)
+                        # Persist this batch's mental-model refresh tags atomically with the
+                        # witness, so they share the batch's fate: durable iff the batch is
+                        # (#3411). Only the succeeded source facts — the ones just marked
+                        # consolidated — contribute a tag.
+                        if operation_id and succeeded_ids:
+                            succeeded_set = {str(mem_id) for mem_id in succeeded_ids}
+                            batch_tags = sorted(
+                                {
+                                    t
+                                    for m in llm_batch_local
+                                    if str(m["id"]) in succeeded_set
+                                    for t in (m.get("tags") or [])
+                                }
+                            )
+                            if batch_tags:
+                                await _persist_pending_refresh_tags(conn, operation_id, batch_tags)
+            except BaseException:
+                # The witness row was never committed, so this batch's writes are invisible;
+                # discard the write-group rather than leaving it pending for the recovery
+                # sweep. This matters more now that a sibling group's failure cancels this
+                # task mid-batch instead of letting it run to completion. Kept OUTSIDE the
+                # decide(commit=True) below on purpose: once the witness has committed, the
+                # batch's fate is decided and an abort here would discard durable writes.
+                try:
+                    await _txn_provider.decide_txn(_batch_txn, commit=False)
+                except Exception:
                     logger.warning(
-                        f"[CONSOLIDATION] bank={bank_id} LLM failed for sub-batch of {len(sub_batch)},"
-                        f" splitting into {mid}/{len(sub_batch) - mid}"
+                        f"[CONSOLIDATION] bank={bank_id} failed to abort write-group for"
+                        f" llm_batch #{batch_num_local}; recovery sweep will resolve it",
+                        exc_info=True,
                     )
-                    pending[0:0] = [sub_batch[:mid], sub_batch[mid:]]
-                elif sub_llm_failed:
-                    failed_ids.append(sub_batch[0]["id"])
-                    all_results.append({"action": "failed"})
-                    logger.warning(
-                        f"[CONSOLIDATION] bank={bank_id} LLM failed for single memory"
-                        f" {sub_batch[0]['id']}, marking consolidation_failed_at"
-                    )
-                else:
-                    succeeded_ids.extend(m["id"] for m in sub_batch)
-                    all_results.extend(sub_results)
-
-            # Mark through the store so the flag lands wherever the source facts live — tagged
-            # with this batch's txn, so the marks become visible together with the observations
-            # above. Then record the witness row and commit in this ONE short transaction (no LLM
-            # work inside it): its commit is the batch's fate, and `decide` publishes the group.
-            async with acquire_with_retry(pool) as conn:
-                store = get_memories()
-                now = datetime.now(timezone.utc)
-                if succeeded_ids:
-                    await store.mark_consolidated(
-                        conn=conn,
-                        fq_table=fq_table,
-                        bank_id=bank_id,
-                        unit_ids=[str(mem_id) for mem_id in succeeded_ids],
-                        when=now,
-                        failed=False,
-                        txn=_batch_txn,
-                    )
-                if failed_ids:
-                    await store.mark_consolidated(
-                        conn=conn,
-                        fq_table=fq_table,
-                        bank_id=bank_id,
-                        unit_ids=[str(mem_id) for mem_id in failed_ids],
-                        when=now,
-                        failed=True,
-                        txn=_batch_txn,
-                    )
-                async with conn.transaction():
-                    await _txn_provider.write_txn_witness(_batch_txn, conn=conn, fq_table=fq_table)
+                raise
             # Postgres committed the witness: publish the batch's write-group. On a crash before
             # here the writes stay invisible and the recovery sweep resolves them (spec §5).
             await _txn_provider.decide_txn(_batch_txn, commit=True)
@@ -1561,7 +1696,7 @@ async def _run_consolidation_job(
                             await stack.enter_async_context(scope_locks[s])
                         return await _process_tag_group(group_batches)
 
-            group_results = await asyncio.gather(*(_run_group(g, s) for g, s in zip(numbered_groups, group_scopes)))
+            group_results = await _gather_or_cancel([_run_group(g, s) for g, s in zip(numbered_groups, group_scopes)])
             batch_results: list[_BatchDeltas] = [d for gd in group_results for d in gd]
             any_cancelled = any(d.cancelled for d in batch_results)
         else:
@@ -1598,6 +1733,19 @@ async def _run_consolidation_job(
     # execute_task's retry handler means the op is retried with backoff; on retry the
     # consolidator skips already-consolidated rows via the consolidated_at filter and
     # picks up the remainder. Issue #1842.
+    # The affected-tag union for the whole round-limited chain. Refresh fires once, when
+    # the backlog has fully drained (the final round), not once per round — a model's
+    # memories can straddle rounds, and gating on the final round alone (the prior
+    # behaviour) dropped every model consolidated earlier because the final round's tags
+    # no longer named them (#3411). The union is durable: each batch writes its tags into
+    # the op's ``task_payload`` inside the batch's own witness txn (crash-safe), and the
+    # re-queue threads the accumulated set forward to the next round. Prefer that durable
+    # value; fall back to the in-memory union when there is no backing op (a direct
+    # ``run_consolidation_job`` call, e.g. in tests).
+    all_refresh_tags = set(pending_refresh_tags or []) | consolidated_tags
+    if operation_id:
+        all_refresh_tags |= await _read_pending_refresh_tags(pool, operation_id)
+
     if hit_round_limit:
         remaining = total_count - stats["memories_processed"]
         logger.info(
@@ -1608,6 +1756,7 @@ async def _run_consolidation_job(
             bank_id=bank_id,
             request_context=request_context,
             observation_scopes=observation_scopes,
+            pending_refresh_tags=sorted(all_refresh_tags) or None,
         )
 
     # Build summary
@@ -1644,11 +1793,19 @@ async def _run_consolidation_job(
     if timing_parts:
         perf.log(f"[4] Timing breakdown: {', '.join(timing_parts)}")
 
-    # Trigger mental model refreshes only on the final round (when all memories are processed).
-    # If we hit the round limit and re-queued, skip MM refresh — the next round will handle it.
+    # Trigger mental-model refreshes once, when the chain has fully drained. On a
+    # round-limited round we skip and carry the affected tags forward (above); the
+    # final round flushes the accumulated union, so a model whose memories were
+    # consolidated in ANY round is refreshed exactly once — deduplicated, not dropped
+    # (#3411). Each model is still refreshed at most once per drain: a strict tagged
+    # model appears once in the trigger's candidate query regardless of how many rounds
+    # its tag spanned.
     if hit_round_limit:
         stats["mental_models_refreshed"] = 0
-        logger.info(f"[CONSOLIDATION] bank={bank_id} skipping mental model refresh (round limit hit, re-queued)")
+        logger.info(
+            f"[CONSOLIDATION] bank={bank_id} deferring mental model refresh to the final round "
+            f"(round limit hit; carrying {len(all_refresh_tags)} tags forward)"
+        )
     else:
         set_stage("consolidation.refreshing_mental_models")
         await memory_engine._write_operation_progress(
@@ -1662,7 +1819,7 @@ async def _run_consolidation_job(
             memory_engine=memory_engine,
             bank_id=bank_id,
             request_context=request_context,
-            consolidated_tags=list(consolidated_tags) if consolidated_tags else None,
+            consolidated_tags=sorted(all_refresh_tags) or None,
             perf=perf,
         )
         stats["mental_models_refreshed"] = mental_models_refreshed
@@ -1772,10 +1929,14 @@ async def _trigger_mental_model_refreshes(
     for row in rows:
         mental_model_id = row["id"]
         try:
+            # skip_if_in_flight: a consolidation chain fires this every round and
+            # overlapping consolidations can run on the same bank, so a model still
+            # pending/processing a refresh must not be enqueued a second time (#3411).
             await memory_engine.submit_async_refresh_mental_model(
                 bank_id=bank_id,
                 mental_model_id=mental_model_id,
                 request_context=request_context,
+                skip_if_in_flight=True,
             )
             refreshed_count += 1
             logger.info(
@@ -1820,8 +1981,6 @@ async def _process_memory_batch(
             consolidation where a single memory can contribute to observations
             scoped at different tag levels (e.g., user-level vs session-level).
     """
-    import asyncio
-
     # Map the source memories this batch consumes onto the consolidation trace.
     record_source_memory_ids([str(m["id"]) for m in memories])
 
@@ -1839,7 +1998,11 @@ async def _process_memory_batch(
         )
         for m in memories
     ]
-    per_fact_recalls = await asyncio.gather(*recall_tasks)
+    # A failed recall must fail the batch rather than degrade to "no related
+    # observations": proceeding with an empty candidate set would hide an
+    # existing twin from the LLM and turn an UPDATE into a duplicate CREATE.
+    # The batch's memories stay unconsolidated and are picked up on retry.
+    per_fact_recalls = await _gather_or_cancel(recall_tasks)
     if perf:
         perf.record_timing("recall", time.time() - t0)
 

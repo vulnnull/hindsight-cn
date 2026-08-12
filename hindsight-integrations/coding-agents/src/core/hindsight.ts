@@ -12,7 +12,8 @@ import {
   PAGE_TRIGGER,
   PAGES,
 } from "./missions";
-import { semverGte, sleep } from "./util";
+import { pool, semverGte, sleep } from "./util";
+import type { RetainStamp } from "./retain-stamp";
 
 /** One node of GET /knowledge-base/tree. Only the fields this client reads. */
 export interface KnowledgeNode {
@@ -29,6 +30,8 @@ export interface ClientOpts {
   apiToken?: string;
   bank: string;
   log?: (msg: string) => void;
+  /** Cap on concurrent retain-related requests (drain op polls, deepen pools). Default 10. */
+  maxParallelRetains?: number;
 }
 
 export interface RetainOpts {
@@ -47,6 +50,31 @@ export interface RetainOpts {
  *  could be applied twice without us ever knowing. Hence: no idempotency, no append. */
 export const MIN_IDEMPOTENT_RETAIN_VERSION = "0.8.6";
 
+/**
+ * Raised when the API rate-limits a request (HTTP 429), carrying how long it asked us to wait.
+ *
+ * A plain Error would be indistinguishable from a 500 or a network fault, and those want opposite
+ * treatment: a rate limit is a "not now, ask again" that the caller can honour, while a server
+ * error is not worth hammering. Callers that have somewhere safe to wait retry; the rest fail as
+ * before.
+ */
+export class RateLimitedError extends Error {
+  readonly code = "rate_limited";
+  constructor(readonly retryAfterMs: number) {
+    super(`rate limited; retry after ${Math.round(retryAfterMs / 1000)}s`);
+    this.name = "RateLimitedError";
+  }
+}
+
+/** Parse a `Retry-After` header (delta-seconds or HTTP-date) into ms; 0 when absent or unusable. */
+export function retryAfterMs(header: string | null | undefined): number {
+  if (!header) return 0;
+  const secs = Number(header.trim());
+  if (Number.isFinite(secs) && secs >= 0) return secs * 1000;
+  const at = Date.parse(header);
+  return Number.isNaN(at) ? 0 : Math.max(0, at - Date.now());
+}
+
 /** Raised when the target server predates the knowledge-pages API surface. */
 export class KnowledgePagesUnavailableError extends Error {
   readonly code = "knowledge_pages_unavailable";
@@ -57,6 +85,26 @@ export class KnowledgePagesUnavailableError extends Error {
 }
 
 const TERMINAL = new Set(["completed", "failed", "cancelled", "error"]);
+
+/** Default cap on concurrent retain-related requests; configurable via `maxParallelRetains`. */
+export const DEFAULT_MAX_PARALLEL_RETAINS = 10;
+
+/** How long drain() pauses between poll cycles when the API did not rate-limit (429). */
+const POLL_CYCLE_MS = 5000;
+
+/** Minimum backoff after a 429 that carried no (or a shorter) Retry-After. */
+const RETRY_AFTER_FLOOR_MS = 10 * 1000;
+
+/**
+ * Ceiling on a single backoff, however long `Retry-After` asks for.
+ *
+ * The header is a server's hint, not a budget we owe it: a large value (an incident, a
+ * misconfigured limiter, a proxy inventing one) would otherwise park a drain for as long as it
+ * says — up to the whole `maxMs`, with the background seed frozen behind it. Capping keeps the
+ * signal without handing over the schedule; if the limit still applies, the next poll simply gets
+ * another 429 and backs off again.
+ */
+const RETRY_AFTER_CEILING_MS = 60 * 1000;
 
 /** Bank-level missions the template seeds once and then leaves alone (#2492). */
 const MISSION_FIELDS = ["reflect_mission", "retain_mission", "observations_mission"] as const;
@@ -71,12 +119,14 @@ export class HindsightClient {
   /** Tri-state capability probe: unknown until the first append-mode retain, then cached. */
   private idempotentRetain: boolean | undefined;
   private readonly log: (msg: string) => void;
+  readonly maxParallelRetains: number;
 
   constructor(o: ClientOpts) {
     this.apiUrl = o.apiUrl.replace(/\/$/, "");
     this.apiToken = o.apiToken;
     this.bank = o.bank;
     this.log = o.log ?? (() => {});
+    this.maxParallelRetains = o.maxParallelRetains || DEFAULT_MAX_PARALLEL_RETAINS;
   }
 
   private headers(): Record<string, string> {
@@ -104,6 +154,8 @@ export class HindsightClient {
       body: body ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(15_000),
     });
+    if (r.status === 429 && !tolerate.includes(429))
+      throw new RateLimitedError(retryAfterMs(r.headers.get("retry-after")));
     if (!r.ok && r.status !== 404 && !tolerate.includes(r.status))
       throw new Error(`${method} ${url} -> ${r.status} ${await r.text()}`);
     return r;
@@ -260,7 +312,14 @@ export class HindsightClient {
     }
   }
 
-  /** Poll each enqueued operation by id until terminal. LIST only shows active ops, so per-id GET is reliable. */
+  /**
+   * Poll each enqueued operation by id until terminal. LIST only shows active ops, so per-id GET is reliable.
+   *
+   * Concurrency is capped at `maxParallelRetains` (the API rate-limits bursts, not single
+   * requests — a 200 to a lone GET with 429s under `Promise.all` over every pending op). A 429
+   * leaves the op pending and backs the next cycle off by its `Retry-After` (10s floor) instead
+   * of hammering the next cycle 5s later.
+   */
   async drain(ids: string[], label: string, maxMs = 60 * 60 * 1000): Promise<void> {
     if (!ids.length) return;
     this.log(`[wait] draining ${ids.length} ${label} operations …`);
@@ -268,24 +327,32 @@ export class HindsightClient {
     const pending = new Set(ids);
     let failed = 0;
     while (pending.size && Date.now() - start < maxMs) {
-      await Promise.all(
-        [...pending].map(async (id) => {
-          try {
-            const r = await fetch(this.bankUrl(`/operations/${id}`), { headers: this.headers() });
-            if (!r.ok) return;
-            const st = (((await r.json()) as { status?: string }).status || "").toLowerCase();
-            if (TERMINAL.has(st)) {
-              pending.delete(id);
-              if (st !== "completed") failed++;
-            }
-          } catch {
-            /* transient — retry next cycle */
+      // Cycle backoff: default 5s; any 429 in the cycle raises it to the longest Retry-After seen
+      // (floor 10s) so a rate-limited API gets room to recover before the next poll round.
+      let backoffMs = POLL_CYCLE_MS;
+      await pool([...pending], this.maxParallelRetains, async (id) => {
+        try {
+          const r = await fetch(this.bankUrl(`/operations/${id}`), { headers: this.headers() });
+          if (r.status === 429) {
+            backoffMs = Math.min(
+              RETRY_AFTER_CEILING_MS,
+              Math.max(backoffMs, RETRY_AFTER_FLOOR_MS, retryAfterMs(r.headers.get("retry-after")))
+            );
+            return; // op stays pending — retried after the backoff
           }
-        })
-      );
+          if (!r.ok) return;
+          const st = (((await r.json()) as { status?: string }).status || "").toLowerCase();
+          if (TERMINAL.has(st)) {
+            pending.delete(id);
+            if (st !== "completed") failed++;
+          }
+        } catch {
+          /* transient — retry next cycle */
+        }
+      });
       if (pending.size) {
         this.log(`  … ${pending.size}/${ids.length} ${label} ops pending`);
-        await sleep(5000);
+        await sleep(backoffMs);
       }
     }
     this.log(
@@ -492,6 +559,7 @@ export class HindsightClient {
     title: string;
     summary: string;
     relatesToPageId?: string;
+    stamp?: RetainStamp;
   }): Promise<{ page_id: string }> {
     // `/knowledge-base/pages` mints its OWN page id (kp-…); we can't set it. So for a new initiative
     // we create the page first and adopt the server-assigned id — that id is what the return value
@@ -522,13 +590,20 @@ export class HindsightClient {
     const content = `${verb}: ${args.title}. ${args.summary}`;
     // Unique marker document id (NOT pageId) so repeated captures accrue instead of replacing.
     const markerId = `initiative-marker-${this.slugify(args.title)}-${Date.now()}`;
-    await this.retain(
-      content,
-      "initiative marker",
-      markerId,
-      ["knowledge:feature-work", `relatedPageId:${pageId}`],
-      "document"
-    );
+    const tags = [
+      ...new Set([
+        ...(args.stamp?.tags ?? []),
+        "knowledge:feature-work",
+        `relatedPageId:${pageId}`,
+      ]),
+    ];
+    if (Object.keys(args.stamp?.metadata ?? {}).length) {
+      await this.retain(content, "initiative marker", markerId, tags, "document", {
+        metadata: args.stamp?.metadata,
+      });
+    } else {
+      await this.retain(content, "initiative marker", markerId, tags, "document");
+    }
     return { page_id: pageId };
   }
 

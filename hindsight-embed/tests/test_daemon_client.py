@@ -517,3 +517,147 @@ class TestDaemonLogRotation:
         assert _parse_non_negative_int("10MB", 42, "LIMIT") == 42
         assert _parse_non_negative_int("-1", 42, "LIMIT") == 42
         assert "Invalid LIMIT" in caplog.text
+
+
+class TestStop:
+    """Tests for DaemonEmbedManager.stop() - regression coverage for #3169.
+
+    Every decision in stop() is based on port occupancy. The /health probe
+    reports responsiveness, not identity or liveness, so a busy daemon fails
+    it; using it as the already-stopped guard or as the success condition is
+    what made `daemon stop` report success without sending any signal.
+    """
+
+    def _paths(self, tmp_path, port=9700):
+        from hindsight_embed.profile_manager import ProfilePaths
+
+        return ProfilePaths(
+            config=tmp_path / "embed",
+            lock=tmp_path / "daemon.lock",
+            log=tmp_path / "daemon.log",
+            port=port,
+        )
+
+    def test_busy_daemon_is_terminated(self, tmp_path):
+        """A daemon that holds the port but fails /health is still stopped.
+
+        This is the #3169 scenario. Both health probes are patched to raise so
+        the test fails if any path in stop() consults responsiveness.
+        """
+        manager = DaemonEmbedManager()
+        with (
+            patch.object(
+                manager._profile_manager,
+                "resolve_profile_paths",
+                return_value=self._paths(tmp_path),
+            ),
+            patch.object(DaemonEmbedManager, "_is_port_in_use", side_effect=[True, False]),
+            patch.object(
+                DaemonEmbedManager,
+                "is_running",
+                side_effect=AssertionError("stop() must not consult /health"),
+            ),
+            patch.object(
+                DaemonEmbedManager,
+                "_port_health_ok",
+                side_effect=AssertionError("stop() must not consult /health"),
+            ),
+            patch.object(DaemonEmbedManager, "_find_pid_on_port", return_value=4242),
+            patch.object(DaemonEmbedManager, "_kill_process", return_value=True) as mock_kill,
+        ):
+            assert manager.stop("default") is True
+            mock_kill.assert_called_once_with(4242)
+
+    def test_unresponsive_listener_is_reclaimed_like_clear_port(self, tmp_path):
+        """stop() reclaims an occupied, unhealthy port the way _clear_port() does.
+
+        Without an ownership receipt "busy" and "foreign" are the same
+        observable state, so the start path already kills the listener holding
+        the profile's port. Refusing here instead would leave a wedged daemon
+        unstoppable, which is the #3169 symptom.
+        """
+        manager = DaemonEmbedManager()
+        with (
+            patch.object(
+                manager._profile_manager,
+                "resolve_profile_paths",
+                return_value=self._paths(tmp_path),
+            ),
+            patch.object(DaemonEmbedManager, "_is_port_in_use", side_effect=[True, False]),
+            patch.object(DaemonEmbedManager, "_port_health_ok", return_value=False),
+            patch.object(DaemonEmbedManager, "_find_pid_on_port", return_value=9999),
+            patch.object(DaemonEmbedManager, "_kill_process", return_value=True) as mock_kill,
+        ):
+            assert manager.stop("default") is True
+            mock_kill.assert_called_once_with(9999)
+
+        with (
+            patch.object(DaemonEmbedManager, "_is_port_in_use", return_value=True),
+            patch.object(DaemonEmbedManager, "_wait_for_port_health", return_value=False),
+            patch.object(DaemonEmbedManager, "_find_pid_on_port", return_value=9999),
+            patch.object(DaemonEmbedManager, "_kill_process", return_value=True) as mock_kill,
+        ):
+            assert manager._clear_port(9700) is True
+            mock_kill.assert_called_once_with(9999)
+
+    def test_failed_termination_returns_false(self, tmp_path):
+        """_kill_process() returning False must not be converted into success."""
+        manager = DaemonEmbedManager()
+        with (
+            patch.object(
+                manager._profile_manager,
+                "resolve_profile_paths",
+                return_value=self._paths(tmp_path),
+            ),
+            patch.object(DaemonEmbedManager, "_is_port_in_use", return_value=True),
+            patch.object(DaemonEmbedManager, "_find_pid_on_port", return_value=4242),
+            patch.object(DaemonEmbedManager, "_kill_process", return_value=False),
+        ):
+            assert manager.stop("default") is False
+
+    def test_bound_port_without_pid_returns_false(self, tmp_path):
+        """A bound port whose PID can't be found is a failure, not a success."""
+        manager = DaemonEmbedManager()
+        with (
+            patch.object(
+                manager._profile_manager,
+                "resolve_profile_paths",
+                return_value=self._paths(tmp_path),
+            ),
+            patch.object(DaemonEmbedManager, "_is_port_in_use", return_value=True),
+            patch.object(DaemonEmbedManager, "_find_pid_on_port", return_value=None),
+            patch.object(DaemonEmbedManager, "_kill_process") as mock_kill,
+        ):
+            assert manager.stop("default") is False
+            mock_kill.assert_not_called()
+
+    def test_unbound_port_reports_already_stopped(self, tmp_path):
+        """Nothing bound to the port means there is nothing to stop."""
+        manager = DaemonEmbedManager()
+        with (
+            patch.object(
+                manager._profile_manager,
+                "resolve_profile_paths",
+                return_value=self._paths(tmp_path),
+            ),
+            patch.object(DaemonEmbedManager, "_is_port_in_use", return_value=False),
+            patch.object(DaemonEmbedManager, "_find_pid_on_port") as mock_find,
+        ):
+            assert manager.stop("default") is True
+            mock_find.assert_not_called()
+
+    def test_lingering_listener_after_kill_returns_false(self, tmp_path):
+        """If the listener never disappears after the kill, stop() must not claim success."""
+        manager = DaemonEmbedManager()
+        with (
+            patch.object(
+                manager._profile_manager,
+                "resolve_profile_paths",
+                return_value=self._paths(tmp_path),
+            ),
+            patch.object(DaemonEmbedManager, "_is_port_in_use", return_value=True),
+            patch.object(DaemonEmbedManager, "_find_pid_on_port", return_value=4242),
+            patch.object(DaemonEmbedManager, "_kill_process", return_value=True),
+            patch("hindsight_embed.daemon_embed_manager.time.sleep"),
+        ):
+            assert manager.stop("default") is False

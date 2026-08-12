@@ -1252,7 +1252,7 @@ export type CreateDirectiveRequest = {
   /**
    * Tags
    *
-   * Tags for filtering
+   * Directive execution scope. Empty means global; non-empty requires a matching reflect scope.
    */
   tags?: Array<string>;
 };
@@ -4089,6 +4089,12 @@ export type RecallResponse = {
   source_facts?: {
     [key: string]: RecallResult;
   } | null;
+  /**
+   * Source Facts Truncated
+   *
+   * Whether the source_facts map was cut short by the token budget. When true, some IDs in results[].source_fact_ids have no entry in source_facts — the budget ran out, the references are not dangling. Only set when source facts were requested.
+   */
+  source_facts_truncated?: boolean | null;
 };
 
 /**
@@ -4392,19 +4398,19 @@ export type ReflectRequest = {
   /**
    * Tags
    *
-   * Filter memories by tags during reflection. If not specified, all memories are considered.
+   * Scope raw facts, observations, mental models, and tagged directives during reflection. With no tags, memory retrieval is unfiltered while only untagged/global directives are loaded. Use tags=[] with tags_match='exact' to select the untagged/global scope.
    */
   tags?: Array<string> | null;
   /**
    * Tags Match
    *
-   * How to match tags: 'any' (OR, includes untagged), 'all' (AND, includes untagged), 'any_strict' (OR, excludes untagged), 'all_strict' (AND, excludes untagged).
+   * How to match tags: 'any' (OR, includes untagged), 'all' (AND, includes untagged), 'any_strict' (OR, excludes untagged), 'all_strict' (AND, excludes untagged), or 'exact' (set equality). Untagged directives remain global in every mode.
    */
   tags_match?: "any" | "all" | "any_strict" | "all_strict" | "exact";
   /**
    * Tag Groups
    *
-   * Compound tag filter using boolean groups. Groups in the list are AND-ed. Each group is a leaf {tags, match} or compound {and: [...]}, {or: [...]}, {not: ...}.
+   * Compound tag filter using boolean groups. Groups in the list are AND-ed. Each group is a leaf {tags, match} or compound {and: [...]}, {or: [...]}, {not: ...}. Mutually exclusive with tags.
    */
   tag_groups?: Array<TagGroupLeaf | TagGroupAndInput | TagGroupOrInput | TagGroupNotInput> | null;
   /**
@@ -6779,13 +6785,13 @@ export type ListDirectivesData = {
     /**
      * Tags
      *
-     * Filter by tags
+     * Filter directives by execution scope. Omit or pass [] to list all directives.
      */
     tags?: Array<string> | null;
     /**
      * Tags Match
      *
-     * How to match tags
+     * How tagged directives match the requested scope. Untagged/global directives are included.
      */
     tags_match?: "any" | "all" | "exact";
     /**

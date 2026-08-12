@@ -112,7 +112,10 @@ export async function buildHookOutput(args: {
     const t0 = Date.now();
     try {
       reflectAnswer = await client.reflect(buildReflectQuery(prompt), {
-        budget: "high",
+        // Automatic reflection runs inside a hard 25s hook window. Hindsight's low budget is the
+        // supported default for bounded reflect calls; callers that explicitly invoke the MCP
+        // tool still get the deeper high-budget path.
+        budget: "low",
         timeoutMs: Math.min(cfg.reflectTimeoutMs, HOOK_REFLECT_CAP_MS),
       });
       diag(harness, reflectAnswer ? "reflect_ok" : "reflect_empty", {
@@ -232,7 +235,12 @@ export async function runHook(
     log.debug(spec.harness, "hook skipped: bank disabled via banks override", { bank: bankId });
     return;
   }
-  const client = makeClient({ apiUrl: cfg.apiUrl, apiToken: cfg.apiToken, bank: bankId });
+  const client = makeClient({
+    apiUrl: cfg.apiUrl,
+    apiToken: cfg.apiToken,
+    bank: bankId,
+    maxParallelRetains: cfg.maxParallelRetains,
+  });
   const cacheFile = sessionCacheFile(spec.harness, sessionId || "no-session");
 
   // Safety net on EVERY harness: on the session's FIRST prompt (no cache file yet), fire the

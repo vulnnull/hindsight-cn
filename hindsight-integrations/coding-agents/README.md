@@ -2,7 +2,7 @@
 
 Long-term project memory for **coding agents**, backed by [Hindsight](https://vectorize.io/hindsight).
 One package, several agents: a shared reflect-and-inject core with a thin entry point per agent
-(**opencode**, **Kilo CLI**, **Cline CLI**, **Claude Code**, **Codex CLI**, **Antigravity CLI**, **Cursor CLI**, **GitHub Copilot CLI**, **Grok Build**). Ingestion is fully
+(**opencode**, **Kilo CLI**, **Cline CLI**, **Prime Agent**, **Claude Code**, **Codex CLI**, **Antigravity CLI**, **Cursor CLI**, **GitHub Copilot CLI**, **Grok Build**). Ingestion is fully
 automatic — there is no setup command: a repo's git history and conversations flow into its memory
 bank in the background as you work.
 
@@ -111,6 +111,14 @@ npx @vectorize-io/hindsight-coding-agents install cline-cli
 ```
 
 A native plugin via `cline plugin install`, plus MCP and the companion skill.
+
+#### <img src="https://hindsight.vectorize.io/img/harness/prime-agent.svg" alt="" width="20" height="20" /> Prime Agent
+
+```bash
+npx @vectorize-io/hindsight-coding-agents install prime-agent
+```
+
+An extension entry in `~/.prime/agent/settings.json` — native tools, no MCP needed.
 
 Uninstall the same way: `npx @vectorize-io/hindsight-coding-agents uninstall claude-code` (or `uninstall all`).
 
@@ -266,7 +274,8 @@ Environment variables are a **fallback**: the file wins wherever it sets a value
 an existing setup changes nothing. `retainTags` takes a comma-separated list
 (`HINDSIGHT_RETAIN_TAGS="project:{gitProject},env:work"`); entries are trimmed and blanks dropped.
 The map-valued settings (`mapPathToBank`, `harnesses`, `banks`, `retainMetadata`) are file-only —
-per-key branching doesn't survive flattening into one variable.
+per-key branching doesn't survive flattening into one variable. `maxParallelRetains` is available
+as `HINDSIGHT_MAX_PARALLEL_RETAINS` for containers and CI.
 
 There is deliberately no repo-carried config file — per-repo bank routing is `mapPathToBank`,
 per-agent differences are `harnesses.<name>`.
@@ -295,8 +304,8 @@ hook by Codex...), so one shared config serves several agents side by side:
 | `bankIdTemplate`        | `"coding-agent::{gitProject}"`       | dynamic bank id format; the default makes every agent share one bank per repo                                                                                                                                                       |
 | `mapPathToBank`         | —                                    | absolute path → bank; **longest prefix wins**; overrides everything                                                                                                                                                                 |
 | `resolveWorktrees`      | `true`                               | `{gitProject}`: linked worktrees share the main repo's bank                                                                                                                                                                         |
-| `retainTags`            | —                                    | extra tags on every session write-back, e.g. `["project:{gitProject}"]` — see **Recording where a memory came from** below                                                                                                          |
-| `retainMetadata`        | —                                    | extra metadata on every session write-back, e.g. `{"repo": "{gitProject}"}`                                                                                                                                                         |
+| `retainTags`            | —                                    | extra tags on every document written by the integration, e.g. `["project:{gitProject}"]` — see **Recording where a memory came from** below                                                                                         |
+| `retainMetadata`        | —                                    | extra metadata on every document written by the integration, e.g. `{"repo": "{gitProject}"}`                                                                                                                                        |
 | `disabled`              | `false`                              | hard off-switch (inert plugin/hook — a no-memory baseline)                                                                                                                                                                          |
 | `reflectTimeoutMs`      | `120000`                             | session-reflect timeout (hook harnesses additionally cap it at 25s to fit the host's hook window); on timeout the session runs without reflect (recorded)                                                                           |
 | `pageRefreshEveryTurns` | `10`                                 | refetch the knowledge pages and re-inject the page roster + tool guide every N user turns                                                                                                                                           |
@@ -306,7 +315,7 @@ hook by Codex...), so one shared config serves several agents side by side:
 | `surveyModel`           | `haiku`                              | model for the survey — Claude recipe only (`claude -p --model`); other agents use their configured default                                                                                                                          |
 | `surveyBudgetUsd`       | `2`                                  | survey spend cap — Claude recipe only (`claude -p --max-budget-usd`); other agents rely on their read-only sandbox                                                                                                                  |
 | `retainSessions`        | `true`                               | plugin-harness write-back (opencode, Kilo): async upsert of the session transcript every turn, plus an idle flush that captures the reply the per-turn pass can't see (set `false` to opt out; hook harnesses always write on Stop) |
-| `retainEveryTurns`      | `1`                                  | write-back cadence in user turns, for the plugin harnesses (opencode, Kilo, Cline CLI) — hook harnesses write on every Stop and ignore it                                                                                           |
+| `maxParallelRetains`    | `10`                                 | cap on concurrent retain-related requests: drain()'s per-op polls plus deepen's chat/git retain pools. The API rate-limits bursts, not single requests — if you see 429s, lower this rather than raising it                         |
 | `logLevel`              | `"info"`                             | plugin-log verbosity (`"debug"` \| `"info"` \| `"warn"` \| `"error"`); `HINDSIGHT_LOG_LEVEL` env overrides                                                                                                                          |
 | `gitIngest`             | `"message"`                          | git depth for seeding AND staying current (same engine): `"message"` = commit messages only (one doc, re-upserted when HEAD moves); `"full"` = messages + per-commit full diffs (progressive, newest first); `"none"` = git off     |
 | `harnesses.<name>`      | —                                    | per-harness override of any field above                                                                                                                                                                                             |
@@ -383,8 +392,9 @@ all share one memory per repo — use `"{harness}-{gitProject}"` to split per ag
 
 With a bank per repo, the bank _is_ the answer to "where did this come from". On a deliberately
 **shared** bank — one bank holding cross-project knowledge so facts recall everywhere — it isn't:
-every memory looks alike. `retainTags` and `retainMetadata` stamp that provenance onto each session
-write-back:
+every memory looks alike. `retainTags` and `retainMetadata` stamp that provenance onto conversations,
+git history and diffs, survey lifecycle documents, initiative markers, and documents saved through
+`hindsight_ingest_document`:
 
 ```jsonc
 {
@@ -398,6 +408,7 @@ Recalls can then filter by `project:<repo>`, and every document shows which repo
 of. Both accept the same placeholders as `bankIdTemplate` — `{gitProject}`, `{project}`,
 `{harness}`, `{channel}`, `{user}` — plus `{bankId}`, `{sessionId}` and `{timestamp}`.
 `{gitProject}` is worktree-aware here too, so every linked worktree of a repo stamps one name.
+`{sessionId}` resolves to `unknown` for documents that do not originate from an agent session.
 
 The plugin's own `source:` and `harness:` tags are reserved: entries in those namespaces are ignored
 with a warning, so a document's agent attribution always reflects the agent that actually wrote it.

@@ -456,6 +456,7 @@ from .retain.types import RetainContentDict
 from .search.reranking import CrossEncoderReranker, apply_combined_scoring
 from .search.tags import TagGroup, TagsMatch, build_tag_groups_where_clause, build_tags_where_clause
 from .search.types import ScoredResult
+from .source_facts import select_source_facts_within_budget
 from .task_backend import TaskBackend
 
 # Recall ranking strategy: how the per-arm (semantic/bm25/graph/temporal) results are
@@ -2447,6 +2448,7 @@ class MemoryEngine(MemoryEngineInterface):
             request_context=internal_context,
             operation_id=task_dict.get("operation_id"),
             observation_scopes=task_dict.get("observation_scopes"),
+            pending_refresh_tags=task_dict.get("pending_refresh_tags"),
         )
 
         logger.info(f"[CONSOLIDATION] bank={bank_id} completed: {result.get('memories_processed', 0)} processed")
@@ -6569,6 +6571,7 @@ class MemoryEngine(MemoryEngineInterface):
             source_fact_start = time.time()
             source_fact_ids_by_obs: dict[str, list[str]] = {}  # obs_id -> [source_id, ...]
             source_facts_dict: dict[str, MemoryFact] | None = None
+            source_facts_truncated = False
             if include_source_facts:
                 observation_ids = [uuid.UUID(sr.id) for sr in top_scored if sr.retrieval.fact_type == "observation"]
                 if observation_ids:
@@ -6610,18 +6613,23 @@ class MemoryEngine(MemoryEngineInterface):
                         # Resolve each observation's sources. This is a recall hot path, so the SQL
                         # store reads only the two columns it needs rather than a full memory row; a
                         # store that owns its rows answers from its own objects via one addressed read.
+                        #
+                        # Both branches keep observation-rank order: the token budget below is filled
+                        # in this order, so an unordered read would let a low-ranked observation
+                        # spend the budget the top-ranked one needs (issue #3221).
                         if store.writes_memory_rows_in_sql_for(bank_id):
                             obs_rows = [
                                 {"id": str(r["id"]), "source_memory_ids": r["source_memory_ids"]}
                                 for r in await sf_conn.fetch(
                                     f"SELECT id, source_memory_ids FROM {fq_table('memory_units')} "
-                                    f"WHERE id = ANY($1::uuid[]) AND fact_type = 'observation'",
+                                    f"WHERE id = ANY($1::uuid[]) AND fact_type = 'observation' "
+                                    f"ORDER BY array_position($1::uuid[], id)",
                                     observation_ids,
                                 )
                             ]
                         else:
-                            obs_rows = [
-                                {"id": m.unit_id, "source_memory_ids": m.source_memory_ids}
+                            obs_by_id = {
+                                m.unit_id: m
                                 for m in await store.get_memories(
                                     conn=sf_conn,
                                     fq_table=fq_table,
@@ -6629,6 +6637,11 @@ class MemoryEngine(MemoryEngineInterface):
                                     unit_ids=[str(o) for o in observation_ids],
                                 )
                                 if m.fact_type == "observation"
+                            }
+                            obs_rows = [
+                                {"id": m.unit_id, "source_memory_ids": m.source_memory_ids}
+                                for m in (obs_by_id.get(str(o)) for o in observation_ids)
+                                if m is not None
                             ]
 
                         # Collect unique source IDs in order of first appearance
@@ -6691,7 +6704,6 @@ class MemoryEngine(MemoryEngineInterface):
                                 }
 
                             encoding = _get_tiktoken_encoding()
-                            source_facts_dict = {}
 
                             def _make_source_fact(sid: str, r: Any) -> MemoryFact:
                                 return MemoryFact(
@@ -6708,36 +6720,18 @@ class MemoryEngine(MemoryEngineInterface):
                                     tags=r["tags"] or None,
                                 )
 
-                            if max_source_facts_tokens_per_observation >= 0:
-                                # Per-observation capping: each observation independently selects
-                                # source facts up to its token budget.
-                                for obs_id, sids in source_fact_ids_by_obs.items():
-                                    obs_tokens = 0
-                                    for sid in sids:
-                                        if sid not in source_row_by_id:
-                                            continue
-                                        r = source_row_by_id[sid]
-                                        fact_tokens = len(encoding.encode(r["text"]))
-                                        if obs_tokens + fact_tokens > max_source_facts_tokens_per_observation:
-                                            break
-                                        obs_tokens += fact_tokens
-                                        if sid not in source_facts_dict:
-                                            source_facts_dict[sid] = _make_source_fact(sid, r)
-                            else:
-                                # Global budget: fill in order of first appearance until exhausted.
-                                total_source_tokens = 0
-                                for sid in source_ids_ordered:
-                                    if sid not in source_row_by_id:
-                                        continue
-                                    r = source_row_by_id[sid]
-                                    fact_tokens = len(encoding.encode(r["text"]))
-                                    if (
-                                        max_source_facts_tokens >= 0
-                                        and total_source_tokens + fact_tokens > max_source_facts_tokens
-                                    ):
-                                        break
-                                    source_facts_dict[sid] = _make_source_fact(sid, r)
-                                    total_source_tokens += fact_tokens
+                            selection = select_source_facts_within_budget(
+                                source_ids_ordered=source_ids_ordered,
+                                source_fact_ids_by_obs=source_fact_ids_by_obs,
+                                text_by_id={sid: r["text"] for sid, r in source_row_by_id.items()},
+                                max_total_tokens=max_source_facts_tokens,
+                                max_tokens_per_observation=max_source_facts_tokens_per_observation,
+                                count_tokens=lambda text: len(encoding.encode(text)),
+                            )
+                            source_facts_truncated = selection.truncated
+                            source_facts_dict = {
+                                sid: _make_source_fact(sid, source_row_by_id[sid]) for sid in selection.ids
+                            }
 
             # Source-fact enrichment is two SQL passes + tiktoken encoding; record it
             # only when requested (issue #2361).
@@ -6901,6 +6895,7 @@ class MemoryEngine(MemoryEngineInterface):
                 entities=entities_dict,
                 chunks=chunks_dict,
                 source_facts=source_facts_dict,
+                source_facts_truncated=source_facts_truncated if include_source_facts else None,
             )
 
         except OperationCancelledError:
@@ -14238,18 +14233,41 @@ class MemoryEngine(MemoryEngineInterface):
             )
             await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         backend = await self._get_backend()
+        # A page's searchable document is its backing mental model's name + content,
+        # so the rename must also update mental_models.name — and re-tokenize its
+        # search_vector for vchord (native is a generated column, the other backends
+        # index base columns; same helper as create/update/clear_mental_model). Both
+        # writes share one transaction, so a knowledge_pages name-uniqueness
+        # violation rolls the mental-model name back with it. Folders carry no
+        # backing model (mental_model_id is NULL), so only the node row is touched.
+        sv_expr = pg_search_vector_expr(
+            get_config(), text_col="$3", context_col="content", signals_col=None, native_inline=False
+        )
+        sv_clause = f", search_vector = {sv_expr}" if sv_expr else ""
         async with acquire_with_retry(backend) as conn:
-            row = await conn.fetchrow(
-                f"""
-                UPDATE {fq_table("knowledge_pages")}
-                SET name = $3, updated_at = now()
-                WHERE bank_id = $1 AND id = $2
-                RETURNING {self._KP_COLUMNS}
-                """,
-                bank_id,
-                node_id,
-                name,
-            )
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    f"""
+                    UPDATE {fq_table("knowledge_pages")}
+                    SET name = $3, updated_at = now()
+                    WHERE bank_id = $1 AND id = $2
+                    RETURNING {self._KP_COLUMNS}
+                    """,
+                    bank_id,
+                    node_id,
+                    name,
+                )
+                if row is not None and row["mental_model_id"] is not None:
+                    await conn.execute(
+                        f"""
+                        UPDATE {fq_table("mental_models")}
+                        SET name = $3{sv_clause}
+                        WHERE bank_id = $1 AND id = $2
+                        """,
+                        bank_id,
+                        row["mental_model_id"],
+                        name,
+                    )
         return self._row_to_knowledge_node(row) if row else None
 
     async def update_knowledge_page(
@@ -15903,6 +15921,30 @@ class MemoryEngine(MemoryEngineInterface):
                         row_payload = row["task_payload"]
                         row_dict = json.loads(row_payload) if isinstance(row_payload, str) else (row_payload or {})
                         if row_dict.get("observation_scopes") is None:
+                            # A round-limit consolidation chain carries its accumulated
+                            # mental-model refresh tags in ``pending_refresh_tags`` (#3411).
+                            # If its re-queue is deduped into an unrelated pending
+                            # consolidation (e.g. one a retain enqueued mid-drain), fold
+                            # those tags into the surviving op so its final round still
+                            # refreshes every affected model — otherwise the accumulated
+                            # set is silently lost and the models stay stale. Safe to
+                            # UPDATE here: dedupe_by_bank holds FOR NO KEY UPDATE on the
+                            # bank row, serialising concurrent submits for this bank.
+                            incoming_tags = full_payload.get("pending_refresh_tags")
+                            if incoming_tags:
+                                existing_tags = row_dict.get("pending_refresh_tags") or []
+                                merged_tags = sorted(set(existing_tags) | set(incoming_tags))
+                                if merged_tags != existing_tags:
+                                    row_dict["pending_refresh_tags"] = merged_tags
+                                    await conn.execute(
+                                        f"""
+                                        UPDATE {fq_table("async_operations")}
+                                        SET task_payload = $1::jsonb, updated_at = now()
+                                        WHERE operation_id = $2
+                                        """,
+                                        json.dumps(row_dict, default=_json_default),
+                                        row["operation_id"],
+                                    )
                             logger.debug(
                                 f"{operation_type} task already pending for bank_id={bank_id}, "
                                 f"skipping duplicate (existing operation_id={row['operation_id']})"
@@ -16401,6 +16443,7 @@ class MemoryEngine(MemoryEngineInterface):
         *,
         request_context: "RequestContext",
         observation_scopes: list[list[str]] | None = None,
+        pending_refresh_tags: list[str] | None = None,
     ) -> dict[str, Any]:
         """Submit a consolidation operation to run asynchronously.
 
@@ -16412,6 +16455,9 @@ class MemoryEngine(MemoryEngineInterface):
             request_context: Request context for authentication
             observation_scopes: Optional list of tag scopes to consolidate. When provided,
                 only unconsolidated memories matching at least one scope are processed.
+            pending_refresh_tags: Set by the round-limit re-queue only — the union of tags
+                consolidated by earlier rounds of this chain, so the final round refreshes
+                every affected mental model exactly once (#3411). Not a caller-facing knob.
 
         Returns:
             Dict with operation_id
@@ -16437,6 +16483,8 @@ class MemoryEngine(MemoryEngineInterface):
             task_payload["_api_key_id"] = request_context.api_key_id
         if observation_scopes is not None:
             task_payload["observation_scopes"] = observation_scopes
+        if pending_refresh_tags is not None:
+            task_payload["pending_refresh_tags"] = pending_refresh_tags
 
         # Skip bank-level deduplication when scoped — the caller wants a
         # targeted run that should not be merged into a pending full-bank sweep.

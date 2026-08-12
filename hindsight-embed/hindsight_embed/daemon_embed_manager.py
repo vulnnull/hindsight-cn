@@ -1006,25 +1006,34 @@ class DaemonEmbedManager(EmbedManager):
         Returns:
             True if stopped successfully, False otherwise
         """
-        if not self.is_running(profile):
-            logger.debug(f"Daemon not running for profile '{profile}'")
-            return True
-
-        # Get port
         paths = self._profile_manager.resolve_profile_paths(profile)
         port = paths.port
 
-        pid = self._find_pid_on_port(port)
-        if pid is not None:
-            logger.debug(f"Found daemon PID {pid} on port {port}")
-            self._kill_process(pid)
-        else:
-            logger.warning(f"Could not find PID for port {port}")
+        # Every decision here is based on port occupancy, never on /health.
+        # A daemon that is alive but busy fails the responsiveness probe
+        # (issue #3169), so using it as the already-stopped guard made stop()
+        # report success without sending any signal. Reclaiming the profile's
+        # port from an unresponsive listener is the same policy _clear_port()
+        # applies on the start path.
+        if not self._is_port_in_use(port):
+            logger.debug(f"Daemon not running for profile '{profile}'")
+            return True
 
-        # Wait for health check to fail
+        pid = self._find_pid_on_port(port)
+        if pid is None:
+            logger.warning(f"Port {port} is bound but no PID could be found")
+            return False
+
+        logger.debug(f"Found daemon PID {pid} on port {port}")
+        if not self._kill_process(pid):
+            logger.warning(f"Daemon process (PID {pid}) did not stop in time")
+            return False
+
+        # The process is gone; wait for the listener to disappear so a
+        # follow-up start doesn't race the closing socket.
         for _ in range(30):
-            if not self.is_running(profile):
+            if not self._is_port_in_use(port):
                 return True
             time.sleep(0.1)
 
-        return not self.is_running(profile)
+        return not self._is_port_in_use(port)
