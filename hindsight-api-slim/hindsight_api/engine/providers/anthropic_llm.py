@@ -88,7 +88,7 @@ class AnthropicLLM(LLMInterface):
         api_key: str,
         base_url: str,
         model: str,
-        reasoning_effort: str = "low",
+        reasoning_effort: str | None = None,
         timeout: float = 300.0,
         default_headers: dict[str, str] | None = None,
         extra_body: dict[str, Any] | None = None,
@@ -115,6 +115,7 @@ class AnthropicLLM(LLMInterface):
             **kwargs: Additional provider-specific parameters.
         """
         super().__init__(provider, api_key, base_url, model, reasoning_effort, **kwargs)
+        self._warn_reasoning_effort_unsupported()
 
         if not self.api_key:
             raise ValueError("API key is required for Anthropic provider")

@@ -10,6 +10,16 @@ For the source code, see [`hindsight-integrations/coding-agents`](https://github
 
 ← [Back to main changelog](/changelog)
 
+## [0.3.3](https://github.com/vectorize-io/hindsight/tree/integrations/coding-agents/v0.3.3)
+
+**Improvements**
+
+- When a turn runs without memory, the system now explicitly reports it to make memory usage clearer during runs.<span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/nicoloboschi" target="_blank" rel="noopener noreferrer" style={{color: "var(--ifm-color-primary)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px", verticalAlign: "middle"}}><img src="https://github.com/nicoloboschi.png?size=40" alt="@nicoloboschi" width="18" height="18" style={{borderRadius: "50%"}} />@nicoloboschi</a><span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/vectorize-io/hindsight/commit/383b1d201" target="_blank" rel="noopener noreferrer" style={{fontFamily: "var(--ifm-font-family-monospace, monospace)", fontSize: "0.85em", color: "var(--ifm-color-emphasis-600)"}}>383b1d201</a>
+
+**Bug Fixes**
+
+- OpenCode survey now runs under the integration’s own agent (instead of plan mode), improving correctness and consistency of survey behavior.<span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/nicoloboschi" target="_blank" rel="noopener noreferrer" style={{color: "var(--ifm-color-primary)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px", verticalAlign: "middle"}}><img src="https://github.com/nicoloboschi.png?size=40" alt="@nicoloboschi" width="18" height="18" style={{borderRadius: "50%"}} />@nicoloboschi</a><span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/vectorize-io/hindsight/commit/c43a3ebfa" target="_blank" rel="noopener noreferrer" style={{fontFamily: "var(--ifm-font-family-monospace, monospace)", fontSize: "0.85em", color: "var(--ifm-color-emphasis-600)"}}>c43a3ebfa</a>
+
 ## [0.3.2](https://github.com/vectorize-io/hindsight/tree/integrations/coding-agents/v0.3.2)
 
 **Bug Fixes**

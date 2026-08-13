@@ -247,26 +247,97 @@ async def run_graph_maintenance_job(
     result.queues_drained = relink.queue_exhausted and prune.queue_exhausted
 
     elapsed = time.time() - job_start
+
+    # --- Hand-off: schedule a successor for any work this run leaves behind ---
+    #
+    # Submit-time dedup now treats a *running* graph-maintenance job as covering
+    # the bank (see _submit_async_operation's dedupe_by_bank_includes_processing).
+    # That is what stops one job being queued per triggering operation, but it
+    # means a submit made while this job runs is suppressed. So this job has to
+    # hand off to a successor for any work it leaves behind, or that work strands
+    # until some unrelated future trigger. Both hand-offs below pass
+    # dedupe_excludes_operation_id: the worker only marks the operation completed
+    # after this body returns, so the row is still 'processing' now and the
+    # widened predicate would otherwise dedup the hand-off against its own row and
+    # silently do nothing.
+    from .memory_engine import acquire_with_retry
+    from .task_backend import SyncTaskBackend
+
     if not result.queues_drained:
-        # Not a failure: every batch committed, so the remaining queue rows are
-        # simply the next run's work. Logged at WARNING because a bank that keeps
-        # landing here is producing maintenance faster than one run absorbs it,
-        # which is worth seeing before it becomes a backlog.
+        # Backlog case: the time budget stopped a drain with work still queued, so
+        # more is provably left. Chain a follow-up so the backlog converges
+        # without waiting for the next delete to trigger a run — on a bank that
+        # has gone quiet that may be never. WARNING because a bank that keeps
+        # landing here is producing maintenance faster than one run absorbs it.
         logger.warning(
             f"[GRAPH_MAINT] bank={bank_id} hit the {_JOB_TIME_BUDGET_SECONDS:.0f}s budget with work still "
             f"queued; committed {result.as_dict()} in {elapsed:.2f}s"
         )
-        # Chain a follow-up so the backlog converges without waiting for the next
-        # delete to trigger a run. Only under a real queue: a synchronous task
-        # backend (tests, embedded) runs submitted tasks inline, so this would
-        # recurse one stack frame per budget window instead of scheduling. There
-        # the caller is already the loop — it gets the remaining rows on its next
-        # call. No force_sweep: the submit's pre-check inspects both queues, so
-        # this only lands an operation while work is genuinely left.
-        from .task_backend import SyncTaskBackend
-
+        # A synchronous task backend (tests, embedded) runs the successor inline,
+        # which would recurse one job per budget window instead of scheduling.
+        # There the caller is already the drain loop and gets the remaining rows
+        # on its next call, so skip the hand-off.
         if not isinstance(memory_engine._task_backend, SyncTaskBackend):
-            await memory_engine.submit_async_graph_maintenance(bank_id=bank_id, request_context=request_context)
+            try:
+                await memory_engine.submit_async_graph_maintenance(
+                    bank_id=bank_id,
+                    request_context=request_context,
+                    dedupe_excludes_operation_id=operation_id,
+                )
+            except Exception:
+                # Never fail a completed maintenance run over the hand-off. The
+                # work is still queued and the next trigger picks it up; log
+                # loudly so a persistent failure here is visible, not silent.
+                logger.exception(f"[GRAPH_MAINT] bank={bank_id} follow-up submit failed")
+    else:
+        # Gap case: both queues drained within budget, but new rows can have
+        # landed in the gap between a pass's final claim and this job being marked
+        # completed. Their submits were deduped against this still-'processing'
+        # job, so nothing is scheduled to pick them up. Re-check both queues —
+        # reusing the portable existence check submit uses for its empty-queue
+        # short-circuit (no Postgres-only LIMIT, and covers the relink and
+        # entity-prune queues) — and hand off anything that landed.
+        #
+        # Gated on this run having made progress. A run that consumed nothing and
+        # still sees queued work would hand off to a successor that repeats the
+        # exact outcome — an endless per-bank chain. Requiring progress means the
+        # chain only continues while it is actually draining, so it terminates.
+        # (The backlog branch above is not gated this way: its contract is to
+        # always continue a budgeted backlog so a quiet bank is never stranded.)
+        #
+        # Not guarded against SyncTaskBackend, unlike the backlog branch: this
+        # branch cannot fire on one. A synchronous backend is single-threaded, so
+        # nothing enqueues concurrently and the queues are empty once the passes
+        # (which never enqueue for themselves) return — leaving no gap to close.
+        made_progress = result.relink_units_processed > 0 or result.entities_examined > 0
+        try:
+            backend_check = await memory_engine._get_backend()
+            async with acquire_with_retry(backend_check) as conn:
+                work_remains = bool(
+                    await conn.fetchval(
+                        f"""
+                        SELECT 1 WHERE
+                            EXISTS (SELECT 1 FROM {fq_table("graph_maintenance_queue")} WHERE bank_id = $1)
+                            OR EXISTS (SELECT 1 FROM {fq_table("entity_maintenance_queue")} WHERE bank_id = $1)
+                        """,
+                        bank_id,
+                    )
+                )
+            if work_remains and not made_progress:
+                logger.warning(
+                    f"[GRAPH_MAINT] bank={bank_id} queue still non-empty after a run that drained "
+                    f"nothing; not chaining a successor (it would repeat this outcome)"
+                )
+            elif work_remains:
+                logger.info(f"[GRAPH_MAINT] bank={bank_id} work arrived during the run; submitting a follow-up job")
+                await memory_engine.submit_async_graph_maintenance(
+                    bank_id=bank_id,
+                    request_context=request_context,
+                    dedupe_excludes_operation_id=operation_id,
+                )
+        except Exception:
+            # As above: the queued work survives, so log rather than fail the run.
+            logger.exception(f"[GRAPH_MAINT] bank={bank_id} follow-up submit failed")
 
     logger.info(
         f"[GRAPH_MAINT] bank={bank_id} done: {result.as_dict()}, elapsed={elapsed:.2f}s, operation_id={operation_id}"

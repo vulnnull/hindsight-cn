@@ -174,11 +174,12 @@ class GeminiLLM(LLMInterface):
         api_key: str,
         base_url: str,
         model: str,
-        reasoning_effort: str = "low",
+        reasoning_effort: str | None = None,
         **kwargs: Any,
     ):
         """Initialize Gemini/VertexAI LLM provider."""
         super().__init__(provider, api_key, base_url, model, reasoning_effort, **kwargs)
+        self._warn_reasoning_effort_unsupported()
 
         self._client = None
         self._is_vertexai = self.provider == "vertexai"

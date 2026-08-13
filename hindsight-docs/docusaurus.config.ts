@@ -272,6 +272,12 @@ const config: Config = {
           className: 'navbar-item-changelog',
         },
         {
+          href: 'https://learn.hindsight.vectorize.io',
+          position: 'left',
+          label: 'Academy',
+          className: 'navbar-item-academy',
+        },
+        {
           type: 'dropdown',
           label: 'Resources',
           position: 'left',
@@ -386,6 +392,10 @@ const config: Config = {
             {
               label: 'Guides',
               to: '/guides',
+            },
+            {
+              label: 'Academy',
+              href: 'https://learn.hindsight.vectorize.io',
             },
             {
               label: 'Hindsight Cloud',

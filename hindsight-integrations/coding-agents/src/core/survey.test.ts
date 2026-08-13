@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { resolveClaudeBin, startCodebaseSurvey, SURVEY_PROMPT } from "./survey";
+import {
+  resolveClaudeBin,
+  startCodebaseSurvey,
+  SURVEY_AGENT,
+  SURVEY_AGENT_CONFIG,
+  SURVEY_PROMPT,
+} from "./survey";
 
 describe("resolveClaudeBin", () => {
   const ORIGINAL_ENV = process.env.HINDSIGHT_CLAUDE_BIN;
@@ -125,8 +131,8 @@ describe("startCodebaseSurvey", () => {
     expect(options.env.HINDSIGHT_DISABLE_HOOKS).toBe("1");
   });
 
-  // ── opencode recipe (read-only plan agent; tools from the loaded plugin) ───────────────────────
-  it("opencode: spawns `opencode run --agent plan` with the prompt", () => {
+  // ── opencode recipe (our own read-only agent; tools from the loaded plugin) ────────────────────
+  it("opencode: spawns `opencode run` under OUR survey agent, never the built-in plan agent", () => {
     const spawn = fakeSpawn();
     startCodebaseSurvey("/repo", {
       harness: "opencode",
@@ -135,8 +141,26 @@ describe("startCodebaseSurvey", () => {
     });
     const [bin, argv, options] = spawn.mock.calls[0];
     expect(bin).toBe("opencode");
-    expect(argv).toEqual(["run", "--agent", "plan", SURVEY_PROMPT]);
+    expect(argv).toEqual(["run", "--agent", SURVEY_AGENT, SURVEY_PROMPT]);
+    // `plan` appends a read-only system-reminder that talks models out of the ingest call the
+    // survey exists to make (#3450) — the whole point is not to run under it.
+    expect(argv).not.toContain("plan");
     expect(options.env.HINDSIGHT_DISABLE_HOOKS).toBe("1");
+  });
+
+  // The recipe above is only safe because the agent it names is read-only. opencode drops denied
+  // tools from the model's tool list entirely, so this ruleset IS the sandbox.
+  it("the survey agent denies everything except reading and the one ingest tool", () => {
+    expect(SURVEY_AGENT_CONFIG.permission["*"]).toBe("deny");
+    expect(SURVEY_AGENT_CONFIG.permission.hindsight_ingest_document).toBe("allow");
+    const allowed = Object.entries(SURVEY_AGENT_CONFIG.permission)
+      .filter(([, v]) => v === "allow")
+      .map(([k]) => k)
+      .sort();
+    expect(allowed).toEqual(["glob", "grep", "hindsight_ingest_document", "read"]);
+    // No write, no bash, and no `task` — which would reach a subagent that CAN write.
+    for (const escape of ["write", "edit", "bash", "task", "patch"])
+      expect(SURVEY_AGENT_CONFIG.permission).not.toHaveProperty(escape, "allow");
   });
 
   // ── agent selection + fallback ─────────────────────────────────────────────────────────────────

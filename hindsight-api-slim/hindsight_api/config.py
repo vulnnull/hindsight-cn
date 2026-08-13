@@ -558,6 +558,12 @@ ENV_LINK_EXPANSION_PER_ENTITY_LIMIT = "HINDSIGHT_API_LINK_EXPANSION_PER_ENTITY_L
 ENV_LINK_EXPANSION_TIMEOUT = "HINDSIGHT_API_LINK_EXPANSION_TIMEOUT"
 ENV_BANK_STATS_CACHE_TTL_SECONDS = "HINDSIGHT_API_BANK_STATS_CACHE_TTL_SECONDS"
 ENV_BANK_STATS_CACHE_MAX_ENTRIES = "HINDSIGHT_API_BANK_STATS_CACHE_MAX_ENTRIES"
+# Request headers copied into RequestContext.extra_headers for extensions to read.
+# Comma-separated, matched case-insensitively. Empty by default: extensions only
+# ever see headers an operator has explicitly opted in, so a custom
+# TenantExtension/OperationValidatorExtension can't be handed request data its
+# author never asked for.
+ENV_EXTENSION_PASSTHROUGH_HEADERS = "HINDSIGHT_API_EXTENSION_PASSTHROUGH_HEADERS"
 
 # OpenTelemetry tracing configuration
 ENV_OTEL_TRACES_ENABLED = "HINDSIGHT_API_OTEL_TRACES_ENABLED"
@@ -934,7 +940,6 @@ DEFAULT_LLM_MAX_RETRIES = 3  # Max retry attempts for LLM API calls
 DEFAULT_LLM_INITIAL_BACKOFF = 1.0  # Initial backoff in seconds for retry exponential backoff
 DEFAULT_LLM_MAX_BACKOFF = 60.0  # Max backoff cap in seconds for retry exponential backoff
 DEFAULT_LLM_TIMEOUT = 120.0  # seconds
-DEFAULT_LLM_REASONING_EFFORT = "low"
 DEFAULT_LLM_SEND_BANK_AS_USER = False  # Opt-in: tag provider calls with user=<bank_id>
 
 # Vertex AI defaults
@@ -2122,7 +2127,10 @@ class HindsightConfig:
     llm_initial_backoff: float
     llm_max_backoff: float
     llm_timeout: float
-    llm_reasoning_effort: str
+    # None when unset, and unset means no provider sends a reasoning parameter at all —
+    # each model runs at its own default effort. A configured value is a statement about
+    # the deployment and is sent as given (issue #3449).
+    llm_reasoning_effort: str | None
     llm_groq_service_tier: str  # Groq: "on_demand", "flex", or "auto"
     llm_openai_service_tier: str | None  # OpenAI: None (default) or "flex" (50% cheaper)
     llm_bedrock_service_tier: str | None  # Bedrock: None (default), "flex", "priority", or "reserved"
@@ -2632,6 +2640,12 @@ class HindsightConfig:
     webhook_allowed_hosts: list[str] = field(default_factory=list)
     webhook_expose_response_body: bool = DEFAULT_WEBHOOK_EXPOSE_RESPONSE_BODY
 
+    # Headers forwarded to extensions via RequestContext.extra_headers (static,
+    # server-level only — deliberately NOT per-bank configurable: a tenant must
+    # not be able to widen the set of request headers its own extension code
+    # sees). Stored lower-cased; empty means no header is ever forwarded.
+    extension_passthrough_headers: list[str] = field(default_factory=list)
+
     # Class-level sets for configuration categorization
 
     # CREDENTIAL_FIELDS: Never exposed via API, never configurable per-tenant/bank
@@ -3078,7 +3092,7 @@ class HindsightConfig:
             llm_initial_backoff=float(os.getenv(ENV_LLM_INITIAL_BACKOFF, str(DEFAULT_LLM_INITIAL_BACKOFF))),
             llm_max_backoff=float(os.getenv(ENV_LLM_MAX_BACKOFF, str(DEFAULT_LLM_MAX_BACKOFF))),
             llm_timeout=float(os.getenv(ENV_LLM_TIMEOUT, str(DEFAULT_LLM_TIMEOUT))),
-            llm_reasoning_effort=os.getenv(ENV_LLM_REASONING_EFFORT, DEFAULT_LLM_REASONING_EFFORT),
+            llm_reasoning_effort=os.getenv(ENV_LLM_REASONING_EFFORT) or None,
             llm_groq_service_tier=os.getenv(ENV_LLM_GROQ_SERVICE_TIER, DEFAULT_LLM_GROQ_SERVICE_TIER),
             llm_openai_service_tier=os.getenv(ENV_LLM_OPENAI_SERVICE_TIER, DEFAULT_LLM_OPENAI_SERVICE_TIER),
             llm_bedrock_service_tier=os.getenv(ENV_LLM_BEDROCK_SERVICE_TIER) or None,
@@ -3932,6 +3946,12 @@ class HindsightConfig:
             webhook_expose_response_body=_parse_boolean_env(
                 ENV_WEBHOOK_EXPOSE_RESPONSE_BODY, DEFAULT_WEBHOOK_EXPOSE_RESPONSE_BODY
             ),
+            # Lower-cased here so the transports can match incoming header names
+            # case-insensitively (HTTP header names are case-insensitive) without
+            # re-normalising the allowlist on every request.
+            extension_passthrough_headers=[
+                h.lower() for h in _parse_str_list(os.getenv(ENV_EXTENSION_PASSTHROUGH_HEADERS, ""))
+            ],
         )
         config.validate()
         return config

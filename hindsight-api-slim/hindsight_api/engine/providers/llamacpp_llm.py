@@ -273,7 +273,7 @@ class LlamaCppLLM(LLMInterface):
         api_key: str,
         base_url: str,
         model: str,
-        reasoning_effort: str = "low",
+        reasoning_effort: str | None = None,
         extra_body: dict[str, Any] | None = None,
         model_path: str | None = None,
         gpu_layers: int = -1,
@@ -338,6 +338,8 @@ class LlamaCppLLM(LLMInterface):
             api_key="llamacpp",
             base_url=self._server.base_url,
             model=self.model,
+            # None (unconfigured) must stay None so the delegate omits the parameter
+            # rather than inventing a level for the local model.
             reasoning_effort=self.reasoning_effort,
             extra_body=self._extra_body,
         )

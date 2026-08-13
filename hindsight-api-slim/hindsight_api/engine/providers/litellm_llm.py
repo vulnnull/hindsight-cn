@@ -97,7 +97,7 @@ class LiteLLMLLM(LLMInterface):
         api_key: str,
         base_url: str,
         model: str,
-        reasoning_effort: str = "low",
+        reasoning_effort: str | None = None,
         timeout: float | None = None,
         extra_body: dict[str, Any] | None = None,
         bedrock_service_tier: str | None = None,
@@ -185,6 +185,14 @@ class LiteLLMLLM(LLMInterface):
             kwargs["max_completion_tokens"] = self._cap_max_completion_tokens(max_completion_tokens)
         if temperature is not None:
             kwargs["temperature"] = temperature
+        # LiteLLM translates reasoning_effort per target provider (Anthropic thinking
+        # budgets, Gemini thinking config, OpenAI's flat param), so forwarding the
+        # operator's setting is all that is needed to honour it here — dropping it was
+        # a silent no-op on every model behind this lane (issue #3449). Only sent when
+        # configured; ``litellm.drop_params = True`` discards it for models that have
+        # no reasoning knob rather than raising.
+        if self.reasoning_effort is not None:
+            kwargs["reasoning_effort"] = self.reasoning_effort
 
         # User-configured extras fill in only where the caller didn't set a value,
         # so explicit per-call params (model, messages, temperature, …) always win.

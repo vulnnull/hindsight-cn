@@ -1134,7 +1134,22 @@ async def test_reasoning_effort_and_the_token_cap_land_in_the_body(tmp_path, mon
     assert "max_completion_tokens" not in body
 
 
-@pytest.mark.parametrize("effort", ["none", "None", "  none  ", ""])
+@pytest.mark.parametrize("effort", [None, ""])
+async def test_an_unconfigured_reasoning_effort_is_not_sent(tmp_path, monkeypatch, effort):
+    """Unset means grok runs at its own default effort.
+
+    Hindsight used to resolve unset to "low" in the config layer and send it here, so
+    a deployment that never configured reasoning still had a level chosen for it. An
+    empty environment variable counts as unset, exactly like an absent one.
+    """
+    llm = _make_llm(tmp_path, monkeypatch, reasoning_effort=effort)
+
+    await llm.call(messages=[{"role": "user", "content": "hi"}], max_retries=0)
+
+    assert "reasoning_effort" not in llm._client.calls[0]["json"]
+
+
+@pytest.mark.parametrize("effort", ["none", "None", "  none  "])
 async def test_a_none_reasoning_effort_is_omitted_rather_than_sent(tmp_path, monkeypatch, effort):
     """xAI answers ``reasoning_effort: "none"`` with a non-retryable HTTP 400.
 

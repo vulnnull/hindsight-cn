@@ -479,6 +479,46 @@ async def entity_map_for_units(
     return by_unit
 
 
+async def resolve_entity_names(
+    *,
+    conn: DatabaseConnection,
+    fq_table: Callable[[str], str],
+    bank_id: str,
+    entity_ids: list[str],
+) -> dict[str, str]:
+    """``{entity_id: canonical_name}`` for the given ids, scoped to ``bank_id``.
+
+    The label half of :func:`entity_map_for_units`, for a backend that already
+    carries a unit's entity ids on the recalled result: recall builds the
+    unit->entity map from those ids and needs only the names, so this resolves the
+    ``entities`` registry once without re-fetching any memory. Bank-scoped like the
+    sibling registry reads (the ``entities`` table has a ``bank_id`` column).
+
+    Ids that don't parse as UUIDs are dropped rather than raised — a malformed id
+    on a store's result payload must not turn into a DB error mid-recall — and ids
+    with no registry row (or in another bank) are simply absent from the result.
+    """
+    if not entity_ids:
+        return {}
+    # Bind ``uuid.UUID`` objects for the ``uuid[]`` param (repo convention, see
+    # ``_as_uuids``), but coerce defensively: skip anything unparseable instead of
+    # letting the whole resolve raise.
+    uuids: list = []
+    for raw in {str(e) for e in entity_ids}:
+        try:
+            uuids.append(uuid_module.UUID(raw))
+        except (ValueError, AttributeError, TypeError):
+            continue
+    if not uuids:
+        return {}
+    rows = await conn.fetch(
+        f"SELECT id, canonical_name FROM {fq_table('entities')} WHERE id = ANY($1::uuid[]) AND bank_id = $2",
+        uuids,
+        bank_id,
+    )
+    return {str(row["id"]): row["canonical_name"] for row in rows}
+
+
 # --------------------------------------------------------------- maintenance
 
 
@@ -953,4 +993,5 @@ __all__ = [
     "graph_entity_rows",
     "graph_units",
     "relink_pass",
+    "resolve_entity_names",
 ]

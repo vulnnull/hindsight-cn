@@ -1119,7 +1119,9 @@ class TestTimeBudget:
 
         submitted: list[str] = []
 
-        async def _record_submit(*, bank_id: str, request_context, force_sweep: bool = False):
+        async def _record_submit(
+            *, bank_id: str, request_context, dedupe_excludes_operation_id=None, force_sweep: bool = False
+        ):
             submitted.append(bank_id)
             return {"operation_id": None, "no_work": True}
 

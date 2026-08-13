@@ -176,7 +176,7 @@ class OpenAIResponsesLLM(LLMInterface):
         api_key: str,
         base_url: str,
         model: str,
-        reasoning_effort: str = "low",
+        reasoning_effort: str | None = None,
         timeout: float | None = None,
         extra_body: dict[str, Any] | None = None,
         default_headers: dict[str, str] | None = None,
@@ -455,7 +455,9 @@ class OpenAIResponsesLLM(LLMInterface):
             params["max_output_tokens"] = max_completion_tokens
         if temperature is not None and not is_reasoning_model:
             params["temperature"] = temperature
-        if is_reasoning_model:
+        # Only when the operator configured a level: unset means the model runs at the
+        # Responses API's own default effort rather than one Hindsight picked.
+        if is_reasoning_model and self.reasoning_effort is not None:
             params["reasoning"] = {"effort": self.reasoning_effort}
         if self.openai_service_tier:
             params["service_tier"] = self.openai_service_tier
@@ -571,7 +573,9 @@ class OpenAIResponsesLLM(LLMInterface):
             params["max_output_tokens"] = max_completion_tokens
         if temperature is not None and not is_reasoning_model:
             params["temperature"] = temperature
-        if is_reasoning_model:
+        # Only when the operator configured a level: unset means the model runs at the
+        # Responses API's own default effort rather than one Hindsight picked.
+        if is_reasoning_model and self.reasoning_effort is not None:
             params["reasoning"] = {"effort": self.reasoning_effort}
         if self.openai_service_tier:
             params["service_tier"] = self.openai_service_tier

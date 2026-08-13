@@ -8,9 +8,13 @@ without consolidation.
 import urllib.parse
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Any, NoReturn
 
+import asyncpg
+import pytest
 import pytest_asyncio
 
+from hindsight_api.engine.db import DatabaseConnection
 from hindsight_api.engine.memory_engine import MemoryEngine, _may_need_refresh
 from hindsight_api.extensions import (
     BankReadContext,
@@ -364,6 +368,119 @@ class TestCreate:
             json={"name": "Nope", "parent_id": ids.orders},
         )
         assert resp.status_code == 400
+
+    async def test_create_page_missing_parent_rolls_back_mental_model(self, memory: MemoryEngine, request_context):
+        bank_id = f"test-kb-create-{uuid.uuid4().hex[:8]}"
+        await memory.create_knowledge_folder(bank_id, "Root", request_context=request_context)
+        before = await memory.list_mental_models(bank_id, request_context=request_context)
+
+        with pytest.raises(ValueError, match="not found"):
+            await memory.create_knowledge_page(
+                bank_id,
+                "Orphan",
+                "What is orphaned?",
+                "seed",
+                parent_id="missing-parent",
+                request_context=request_context,
+            )
+
+        after = await memory.list_mental_models(bank_id, request_context=request_context)
+        assert {mm["id"] for mm in after} == {mm["id"] for mm in before}
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+    async def test_create_page_under_page_rolls_back_mental_model(self, memory: MemoryEngine, request_context):
+        bank_id = f"test-kb-create-{uuid.uuid4().hex[:8]}"
+        parent = await memory.create_knowledge_page(
+            bank_id, "Parent page", "What is the parent?", "seed", request_context=request_context
+        )
+        before = await memory.list_mental_models(bank_id, request_context=request_context)
+
+        with pytest.raises(ValueError, match="is not a folder"):
+            await memory.create_knowledge_page(
+                bank_id,
+                "Orphan",
+                "What is orphaned?",
+                "seed",
+                parent_id=parent["id"],
+                request_context=request_context,
+            )
+
+        after = await memory.list_mental_models(bank_id, request_context=request_context)
+        assert {mm["id"] for mm in after} == {mm["id"] for mm in before}
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+    async def test_duplicate_page_rolls_back_mental_model(self, memory: MemoryEngine, request_context):
+        bank_id = f"test-kb-create-{uuid.uuid4().hex[:8]}"
+        parent = await memory.create_knowledge_folder(bank_id, "Root", request_context=request_context)
+        await memory.create_knowledge_page(
+            bank_id,
+            "Existing",
+            "What exists?",
+            "seed",
+            parent_id=parent["id"],
+            request_context=request_context,
+        )
+        rolled_back_mm_id = f"mm-{uuid.uuid4().hex}"
+
+        duplicate = await memory.create_knowledge_page(
+            bank_id,
+            "Existing",
+            "What is duplicated?",
+            "seed",
+            parent_id=parent["id"],
+            mental_model_id=rolled_back_mm_id,
+            request_context=request_context,
+        )
+
+        assert duplicate is None
+        assert await memory.get_mental_model(bank_id, rolled_back_mm_id, request_context=request_context) is None
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+    async def test_duplicate_mental_model_id_is_not_reported_as_duplicate_page(
+        self, memory: MemoryEngine, request_context
+    ):
+        bank_id = f"test-kb-create-{uuid.uuid4().hex[:8]}"
+        existing = await memory.create_mental_model(
+            bank_id, "Existing MM", "What exists?", "seed", request_context=request_context
+        )
+
+        with pytest.raises(asyncpg.UniqueViolationError):
+            await memory.create_knowledge_page(
+                bank_id,
+                "New page",
+                "What is new?",
+                "seed",
+                mental_model_id=existing["id"],
+                request_context=request_context,
+            )
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+    async def test_non_unique_failure_after_mental_model_insert_rolls_back(
+        self, memory: MemoryEngine, request_context, monkeypatch
+    ):
+        bank_id = f"test-kb-create-{uuid.uuid4().hex[:8]}"
+        mental_model_id = f"mm-{uuid.uuid4().hex}"
+        insert_mental_model = memory._insert_pinned_mental_model
+
+        async def insert_then_fail(conn: DatabaseConnection, **kwargs: Any) -> NoReturn:
+            await insert_mental_model(conn, **kwargs)
+            raise RuntimeError("page write failed")
+
+        monkeypatch.setattr(memory, "_insert_pinned_mental_model", insert_then_fail)
+
+        with pytest.raises(RuntimeError, match="page write failed"):
+            await memory.create_knowledge_page(
+                bank_id,
+                "Rolled back",
+                "What is rolled back?",
+                "seed",
+                mental_model_id=mental_model_id,
+                request_context=request_context,
+            )
+
+        assert await memory.get_mental_model(bank_id, mental_model_id, request_context=request_context) is None
+        await memory.delete_bank(bank_id, request_context=request_context)
 
 
 class TestExport:

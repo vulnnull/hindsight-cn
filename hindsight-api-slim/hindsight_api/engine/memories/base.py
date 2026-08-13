@@ -880,6 +880,19 @@ class MemoriesExtension(Extension, ABC):
         """
 
     @abstractmethod
+    async def resolve_entity_names(self, *, conn, fq_table, bank_id: str, entity_ids: list[str]) -> dict[str, str]:
+        """``{entity_id: canonical_name}`` for the given ids, from the ``entities`` registry.
+
+        The label half of :meth:`entity_map_for_units`, split out so a backend that
+        already carries a unit's entity ids on the recalled result can turn those ids
+        into names without re-fetching the memories — recall then builds the entity map
+        from the result's ids plus this one lookup. Bank-scoped, and ids with no registry
+        row are simply absent from the result. The concrete SQL is the store's, next to
+        :meth:`entity_map_for_units`, because the query dialect belongs to the backend,
+        not this interface.
+        """
+
+    @abstractmethod
     async def any_memory_updated_since(
         self,
         *,

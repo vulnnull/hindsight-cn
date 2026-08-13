@@ -5,6 +5,7 @@ This module defines the interface that all LLM providers must implement,
 enabling support for multiple LLM backends (OpenAI, Anthropic, Gemini, Codex, etc.)
 """
 
+import logging
 from abc import ABC, abstractmethod
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
@@ -13,6 +14,8 @@ from enum import StrEnum
 from typing import Any, Callable, Self
 
 from .response_models import LLMToolCallResult
+
+logger = logging.getLogger(__name__)
 
 
 class LLMToolChoiceMode(StrEnum):
@@ -68,7 +71,7 @@ class LLMInterface(ABC):
         api_key: str,
         base_url: str,
         model: str,
-        reasoning_effort: str = "low",
+        reasoning_effort: str | None = None,
         **kwargs: Any,
     ):
         """
@@ -79,14 +82,37 @@ class LLMInterface(ABC):
             api_key: API key or authentication token.
             base_url: Base URL for the API.
             model: Model name.
-            reasoning_effort: Reasoning effort level for supported providers.
+            reasoning_effort: Reasoning effort level, or None when the operator
+                configured none — in which case no provider sends the parameter and
+                every model runs at its own default effort.
             **kwargs: Additional provider-specific parameters.
         """
         self.provider = provider.lower()
         self.api_key = api_key
         self.base_url = base_url
         self.model = model
-        self.reasoning_effort = reasoning_effort
+        # None means "the operator said nothing", and nothing is what gets sent: no
+        # provider may invent a level. Hindsight used to resolve unset to "low" here and
+        # ship it to whichever lanes their capability check happened to accept, which
+        # made the setting both invisible (a configured value could be silently dropped —
+        # issue #3449) and presumptuous (an unconfigured one was still transmitted).
+        # An empty string is an unset environment variable, not a level.
+        self.reasoning_effort: str | None = reasoning_effort or None
+
+    def _warn_reasoning_effort_unsupported(self) -> None:
+        """Report, once at startup, that this provider cannot honour a configured effort.
+
+        Providers with no reasoning knob to turn call this from ``__init__``. Silence is
+        what made issue #3449 expensive: the variable is set, documented and visible in
+        the environment, so every signal the operator has says it is in force. A setting
+        this provider cannot act on has to say so out loud.
+        """
+        if self.reasoning_effort is None:
+            return
+        logger.warning(
+            f"reasoning_effort={self.reasoning_effort!r} is ignored: the {self.provider} provider "
+            f"has no reasoning-effort control. Remove the setting or switch provider to apply it."
+        )
 
     @abstractmethod
     async def verify_connection(self) -> None:

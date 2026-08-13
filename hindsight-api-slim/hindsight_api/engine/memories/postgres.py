@@ -614,6 +614,9 @@ class PostgresMemories(MemoriesExtension):
     ) -> dict[str, list[dict[str, str]]]:
         return await graph.entity_map_for_units(conn=conn, fq_table=fq_table, bank_id=bank_id, unit_ids=unit_ids)
 
+    async def resolve_entity_names(self, *, conn, fq_table, bank_id: str, entity_ids: list[str]) -> dict[str, str]:
+        return await graph.resolve_entity_names(conn=conn, fq_table=fq_table, bank_id=bank_id, entity_ids=entity_ids)
+
     # ------------------------------------------------------------------ maintenance
 
     async def record_unit_entities(

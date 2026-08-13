@@ -362,7 +362,7 @@ class XaiOAuthLLM(LLMInterface):
         api_key: str,  # Ignored: the credential is the OAuth grant in the token store.
         base_url: str,
         model: str,
-        reasoning_effort: str = "low",
+        reasoning_effort: str | None = None,
         timeout: float | None = None,
         auth_manager: XaiOAuthManager | None = None,
         **kwargs: Any,

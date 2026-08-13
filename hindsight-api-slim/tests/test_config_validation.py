@@ -662,14 +662,24 @@ def test_markitdown_ocr_uses_explicit_config(monkeypatch):
     assert config.file_parser_markitdown_ocr_default_headers == {"X-Component-Id": "hindsight-ocr"}
 
 
-def test_llm_reasoning_effort_defaults_to_low(monkeypatch):
+def test_llm_reasoning_effort_unset_stays_none(monkeypatch):
+    """Unset must stay None all the way down: no provider sends a level nobody set.
+
+    Baking "low" in here made every HINDSIGHT_API_*_REASONING_EFFORT variable
+    indistinguishable from the default one layer down, so a configured value could be
+    silently discarded (issue #3449) while an unconfigured one was still transmitted.
+    """
     from hindsight_api.config import HindsightConfig
+    from hindsight_api.engine.providers.mock_llm import MockLLM
 
     monkeypatch.delenv("HINDSIGHT_API_LLM_REASONING_EFFORT", raising=False)
     monkeypatch.setenv("HINDSIGHT_API_LLM_PROVIDER", "mock")
 
     config = HindsightConfig.from_env()
-    assert config.llm_reasoning_effort == "low"
+    assert config.llm_reasoning_effort is None
+
+    llm = MockLLM(provider="mock", api_key="", base_url="", model="mock", reasoning_effort=None)
+    assert llm.reasoning_effort is None
 
 
 def test_llm_reasoning_effort_loaded_from_env(monkeypatch):

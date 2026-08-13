@@ -423,3 +423,21 @@ def test_factory_threads_service_tier_and_headers():
     assert isinstance(impl, OpenAIResponsesLLM)
     assert impl.openai_service_tier == "flex"
     assert impl.default_headers == {"X-Trace-Id": "abc123"}
+
+
+@pytest.mark.asyncio
+async def test_call_omits_the_reasoning_object_when_no_effort_is_configured():
+    """Unset means the Responses API applies its own default effort.
+
+    Hindsight used to resolve unset to "low" in the config layer and send it here, so a
+    deployment that never configured reasoning still had a level chosen for it. The
+    reasoning-model request shape (token floor, no temperature) is unaffected.
+    """
+    llm = _make_llm(model="gpt-5.6", reasoning_effort=None)
+    create = _mock_create(llm, _fake_response(output_text="ok"))
+
+    await llm.call(messages=[{"role": "user", "content": "hi"}], max_retries=0)
+
+    kwargs = create.await_args.kwargs
+    assert "reasoning" not in kwargs
+    assert "temperature" not in kwargs

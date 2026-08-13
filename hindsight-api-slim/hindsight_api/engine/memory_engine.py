@@ -52,7 +52,7 @@ from ..worker.exceptions import DeferOperation, RetryTaskAt, format_task_error
 from ..worker.stage import set_stage
 from .audit import AuditLogger, audit_context
 from .bank_stats_cache import BankStatsCache, DistributedBankStatsCache
-from .db import DatabaseBackend, create_database_backend
+from .db import DatabaseBackend, DatabaseConnection, ResultRow, create_database_backend
 from .db.ops_postgresql import pg_search_vector_expr
 from .db_budget import budgeted_operation
 from .llm_interface import ProviderRateLimitResetError
@@ -933,6 +933,33 @@ def _is_invalid_embedding_dimension_error(e: Exception) -> bool:
     return "different vector dimensions" in message or (
         "embedding" in message and "dimension" in message and "expected" in message
     )
+
+
+def _entity_map_from_results(
+    ids_by_unit: dict[str, list[str]], names: dict[str, str]
+) -> dict[str, list[dict[str, str]]]:
+    """Build the ``{unit_id: [{entity_id, canonical_name}]}`` recall shape from the
+    entity ids a store carried on its results, given a resolved id->name map.
+
+    Mirrors ``entity_map_for_units`` exactly, so both paths produce identical output:
+    an order-preserving per-unit dedupe (a unit can carry the same id twice), ids with
+    no resolved name dropped, and — crucially — a unit that resolves to no entity is
+    omitted entirely rather than mapped to ``[]``, so its fact keeps ``entities=None``
+    downstream instead of an empty list. Pure and connectionless, so it is unit-testable
+    without a store or a database.
+    """
+    out: dict[str, list[dict[str, str]]] = {}
+    for unit_id, ids in ids_by_unit.items():
+        rows: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for entity_id in ids:
+            if entity_id in seen or entity_id not in names:
+                continue
+            seen.add(entity_id)
+            rows.append({"entity_id": entity_id, "canonical_name": names[entity_id]})
+        if rows:
+            out[unit_id] = rows
+    return out
 
 
 def _is_non_retryable_task_error(e: Exception) -> bool:
@@ -6754,13 +6781,37 @@ class MemoryEngine(MemoryEngineInterface):
                 if unit_ids:
                     from .memories import get_memories
 
-                    async with acquire_with_retry(backend) as entity_conn:
-                        # The memory carries its own entity ids; the store resolves
-                        # them to names (observations inherit their sources'), the
-                        # `entities` registry staying in postgres.
-                        fact_entity_map = await get_memories().entity_map_for_units(
-                            conn=entity_conn, fq_table=fq_table, bank_id=bank_id, unit_ids=unit_ids
-                        )
+                    # A backend that resolves the unit->entity posting inline carries
+                    # each result's entity ids on the RetrievalResult (a list, possibly
+                    # empty); Postgres leaves them None and resolves them here. When every
+                    # result carries its ids we avoid re-fetching the memories: build the
+                    # map from the results themselves and resolve names in one Postgres
+                    # lookup — and when no result carries any entity (chunks mode) skip all
+                    # work, acquiring no connection at all.
+                    if all(sr.retrieval.entity_ids is not None for sr in top_scored):
+                        # Normalise ids to str once, here at the boundary: a store may
+                        # hand back UUIDs, and everything downstream (the union, the
+                        # membership test, the map keys) then speaks one type.
+                        ids_by_unit = {sr.id: [str(e) for e in (sr.retrieval.entity_ids or [])] for sr in top_scored}
+                        union = {e for ids in ids_by_unit.values() for e in ids}
+                        names: dict[str, str] = {}
+                        # Acquire a connection only when there is actually a name to
+                        # resolve — when no result carries any entity (chunks mode) we
+                        # touch Postgres not at all.
+                        if union:
+                            async with acquire_with_retry(backend) as entity_conn:
+                                names = await get_memories().resolve_entity_names(
+                                    conn=entity_conn, fq_table=fq_table, bank_id=bank_id, entity_ids=list(union)
+                                )
+                        fact_entity_map = _entity_map_from_results(ids_by_unit, names)
+                    else:
+                        async with acquire_with_retry(backend) as entity_conn:
+                            # The memory carries its own entity ids; the store resolves
+                            # them to names (observations inherit their sources'), the
+                            # `entities` registry staying in postgres.
+                            fact_entity_map = await get_memories().entity_map_for_units(
+                                conn=entity_conn, fq_table=fq_table, bank_id=bank_id, unit_ids=unit_ids
+                            )
 
             # Convert results to MemoryFact objects
             # Build per-result scores (final/reranker/semantic/text) keyed by id.
@@ -12494,6 +12545,54 @@ class MemoryEngine(MemoryEngineInterface):
                 )
             return result
 
+    async def _generate_mental_model_embedding(self, name: str, content: str) -> str | None:
+        embedding = await embedding_utils.generate_embeddings_batch(self.embeddings, [f"{name} {content}"])
+        return str(embedding[0]) if embedding else None
+
+    async def _insert_pinned_mental_model(
+        self,
+        conn: DatabaseConnection,
+        *,
+        mental_model_id: str,
+        bank_id: str,
+        name: str,
+        source_query: str,
+        content: str,
+        embedding: str | None,
+        tags: list[str] | None,
+        max_tokens: int | None,
+        trigger: dict[str, Any] | None,
+    ) -> ResultRow:
+        """Insert a pinned model using the caller's transaction."""
+        # VectorChord needs mental_models.search_vector tokenized on write; every
+        # other backend either generates it or indexes the source columns.
+        sv_expr = pg_search_vector_expr(
+            get_config(), text_col="$3", context_col="$5", signals_col=None, native_inline=False
+        )
+        sv_col = ", search_vector" if sv_expr else ""
+        sv_val = f", {sv_expr}" if sv_expr else ""
+        row = await conn.fetchrow(
+            f"""
+            INSERT INTO {fq_table("mental_models")}
+            (id, bank_id, subtype, name, description, source_query, content, embedding, tags, max_tokens, trigger{sv_col})
+            VALUES ($1, $2, 'pinned', $3, ' ', $4, $5, $6, $7, COALESCE($8, 2048), COALESCE($9, '{{"refresh_after_consolidation": false}}'::jsonb){sv_val})
+            RETURNING id, bank_id, name, source_query, content, tags,
+                      last_refreshed_at, created_at, reflect_response,
+                      max_tokens, trigger, structured_content
+            """,
+            mental_model_id,
+            bank_id,
+            name,
+            source_query,
+            content,
+            embedding,
+            tags or [],
+            max_tokens,
+            json.dumps(trigger) if trigger else None,
+        )
+        assert row is not None
+        return row
+
     async def create_mental_model(
         self,
         bank_id: str,
@@ -12539,11 +12638,7 @@ class MemoryEngine(MemoryEngineInterface):
                 await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         backend = await self._get_backend()
 
-        # Generate embedding for the content
-        embedding_text = f"{name} {content}"
-        embedding = await embedding_utils.generate_embeddings_batch(self.embeddings, [embedding_text])
-        # Convert embedding to string for asyncpg vector type
-        embedding_str = str(embedding[0]) if embedding else None
+        embedding = await self._generate_mental_model_embedding(name, content)
 
         if not mental_model_id:
             mental_model_id = f"mm-{uuid.uuid4().hex}"
@@ -12559,63 +12654,18 @@ class MemoryEngine(MemoryEngineInterface):
                     request_context,
                     conn=conn,
                 )
-                # VectorChord needs mental_models.search_vector tokenized on write:
-                # its column is a plain bm25vector read by idx_mental_models_text_search
-                # (native's is GENERATED; pg_search/pg_textsearch/pgroonga index base
-                # columns), so every other backend leaves it out. Same tokenization the
-                # memory_units write path uses (pg_search_vector_expr / insert_facts_batch),
-                # over name + content — native_inline=False because mm's native column
-                # populates itself.
-                config = get_config()
-                if mental_model_id:
-                    sv_expr = pg_search_vector_expr(
-                        config, text_col="$3", context_col="$5", signals_col=None, native_inline=False
-                    )
-                    sv_col = ", search_vector" if sv_expr else ""
-                    sv_val = f", {sv_expr}" if sv_expr else ""
-                    row = await conn.fetchrow(
-                        f"""
-                        INSERT INTO {fq_table("mental_models")}
-                        (id, bank_id, subtype, name, description, source_query, content, embedding, tags, max_tokens, trigger{sv_col})
-                        VALUES ($1, $2, 'pinned', $3, ' ', $4, $5, $6, $7, COALESCE($8, 2048), COALESCE($9, '{{"refresh_after_consolidation": false}}'::jsonb){sv_val})
-                        RETURNING id, bank_id, name, source_query, content, tags,
-                                  last_refreshed_at, created_at, reflect_response,
-                                  max_tokens, trigger, structured_content
-                        """,
-                        mental_model_id,
-                        bank_id,
-                        name,
-                        source_query,
-                        content,
-                        embedding_str,
-                        tags or [],
-                        max_tokens,
-                        json.dumps(trigger) if trigger else None,
-                    )
-                else:
-                    sv_expr = pg_search_vector_expr(
-                        config, text_col="$2", context_col="$4", signals_col=None, native_inline=False
-                    )
-                    sv_col = ", search_vector" if sv_expr else ""
-                    sv_val = f", {sv_expr}" if sv_expr else ""
-                    row = await conn.fetchrow(
-                        f"""
-                        INSERT INTO {fq_table("mental_models")}
-                        (bank_id, subtype, name, description, source_query, content, embedding, tags, max_tokens, trigger{sv_col})
-                        VALUES ($1, 'pinned', $2, ' ', $3, $4, $5, $6, COALESCE($7, 2048), COALESCE($8, '{{"refresh_after_consolidation": false}}'::jsonb){sv_val})
-                        RETURNING id, bank_id, name, source_query, content, tags,
-                                  last_refreshed_at, created_at, reflect_response,
-                                  max_tokens, trigger, structured_content
-                        """,
-                        bank_id,
-                        name,
-                        source_query,
-                        content,
-                        embedding_str,
-                        tags or [],
-                        max_tokens,
-                        json.dumps(trigger) if trigger else None,
-                    )
+                row = await self._insert_pinned_mental_model(
+                    conn,
+                    mental_model_id=mental_model_id,
+                    bank_id=bank_id,
+                    name=name,
+                    source_query=source_query,
+                    content=content,
+                    embedding=embedding,
+                    tags=tags,
+                    max_tokens=max_tokens,
+                    trigger=trigger,
+                )
 
         # Best-effort default-template hook runs after the bank-create commits
         # (it opens its own connections and can create pinned models).
@@ -14034,48 +14084,57 @@ class MemoryEngine(MemoryEngineInterface):
                 request_context=request_context,
             )
             await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
-        # The mental model carries the content (and is created by the existing
-        # path, including lazy bank creation); the node only refs it. The write is
-        # already authorized above, so the nested mental-model create/delete run
-        # without invoking the validator a second time.
-        with _authorize_nested_operations():
-            mm = await self.create_mental_model(
-                bank_id=bank_id,
-                name=name,
-                source_query=source_query,
-                content=content,
-                mental_model_id=mental_model_id,
-                tags=tags,
-                max_tokens=max_tokens if max_tokens is not None else self.KNOWLEDGE_PAGE_DEFAULT_MAX_TOKENS,
-                trigger=trigger if trigger is not None else dict(self.KNOWLEDGE_PAGE_DEFAULT_TRIGGER),
-                request_context=request_context,
-            )
-            backend = await self._get_backend()
-            page_id = f"kp-{uuid.uuid4().hex}"
-            try:
-                async with acquire_with_retry(backend) as conn:
-                    async with conn.transaction():
-                        await self._kp_assert_folder_parent(conn, bank_id, parent_id)
-                        row = await conn.fetchrow(
-                            f"""
-                            INSERT INTO {fq_table("knowledge_pages")}
-                                (id, bank_id, parent_id, kind, name, mental_model_id, managed)
-                            VALUES ($1, $2, $3, 'page', $4, $5, $6)
-                            RETURNING {self._KP_COLUMNS}
-                            """,
-                            page_id,
-                            bank_id,
-                            parent_id,
-                            name,
-                            mm["id"],
-                            managed,
-                        )
-            except asyncpg.UniqueViolationError:
-                # Duplicate page name in this folder (uq_kp_folder_pagename). Roll back
-                # by deleting the orphan mental model we just created, then signal the
-                # caller that the page already exists.
-                await self.delete_mental_model(bank_id, mm["id"], request_context=request_context)
-                return None
+        mental_model_id = mental_model_id or f"mm-{uuid.uuid4().hex}"
+        embedding = await self._generate_mental_model_embedding(name, content)
+        effective_max_tokens = max_tokens if max_tokens is not None else self.KNOWLEDGE_PAGE_DEFAULT_MAX_TOKENS
+        effective_trigger = trigger if trigger is not None else dict(self.KNOWLEDGE_PAGE_DEFAULT_TRIGGER)
+        backend = await self._get_backend()
+        page_id = f"kp-{uuid.uuid4().hex}"
+        try:
+            async with acquire_with_retry(backend) as conn:
+                # The page row and its backing model have one lifecycle, so they
+                # share a transaction instead of compensating after a partial commit.
+                async with conn.transaction():
+                    created = await self._ensure_bank_exists(bank_id, request_context, conn=conn)
+                    await self._kp_assert_folder_parent(conn, bank_id, parent_id)
+                    mm_row = await self._insert_pinned_mental_model(
+                        conn,
+                        mental_model_id=mental_model_id,
+                        bank_id=bank_id,
+                        name=name,
+                        source_query=source_query,
+                        content=content,
+                        embedding=embedding,
+                        tags=tags,
+                        max_tokens=effective_max_tokens,
+                        trigger=effective_trigger,
+                    )
+                    row = await conn.fetchrow(
+                        f"""
+                        INSERT INTO {fq_table("knowledge_pages")}
+                            (id, bank_id, parent_id, kind, name, mental_model_id, managed)
+                        VALUES ($1, $2, $3, 'page', $4, $5, $6)
+                        RETURNING {self._KP_COLUMNS}
+                        """,
+                        page_id,
+                        bank_id,
+                        parent_id,
+                        name,
+                        mental_model_id,
+                        managed,
+                    )
+        except asyncpg.UniqueViolationError as exc:
+            if getattr(exc, "constraint_name", None) != "uq_kp_folder_pagename":
+                raise
+            # The transaction already rolled the MM back; preserve the existing
+            # API contract that a duplicate page is surfaced as HTTP 409.
+            return None
+
+        # This hook opens its own connections and therefore must run after commit.
+        if created:
+            await self._apply_default_bank_template(bank_id, request_context)
+        logger.info(f"[MENTAL_MODELS] Created pinned mental model '{name}' for bank {bank_id}")
+        mm = self._row_to_mental_model(mm_row)
         node = self._row_to_knowledge_node(row)
         # Surface the mental-model metadata so the caller can render markdown or
         # schedule a content refresh without a second fetch.
@@ -15882,6 +15941,8 @@ class MemoryEngine(MemoryEngineInterface):
         *,
         result_metadata: dict[str, Any] | None = None,
         dedupe_by_bank: bool = False,
+        dedupe_by_bank_includes_processing: bool = False,
+        dedupe_excludes_operation_id: str | None = None,
         dedupe_in_flight_payload_key: str | None = None,
     ) -> dict[str, Any]:
         """Generic helper to submit an async operation.
@@ -15892,7 +15953,14 @@ class MemoryEngine(MemoryEngineInterface):
             task_type: Task type for the task payload (e.g., 'consolidation', 'batch_retain')
             task_payload: Additional task payload fields (operation_id and bank_id are added automatically)
             result_metadata: Optional metadata to store with the operation record
-            dedupe_by_bank: If True, skip creating a new task if one is already pending for this bank+operation_type
+            dedupe_by_bank: If True, skip creating a new task if one is already queued for this
+                bank+operation_type. Which statuses count as "queued" depends on
+                dedupe_by_bank_includes_processing below.
+            dedupe_by_bank_includes_processing: Widen dedupe_by_bank to also match a
+                *processing* job. Only correct for operations whose job drains its
+                own backlog to empty before finishing (see submit_async_graph_maintenance);
+                for watermark-based jobs like consolidation it would drop work that
+                arrived after the running job took its watermark.
             dedupe_in_flight_payload_key: If set, skip creating a new task when a pending or processing
                 operation of this type exists whose task_payload carries the same value for this key
                 (e.g. 'mental_model_id'). Narrower than dedupe_by_bank, which dedupes per bank.
@@ -15957,13 +16025,28 @@ class MemoryEngine(MemoryEngineInterface):
                     raise OperationValidationError(f"Bank '{bank_id}' not found", status_code=404)
 
                 if dedupe_by_bank:
-                    # Only check 'pending', not 'processing': a processing task uses a
-                    # watermark from when it started, so memories added after that need
-                    # a fresh run regardless.
+                    # Which statuses count as "already covered".
+                    #
+                    # 'pending' only, by default: a *processing* watermark-based task
+                    # (consolidation) fixed its watermark when it started, so memories
+                    # added after that need a fresh run regardless.
+                    #
+                    # Callers whose job drains its own backlog to empty before
+                    # finishing opt into 'processing' as well. Without it, dedup is
+                    # ineffective under load: the single pending row gets claimed
+                    # within milliseconds, the next submit sees no pending row and
+                    # inserts another, and the cycle repeats once per triggering
+                    # operation — producing hundreds of concurrent jobs for one bank
+                    # rather than the one the job body assumes is running.
+                    status_filter = (
+                        "status IN ('pending', 'processing')"
+                        if dedupe_by_bank_includes_processing
+                        else "status = 'pending'"
+                    )
                     pending = await conn.fetch(
                         f"""
-                        SELECT operation_id, task_payload FROM {fq_table("async_operations")}
-                        WHERE bank_id = $1 AND operation_type = $2 AND status = 'pending'
+                        SELECT operation_id, task_payload, status FROM {fq_table("async_operations")}
+                        WHERE bank_id = $1 AND operation_type = $2 AND {status_filter}
                         """,
                         bank_id,
                         operation_type,
@@ -15975,6 +16058,17 @@ class MemoryEngine(MemoryEngineInterface):
                     # JSON_VALUE returns NULL for the array-valued observation_scopes.
                     # (Scoped submits never reach here: they pass dedupe_by_bank=False.)
                     for row in pending:
+                        # A job that submits its own successor must not match itself.
+                        # The submitting operation is still 'processing' while its body
+                        # runs (the worker only marks it completed afterwards), so with
+                        # dedupe_by_bank_includes_processing the hand-off would dedupe
+                        # against its own row and silently do nothing. Compared in
+                        # Python rather than SQL because the operation_id cast is not
+                        # portable across the Postgres and Oracle backends.
+                        if dedupe_excludes_operation_id is not None and str(row["operation_id"]) == str(
+                            dedupe_excludes_operation_id
+                        ):
+                            continue
                         row_payload = row["task_payload"]
                         row_dict = json.loads(row_payload) if isinstance(row_payload, str) else (row_payload or {})
                         if row_dict.get("observation_scopes") is None:
@@ -16003,7 +16097,7 @@ class MemoryEngine(MemoryEngineInterface):
                                         row["operation_id"],
                                     )
                             logger.debug(
-                                f"{operation_type} task already pending for bank_id={bank_id}, "
+                                f"{operation_type} task already {row['status']} for bank_id={bank_id}, "
                                 f"skipping duplicate (existing operation_id={row['operation_id']})"
                             )
                             return {
@@ -16567,6 +16661,7 @@ class MemoryEngine(MemoryEngineInterface):
         bank_id: str,
         *,
         request_context: "RequestContext",
+        dedupe_excludes_operation_id: str | None = None,
         force_sweep: bool = False,
     ) -> dict[str, Any]:
         """Submit a graph-maintenance job to drain the bank's maintenance queues.
@@ -16575,8 +16670,9 @@ class MemoryEngine(MemoryEngineInterface):
         (``graph_maintenance_queue`` and ``entity_maintenance_queue``) are empty
         for this bank, so unconditional callers (e.g. every retain that may or
         may not have triggered a document upsert) don't generate empty worker
-        tasks. Deduplicates by bank when an existing pending job is already
-        scheduled.
+        tasks. Deduplicates by bank against a job that is already pending *or*
+        already running — graph maintenance drains its own queue to empty, so a
+        job that is mid-flight still covers work queued after it started.
 
         Args:
             force_sweep: Skip the empty-queue short-circuit and submit anyway.
@@ -16629,6 +16725,15 @@ class MemoryEngine(MemoryEngineInterface):
             task_type="graph_maintenance",
             task_payload=task_payload,
             dedupe_by_bank=True,
+            # Safe here (unlike consolidation): run_graph_maintenance_job loops
+            # until graph_maintenance_queue is empty for the bank, so a running
+            # job already covers rows enqueued while it runs. The job re-submits
+            # itself if anything lands in the gap between its final claim and
+            # completion.
+            dedupe_by_bank_includes_processing=True,
+            # Set by the job's own hand-off so it does not match its own
+            # still-'processing' row and suppress its successor.
+            dedupe_excludes_operation_id=dedupe_excludes_operation_id,
         )
 
     async def submit_async_refresh_mental_model(

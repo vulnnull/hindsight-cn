@@ -79,11 +79,12 @@ class ClaudeCodeLLM(LLMInterface):
         api_key: str,  # Will be ignored, uses CLI auth
         base_url: str,
         model: str,
-        reasoning_effort: str = "low",
+        reasoning_effort: str | None = None,
         **kwargs: Any,
     ):
         """Initialize Claude Code LLM provider."""
         super().__init__(provider, api_key, base_url, model, reasoning_effort, **kwargs)
+        self._warn_reasoning_effort_unsupported()
 
         # Verify Claude Agent SDK is available
         try:

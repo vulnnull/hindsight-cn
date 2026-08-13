@@ -297,7 +297,7 @@ def create_llm_provider(
     api_key: str,
     base_url: str,
     model: str,
-    reasoning_effort: str,
+    reasoning_effort: str | None,
     groq_service_tier: str | None = None,
     openai_service_tier: str | None = None,
     bedrock_service_tier: str | None = None,
@@ -323,7 +323,9 @@ def create_llm_provider(
         api_key: API key (may be None for local providers or OAuth providers).
         base_url: Base URL for the API.
         model: Model name.
-        reasoning_effort: Reasoning effort level for supported providers.
+        reasoning_effort: Reasoning effort level for supported providers, or None when
+            the operator configured none (providers then fall back to the default level
+            and may skip the parameter entirely).
         groq_service_tier: Groq service tier (for Groq provider) - "on_demand", "flex", or "auto".
         openai_service_tier: OpenAI service tier (for OpenAI provider) - None (default) or "flex" (50% cheaper).
         bedrock_service_tier: Bedrock service tier (for Bedrock provider) - None (default), "flex", "priority", or "reserved".
@@ -637,7 +639,7 @@ class LLMProvider:
         api_key: str,
         base_url: str,
         model: str,
-        reasoning_effort: str = "low",
+        reasoning_effort: str | None = None,
         groq_service_tier: str | None = None,
         openai_service_tier: str | None = None,
         bedrock_service_tier: str | None = None,
@@ -666,7 +668,8 @@ class LLMProvider:
             api_key: API key.
             base_url: Base URL for the API.
             model: Model name.
-            reasoning_effort: Reasoning effort level for supported providers.
+            reasoning_effort: Reasoning effort level for supported providers, or None
+                when the operator configured none.
             groq_service_tier: Groq service tier ("on_demand", "flex", "auto") - from config.
             openai_service_tier: OpenAI service tier (None or "flex") - from config.
             bedrock_service_tier: Bedrock service tier (None, "flex", "priority", "reserved") - from config.
@@ -1437,7 +1440,6 @@ class LLMProvider:
             DEFAULT_LLM_OPENAI_SERVICE_TIER,
             DEFAULT_LLM_PROMPT_CACHE_ENABLED,
             DEFAULT_LLM_PROVIDER,
-            DEFAULT_LLM_REASONING_EFFORT,
             DEFAULT_LLM_STRUCTURED_OUTPUT_FORCED_TOOL,
             DEFAULT_LLM_TIMEOUT,
             ENV_LLM_API_KEY,
@@ -1499,7 +1501,7 @@ class LLMProvider:
             api_key=api_key,
             base_url=base_url,
             model=model,
-            reasoning_effort=os.getenv(ENV_LLM_REASONING_EFFORT, DEFAULT_LLM_REASONING_EFFORT),
+            reasoning_effort=os.getenv(ENV_LLM_REASONING_EFFORT) or None,
             extra_body=extra_body,
             default_headers=default_headers,
             cache_affinity=cache_affinity,

@@ -100,6 +100,10 @@ class MCPToolsConfig:
     retain_description: str | None = None
     recall_description: str | None = None
 
+    # How to resolve the allowlisted passthrough headers (set by MCP middleware).
+    # Appended last so existing positional construction keeps its meaning.
+    extra_headers_resolver: Callable[[], dict[str, str]] | None = None
+
     # Retain behavior
 
 
@@ -113,8 +117,13 @@ def _get_request_context(config: MCPToolsConfig) -> RequestContext:
     tenant_id = config.tenant_id_resolver() if config.tenant_id_resolver else None
     api_key_id = config.api_key_id_resolver() if config.api_key_id_resolver else None
     mcp_authenticated = config.mcp_authenticated_resolver() if config.mcp_authenticated_resolver else False
+    extra_headers = config.extra_headers_resolver() if config.extra_headers_resolver else {}
     return RequestContext(
-        api_key=api_key, tenant_id=tenant_id, api_key_id=api_key_id, mcp_authenticated=mcp_authenticated
+        api_key=api_key,
+        tenant_id=tenant_id,
+        api_key_id=api_key_id,
+        mcp_authenticated=mcp_authenticated,
+        extra_headers=extra_headers,
     )
 
 
