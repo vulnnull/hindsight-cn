@@ -21,7 +21,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { deriveBankId } from "./bank";
 import type { Config } from "./config";
 import { applyBankConfig, loadConfig } from "./config";
-import { diag } from "./diag";
+import { diag, diagFilePath } from "./diag";
 import { log, setLogLevel } from "./log";
 import { startBackgroundSeed } from "./seed";
 import type { ClientOpts } from "./hindsight";
@@ -102,6 +102,10 @@ export async function buildHookOutput(args: {
   // instructs the agent to call hindsight_reflect itself when a new goal is set.
   let reflectAnswer = cached.reflectAnswer;
   let reflectRanThisTurn = false;
+  // Set ONLY by the catch below. An empty answer is not a failure: reflect can legitimately have
+  // nothing to say on a sparse bank (diag records that as reflect_empty), and reporting it as a
+  // failure would tell the user the plugin broke on exactly the sessions where it did not.
+  let reflectFailed = false;
   const deferInitialReflect = cached.deferInitialReflect === true;
   if (deferInitialReflect) {
     // A new bank has no useful history yet. Do not burn the once-per-session synthesis on prompt
@@ -128,6 +132,7 @@ export async function buildHookOutput(args: {
       });
     } catch (e) {
       reflectAnswer = ""; // ran and failed — don't retry every turn; the diag trail records it
+      reflectFailed = true;
       log.warn(harness, "reflect failed — session runs without memory", {
         error: String((e as Error)?.message || e).slice(0, 200),
       });
@@ -193,6 +198,12 @@ export async function buildHookOutput(args: {
     notice =
       `${brandWord()} · goal: recall this repo's past decisions about “${excerpt}”\n` +
       `↳ ${preview.length > 140 ? `${preview.slice(0, 140)}…` : preview}`;
+  } else if (reflectFailed) {
+    // The failure is already in the diag trail and plugin.log, but both are files nobody is
+    // tailing mid-session, so a memory-less session looked exactly like a healthy one (#3443).
+    // One terse line pointing at the trail — not an explanation, and not advice to the agent:
+    // this fires at most once per session, on the turn reflect ran.
+    notice = `${brandWord()} · no memory this turn — see ${diagFilePath()}`;
   }
 
   return { context: kept.length ? kept.join("\n\n") : undefined, notice, pagesKnown: pages.length };

@@ -814,11 +814,13 @@ def test_query_analyzer_dateparser_crash_returns_no_constraint(query_analyzer, m
     def boom(*args, **kwargs):
         raise IndexError("list index out of range")
 
-    monkeypatch.setattr(query_analyzer, "_search_dates", boom)
+    monkeypatch.setattr(query_analyzer, "_find_dates", boom)
 
-    # Use a query that doesn't match any of the period regex patterns so the
-    # code path actually reaches the dateparser call.
-    query = "tell me what happened recently with the project"
+    # The query must match no period regex *and* carry a scoreable token, so it
+    # reaches the dateparser call rather than being rejected by the pre-filter
+    # (a query with no digit and no date word can never produce a constraint,
+    # so it short-circuits before dateparser runs at all).
+    query = "tell me what happened on the 3rd with the project"
 
     with caplog.at_level(logging.WARNING):
         analysis = query_analyzer.analyze(query, reference_date)
@@ -982,44 +984,34 @@ def test_query_analyzer_day_month_year_stays_exact(query_analyzer, query, expect
     assert analysis.temporal_constraint.end_date.date() == expected.date()
 
 
-def test_query_analyzer_default_keeps_auto_detection(monkeypatch):
-    """Default (languages=None) must not pass `languages` to dateparser.
+def test_query_analyzer_default_keeps_auto_detection():
+    """Default (languages=None) must keep dateparser's full-locale auto-detection.
 
-    Auto-detection is the pre-existing behavior; the new option is opt-in only.
+    Auto-detection is the pre-existing behavior; restricting is opt-in only.
     """
+    from dateparser.search import _search_with_detection
+
     analyzer = DateparserQueryAnalyzer()
     analyzer.load()
 
-    captured = {}
-
-    def fake_search_dates(query, **kwargs):
-        captured.update(kwargs)
-        return None
-
-    monkeypatch.setattr(analyzer, "_search_dates", fake_search_dates)
-
-    # Query that no period regex matches, so the dateparser call is reached.
-    analyzer.analyze("tell me what happened recently with the project", datetime(2025, 1, 15, 12, 0, 0))
-
-    assert "languages" not in captured, "default must leave dateparser's auto-detection untouched"
+    assert len(analyzer._locales) == len(_search_with_detection.available_language_map), (
+        "default must detect across every locale dateparser ships"
+    )
 
 
-def test_query_analyzer_languages_passed_through(monkeypatch):
-    """An explicit language list must reach search_dates unchanged."""
+def test_query_analyzer_languages_passed_through():
+    """An explicit language list must restrict detection to exactly those locales."""
     analyzer = DateparserQueryAnalyzer(languages=["en", "zh"])
     analyzer.load()
 
-    captured = {}
+    assert [loc.shortname for loc in analyzer._locales] == ["en", "zh"]
 
-    def fake_search_dates(query, **kwargs):
-        captured.update(kwargs)
-        return None
 
-    monkeypatch.setattr(analyzer, "_search_dates", fake_search_dates)
-
-    analyzer.analyze("tell me what happened recently with the project", datetime(2025, 1, 15, 12, 0, 0))
-
-    assert captured.get("languages") == ["en", "zh"]
+def test_query_analyzer_rejects_unknown_language():
+    """An unusable language list must fail loudly rather than silently widen."""
+    analyzer = DateparserQueryAnalyzer(languages=["en", "not-a-language"])
+    with pytest.raises(ValueError, match="not-a-language"):
+        analyzer.load()
 
 
 def test_query_analyzer_warmup_uses_same_languages(monkeypatch):
@@ -1029,25 +1021,19 @@ def test_query_analyzer_warmup_uses_same_languages(monkeypatch):
     would leave part of dateparser's lazy-load cost on the first real query.
     """
     calls = []
+    real_find_dates = DateparserQueryAnalyzer._find_dates
 
-    def fake_search_dates(query, **kwargs):
-        calls.append((query, kwargs))
-        return None
+    def spy(self, query, **kwargs):
+        calls.append((query, [loc.shortname for loc in self._locales]))
+        return real_find_dates(self, query, **kwargs)
 
-    import hindsight_api.engine.query_analyzer as qa_module
-
-    monkeypatch.setattr(qa_module, "search_dates", fake_search_dates, raising=False)
-    monkeypatch.setitem(
-        __import__("sys").modules,
-        "dateparser.search",
-        type("M", (), {"search_dates": staticmethod(fake_search_dates)}),
-    )
+    monkeypatch.setattr(DateparserQueryAnalyzer, "_find_dates", spy)
 
     analyzer = DateparserQueryAnalyzer(languages=["en"])
     analyzer.load()
 
     assert calls, "load() should fire a warm-up call"
-    assert calls[0][1].get("languages") == ["en"], "warm-up must use the configured locale set"
+    assert calls[0][1] == ["en"], "warm-up must use the configured locale set"
 
 
 def test_query_analyzer_explicit_date_with_restricted_language(query_analyzer):

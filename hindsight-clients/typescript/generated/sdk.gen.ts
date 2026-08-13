@@ -1431,7 +1431,7 @@ export const getBankConfig = <ThrowOnError extends boolean = false>(
 /**
  * Update bank configuration
  *
- * Update configuration overrides for a bank. Only hierarchical fields can be overridden (LLM settings, retention parameters, etc.). Keys can be provided in Python field format (llm_provider) or environment variable format (HINDSIGHT_API_LLM_PROVIDER).
+ * Update configuration overrides for a bank. Only hierarchical behavioral settings can be overridden (retention parameters, recall settings, etc.). Keys can be provided in Python field format (retain_extraction_mode) or environment variable format (HINDSIGHT_API_RETAIN_EXTRACTION_MODE).
  */
 export const updateBankConfig = <ThrowOnError extends boolean = false>(
   options: Options<UpdateBankConfigData, ThrowOnError>

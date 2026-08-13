@@ -3738,10 +3738,10 @@ paths:
       tags:
       - Banks
     patch:
-      description: "Update configuration overrides for a bank. Only hierarchical fields\
-        \ can be overridden (LLM settings, retention parameters, etc.). Keys can be\
-        \ provided in Python field format (llm_provider) or environment variable format\
-        \ (HINDSIGHT_API_LLM_PROVIDER)."
+      description: "Update configuration overrides for a bank. Only hierarchical behavioral\
+        \ settings can be overridden (retention parameters, recall settings, etc.).\
+        \ Keys can be provided in Python field format (retain_extraction_mode) or\
+        \ environment variable format (HINDSIGHT_API_RETAIN_EXTRACTION_MODE)."
       operationId: update_bank_config
       parameters:
       - explode: false
@@ -4862,11 +4862,9 @@ components:
       example:
         bank_id: my-bank
         config:
-          llm_model: gpt-4
-          llm_provider: openai
+          retain_chunk_size: 3000
           retain_extraction_mode: verbose
         overrides:
-          llm_model: gpt-4
           retain_extraction_mode: verbose
       properties:
         bank_id:
@@ -4891,14 +4889,13 @@ components:
       description: Request model for updating bank configuration.
       example:
         updates:
-          llm_model: claude-sonnet-4-5
           retain_custom_instructions: Extract technical details carefully
-          retain_extraction_mode: verbose
+          retain_extraction_mode: custom
       properties:
         updates:
           additionalProperties: {}
           description: Configuration overrides. Keys can be in Python field format
-            (llm_provider) or environment variable format (HINDSIGHT_API_LLM_PROVIDER).
+            (retain_extraction_mode) or environment variable format (HINDSIGHT_API_RETAIN_EXTRACTION_MODE).
             Only hierarchical fields can be overridden per-bank.
           title: Updates
       required:
@@ -8828,7 +8825,7 @@ components:
         completed_at: 2024-01-15T10:31:30Z
         created_at: 2024-01-15T10:30:00Z
         operation_id: 550e8400-e29b-41d4-a716-446655440000
-        operation_type: refresh_mental_models
+        operation_type: refresh_mental_model
         status: completed
         updated_at: 2024-01-15T10:31:30Z
       properties:
@@ -8892,6 +8889,7 @@ components:
         operations:
         - created_at: 2024-01-15T10:30:00Z
           id: 550e8400-e29b-41d4-a716-446655440000
+          items_count: 5
           status: pending
           task_type: retain
         total: 150
@@ -9999,14 +9997,18 @@ components:
     VersionResponse:
       description: Response model for the version/info endpoint.
       example:
-        api_version: 0.4.0
+        api_version: 0.9.0
         features:
+          audit_log: false
           bank_config_api: false
+          bank_llm_health: true
           document_export_api: true
           document_import_api: true
           file_upload_api: true
+          llm_trace: false
           mcp: true
           observations: false
+          store_document_text: true
           worker: true
       properties:
         api_version:

@@ -816,9 +816,11 @@ async def retrieve_all_fact_types_parallel(
     temporal_extraction_start = time.time()
     temporal_constraint = None
     if enable_temporal_retrieval:
-        from .temporal_extraction import extract_temporal_constraint
+        from .temporal_extraction import extract_temporal_constraint_async
 
-        temporal_constraint = extract_temporal_constraint(
+        # Off the event loop: this is pure CPU and would otherwise stall every
+        # other in-flight request in the process, not just this recall.
+        temporal_constraint = await extract_temporal_constraint_async(
             query_text, reference_date=question_date, analyzer=query_analyzer
         )
     temporal_extraction_time = time.time() - temporal_extraction_start

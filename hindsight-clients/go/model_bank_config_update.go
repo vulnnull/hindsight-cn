@@ -21,7 +21,7 @@ var _ MappedNullable = &BankConfigUpdate{}
 
 // BankConfigUpdate Request model for updating bank configuration.
 type BankConfigUpdate struct {
-	// Configuration overrides. Keys can be in Python field format (llm_provider) or environment variable format (HINDSIGHT_API_LLM_PROVIDER). Only hierarchical fields can be overridden per-bank.
+	// Configuration overrides. Keys can be in Python field format (retain_extraction_mode) or environment variable format (HINDSIGHT_API_RETAIN_EXTRACTION_MODE). Only hierarchical fields can be overridden per-bank.
 	Updates map[string]interface{} `json:"updates"`
 }
 
