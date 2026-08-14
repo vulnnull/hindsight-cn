@@ -686,7 +686,7 @@ async def _streaming_batch_write_ext(
             (unit_id, resolved_entity_ids[idx], fact_date)
             for idx, (unit_id, _local_idx, fact_date) in enumerate(remapped_entity_to_unit)
         ]
-        await entity_resolver.record_unit_entity_postings(unit_entity_pairs, bank_id=bank_id)
+        await entity_resolver.record_unit_entity_postings(unit_entity_pairs, bank_id=bank_id, txn=ext_txn)
 
     # ---- CONNECTION PHASE (short transaction: local metadata + commit witness) ----
     try:
@@ -864,7 +864,7 @@ async def _delta_batch_write_ext(
             (unit_id, resolved_entity_ids[idx], fact_date)
             for idx, (unit_id, _local_idx, fact_date) in enumerate(remapped_entity_to_unit)
         ]
-        await entity_resolver.record_unit_entity_postings(unit_entity_pairs, bank_id=bank_id)
+        await entity_resolver.record_unit_entity_postings(unit_entity_pairs, bank_id=bank_id, txn=ext_txn)
 
     # ---- CONNECTION PHASE (short transaction: local metadata + tombstones + witness) ----
     try:
@@ -2152,6 +2152,10 @@ async def _streaming_retain_batch(
                                 store_document_text=getattr(config, "store_document_text", True),
                                 txn=_edge_txn,
                             )
+                            # Re-record the witness now that the group's writes have happened, so
+                            # the row carries what they actually wrote. `begin_txn` recorded it
+                            # before any write existed; the upsert widens rather than replaces.
+                            await _edge_provider.write_txn_witness(_edge_txn, conn=conn, fq_table=fq_table)
                         doc_tracking_done[0] = True
                         # Memory: combined_content has been persisted; release
                         # it now so the rest of the consumer loop doesn't pin
@@ -2416,6 +2420,11 @@ async def _streaming_retain_batch(
                         txn=_group_txn,
                     )
 
+                    # Last thing inside the transaction: re-record the witness now that this
+                    # batch's writes have happened, so the row carries what they actually wrote.
+                    # `begin_txn` above recorded it before any write existed; the upsert widens.
+                    await _provider.write_txn_witness(_group_txn, conn=conn, fq_table=fq_table)
+
                 # Postgres committed this batch: publish its write-group. If it had aborted,
                 # this is skipped and the recovery sweep resolves the undecided txn (spec §5).
                 await _provider.decide_txn(_group_txn, commit=True)
@@ -2594,6 +2603,10 @@ async def _streaming_retain_batch(
                             store_document_text=getattr(config, "store_document_text", True),
                             txn=_edge_txn,
                         )
+                        # Re-record the witness now that the group's writes have happened, so the
+                        # row carries what they actually wrote. `begin_txn` recorded it before any
+                        # write existed; the upsert widens rather than replaces.
+                        await _edge_provider.write_txn_witness(_edge_txn, conn=conn, fq_table=fq_table)
                     doc_tracking_done[0] = True
                     # Memory: combined_content has been persisted and won't be
                     # read again — release the per-document text now.
@@ -3229,6 +3242,12 @@ async def _try_delta_retain(
                     ops=pool.ops,
                     txn=_group_txn,
                 )
+
+                # Last thing inside the transaction: re-record the witness now that the group's
+                # writes have happened, so the row carries what they actually wrote. `begin_txn`
+                # above recorded it before any write existed; the upsert widens rather than
+                # replaces.
+                await _provider.write_txn_witness(_group_txn, conn=conn, fq_table=fq_table)
 
             # Postgres has committed: publish the write-group so its writes become visible.
             # If the transaction had aborted instead, this line is skipped and the recovery

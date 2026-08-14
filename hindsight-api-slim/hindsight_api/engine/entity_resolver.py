@@ -1246,6 +1246,7 @@ class EntityResolver:
         self,
         unit_entity_pairs: list[tuple[str, str]] | list[tuple[str, str, datetime | None]],
         bank_id: str | None = None,
+        txn=None,
     ):
         """Store-owned variant of :meth:`link_units_to_entities_batch` that touches NO
         Postgres connection.
@@ -1257,6 +1258,10 @@ class EntityResolver:
         its connection-free store phase and never hold the data-plane connection across the
         object-store write. NOT for the Postgres store, whose posting is a real ``unit_entities``
         INSERT that requires the connection.
+
+        ``txn`` is the caller's write-group handle. For a store that keeps the posting on the
+        memory, this re-writes rows the same write-group just created, so it belongs to that
+        group — see :meth:`MemoriesExtension.record_unit_entities`.
         """
         if not unit_entity_pairs:
             return
@@ -1265,10 +1270,10 @@ class EntityResolver:
             (t[0], t[1], t[2] if len(t) >= 3 else None)  # type: ignore[misc]
             for t in unit_entity_pairs
         ]
-        return await self._link_units_to_entities_batch_impl(None, normalized, bank_id)
+        return await self._link_units_to_entities_batch_impl(None, normalized, bank_id, txn=txn)
 
     async def _link_units_to_entities_batch_impl(
-        self, conn, unit_entity_pairs: list[tuple[str, str, datetime | None]], bank_id: str | None = None
+        self, conn, unit_entity_pairs: list[tuple[str, str, datetime | None]], bank_id: str | None = None, txn=None
     ):
         # Sorted bulk insert to prevent deadlocks from inconsistent lock ordering
         # across concurrent transactions on the unit_entities unique index.
@@ -1289,6 +1294,7 @@ class EntityResolver:
             bank_id=bank_id,
             unit_ids=unit_ids,
             entity_ids=entity_ids,
+            txn=txn,
         )
 
         # Build maps keyed by unit_id:

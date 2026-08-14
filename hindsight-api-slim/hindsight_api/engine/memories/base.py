@@ -1205,7 +1205,15 @@ class MemoriesExtension(Extension, ABC):
     # join table to sweep, so those passes are no-ops for it.
 
     async def record_unit_entities(
-        self, *, conn, ops, fq_table, bank_id: str | None = None, unit_ids: list[Any], entity_ids: list[Any]
+        self,
+        *,
+        conn,
+        ops,
+        fq_table,
+        bank_id: str | None = None,
+        unit_ids: list[Any],
+        entity_ids: list[Any],
+        txn: "MemoryTxn | None" = None,
     ) -> None:
         """Record the unit→entity postings for a batch of memories.
 
@@ -1216,6 +1224,14 @@ class MemoriesExtension(Extension, ABC):
         the memory (rather than in a global join table) needs to know which
         namespace the units live in — the Postgres join is keyed by global unit id
         and ignores it.
+
+        ``txn`` is the caller's write-group handle. For a store that keeps the
+        posting ON the memory this call is a re-write of rows the same write-group
+        already created, so it belongs to that group: passing the handle keeps the
+        two writes atomic together and — for a store that records what its groups
+        wrote — keeps this write inside the group's accounting. Ignored by the
+        Postgres store, whose posting is an ordinary row in the caller's own
+        transaction.
         """
 
     async def enqueue_relink_victims(
