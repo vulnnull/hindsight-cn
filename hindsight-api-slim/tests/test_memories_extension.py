@@ -752,6 +752,38 @@ def test_a_store_answers_capabilities_per_bank():
     assert store.writes_memory_rows_in_sql is False
 
 
+def test_assert_writable_defaults_to_allowing_everything():
+    """No existing store needs a change: the default is a no-op, so a store that has never heard
+    of write windows keeps taking every write."""
+    import asyncio
+
+    asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
+        PostgresMemories({}).assert_writable("any-bank")
+    )
+
+
+async def test_retain_refuses_a_bank_the_store_has_closed_to_writes(restore_default_store):
+    """A retain writes documents, chunks and entities through SQL paths that never reach the
+    memories interface, so a store cannot close a bank from its own methods alone. `retain_batch`
+    asks first — and asks BEFORE anything is written, which is what this pins: every other
+    argument here is None, so a guard that ran even one step late would raise something else.
+    """
+    from hindsight_api.engine.memories.base import StoreWriteUnavailable
+    from hindsight_api.engine.retain import orchestrator
+
+    class ClosedForWrites(InMemoryMemories):
+        name = "closed"
+
+        async def assert_writable(self, bank_id):
+            if bank_id == "frozen-bank":
+                raise StoreWriteUnavailable(f"bank {bank_id} is mid-cutover")
+
+    set_memories(ClosedForWrites({}))
+
+    with pytest.raises(StoreWriteUnavailable, match="mid-cutover"):
+        await orchestrator.retain_batch(None, None, None, None, None, "frozen-bank", [{"content": "hello"}], None)
+
+
 # ---------------------------------------------------------------------------
 # Interface conformance: the stub must stay a COMPLETE, signature-compatible
 # implementation of every MemoriesExtension method. This is the guard that keeps

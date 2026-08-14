@@ -18,7 +18,9 @@ so the slot limits under test are exact and not a function of ambient in-flight
 work in the shared test database.
 """
 
+import asyncio
 import json
+import os
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -32,16 +34,89 @@ pytestmark = pytest.mark.xdist_group("worker_tests")
 _TABLE = "async_operations"
 
 
+@pytest.fixture(scope="session")
+def isolated_ops_schema(pg0_db_url):
+    """A private, migrated Postgres schema for this file's claim tests.
+
+    ``ops.claim_tasks`` scans the whole schema on the connection's search_path,
+    and tests like ``test_not_starved_by_newer_pending_work`` assert on an *exact*
+    single-slot claim — both are meaningless if another pytest-xdist worker's
+    pending rows are visible. The previous fixture kept itself clean with a global
+    ``DELETE FROM async_operations WHERE status = 'pending'``, which under xdist
+    deleted those other workers' in-flight operations mid-run (e.g. a refresh op
+    sitting ``pending`` for the window between ``_submit_async_operation``
+    committing it and ``SyncTaskBackend`` marking it ``completed``, which then
+    read back as ``not_found`` and flaked an unrelated test).
+
+    So give this file its own schema: "the whole schema" is then only its own
+    rows, and its cleanup can never touch ``public``. One schema per worker,
+    created + migrated once and dropped at session end. ``search_path`` is set on
+    the pool in :func:`backend`, so every table reference here resolves into it.
+    """
+    from hindsight_api.engine.db import create_database_backend
+    from hindsight_api.pg0 import resolve_database_url
+
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "master")
+    schema = f"gmclaim_iso_{worker}"
+
+    async def _provision() -> str:
+        url = await resolve_database_url(pg0_db_url)
+        b = create_database_backend("postgresql")
+        await b.initialize(url, min_size=1, max_size=2)
+        try:
+            async with b.get_pool().acquire() as conn:
+                # Rebuild from scratch so a schema left by a crashed prior run
+                # can't carry stale state into this session.
+                await conn.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+                await conn.execute(f'CREATE SCHEMA "{schema}"')
+            # run_migrations is sync; call it with the loop running (as elsewhere
+            # in the suite) — it builds banks/async_operations/etc. in the schema.
+            b.run_migrations(url, schema=schema)
+        finally:
+            await b.shutdown()
+        return url
+
+    async def _drop(url: str) -> None:
+        b = create_database_backend("postgresql")
+        await b.initialize(url, min_size=1, max_size=2)
+        try:
+            async with b.get_pool().acquire() as conn:
+                await conn.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        finally:
+            await b.shutdown()
+
+    loop = asyncio.new_event_loop()
+    try:
+        url = loop.run_until_complete(_provision())
+    finally:
+        loop.close()
+
+    yield schema
+
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(_drop(url))
+    finally:
+        loop.close()
+
+
 @pytest_asyncio.fixture
-async def backend(pg0_db_url):
-    """Create a DatabaseBackend for claim tests."""
+async def backend(pg0_db_url, isolated_ops_schema):
+    """Create a DatabaseBackend whose pool is pinned to this file's private schema."""
     from hindsight_api.engine.db import create_database_backend
     from hindsight_api.pg0 import resolve_database_url
 
     resolved_url = await resolve_database_url(pg0_db_url)
 
+    async def _use_isolated_schema(conn):
+        # init runs once per new connection, setup runs on every acquire (after
+        # asyncpg's release-time RESET ALL), so this pins search_path for the
+        # pool's whole lifetime — every unqualified table resolves into the
+        # private schema, so claims and cleanup never see the shared public one.
+        await conn.execute(f'SET search_path TO "{isolated_ops_schema}", public')
+
     b = create_database_backend("postgresql")
-    await b.initialize(resolved_url, min_size=2, max_size=10, command_timeout=30)
+    await b.initialize(resolved_url, min_size=2, max_size=10, command_timeout=30, init_callback=_use_isolated_schema)
     yield b
     await b.shutdown()
 
@@ -54,11 +129,10 @@ async def pool(backend):
 
 @pytest_asyncio.fixture
 async def clean_operations(pool):
-    """Isolate these tests from other pending work in the shared schema.
+    """Clear leftovers from a prior test in this group.
 
-    Same rationale as test_worker.py's fixture: the claim queries scan the whole
-    schema, so stale pending rows from other tests would be claimed here and
-    consume the (deliberately small) slot limits under test.
+    Safe to be broad now: the pool is pinned to this file's private schema
+    (:func:`isolated_ops_schema`), so this only ever touches its own rows.
     """
     await pool.execute("DELETE FROM async_operations WHERE status = 'pending'")
     yield

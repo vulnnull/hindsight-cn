@@ -63,6 +63,21 @@ class MemoryTxn:
     deliberately empty: only the store that minted a handle interprets it."""
 
 
+class StoreWriteUnavailable(RuntimeError):
+    """The store cannot accept writes for this bank *right now*, but will shortly.
+
+    Distinct from a failure: nothing is wrong, the bank is briefly closed to writes — a store
+    migrating a bank between backends holds it for a few seconds while it takes the final delta
+    and flips. The caller should retry rather than surface an error, which is why the API maps
+    this to 503 with a `Retry-After` rather than a 5xx that reads as a bug.
+
+    Raised from :meth:`MemoriesExtension.assert_writable` and from bank-scoped write methods.
+    """
+
+    #: Seconds a caller should wait before retrying. A cutover freeze is drain + a reconcile.
+    retry_after: int = 30
+
+
 # Keys used in an implementation's opaque metadata bag for the `memory_units`
 # columns it has no first-class model of. These round-trip verbatim: they are
 # stored without interpretation and returned on every hit, which is what lets
@@ -451,6 +466,21 @@ class MemoriesExtension(Extension, ABC):
         """Per-bank form of :attr:`owns_document_store`. Defaults to the class attribute; a store
         that keeps some banks in a separate backend overrides it. See :meth:`writes_memory_rows_in_sql_for`."""
         return self.owns_document_store
+
+    async def assert_writable(self, bank_id: str) -> None:
+        """Refuse the operation if the store cannot take writes for this bank right now.
+
+        Called at the entry to a *multi-store* operation — retain, which writes documents, chunks
+        and entities through paths that are not this interface at all. Every write that does go
+        through a store method is already covered by the method itself; this exists for the ones
+        that are not, so a store can close a bank completely rather than only partly.
+
+        The default is a no-op, so no existing store needs a change. A store that migrates banks
+        between backends raises :class:`StoreWriteUnavailable` while a bank is mid-cutover: the
+        window is seconds, and a retain that started before it and writes after it would land in
+        the store that is about to stop being authoritative.
+        """
+        return None
 
     # ------------------------------------------------------------------ lifecycle
 

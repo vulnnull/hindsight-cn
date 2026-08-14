@@ -1121,6 +1121,15 @@ async def retain_batch(
         didn't dedup (caller should treat as "bill full submitted content").
         See ``RetainResult.processed_content_tokens`` for details.
     """
+    # Before anything is written. A retain is the one operation that writes to BOTH stores —
+    # documents, chunks and entities go to SQL through paths that never touch the memories
+    # interface — so a store that needs a bank closed to writes (a backend cutover) cannot enforce
+    # it from its own methods alone. Checked here, at the single entry every retain passes through,
+    # rather than at each of the writes it fans out into.
+    from ..memories import get_memories
+
+    await get_memories().assert_writable(bank_id)
+
     start_time = time.time()
     total_chars = sum(len(item.get("content", "")) for item in contents_dicts)
 

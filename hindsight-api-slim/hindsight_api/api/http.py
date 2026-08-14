@@ -4073,6 +4073,19 @@ def _register_routes(app: FastAPI):
             content={"detail": str(exc)},
         )
 
+    # A bank briefly closed to writes — a store migrating it between backends holds it for a few
+    # seconds. 503 + Retry-After rather than a 500: nothing is broken, and the difference decides
+    # whether a client retries or reports a failure to the user.
+    from ..engine.memories.base import StoreWriteUnavailable
+
+    @app.exception_handler(StoreWriteUnavailable)
+    async def store_write_unavailable_handler(request, exc: StoreWriteUnavailable):
+        return JSONResponse(
+            status_code=503,
+            content={"detail": str(exc)},
+            headers={"Retry-After": str(getattr(exc, "retry_after", 30))},
+        )
+
     async def _readiness_response() -> JSONResponse:
         """Shared body of /health and /health/ready: 200 if healthy, 503 if not."""
         health = await app.state.memory.health_check()
