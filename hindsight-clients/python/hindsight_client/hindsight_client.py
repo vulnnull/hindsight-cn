@@ -1529,6 +1529,7 @@ class Hindsight:
         source_query: str | None = None,
         tags: list[str] | None = None,
         max_tokens: int | None = None,
+        trigger: dict[str, Any] | None = None,
     ):
         """
         Rename/move a knowledge node and/or update a page's options (sync wrapper —
@@ -1545,6 +1546,8 @@ class Hindsight:
             source_query: Pages only — new question. Changing it rebuilds the page.
             tags: Pages only — replaces the page's tags (pass [] to clear)
             max_tokens: Pages only — new content budget
+            trigger: Pages only — refresh settings to change, applied as a patch: the
+                keys you pass are updated and the rest keep the page's current values
 
         Returns:
             KnowledgeNode
@@ -1566,6 +1569,8 @@ class Hindsight:
             fields["tags"] = tags
         if max_tokens is not None:
             fields["max_tokens"] = max_tokens
+        if trigger is not None:
+            fields["trigger"] = trigger
 
         request_obj = update_node_request.UpdateNodeRequest(**fields)
 
@@ -1737,18 +1742,34 @@ class Hindsight:
 
         return _run_async(self._directives_api.create_directive(bank_id, request_obj, _request_timeout=self._timeout))
 
-    def list_directives(self, bank_id: str, tags: list[str] | None = None):
+    def list_directives(
+        self,
+        bank_id: str,
+        tags: list[str] | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+    ):
         """
         List all directives in a bank (sync wrapper — use ``await client.directives.list_directives(...)`` in async code).
 
         Args:
             bank_id: The memory bank ID
             tags: Optional tags to filter by
+            limit: Maximum number of directives to return
+            offset: Number of directives to skip (for pagination)
 
         Returns:
-            ListDirectivesResponse with items
+            ListDirectivesResponse with items and the total matching the filter
         """
-        return _run_async(self._directives_api.list_directives(bank_id, tags=tags, _request_timeout=self._timeout))
+        return _run_async(
+            self._directives_api.list_directives(
+                bank_id,
+                tags=tags,
+                limit=limit,
+                offset=offset,
+                _request_timeout=self._timeout,
+            )
+        )
 
     def get_directive(self, bank_id: str, directive_id: str):
         """

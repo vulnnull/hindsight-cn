@@ -1892,7 +1892,7 @@ async def _trigger_mental_model_refreshes(
         if consolidated_tags:
             candidates = await conn.fetch(
                 f"""
-                SELECT id, name, tags, last_refreshed_at, trigger
+                SELECT id, name, tags, last_refreshed_at, last_memory_seen_at, trigger
                 FROM {fq_table("mental_models")}
                 WHERE bank_id = $1
                   AND (trigger->>'refresh_after_consolidation')::boolean = true
@@ -1907,7 +1907,7 @@ async def _trigger_mental_model_refreshes(
         else:
             candidates = await conn.fetch(
                 f"""
-                SELECT id, name, tags, last_refreshed_at, trigger
+                SELECT id, name, tags, last_refreshed_at, last_memory_seen_at, trigger
                 FROM {fq_table("mental_models")}
                 WHERE bank_id = $1
                   AND (trigger->>'refresh_after_consolidation')::boolean = true

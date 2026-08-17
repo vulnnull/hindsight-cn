@@ -106,6 +106,39 @@ async def _count_refresh_ops(memory: MemoryEngine, bank_id: str) -> int:
 
 
 @pytest.mark.asyncio
+async def test_refresh_operations_name_the_model_they_refreshed(memory: MemoryEngine, request_context, monkeypatch):
+    """The operations *list* carries `mental_model_id` for a refresh.
+
+    These operations have no `document_id`, and the list carries no `result_metadata`
+    either, so without it the log cannot say which model an operation refreshed — a bank
+    with hundreds of models is undiagnosable from the list alone. The single-operation
+    read already answers it through `result_metadata`, so it gets no duplicate field.
+    """
+    bank = await _make_bank(memory, request_context)
+    async with memory._pool.acquire() as conn:
+        mm_id = await _insert_mm(conn, bank, refresh_cron="*/5 * * * *", last_refreshed_offset="1 day")
+    _stall_worker(memory, monkeypatch)
+
+    submitted = await memory.submit_async_refresh_mental_model(
+        bank_id=bank, mental_model_id=mm_id, request_context=request_context
+    )
+
+    listed = await memory.list_operations(bank_id=bank, request_context=request_context)
+    refreshes = [op for op in listed["operations"] if op["task_type"] == "refresh_mental_model"]
+    assert len(refreshes) == 1
+    assert refreshes[0]["mental_model_id"] == mm_id
+    # The field this used to be the only handle on is still null for these ops, which is
+    # exactly why mental_model_id is needed.
+    assert refreshes[0]["document_id"] is None
+
+    # The single-operation read answers the same question through result_metadata.
+    status = await memory.get_operation_status(
+        bank_id=bank, operation_id=submitted["operation_id"], request_context=request_context
+    )
+    assert status["result_metadata"]["mental_model_id"] == mm_id
+
+
+@pytest.mark.asyncio
 async def test_refresh_cron_round_trips_through_create_and_get(memory: MemoryEngine, request_context):
     """refresh_cron set on a mental model's trigger persists and reads back."""
     bank = await _make_bank(memory, request_context)

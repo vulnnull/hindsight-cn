@@ -1817,8 +1817,10 @@ paths:
     patch:
       description: "Rename a node (set `name`), move it under another folder (set\
         \ `parent_id`, null for the root), and/or update a page's options (`source_query`,\
-        \ `tags`, `max_tokens`). Changing `source_query` schedules an async refresh\
-        \ so the page rebuilds against the new question."
+        \ `tags`, `max_tokens`, `trigger`). Changing `source_query` schedules an async\
+        \ refresh so the page rebuilds against the new question. `trigger` is applied\
+        \ as a patch: the fields you send are updated and the rest keep the page's\
+        \ current values."
       operationId: update_knowledge_node
       parameters:
       - explode: false
@@ -6042,6 +6044,9 @@ components:
     DirectiveListResponse:
       description: Response model for listing directives.
       example:
+        total: 6
+        offset: 5
+        limit: 1
         items:
         - is_active: true
           updated_at: updated_at
@@ -6070,8 +6075,24 @@ components:
           items:
             $ref: '#/components/schemas/DirectiveResponse'
           type: array
+        total:
+          description: Total number of directives matching the filter (not just this
+            page)
+          title: Total
+          type: integer
+        limit:
+          description: Page size that was applied
+          title: Limit
+          type: integer
+        offset:
+          description: Offset that was applied
+          title: Offset
+          type: integer
       required:
       - items
+      - limit
+      - offset
+      - total
       title: DirectiveListResponse
     DirectiveResponse:
       description: Response model for a directive.
@@ -8087,15 +8108,12 @@ components:
     MentalModelListResponse:
       description: Response model for listing mental models.
       example:
+        total: 5
+        offset: 2
+        limit: 5
         items:
-        - source_query: source_query
-          max_tokens: 0
-          bank_id: bank_id
-          reflect_response:
-            key: ""
-          name: name
+        - max_tokens: 0
           created_at: created_at
-          id: id
           trigger:
             recall_chunks_max_tokens: 1
             refresh_cron: refresh_cron
@@ -8125,18 +8143,19 @@ components:
             recall_max_tokens: 6
           last_refreshed_at: last_refreshed_at
           is_stale: true
+          last_memory_seen_at: last_memory_seen_at
           content: content
           tags:
           - tags
           - tags
-        - source_query: source_query
-          max_tokens: 0
+          source_query: source_query
           bank_id: bank_id
           reflect_response:
             key: ""
           name: name
-          created_at: created_at
           id: id
+        - max_tokens: 0
+          created_at: created_at
           trigger:
             recall_chunks_max_tokens: 1
             refresh_cron: refresh_cron
@@ -8166,17 +8185,40 @@ components:
             recall_max_tokens: 6
           last_refreshed_at: last_refreshed_at
           is_stale: true
+          last_memory_seen_at: last_memory_seen_at
           content: content
           tags:
           - tags
           - tags
+          source_query: source_query
+          bank_id: bank_id
+          reflect_response:
+            key: ""
+          name: name
+          id: id
       properties:
         items:
           items:
             $ref: '#/components/schemas/MentalModelResponse'
           type: array
+        total:
+          description: Total number of mental models matching the filter (not just
+            this page)
+          title: Total
+          type: integer
+        limit:
+          description: Page size that was applied
+          title: Limit
+          type: integer
+        offset:
+          description: Offset that was applied
+          title: Offset
+          type: integer
       required:
       - items
+      - limit
+      - offset
+      - total
       title: MentalModelListResponse
     MentalModelRefreshScope:
       description: |-
@@ -8301,9 +8343,9 @@ components:
           nullable: true
           type: string
         created_before:
-          description: "Database-time snapshot bounding the refresh. Memories committed\
-            \ after this are not read, so they stay newer than the persisted watermark\
-            \ and are caught by the next refresh."
+          description: "Database-time snapshot bounding the refresh. Memories written\
+            \ or edited after this are not read, so they stay newer than the persisted\
+            \ watermark and are caught by the next refresh."
           format: date-time
           title: Created Before
           type: string
@@ -8317,14 +8359,8 @@ components:
     MentalModelResponse:
       description: Response model for a mental model (stored reflect response).
       example:
-        source_query: source_query
         max_tokens: 0
-        bank_id: bank_id
-        reflect_response:
-          key: ""
-        name: name
         created_at: created_at
-        id: id
         trigger:
           recall_chunks_max_tokens: 1
           refresh_cron: refresh_cron
@@ -8354,10 +8390,17 @@ components:
           recall_max_tokens: 6
         last_refreshed_at: last_refreshed_at
         is_stale: true
+        last_memory_seen_at: last_memory_seen_at
         content: content
         tags:
         - tags
         - tags
+        source_query: source_query
+        bank_id: bank_id
+        reflect_response:
+          key: ""
+        name: name
+        id: id
       properties:
         id:
           title: Id
@@ -8385,6 +8428,9 @@ components:
         trigger:
           $ref: '#/components/schemas/MentalModelTrigger-Output'
         last_refreshed_at:
+          nullable: true
+          type: string
+        last_memory_seen_at:
           nullable: true
           type: string
         created_at:
@@ -8789,6 +8835,9 @@ components:
           nullable: true
           type: string
         filename:
+          nullable: true
+          type: string
+        mental_model_id:
           nullable: true
           type: string
         created_at:
@@ -9908,6 +9957,33 @@ components:
         max_tokens: 0
         parent_id: parent_id
         name: name
+        trigger:
+          recall_chunks_max_tokens: 1
+          refresh_cron: refresh_cron
+          tag_groups:
+          - match: any_strict
+            tags:
+            - tags
+            - tags
+          - match: any_strict
+            tags:
+            - tags
+            - tags
+          exclude_mental_models: false
+          mode: full
+          refresh_after_consolidation: false
+          fact_types:
+          - world
+          - world
+          response_schema:
+            key: ""
+          exclude_mental_model_ids:
+          - exclude_mental_model_ids
+          - exclude_mental_model_ids
+          include_chunks: true
+          tags_match: any
+          keep_trace: false
+          recall_max_tokens: 6
         tags:
         - tags
         - tags
@@ -9929,6 +10005,8 @@ components:
         max_tokens:
           nullable: true
           type: integer
+        trigger:
+          $ref: '#/components/schemas/MentalModelTrigger-Input'
       title: UpdateNodeRequest
     UpdateWebhookRequest:
       description: Request model for updating a webhook. Only provided fields are
