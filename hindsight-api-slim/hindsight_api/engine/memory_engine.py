@@ -2513,6 +2513,13 @@ class MemoryEngine(MemoryEngineInterface):
         )
 
         logger.info(f"[CONSOLIDATION] bank={bank_id} completed: {result.get('memories_processed', 0)} processed")
+
+        # Consolidation is the other writer of memory_units rows: it mints
+        # observations, which are their own fact_type and so their own indexed
+        # partition. Retain's post-insert hook cannot see them — a bank whose
+        # observations crossed the threshold here would otherwise wait for an
+        # unrelated retain to notice (issue #3485).
+        await self._submit_vector_index_maintenance_quietly(bank_id, internal_context, after="consolidation")
         return result
 
     async def _handle_graph_maintenance(self, task_dict: dict[str, Any]):
@@ -2690,6 +2697,8 @@ class MemoryEngine(MemoryEngineInterface):
                     consolidation_result = await self._handle_consolidation(task_dict)
                 elif task_type == "graph_maintenance":
                     await self._handle_graph_maintenance(task_dict)
+                elif task_type == "vector_index_maintenance":
+                    await self._handle_vector_index_maintenance(task_dict)
                 elif task_type == "refresh_mental_model":
                     await self._handle_refresh_mental_model(task_dict)
                 elif task_type == "webhook_delivery":
@@ -4621,11 +4630,16 @@ class MemoryEngine(MemoryEngineInterface):
           * auto-consolidation (when observations + auto-consolidation are enabled
             for the bank) so freshly inserted facts get observations;
           * graph maintenance, which short-circuits when no cleanup work was
-            enqueued, so a plain insert pays a single cheap indexed SELECT here.
+            enqueued, so a plain insert pays a single cheap indexed SELECT here;
+          * per-bank vector index coverage, which short-circuits when the bank's
+            indexes already match its size. Inserts are what move a bank across
+            the size threshold, so this is where coverage is decided — there is
+            nothing a periodic sweep could discover that the writer does not
+            already know (issue #3485).
 
-        Both are non-critical: failures are logged, never raised, so they can't
-        fail the operation that produced the facts. Pass ``config`` when the caller
-        already resolved it to avoid a redundant lookup.
+        All three are non-critical: failures are logged, never raised, so they
+        can't fail the operation that produced the facts. Pass ``config`` when the
+        caller already resolved it to avoid a redundant lookup.
         """
         if config is None:
             config = await self._config_resolver.resolve_full_config(bank_id, request_context)
@@ -4638,6 +4652,32 @@ class MemoryEngine(MemoryEngineInterface):
             await self.submit_async_graph_maintenance(bank_id=bank_id, request_context=request_context)
         except Exception as e:
             logger.warning(f"Failed to submit graph maintenance task for bank {bank_id}: {e}")
+        await self._submit_vector_index_maintenance_quietly(bank_id, request_context, after="retain")
+
+    async def _submit_vector_index_maintenance_quietly(
+        self,
+        bank_id: str,
+        request_context: "RequestContext",
+        *,
+        after: str,
+    ) -> None:
+        """Queue a vector-index reconcile for ``bank_id``, swallowing failures.
+
+        Called from every path that changes how many memory_units rows a bank
+        holds — inserts (retain, import), consolidation (which mints
+        observations) and deletes. Deletes matter as much as inserts: a bank
+        pruned back under the threshold keeps indexes it no longer earns, and
+        with nothing else scanning for that, an emptied bank that is never
+        written to again would carry them forever.
+
+        Never raises. Index coverage is an optimisation — a bank without it
+        falls back to exact search — so it must not be able to fail the delete or
+        retain that produced the change.
+        """
+        try:
+            await self.submit_async_vector_index_maintenance(bank_id=bank_id, request_context=request_context)
+        except Exception as e:
+            logger.warning(f"Failed to submit vector index maintenance after {after} for bank {bank_id}: {e}")
 
     async def _resolve_retain_config(
         self,
@@ -7350,6 +7390,7 @@ class MemoryEngine(MemoryEngineInterface):
                 )
             except Exception as e:
                 logger.warning(f"Failed to submit graph maintenance after document deletion for bank {bank_id}: {e}")
+            await self._submit_vector_index_maintenance_quietly(bank_id, request_context, after="document deletion")
 
         return result
 
@@ -7708,6 +7749,9 @@ class MemoryEngine(MemoryEngineInterface):
                     f"Failed to submit graph maintenance after memory deletion "
                     f"for bank {bank_id_for_graph_maintenance}: {e}"
                 )
+            await self._submit_vector_index_maintenance_quietly(
+                bank_id_for_graph_maintenance, request_context, after="memory deletion"
+            )
 
         return result
 
@@ -7892,6 +7936,7 @@ class MemoryEngine(MemoryEngineInterface):
                 )
             except Exception as e:
                 logger.warning(f"Failed to submit graph maintenance after bulk memory deletion for bank {bank_id}: {e}")
+            await self._submit_vector_index_maintenance_quietly(bank_id, request_context, after="bulk memory deletion")
 
         return {
             "requested": len(unit_ids),
@@ -8124,6 +8169,19 @@ class MemoryEngine(MemoryEngineInterface):
                     await self.submit_async_consolidation(bank_id=bank_id, request_context=request_context)
                 except Exception as e:
                     logger.warning(f"Failed to submit consolidation after bank deletion for bank {bank_id}: {e}")
+
+        # A bank that survives this call (clear-memories, or a fact_type-scoped
+        # delete) has lost rows and may no longer earn the indexes it has —
+        # frequently all of them, since clearing a bank empties every partition.
+        # The full-delete path above already dropped them by name while it still
+        # knew the internal_id; this is the path where the bank stays, so the
+        # reconcile has to be asked. Without it an emptied-but-kept bank holds
+        # three ANN indexes over nothing until someone writes to it again, and
+        # an emptied bank is exactly the one nobody writes to again.
+        if not delete_bank_profile:
+            await self._submit_vector_index_maintenance_quietly(
+                bank_id, request_context, after="clearing bank memories"
+            )
 
         return result
 
@@ -8439,6 +8497,7 @@ class MemoryEngine(MemoryEngineInterface):
         occurred_end: str | None = None,
         new_fact_type: str | None = None,
         entities: list[str] | None = None,
+        resolve_entities: bool = True,
         state: str | None = None,
         reason: str | None = None,
         request_context: "RequestContext",
@@ -8456,9 +8515,18 @@ class MemoryEngine(MemoryEngineInterface):
           observations + temporal/semantic links, and re-consolidates. For date/context fields,
           ``""`` clears to NULL and ``None`` leaves unchanged; ``new_fact_type``
           must be world/experience. ``entities`` (when not None) replaces the
-          unit's entity set: names are resolved/find-or-created via the same
-          resolver retain uses, ``unit_entities`` + cooccurrence are rebuilt, and
-          ``[]`` detaches all entities. Entities orphaned by the swap, and any
+          unit's entity set, ``unit_entities`` + cooccurrence are rebuilt, and
+          ``[]`` detaches all entities. ``resolve_entities`` decides how those
+          names find their entities. When True (the default, and what retain
+          does) each name is resolved against the bank: a similar existing entity
+          that scores above the match threshold is reused. When False the names
+          are taken literally — an existing entity is reused only on a
+          case-insensitive name match, any other name creates its own entity, and
+          same-request names are never merged with each other. Hand-authored
+          corrections want False: with resolution on, a similar-but-wrong entity
+          that is well connected to the other names in the same edit outscores
+          the one the caller named, and the correction lands on it silently
+          (#3479). Entities orphaned by the swap, and any
           now-stale cooccurrence rows, are reclaimed by the graph-maintenance
           sweep that this edit submits (entity edges live in ``unit_entities``,
           not ``memory_links``, so there is nothing to relink directly).
@@ -8607,6 +8675,14 @@ class MemoryEngine(MemoryEngineInterface):
                     # resolve_entities_only find-or-creates the corrected entities (idempotent) and
                     # autocommits them on this short connection; the Phase-2 relink writes exactly
                     # this resolved set, keeping the stored embedding consistent with the links.
+                    #
+                    # resolve_entities decides whether these names are a correction or another
+                    # guess (#3479). It defaults to True — retain's behaviour, kept as the default
+                    # so existing callers are unaffected — under which a similar-but-wrong entity
+                    # that is well-connected to the other names in this same list outscores the one
+                    # the caller actually named, and the edit lands on it with a 200 and no warning.
+                    # Callers correcting a fact by hand should pass False, which reuses an existing
+                    # entity only on a case-insensitive name match.
                     entities_resolved = True
                     entity_resolution = await resolve_entities_only(
                         self.entity_resolver,
@@ -8616,7 +8692,7 @@ class MemoryEngine(MemoryEngineInterface):
                         [new_text],
                         new_context or "",
                         [entity_date],
-                        [[{"text": name, "type": "CONCEPT"} for name in new_entities]],
+                        [[{"text": name, "type": "CONCEPT", "resolve": resolve_entities} for name in new_entities]],
                         entity_labels=entity_labels,
                     )
                     resolved_for_unit = entity_resolution.unit_to_entity_ids.get(str(memory_uuid), [])
@@ -11080,20 +11156,28 @@ class MemoryEngine(MemoryEngineInterface):
     async def list_banks(
         self,
         *,
+        search_query: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
         request_context: "RequestContext",
-    ) -> list[dict[str, Any]]:
+    ) -> dict[str, Any]:
         """
-        List all agents in the system.
+        List memory banks, most recently written first.
 
         Args:
+            search_query: Case-insensitive substring matched against bank ID and name.
+            limit: Maximum number of banks to return (0 returns none).
+            offset: Number of banks to skip.
             request_context: Request context for authentication.
 
         Returns:
-            List of dicts with bank_id, name, disposition, mission, created_at, updated_at
+            Dict with ``banks`` (one page of bank_id, name, disposition, mission,
+            created_at, updated_at and stats), ``total`` (banks matching the search
+            that are visible to the caller, before paging), ``limit`` and ``offset``.
         """
         await self._authenticate_tenant(request_context)
         await self._get_backend()
-        banks = await bank_utils.list_banks(self._backend)
+        banks = await bank_utils.list_banks(self._backend, search_query=search_query)
         if self._operation_validator:
             from hindsight_api.extensions import BankListContext
 
@@ -11101,18 +11185,31 @@ class MemoryEngine(MemoryEngineInterface):
                 BankListContext(banks=banks, request_context=request_context)
             )
             banks = result.banks
+        # Paging happens here rather than in SQL because filter_bank_list may drop any
+        # bank: a SQL page would hand back short (or empty) pages and a total counting
+        # banks the caller isn't allowed to see.
+        total = len(banks)
+        # Clamped because the page is a Python slice, not a SQL LIMIT: a negative value
+        # from a caller the HTTP layer doesn't validate (the MCP tool) would silently
+        # trim from the end instead of raising.
+        limit = max(limit, 0)
+        offset = max(offset, 0)
+        page = banks[offset : offset + limit]
+        # Per-bank work below is done for the returned page only — a live store count
+        # for banks whose memories live outside SQL, plus config resolution.
+        await bank_utils.apply_store_fact_counts(self._backend, page)
         # Overlay resolved bank config (reflect_mission + disposition_*) on top of the
         # legacy banks.disposition / banks.mission columns, mirroring get_bank_profile so
         # the list and get paths return identical disposition + mission for a bank.
-        # Resolve every bank's config in one batch (single config-column query + a single
+        # Resolve the page's config in one batch (single config-column query + a single
         # tenant-config resolve) rather than one round-trip per bank.
-        configs = await self._config_resolver.get_bank_configs([bank["bank_id"] for bank in banks], request_context)
-        for bank in banks:
+        configs = await self._config_resolver.get_bank_configs([bank["bank_id"] for bank in page], request_context)
+        for bank in page:
             resolved = _overlay_bank_config_disposition_mission(
                 bank["disposition"], bank["mission"], configs.get(bank["bank_id"], {})
             )
             bank["disposition"], bank["mission"] = resolved.disposition, resolved.mission
-        return banks
+        return {"banks": page, "total": total, "limit": limit, "offset": offset}
 
     # ==================== Reflect Methods ====================
 
@@ -16932,6 +17029,190 @@ class MemoryEngine(MemoryEngineInterface):
             # still-'processing' row and suppress its successor.
             dedupe_excludes_operation_id=dedupe_excludes_operation_id,
         )
+
+    async def submit_async_vector_index_maintenance(
+        self,
+        bank_id: str,
+        *,
+        request_context: "RequestContext",
+        dedupe_excludes_operation_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Bring a bank's per-(bank, fact_type) vector indexes back in line with its size.
+
+        Called after a write that could have changed the bank's coverage —
+        retain, import, consolidation, curation. Only writes move a bank across
+        the threshold, so there is nothing for a periodic sweep to discover that
+        the writer did not already know; this replaces one.
+
+        Idempotent and self-limiting: it plans first and short-circuits with
+        ``no_work=True`` when the bank's coverage already matches, so callers
+        can invoke it unconditionally without paying for an async_operations
+        row. At the default threshold of 0 that means one operation per
+        (bank, fact_type) at first write and silence forever after.
+
+        Deduplicates by bank against a job that is pending *or* already running:
+        the job re-plans from live row counts when it starts, so a job in flight
+        already covers a write that landed after it was queued.
+
+        A no-op on backends without per-bank indexes (ScaNN keeps one global
+        index) and on Oracle (partitioned by bank, no partial vector indexes).
+        """
+        await self._authenticate_tenant(request_context)
+
+        index_clause = bank_utils._vector_index_clause()
+        if index_clause is None:
+            return {"operation_id": None, "no_work": True}
+
+        # Cheap pre-check: two bank-scoped index-only queries plus a catalog
+        # lookup. Mirrors submit_async_graph_maintenance — an unconditional
+        # caller must not create an empty worker task on every write.
+        from .vector_index_health import plan_bank_vector_indexes
+
+        backend = await self._get_backend()
+        try:
+            async with acquire_with_retry(backend) as conn:
+                plan = await plan_bank_vector_indexes(conn, get_current_schema(), bank_id)
+        except Exception as e:
+            # Planning is advisory: a bank whose coverage we could not read is
+            # picked up by the next write, or by `hindsight-admin repair-bank`.
+            logger.warning(f"Vector index planning failed for bank {bank_id}: {e}")
+            return {"operation_id": None, "no_work": True}
+        if plan.is_empty:
+            return {"operation_id": None, "no_work": True}
+
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext, BankWriteOperation
+
+            ctx = BankWriteContext(
+                bank_id=bank_id,
+                operation=BankWriteOperation.SUBMIT_ASYNC_VECTOR_INDEX_MAINTENANCE,
+                request_context=request_context,
+            )
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
+
+        task_payload: dict[str, Any] = {}
+        if request_context.tenant_id:
+            task_payload["_tenant_id"] = request_context.tenant_id
+        if request_context.api_key_id:
+            task_payload["_api_key_id"] = request_context.api_key_id
+
+        return await self._submit_async_operation(
+            bank_id=bank_id,
+            operation_type="vector_index_maintenance",
+            task_type="vector_index_maintenance",
+            task_payload=task_payload,
+            dedupe_by_bank=True,
+            # Safe (unlike consolidation, which carries a watermark): the job
+            # re-plans from live row counts at start, so a running job already
+            # covers writes that landed after it was queued.
+            dedupe_by_bank_includes_processing=True,
+            # Set by the job's own hand-off so it does not match its own
+            # still-'processing' row and suppress its successor.
+            dedupe_excludes_operation_id=dedupe_excludes_operation_id,
+        )
+
+    async def _handle_vector_index_maintenance(self, task_dict: dict) -> None:
+        """Reconcile one bank's vector indexes against the size threshold.
+
+        Runs on its own raw autocommit connection rather than a pooled one:
+        CREATE INDEX CONCURRENTLY cannot run inside a transaction block, and
+        both it and DROP INDEX CONCURRENTLY need a real backend session for the
+        whole statement. HINDSIGHT_API_MIGRATION_DATABASE_URL is preferred when
+        set, for the same reason migrations prefer it — a transaction-pooled URL
+        cannot hold a session across the statement.
+        """
+        import asyncpg
+
+        from ..pg0 import resolve_database_url
+        from .vector_index_health import reconcile_bank_vector_indexes
+
+        bank_id = task_dict.get("bank_id")
+        if not bank_id:
+            return
+        index_clause = bank_utils._vector_index_clause()
+        if index_clause is None:
+            return
+
+        # HINDSIGHT_API_MIGRATION_DATABASE_URL first when set — CREATE/DROP INDEX
+        # CONCURRENTLY needs a real backend session for the whole statement, which
+        # a transaction-pooled URL cannot give, and that env var is the documented
+        # direct-connection escape hatch (migrations use it for the same reason).
+        # Otherwise the DSN this engine is actually attached to, NOT
+        # config.database_url: the two differ whenever the engine was handed a DSN
+        # directly rather than reading the env var — embedders, and the test suite,
+        # which resolves pg0 in a fixture. Reading config there connected to a
+        # different database entirely and every reconcile died on
+        # `relation "public.banks" does not exist`.
+        backend = await self._get_backend()
+        url = get_config().migration_database_url or getattr(backend, "dsn", None)
+        if not url:
+            logger.debug("Vector index maintenance skipped: no database URL available")
+            return
+
+        from hindsight_api.models import RequestContext
+
+        request_context = RequestContext(
+            internal=True,
+            tenant_id=task_dict.get("_tenant_id"),
+            api_key_id=task_dict.get("_api_key_id"),
+        )
+        schema = get_current_schema()
+        conn = await asyncpg.connect(await resolve_database_url(url))
+        try:
+            result = await reconcile_bank_vector_indexes(conn, schema, bank_id, index_clause)
+        finally:
+            await conn.close()
+
+        if result.created or result.dropped or result.failed:
+            logger.info(
+                f"Vector index maintenance for bank {bank_id}: "
+                f"{result.created} built, {result.dropped} dropped, {result.failed} failed"
+            )
+        if result.failed:
+            # Logged, never raised. A failed build leaves the bank on the exact
+            # (bank_id, fact_type) B-tree path — slower on a large bank, but
+            # correct — so it is not worth failing the operation, running it back
+            # through the worker's retry/backoff, and surfacing a broken async op
+            # to the user. The usual cause is a transient deadlock against
+            # another session's concurrent index DDL on the shared memory_units
+            # table, and the next write to this bank re-queues the work anyway.
+            # `hindsight-admin repair-bank` is the path that treats a failed
+            # build as an error, because there a human is waiting on the answer.
+            logger.warning(
+                f"Vector index maintenance left {result.failed} index(es) unbuilt for bank {bank_id} "
+                f"({', '.join(result.failed_indexes)}); the next write to this bank retries"
+            )
+            return
+
+        # Hand off if the bank moved under us. The plan is a snapshot, and a
+        # multi-statement delete that is still committing when this job planned
+        # leaves it acting on a stale count — two jobs racing one delete can
+        # rebuild what the other just dropped. Nothing else is looking: with no
+        # periodic sweep, a bank that is never written again keeps whatever the
+        # last racing job decided. Same gap, and same fix, as graph maintenance's
+        # re-submit when work lands between its final claim and completion.
+        #
+        # Bounded two ways. The successor's own pre-check short-circuits once
+        # coverage matches, so a converged bank stops the chain; and this is
+        # skipped entirely when a build failed (returned above), so a permanently
+        # failing index cannot spin submits forever.
+        from .task_backend import SyncTaskBackend
+
+        # A synchronous task backend (tests, embedded) runs the successor inline
+        # and would recurse inside this handler; there the caller is serial
+        # anyway, so the next write reconciles.
+        if isinstance(self._task_backend, SyncTaskBackend):
+            return
+        try:
+            await self.submit_async_vector_index_maintenance(
+                bank_id=bank_id,
+                request_context=request_context,
+                dedupe_excludes_operation_id=task_dict.get("operation_id"),
+            )
+        except Exception:
+            # Never fail a completed reconcile over the hand-off; the next write
+            # picks it up. Logged loudly so a persistent failure is visible.
+            logger.exception(f"Vector index maintenance follow-up submit failed for bank {bank_id}")
 
     async def submit_async_refresh_mental_model(
         self,

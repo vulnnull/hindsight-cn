@@ -498,6 +498,82 @@ async def test_delta_retain_metadata_consistent_for_unchanged_units(memory, requ
 
 
 @pytest.mark.asyncio
+async def test_delta_retain_drops_null_metadata_values(memory, request_context):
+    """A null-valued metadata key must never reach memory_units (issue #3209).
+
+    Retain normalizes it away for freshly extracted facts; both delta paths must
+    apply the same normalization to the units they preserve — the metadata-only
+    re-retain, and the survivor sync of a partial delta. Otherwise a re-retain
+    leaves surviving units carrying nulls while the units beside them do not.
+    The document row keeps the caller's input verbatim.
+    """
+    bank_id = f"test_delta_null_meta_{_ts()}"
+    document_id = "null-metadata-doc"
+    # The chunker splits on ``retain_chunk_size`` (default 3000), so v1 is padded
+    # past several chunk boundaries and v2 only appends: every chunk but the last
+    # is byte-identical, which is what makes the third retain a partial delta
+    # with unchanged survivors rather than a whole-document replace.
+    v1 = "Alice works at Google." + " The project budget is fine." * 400
+    v2 = v1 + " Bob works at Microsoft."
+
+    async def _unit_metadata() -> dict[str, dict]:
+        """The document's memory units, keyed by unit id, so a later call can
+        tell units that survived a delta from ones re-extracted from scratch."""
+        pool = await memory._get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT id, metadata FROM memory_units WHERE bank_id = $1 AND document_id = $2",
+                bank_id,
+                document_id,
+            )
+        assert rows, "expected memory units for the document"
+        units = {}
+        for row in rows:
+            metadata = row["metadata"]
+            if isinstance(metadata, str):
+                metadata = json.loads(metadata)
+            units[str(row["id"])] = metadata
+        return units
+
+    async def _retain(content: str, source: str) -> None:
+        await memory.retain_batch_async(
+            bank_id=bank_id,
+            contents=[
+                {
+                    "content": content,
+                    "document_id": document_id,
+                    "metadata": {"source": source, "ocr_engine": None},
+                }
+            ],
+            request_context=request_context,
+        )
+
+    try:
+        # Full retain: the null is dropped on the freshly extracted facts.
+        await _retain(v1, "email")
+        assert all(metadata == {"source": "email"} for metadata in (await _unit_metadata()).values())
+
+        # Same content, new metadata — the metadata-only delta path.
+        await _retain(v1, "crm")
+        before = await _unit_metadata()
+        assert all(metadata == {"source": "crm"} for metadata in before.values())
+
+        # The document keeps what the caller sent, nulls included.
+        doc = await memory.get_document(document_id, bank_id, request_context=request_context)
+        assert doc is not None
+        assert doc["document_metadata"] == {"source": "crm", "ocr_engine": None}
+
+        # Appended content — a partial delta: unchanged chunks keep their units
+        # and get their metadata synced, new chunks are extracted fresh.
+        await _retain(v2, "crm2")
+        after = await _unit_metadata()
+        assert before.keys() & after.keys(), "expected surviving units from the unchanged chunk"
+        assert all(metadata == {"source": "crm2"} for metadata in after.values())
+    finally:
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+
+@pytest.mark.asyncio
 async def test_delta_retain_tags_propagated_to_existing_units(memory, request_context):
     """
     When tags change during an upsert with unchanged content, the new tags

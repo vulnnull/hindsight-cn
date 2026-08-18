@@ -654,6 +654,17 @@ class MemoryItem(BaseModel):
         default=None,
         description="Optional entities to combine with auto-extracted entities.",
     )
+    resolve_entities: bool = Field(
+        default=True,
+        description="Whether the names in 'entities' are resolved against the entities already in "
+        "the bank. True (default) matches each name to a similar existing entity when it scores "
+        "above the match threshold, so a name close to one already in the bank may resolve to that "
+        "one instead of the one you wrote. False takes your names literally — an existing entity is "
+        "reused only on a case-insensitive name match, any other name creates a new entity, and "
+        "your names are never merged with each other. This applies only to the entities you supply "
+        "here; auto-extracted entities are always resolved, since they are the extractor's guess at "
+        "a name rather than yours. Ignored when 'entities' is omitted.",
+    )
     tags: list[str] | None = Field(
         default=None,
         description="Optional tags for visibility scoping. Memories with tags can be filtered during recall.",
@@ -1282,7 +1293,7 @@ class BankListItem(BaseModel):
 
 
 class BankListResponse(BaseModel):
-    """Response model for listing all banks."""
+    """Response model for listing banks, one page at a time."""
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -1299,12 +1310,18 @@ class BankListResponse(BaseModel):
                         "last_document_at": "2024-01-16T14:20:00Z",
                         "last_write_at": "2024-01-17T09:05:00Z",
                     }
-                ]
+                ],
+                "total": 50,
+                "limit": 100,
+                "offset": 0,
             }
         }
     )
 
     banks: list[BankListItem]
+    total: int = Field(description="Total number of banks visible to the caller, ignoring `limit`/`offset`.")
+    limit: int
+    offset: int
 
 
 class CreateBankRequest(BaseModel):
@@ -1793,8 +1810,19 @@ class UpdateMemoryRequest(BaseModel):
     )
     entities: list[str] | None = Field(
         default=None,
-        description="Replace the fact's entities. Names are resolved/find-or-created "
-        "the same way retain does; '[]' detaches all entities. Omit to leave unchanged.",
+        description="Replace the fact's entities. How each name is matched to an entity is "
+        "governed by 'resolve_entities'. '[]' detaches all entities. Omit to leave unchanged.",
+    )
+    resolve_entities: bool = Field(
+        default=True,
+        description="Whether the names in 'entities' are resolved against the entities already in "
+        "the bank. True (default) is what retain does: a similar existing entity is reused when it "
+        "scores above the match threshold, so a name close to one already in the bank may resolve "
+        "to that one instead of the one you wrote. False takes the names literally — an existing "
+        "entity is reused only on a case-insensitive name match, any other name creates a new "
+        "entity, and names in the same request are never merged with each other. Use False for "
+        "hand-authored corrections, where the name you sent is the answer rather than a guess. "
+        "Ignored when 'entities' is omitted.",
     )
     state: str | None = Field(
         default=None,
@@ -4524,6 +4552,7 @@ def _register_routes(app: FastAPI):
                 occurred_end=occurred_end,
                 new_fact_type=request.fact_type,
                 entities=request.entities,
+                resolve_entities=request.resolve_entities,
                 state=request.state,
                 reason=request.reason,
                 request_context=request_context,
@@ -4937,16 +4966,26 @@ def _register_routes(app: FastAPI):
     @app.get(
         "/v1/default/banks",
         response_model=BankListResponse,
-        summary="List all memory banks",
-        description="Get a list of all agents with their profiles",
+        summary="List memory banks",
+        description=(
+            "List banks with their profiles and summary stats, most recently written first "
+            "(`last_write_at` descending), with pagination and optional search."
+        ),
         operation_id="list_banks",
         tags=["Banks"],
     )
-    async def api_list_banks(request_context: RequestContext = Depends(get_request_context)):
-        """Get list of all banks with their profiles."""
+    async def api_list_banks(
+        q: str | None = Query(None, description="Case-insensitive substring filter on bank ID or name (e.g. 'alice')"),
+        limit: int = Query(default=100, ge=0, description="Maximum number of banks to return"),
+        offset: int = Query(default=0, ge=0, description="Offset for pagination"),
+        request_context: RequestContext = Depends(get_request_context),
+    ):
+        """Get one page of banks with their profiles."""
         try:
-            banks = await app.state.memory.list_banks(request_context=request_context)
-            return BankListResponse(banks=banks)
+            data = await app.state.memory.list_banks(
+                search_query=q, limit=limit, offset=offset, request_context=request_context
+            )
+            return BankListResponse(**data)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -8005,6 +8044,7 @@ def _register_routes(app: FastAPI):
                     content_dict["document_id"] = item.document_id
                 if item.entities:
                     content_dict["entities"] = [{"text": e.text, "type": e.type or "CONCEPT"} for e in item.entities]
+                    content_dict["resolve_entities"] = item.resolve_entities
                 if item.tags:
                     content_dict["tags"] = item.tags
                 if item.observation_scopes is not None:

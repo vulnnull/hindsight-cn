@@ -133,6 +133,45 @@ Hindsight supports four PostgreSQL vector extensions:
 - Running on Google **AlloyDB** or **AlloyDB Omni**
 - Want managed ScaNN with `AUTO` mode tuning
 
+#### Limiting vector indexes on large deployments
+
+On `pgvector`, `pgvectorscale` and `vchord`, a bank's memories are indexed per
+`(bank, fact_type)`. By default every bank that holds memories gets its own
+indexes, which is the right thing for most deployments.
+
+It stops being the right thing when you have thousands of banks. These indexes
+all live on one shared table, and PostgreSQL inspects and locks **every** index
+on a table whenever it plans a query against it — so an index created for one
+bank is a cost paid by searches in every other bank. Past a few thousand banks,
+planning slows sharply and the server eventually runs out of lock-table space,
+failing reads *and* bank deletion alike.
+
+Setting a minimum size fixes that: a bank only gets its own indexes once it is
+large enough to benefit from them. Below the threshold PostgreSQL answers the
+same search from the `(bank_id, fact_type)` B-tree plus a top-N sort, which for
+a small bank is both faster and *exact* rather than approximate — so small banks
+lose nothing. The number of indexes becomes proportional to the number of
+**large** banks rather than to the number of banks, and bank count stops being a
+limit.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HINDSIGHT_API_VECTOR_INDEX_MIN_ROWS` | Memories a bank needs, in one fact type, before that fact type gets its own vector index. `0` (the default) means no minimum — every bank holding memories is indexed. `10000` is a good starting point for deployments with thousands of banks. | `0` |
+
+Coverage is maintained for you. Every write that could move a bank across the
+threshold queues a background `vector_index_maintenance` operation, which builds
+an index when a bank grows past the threshold and removes it if the bank shrinks
+well below it (the gap between those two points prevents churn at the boundary).
+Bank creation, ingestion and import never build indexes themselves, so no
+request ever waits on index DDL.
+
+To reconcile without waiting for a write — after a restore, an upgrade, or an
+extension switch — run:
+
+```bash
+hindsight-admin repair-bank --all
+```
+
 **Switching extensions:**
 
 If you need to switch from one extension to another:
@@ -600,6 +639,8 @@ server-level only (not overridable per tenant/bank) and a change requires a rest
 |----------|-------------|---------|
 | `HINDSIGHT_API_EMBEDDINGS_PROVIDER` | Provider: `local`, `onnx`, `tei`, `openai`, `openai-codex`, `openrouter`, `requesty`, `cohere`, `google`, `zeroentropy`, `litellm`, or `litellm-sdk` | `local` |
 | `HINDSIGHT_API_EMBEDDINGS_MAX_INPUT_TOKENS` | Applies to **every** provider. If set, truncate each text to this many tokens (tiktoken `cl100k_base`, approximate) before embedding. Set it to the model's real input limit (e.g. `8192` for Bedrock Titan V2, or a llama.cpp server's context, with a little headroom) so oversized content is truncated instead of failing the embed call permanently. Off by default. (Deprecated alias: `HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_MAX_INPUT_TOKENS`.) | - |
+| `HINDSIGHT_API_EMBEDDINGS_QUERY_PREFIX` | Text prepended to every search before it is embedded. Set it when your endpoint serves an asymmetric model that expects a search instruction — e.g. `task: search result \| query: ` for `google/embeddinggemma-300m`, or `query: ` for E5. Applies to the providers that only accept plain text (`tei`, `openai`, `openai-codex`, `openrouter`, `requesty`, `litellm`, `litellm-sdk`); see the note below for the ones that don't need it. Trailing spaces are kept as written. | - (no prefix) |
+| `HINDSIGHT_API_EMBEDDINGS_PASSAGE_PREFIX` | Text prepended to every stored memory/document before it is embedded — e.g. `title: none \| text: ` for `google/embeddinggemma-300m`, or `passage: ` for E5. Same providers as above. Trailing spaces are kept as written. | - (no prefix) |
 | `HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL` | Model for local provider. Models that ship their own search-text and stored-text instructions (e.g. the Qwen3-Embedding family) have them applied automatically — see the note below. | `BAAI/bge-small-en-v1.5` |
 | `HINDSIGHT_API_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE` | Allow loading models with custom code (security risk, disabled by default) | `false` |
 | `HINDSIGHT_API_EMBEDDINGS_LOCAL_FORCE_CPU` | Force CPU mode for local embeddings (avoids MPS/XPC issues on macOS) | `false` |
@@ -659,6 +700,10 @@ Embedding provider selection, credentials, base URLs, model choices, dimensions,
 Some embedding models are trained to see a short instruction in front of a search, and nothing (or a different instruction) in front of the text being stored. With the `local` provider, Hindsight applies whichever instructions the model itself ships with — you don't configure anything. The default `BAAI/bge-small-en-v1.5` ships none, so nothing changes for existing deployments; `Qwen/Qwen3-Embedding-*` ships one for searches only, which is what makes those models retrieve accurately.
 
 The rare case to watch for is a model that also instructs the **stored** side. Switching to one of those changes how new memories are indexed, so anything already stored was indexed differently and will compare poorly against it. Re-index the bank (export and re-import it) after adopting such a model. Search-side-only instructions, which covers every model listed above, need no re-indexing.
+
+Most providers can't discover those instructions the way `local` does. A remote endpoint that takes plain text and returns a vector — `tei`, `litellm`, `litellm-sdk`, and anything behind an OpenAI-compatible `/embeddings` URL (`llama-server`, `infinity-emb`, vLLM, ...) — only ever receives the text, so you supply the instructions yourself with `HINDSIGHT_API_EMBEDDINGS_QUERY_PREFIX` and `HINDSIGHT_API_EMBEDDINGS_PASSAGE_PREFIX`. Leaving them unset sends the text unchanged, which is what the symmetric hosted models expect.
+
+Two providers need nothing and ignore both settings: `local` (applies the model's own prompts) and `zeroentropy` (tells the API which side it is embedding). The `onnx` provider has its own pair, `HINDSIGHT_API_EMBEDDINGS_ONNX_QUERY_PREFIX` / `..._PASSAGE_PREFIX`, which default to the E5 instructions.
 
 :::
 

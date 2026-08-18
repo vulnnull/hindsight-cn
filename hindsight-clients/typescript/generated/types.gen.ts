@@ -287,13 +287,27 @@ export type BankListItem = {
 /**
  * BankListResponse
  *
- * Response model for listing all banks.
+ * Response model for listing banks, one page at a time.
  */
 export type BankListResponse = {
   /**
    * Banks
    */
   banks: Array<BankListItem>;
+  /**
+   * Total
+   *
+   * Total number of banks visible to the caller, ignoring `limit`/`offset`.
+   */
+  total: number;
+  /**
+   * Limit
+   */
+  limit: number;
+  /**
+   * Offset
+   */
+  offset: number;
 };
 
 /**
@@ -2997,6 +3011,12 @@ export type MemoryItem = {
    */
   entities?: Array<EntityInput> | null;
   /**
+   * Resolve Entities
+   *
+   * Whether the names in 'entities' are resolved against the entities already in the bank. True (default) matches each name to a similar existing entity when it scores above the match threshold, so a name close to one already in the bank may resolve to that one instead of the one you wrote. False takes your names literally — an existing entity is reused only on a case-insensitive name match, any other name creates a new entity, and your names are never merged with each other. This applies only to the entities you supply here; auto-extracted entities are always resolved, since they are the extractor's guess at a name rather than yours. Ignored when 'entities' is omitted.
+   */
+  resolve_entities?: boolean;
+  /**
    * Tags
    *
    * Optional tags for visibility scoping. Memories with tags can be filtered during recall.
@@ -5003,9 +5023,15 @@ export type UpdateMemoryRequest = {
   /**
    * Entities
    *
-   * Replace the fact's entities. Names are resolved/find-or-created the same way retain does; '[]' detaches all entities. Omit to leave unchanged.
+   * Replace the fact's entities. How each name is matched to an entity is governed by 'resolve_entities'. '[]' detaches all entities. Omit to leave unchanged.
    */
   entities?: Array<string> | null;
+  /**
+   * Resolve Entities
+   *
+   * Whether the names in 'entities' are resolved against the entities already in the bank. True (default) is what retain does: a similar existing entity is reused when it scores above the match threshold, so a name close to one already in the bank may resolve to that one instead of the one you wrote. False takes the names literally — an existing entity is reused only on a case-insensitive name match, any other name creates a new entity, and names in the same request are never merged with each other. Use False for hand-authored corrections, where the name you sent is the answer rather than a guess. Ignored when 'entities' is omitted.
+   */
+  resolve_entities?: boolean;
   /**
    * State
    *
@@ -5788,7 +5814,26 @@ export type ListBanksData = {
     authorization?: string | null;
   };
   path?: never;
-  query?: never;
+  query?: {
+    /**
+     * Q
+     *
+     * Case-insensitive substring filter on bank ID or name (e.g. 'alice')
+     */
+    q?: string | null;
+    /**
+     * Limit
+     *
+     * Maximum number of banks to return
+     */
+    limit?: number;
+    /**
+     * Offset
+     *
+     * Offset for pagination
+     */
+    offset?: number;
+  };
   url: "/v1/default/banks";
 };
 

@@ -1211,19 +1211,30 @@ def _register_list_banks(mcp: FastMCP, memory: MemoryEngine, config: MCPToolsCon
     """Register the list_banks tool."""
 
     @mcp.tool(annotations=_tool_annotations("list_banks"))
-    async def list_banks() -> str:
+    async def list_banks(query: str | None = None, limit: int = 100, offset: int = 0) -> str:
         """
-        List all available memory banks.
+        List available memory banks, most recently written first.
 
         Use this tool to discover what memory banks exist in the system.
         Each bank is an isolated memory store (like a separate "brain").
 
+        Args:
+            query: Optional case-insensitive substring to match against bank ID and name.
+            limit: Maximum number of banks to return (default 100).
+            offset: Number of banks to skip, for paging through `total`.
+
         Returns:
-            JSON list of banks with their IDs, names, dispositions, and missions.
+            JSON with the page of banks (IDs, names, dispositions, missions) plus
+            the total number of matching banks and the limit/offset used.
         """
         try:
-            banks = await memory.list_banks(request_context=_get_request_context(config))
-            return json.dumps({"banks": banks}, indent=2)
+            data = await memory.list_banks(
+                search_query=query,
+                limit=limit,
+                offset=offset,
+                request_context=_get_request_context(config),
+            )
+            return json.dumps(data, indent=2)
         except OperationValidationError as e:
             logger.warning(f"Operation rejected: {e}")
             return json.dumps({"error": str(e), "banks": []})
@@ -2494,6 +2505,13 @@ def _register_update_memory(mcp: FastMCP, memory: MemoryEngine, config: MCPTools
             all). The memory is re-embedded and its derived observations, links, and
             graph are recomputed automatically.
 
+            resolve_entities controls how the names in entities are matched. The
+            default True behaves like retain and may resolve a name onto a similar
+            entity that already exists, which silently discards a correction when the
+            bank holds a near-duplicate name. Pass False whenever you are correcting a
+            fact deliberately: an existing entity is then reused only on a
+            case-insensitive name match, and any other name becomes its own entity.
+
             Only raw world/experience facts can be edited; observations are derived.
             To retire or restore a fact, use invalidate_memory instead.
     """
@@ -2509,6 +2527,7 @@ def _register_update_memory(mcp: FastMCP, memory: MemoryEngine, config: MCPTools
             occurred_end: str | None = None,
             fact_type: str | None = None,
             entities: list[str] | None = None,
+            resolve_entities: bool = True,
             bank_id: str | None = None,
         ) -> str:
             """
@@ -2530,6 +2549,7 @@ def _register_update_memory(mcp: FastMCP, memory: MemoryEngine, config: MCPTools
                     occurred_end=occurred_end,
                     new_fact_type=fact_type,
                     entities=entities,
+                    resolve_entities=resolve_entities,
                     request_context=_get_request_context(config),
                 )
                 if result is None:
@@ -2555,6 +2575,7 @@ def _register_update_memory(mcp: FastMCP, memory: MemoryEngine, config: MCPTools
             occurred_end: str | None = None,
             fact_type: str | None = None,
             entities: list[str] | None = None,
+            resolve_entities: bool = True,
         ) -> dict:
             """
             Args:
@@ -2574,6 +2595,7 @@ def _register_update_memory(mcp: FastMCP, memory: MemoryEngine, config: MCPTools
                     occurred_end=occurred_end,
                     new_fact_type=fact_type,
                     entities=entities,
+                    resolve_entities=resolve_entities,
                     request_context=_get_request_context(config),
                 )
                 if result is None:

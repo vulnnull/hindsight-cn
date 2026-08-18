@@ -469,6 +469,93 @@ class TestEdit:
         await memory.delete_bank(bank_id, request_context=request_context)
 
     @pytest.mark.asyncio
+    async def _near_duplicate_entity_bank(self, memory: MemoryEngine, request_context: RequestContext):
+        """A bank in the shape reported in #3479, returned as (bank_id, unit_id, typo_entity_id).
+
+        Extraction created a typo entity ("Dr Wall") that co-occurs with the other name in the
+        edit, so fuzzy scoring puts it above the 0.6 match threshold for the corrected spelling
+        "Dr. Waller" — name similarity 0.41 plus the full 0.3 co-occurrence bonus.
+        """
+        bank_id = f"test-curation-entmode-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(memory, bank_id, request_context)
+
+        pool = await memory._get_pool()
+        async with pool.acquire() as conn:
+            unit_id = await _insert_memory(conn, memory, bank_id, "Dr. Waller referred the patient to CareOrg.")
+            typo = await _insert_entity(conn, bank_id, "Dr Wall")
+            careorg = await _insert_entity(conn, bank_id, "CareOrg")
+            await _link_entity(conn, unit_id, typo)
+            await _link_entity(conn, unit_id, careorg)
+            # The co-occurrence edge is what lets the typo entity outscore the corrected name.
+            await conn.execute(
+                "INSERT INTO entity_cooccurrences (entity_id_1, entity_id_2, cooccurrence_count) VALUES ($1, $2, 5)",
+                *sorted([typo, careorg], key=str),
+            )
+        return bank_id, unit_id, typo
+
+    @pytest.mark.asyncio
+    async def test_edit_entities_unresolved_keeps_the_submitted_names(
+        self, memory: MemoryEngine, request_context: RequestContext
+    ):
+        """resolve_entities=False links the names the caller wrote (#3479)."""
+        bank_id, m1, typo = await self._near_duplicate_entity_bank(memory, request_context)
+        pool = await memory._get_pool()
+
+        with (
+            patch.object(memory, "submit_async_consolidation", new=AsyncMock()),
+            patch.object(memory, "submit_async_graph_maintenance", new=AsyncMock()),
+        ):
+            result = await memory.update_memory_unit(
+                bank_id,
+                str(m1),
+                entities=["Dr. Waller", "CareOrg"],
+                resolve_entities=False,
+                request_context=request_context,
+            )
+
+        assert set(result["entities"]) == {"Dr. Waller", "CareOrg"}, "the submitted names are stored verbatim"
+        async with pool.acquire() as conn:
+            linked = await conn.fetch(
+                "SELECT e.canonical_name FROM unit_entities ue "
+                "JOIN entities e ON e.id = ue.entity_id WHERE ue.unit_id = $1",
+                m1,
+            )
+            assert {r["canonical_name"] for r in linked} == {"Dr. Waller", "CareOrg"}
+            assert typo not in await _entity_ids_for(conn, m1), "the typo entity is detached, not reused"
+            assert await conn.fetchval("SELECT 1 FROM entities WHERE id = $1", typo), (
+                "the typo entity itself survives for the graph-maintenance sweep to reclaim"
+            )
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+    @pytest.mark.asyncio
+    async def test_edit_entities_default_still_resolves(self, memory: MemoryEngine, request_context: RequestContext):
+        """Omitting the flag keeps retain's resolution, so existing callers are unaffected.
+
+        This pins the backwards-compatible default rather than endorsing the outcome: the same
+        edit that resolve_entities=False gets right lands on the near-duplicate here.
+        """
+        bank_id, m1, typo = await self._near_duplicate_entity_bank(memory, request_context)
+        pool = await memory._get_pool()
+
+        with (
+            patch.object(memory, "submit_async_consolidation", new=AsyncMock()),
+            patch.object(memory, "submit_async_graph_maintenance", new=AsyncMock()),
+        ):
+            result = await memory.update_memory_unit(
+                bank_id,
+                str(m1),
+                entities=["Dr. Waller", "CareOrg"],
+                request_context=request_context,
+            )
+
+        assert set(result["entities"]) == {"Dr Wall", "CareOrg"}, "the default still resolves fuzzily"
+        async with pool.acquire() as conn:
+            assert typo in await _entity_ids_for(conn, m1)
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+    @pytest.mark.asyncio
     async def test_edit_empty_entities_detaches_all(self, memory: MemoryEngine, request_context: RequestContext):
         bank_id = f"test-curation-editent0-{uuid.uuid4().hex[:8]}"
         await _ensure_bank(memory, bank_id, request_context)

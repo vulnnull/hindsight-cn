@@ -392,6 +392,36 @@ async def test_export_bank_contents(memory, request_context):
         await memory.delete_bank(bank, request_context=request_context)
 
 
+@pytest.mark.asyncio
+async def test_export_tolerates_legacy_null_and_numeric_fact_metadata(memory, request_context):
+    """A bank holding legacy metadata must still be exportable (issue #3209).
+
+    Rows written before retain normalized its input can hold a JSON null or a
+    raw integer in memory_units.metadata. TransferFact.metadata is dict[str, str],
+    so exporting such a bank used to fail validation — locking an operator out of
+    the one operation (backup / move) that gets them off the bad data. Export
+    applies the same read contract as recall: nulls dropped, the rest stringified.
+    """
+    bank = _unique_bank("export_legacy_metadata")
+    try:
+        await _retain(memory, bank, "Carol lives in Paris.", request_context, "doc-1")
+        backend = await memory._get_backend()
+        async with acquire_with_retry(backend) as conn:
+            updated = await conn.execute(
+                f"UPDATE {fq_table('memory_units')} SET metadata = $2::jsonb WHERE bank_id = $1",
+                bank,
+                json.dumps({"ocr_engine": None, "original_id": 348}),
+            )
+        assert updated != "UPDATE 0"
+
+        parsed = parse_archive(await memory.export_documents_async(bank, request_context))
+        exported = [fact.metadata for doc in parsed.documents for fact in doc.facts]
+        assert exported
+        assert all(metadata == {"original_id": "348"} for metadata in exported)
+    finally:
+        await memory.delete_bank(bank, request_context=request_context)
+
+
 def _as_json(value):
     """Normalize a jsonb column value (str or already-decoded) to a Python object."""
     return json.loads(value) if isinstance(value, str) else value
