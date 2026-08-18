@@ -158,6 +158,7 @@ function workspaceFor(root: string): Workspace | undefined {
     apiUrl: cfg.apiUrl,
     apiToken: cfg.apiToken,
     bank: resolved.bankId,
+    observationScopes: cfg.observationScopes,
   });
   // The 5th argument is this host's whole reason for existing here: RuntimeCore binds the
   // knowledge tools (and retain stamps) to the workspace it is given, and dsh's process cwd is the

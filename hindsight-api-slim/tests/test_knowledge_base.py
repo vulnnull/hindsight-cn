@@ -185,6 +185,48 @@ class TestTree:
         # Pages always do.
         assert isinstance(roots["Loose"]["is_stale"], bool)
 
+    async def test_tree_exposes_a_page_refresh_policy(self, api_client, kb_bank):
+        """A page's trigger is readable where the page is.
+
+        It decides when a page rebuilds itself and what that costs, so a client that only speaks
+        the knowledge base — the control plane's tree, the coding-agents plugin — could neither
+        show it nor tell whether its own settings still applied. The alternative was walking to
+        the mental-models API once per page.
+        """
+        bank_id, ids = kb_bank
+        resp = await api_client.get(f"/v1/default/banks/{_enc(bank_id)}/knowledge-base/tree")
+        roots = {r["name"]: r for r in resp.json()["roots"]}
+        # The EFFECTIVE policy, not the stored keys: it serializes as MentalModelTrigger, so a
+        # field nobody set comes back at that model's default (keep_trace=False here). Asserting
+        # the whole dict would pin every future field of that model into this test.
+        trigger = roots["Loose"]["trigger"]
+        assert trigger["mode"] == "delta"
+        assert trigger["fact_types"] == ["observation"]
+        assert trigger["exclude_mental_models"] is True
+        assert trigger["refresh_after_consolidation"] is True
+        # A folder has no backing mental model, so it has no refresh policy either —
+        # and a null is dropped from the response entirely (ExcludeNoneRoute), the same
+        # way is_stale is absent on folders rather than null.
+        assert roots["Runbooks"].get("trigger") is None
+
+    async def test_tree_reflects_a_changed_refresh_policy(self, api_client, memory, kb_bank, request_context):
+        """Read-back closes the loop: a client can compare and skip a no-op write.
+
+        The page was created auto-refreshing; after moving it onto a schedule the tree shows the
+        schedule and auto-refresh off. (That the engine *stores* no ``refresh_after_consolidation``
+        key at all is asserted in TestPageDefaults — through this model it serializes as False,
+        which is the same policy stated a different way.)
+        """
+        bank_id, ids = kb_bank
+        await memory.update_knowledge_page(
+            bank_id, ids.loose, trigger={"refresh_cron": "0 3 * * *"}, request_context=request_context
+        )
+        resp = await api_client.get(f"/v1/default/banks/{_enc(bank_id)}/knowledge-base/tree")
+        loose = next(r for r in resp.json()["roots"] if r["name"] == "Loose")
+        assert loose["trigger"]["refresh_cron"] == "0 3 * * *"
+        assert loose["trigger"]["refresh_after_consolidation"] is False
+        assert loose["trigger"]["mode"] == "delta"  # untouched by the patch
+
     async def test_tree_staleness_follows_the_bank_watermark(self, api_client, memory, kb_bank):
         """The tree answers from one bank-wide watermark, not a scan per page.
 
