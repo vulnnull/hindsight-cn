@@ -627,6 +627,12 @@ export type BankTemplateConfig = {
    */
   reflect_source_facts_max_tokens?: number | null;
   /**
+   * Mental Model Min Refresh Interval Seconds
+   *
+   * Minimum seconds between two automatic refreshes of the same mental model in this bank. 0 (the default) means no floor. Overridable per model via the trigger's min_refresh_interval_seconds.
+   */
+  mental_model_min_refresh_interval_seconds?: number | null;
+  /**
    * Llm Gemini Safety Settings
    *
    * Per-bank Gemini/VertexAI safety filter settings
@@ -2259,7 +2265,7 @@ export type KnowledgeNode = {
   /**
    * Is Stale
    *
-   * Pages only, populated by the tree endpoint. False means the page is up to date — nothing in the bank has been written since its last refresh. True means it *may* need a refresh: something was written, but possibly outside the page's tags. Read the page's mental model for the exact answer. Shares the bank-stats freshness, so it can lag a just-written memory by up to a minute.
+   * Pages only, populated by the tree endpoint. True when a memory in *this page's* scope — its tags and fact types — has been written since the page last read the memories. That is the same check a scheduled refresh runs before spending an LLM call, so a flagged page is one a refresh would actually rewrite. Deletions are not observed: removing an in-scope memory leaves no write behind, so it does not raise this flag.
    */
   is_stale?: boolean | null;
   /**
@@ -2987,7 +2993,7 @@ export type MemoryItem = {
    *
    * When the content occurred. Accepts an ISO 8601 datetime string (e.g. '2024-01-15T10:30:00Z'), null/omitted (defaults to now), or the special string 'unset' to explicitly store without any timestamp (use this for timeless content such as fictional documents or static reference material).
    */
-  timestamp?: string | null;
+  timestamp?: string | string | null;
   /**
    * Context
    */
@@ -3159,6 +3165,7 @@ export type MentalModelDryRunRefreshResult = {
    */
   outcome:
     | "content_written"
+    | "content_unchanged"
     | "content_preserved_no_new_facts"
     | "refresh_failed_empty_candidate"
     | "refresh_failed_delta_not_applied";
@@ -3218,6 +3225,10 @@ export type MentalModelDryRunRefreshResult = {
    * Structured operations emitted, in delta mode.
    */
   delta_operations?: MentalModelDeltaOperations | null;
+  /**
+   * Facts the document cites that no longer exist, and what a real refresh would do about them.
+   */
+  retraction?: MentalModelRetraction | null;
   /**
    * Execution trace of the run, always included for a dry run.
    */
@@ -3391,6 +3402,7 @@ export type MentalModelRefreshTrace = {
    */
   outcome:
     | "content_written"
+    | "content_unchanged"
     | "content_preserved_no_new_facts"
     | "refresh_failed_empty_candidate"
     | "refresh_failed_delta_not_applied";
@@ -3410,6 +3422,10 @@ export type MentalModelRefreshTrace = {
    * Structured operations emitted, in delta mode.
    */
   delta_operations?: MentalModelDeltaOperations | null;
+  /**
+   * Facts the document cited that no longer exist, when the refresh found any.
+   */
+  retraction?: MentalModelRetraction | null;
   /**
    * Token usage across the refresh's LLM calls.
    */
@@ -3500,7 +3516,7 @@ export type MentalModelResponse = {
   /**
    * Last Memory Seen At
    *
-   * How far through the bank's memories this model is written — the newest in-scope memory the last refresh saw, in ISO format. Stands still when nothing in the model's scope has been written, however often it is refreshed. Compare against `last_memory_write_at` from GET /stats to flag a whole list cheaply: at or after it means up to date, older means it may need a refresh. Null for a model no refresh has stamped yet.
+   * How far through the bank's memories this model is written — the newest in-scope memory the last refresh saw, in ISO format. Stands still when nothing in the model's scope has been written, however often it is refreshed. At or after the bank's `last_memory_write_at` (GET /stats) the model is provably up to date; when it is older, `is_stale` settles it against the model's own scope. Null for a model no refresh has stamped yet.
    */
   last_memory_seen_at?: string | null;
   /**
@@ -3518,9 +3534,46 @@ export type MentalModelResponse = {
   /**
    * Is Stale
    *
-   * True when memories matching this mental model's tag/fact_type scope have been written since last_memory_seen_at. Exact, and costly to compute, so it is populated only by the single mental-model read at detail=full — never when listing. For a whole list, compare each `last_memory_seen_at` against the bank's `last_memory_write_at` from GET /stats: at or after it means up to date, older means it may need a refresh.
+   * True when memories matching this mental model's tag/fact_type scope have been written since last_memory_seen_at — the same check that decides whether a scheduled refresh does any work, so a model flagged here is one a refresh would actually rewrite. Populated on both the single read and the list. Deletions are not observed: removing an in-scope memory leaves no write behind, so it does not raise this flag.
    */
   is_stale?: boolean | null;
+};
+
+/**
+ * MentalModelRetraction
+ *
+ * Facts the document cited that no longer exist, and what was done about them.
+ *
+ * A retraction is the one refresh input that is *invisible* in every other
+ * report: the fact is gone from the bank, so it appears in no recall, no tool
+ * call, and no supporting-fact list. Without this, a refresh that quietly
+ * deleted a paragraph — or quietly declined to — leaves no evidence of why.
+ */
+export type MentalModelRetraction = {
+  /**
+   * Fact Ids
+   *
+   * Ids the document's based_on cites that no longer exist in the bank.
+   */
+  fact_ids?: Array<string>;
+  /**
+   * Fact Texts
+   *
+   * What those facts said, as the document recorded them. The rows themselves are gone — an observation swept away with its source keeps no history — so this copy is the only surviving record.
+   */
+  fact_texts?: Array<string>;
+  /**
+   * Applied
+   *
+   * Whether the pass that removes them ran to completion (zero edits still counts).
+   */
+  applied: boolean;
+  /**
+   * Deferred Reason
+   *
+   * Why removal was postponed, when it was. Re-ingested facts return under new ids once consolidation catches up, so a retraction seen while facts are still pending is not acted on — removing content before the replacements land would delete claims that are still true.
+   */
+  deferred_reason?: string | null;
 };
 
 /**
@@ -3614,6 +3667,12 @@ export type MentalModelTriggerInput = {
    */
   refresh_cron?: string | null;
   /**
+   * Min Refresh Interval Seconds
+   *
+   * Minimum seconds between two automatic refreshes of this mental model. A triggered refresh that arrives sooner is not dropped: it is queued and parked until the window expires, and every further trigger in the meantime folds into that one queued refresh, so a burst of retains costs one refresh instead of one per retain. Applies to both refresh_after_consolidation and refresh_cron. Explicit refreshes (API, MCP, control plane) ignore it and run immediately. 0 disables the floor for this model; null falls back to the bank/global mental_model_min_refresh_interval_seconds setting (itself 0 by default, i.e. no floor).
+   */
+  min_refresh_interval_seconds?: number | null;
+  /**
    * Fact Types
    *
    * Filter which fact types are retrieved during reflect. None means all types (world, experience, observation).
@@ -3701,6 +3760,12 @@ export type MentalModelTriggerOutput = {
    * Cron expression (UTC, standard 5-field syntax, e.g. '0 3 * * *' for daily at 03:00 UTC) for refreshing this mental model on a fixed schedule. Mutually exclusive with refresh_after_consolidation — a model refreshes either after consolidation or on a cron schedule, not both. A scheduled refresh only runs when the model is stale (new memories in its scope since the last refresh); if nothing changed, the tick is skipped to avoid a wasted LLM call. null = no schedule.
    */
   refresh_cron?: string | null;
+  /**
+   * Min Refresh Interval Seconds
+   *
+   * Minimum seconds between two automatic refreshes of this mental model. A triggered refresh that arrives sooner is not dropped: it is queued and parked until the window expires, and every further trigger in the meantime folds into that one queued refresh, so a burst of retains costs one refresh instead of one per retain. Applies to both refresh_after_consolidation and refresh_cron. Explicit refreshes (API, MCP, control plane) ignore it and run immediately. 0 disables the floor for this model; null falls back to the bank/global mental_model_min_refresh_interval_seconds setting (itself 0 by default, i.e. no floor).
+   */
+  min_refresh_interval_seconds?: number | null;
   /**
    * Fact Types
    *
@@ -3921,6 +3986,10 @@ export type OperationResponse = {
    */
   mental_model_id?: string | null;
   /**
+   * Typed, per-operation-type outcome detail, discriminated by its own `operation_type`. Populated for `refresh_mental_model` operations that have finished; null for operation types that report no typed detail, for operations still in flight, and for operations recorded before this field existed. Unlike `result_metadata` this is a supported field — new operation types add their own shape here rather than flattening fields onto the operation.
+   */
+  details?: RefreshMentalModelOperationDetails | null;
+  /**
    * Created At
    */
   created_at: string;
@@ -3947,7 +4016,7 @@ export type OperationResponse = {
   /**
    * Next Retry At
    *
-   * When the worker will next attempt this operation. For a pending operation, a value in the future indicates the task is waiting rather than available for immediate pickup — for example, an extension may have raised DeferOperation to park the task until some backpressure window opens. Always null for completed tasks.
+   * When the worker will next attempt this operation. For a pending operation, a value in the future indicates the task is waiting rather than available for immediate pickup — a refresh_mental_model held back by min_refresh_interval_seconds, or an extension raising DeferOperation until some backpressure window opens. It is not cleared when the task finally runs, so on a terminal operation it is a record of the last wait rather than a pending one: read it together with status.
    */
   next_retry_at?: string | null;
   /**
@@ -3999,7 +4068,7 @@ export type OperationStatusResponse = {
   /**
    * Next Retry At
    *
-   * When the worker will next attempt this operation. For a pending operation, a value in the future indicates the task is parked (e.g. by an extension raising DeferOperation) rather than awaiting immediate pickup.
+   * When the worker will next attempt this operation. For a pending operation, a value in the future indicates the task is parked — a refresh_mental_model held back by min_refresh_interval_seconds, or an extension raising DeferOperation — rather than awaiting immediate pickup.
    */
   next_retry_at?: string | null;
   /**
@@ -4014,6 +4083,10 @@ export type OperationStatusResponse = {
   result_metadata?: {
     [key: string]: unknown;
   } | null;
+  /**
+   * Typed, per-operation-type outcome detail, discriminated by its own `operation_type`. Populated for `refresh_mental_model` operations that have finished; null for operation types that report no typed detail, for operations still in flight, and for operations recorded before this field existed. Unlike `result_metadata` this is a supported field — new operation types add their own shape here rather than flattening fields onto the operation.
+   */
+  details?: RefreshMentalModelOperationDetails | null;
   /**
    * Child Operations
    *
@@ -4071,7 +4144,7 @@ export type RecallRequest = {
   /**
    * Types
    *
-   * List of fact types to recall: 'world', 'experience', 'observation'. Defaults to world and experience if not specified.
+   * List of fact types to recall: 'world', 'experience', 'observation'. Defaults to all fact types if not specified.
    */
   types?: Array<string> | null;
   /**
@@ -4607,6 +4680,54 @@ export type ReflectTrace = {
    * LLM calls made during reflection
    */
   llm_calls?: Array<ReflectLlmCall>;
+};
+
+/**
+ * RefreshMentalModelOperationDetails
+ *
+ * What a refresh_mental_model operation did, on the operation record itself.
+ *
+ * Reported under an async operation's ``details``, which is keyed by
+ * ``operation_type``: each type that has a typed outcome to report contributes
+ * its own shape there, rather than every type's fields being flattened onto the
+ * operation. Today refresh is the only one.
+ *
+ * This exists because ``result_metadata`` — the only per-refresh record kept
+ * indefinitely — could not say what a refresh did (#3274), and is documented as
+ * debug-only and unstable, so it is not something a caller can build on.
+ */
+export type RefreshMentalModelOperationDetails = {
+  /**
+   * Operation Type
+   *
+   * Discriminator: which operation type this detail describes.
+   */
+  operation_type?: "refresh_mental_model";
+  /**
+   * Outcome
+   *
+   * What the refresh did with the document: rewrote it (`content_written`), produced a document identical to the stored one (`content_unchanged`), had no new facts to read at all (`content_preserved_no_new_facts`), or refused to write (the `refresh_failed_*` values).
+   */
+  outcome:
+    | "content_written"
+    | "content_unchanged"
+    | "content_preserved_no_new_facts"
+    | "refresh_failed_empty_candidate"
+    | "refresh_failed_delta_not_applied"
+    | "refresh_failed_structured_output";
+  /**
+   * Failure Reason
+   *
+   * Why the refresh refused to write, finer-grained than the outcome — it distinguishes an op call that failed from one whose operations were all rejected, and from a baseline document that could not be read. Null unless `outcome` is one of the `refresh_failed_*` values.
+   */
+  failure_reason?:
+    | "empty_candidate"
+    | "structured_doc_unreadable"
+    | "delta_ops_failed"
+    | "delta_ops_all_skipped"
+    | "delta_not_applied"
+    | "structured_output_failed"
+    | null;
 };
 
 /**

@@ -684,6 +684,7 @@ ENV_ENABLE_OBSERVATION_HISTORY = "HINDSIGHT_API_ENABLE_OBSERVATION_HISTORY"
 ENV_OBSERVATION_HISTORY_MAX_ENTRIES = "HINDSIGHT_API_OBSERVATION_HISTORY_MAX_ENTRIES"
 ENV_ENABLE_MENTAL_MODEL_HISTORY = "HINDSIGHT_API_ENABLE_MENTAL_MODEL_HISTORY"
 ENV_MENTAL_MODEL_HISTORY_MAX_ENTRIES = "HINDSIGHT_API_MENTAL_MODEL_HISTORY_MAX_ENTRIES"
+ENV_MENTAL_MODEL_MIN_REFRESH_INTERVAL_SECONDS = "HINDSIGHT_API_MENTAL_MODEL_MIN_REFRESH_INTERVAL_SECONDS"
 
 # Webhook configuration (global, static - server-level only)
 ENV_WEBHOOK_URL = "HINDSIGHT_API_WEBHOOK_URL"
@@ -880,6 +881,7 @@ ENV_RETENTION_SWEEP_INTERVAL_SECONDS = "HINDSIGHT_API_RETENTION_SWEEP_INTERVAL_S
 ENV_OPERATION_CLEANUP_INTERVAL_SECONDS = "HINDSIGHT_API_OPERATION_CLEANUP_INTERVAL_SECONDS"
 ENV_MAINTENANCE_START_JITTER_SECONDS = "HINDSIGHT_API_MAINTENANCE_START_JITTER_SECONDS"
 ENV_VECTOR_INDEX_MIN_ROWS = "HINDSIGHT_API_VECTOR_INDEX_MIN_ROWS"
+ENV_VECTOR_INDEX_MAINTENANCE_MIN_INTERVAL_SECONDS = "HINDSIGHT_API_VECTOR_INDEX_MAINTENANCE_MIN_INTERVAL_SECONDS"
 
 # Disposition settings
 ENV_DISPOSITION_SKEPTICISM = "HINDSIGHT_API_DISPOSITION_SKEPTICISM"
@@ -911,6 +913,7 @@ PROVIDER_DEFAULT_MODELS = {
     "vertexai": "google/gemini-3.1-flash-lite",
     "openai-codex": "gpt-5.4-mini",
     "claude-code": "claude-sonnet-4-5-20250929",
+    "github-copilot": "gpt-5.6-terra",
     "mock": "mock-model",
     "none": "none",
     "litellm": "gpt-4o-mini",
@@ -1268,6 +1271,13 @@ DEFAULT_ENABLE_OBSERVATIONS = True  # Observations enabled by default
 DEFAULT_ENABLE_AUTO_CONSOLIDATION = True  # Auto-consolidation after retain enabled by default
 DEFAULT_ENABLE_OBSERVATION_HISTORY = True  # Observation history tracking enabled by default
 DEFAULT_ENABLE_MENTAL_MODEL_HISTORY = True  # Mental model history tracking enabled by default
+# Floor on how often an *automatic* mental-model refresh may run: a triggered refresh
+# that arrives less than this many seconds after the model's last one is parked until
+# the window expires instead of rebuilding the document immediately. 0 (the default)
+# keeps the historical behaviour — every trigger refreshes at once. Explicit refreshes
+# (API/MCP/control plane) ignore it entirely. Per-model
+# `trigger.min_refresh_interval_seconds` overrides this.
+DEFAULT_MENTAL_MODEL_MIN_REFRESH_INTERVAL_SECONDS = 0
 # History (mental-model refresh snapshots and observation update snapshots) lives in
 # the dedicated mental_model_history / observation_history tables, one row per change.
 # On every write we insert the new entry and delete the oldest rows beyond the cap,
@@ -1511,23 +1521,36 @@ DEFAULT_MAINTENANCE_START_JITTER_SECONDS = 60
 # paid by every other bank in the deployment. Three per bank exhausts the lock
 # table at a few thousand banks (issue #3485).
 #
-# 0 is the default and means "no minimum": every partition that holds rows gets
-# an index, which is the behaviour before the threshold existed. Deployments
-# holding thousands of banks raise it — above the threshold ANN wins, and below
-# it PostgreSQL answers the same query from the (bank_id, fact_type) B-tree plus
-# a top-N sort, which is exact rather than approximate *and* faster, because
-# sorting a few thousand rows by distance costs less than descending an ANN
-# graph. 10_000 is a reasonable starting point (it is also ScaNN's own build
-# floor, SCANN_MIN_ROWS_FOR_AUTO_INDEX).
+# 0 is the default and turns the threshold OFF: all three indexes are created in
+# the bank-create transaction (instant — the bank is empty) and dropped when the
+# bank is deleted, which is exactly the behaviour that predates the threshold. No
+# vector_index_maintenance operation is ever submitted and no write pays a
+# coverage check.
+#
+# Deployments holding thousands of banks set a positive value — above it ANN
+# wins, and below it PostgreSQL answers the same query from the
+# (bank_id, fact_type) B-tree plus a top-N sort, which is exact rather than
+# approximate *and* faster, because sorting a few thousand rows by distance costs
+# less than descending an ANN graph. 10_000 is a reasonable starting point (it is
+# also ScaNN's own build floor, SCANN_MIN_ROWS_FOR_AUTO_INDEX).
 DEFAULT_VECTOR_INDEX_MIN_ROWS = 0
 
 # A partition that falls back below MIN_ROWS * this ratio loses its index. The
 # gap between the build and drop thresholds is hysteresis: with a single
 # boundary, consolidation pruning a bank back and forth across it would rebuild
-# and drop the same ANN index on alternating writes. At the default threshold of
-# 0 there is no gap and nothing to flap — a partition either holds rows or does
-# not.
+# and drop the same ANN index on alternating writes. Unused at the default
+# threshold of 0, where coverage is not row-dependent at all.
 VECTOR_INDEX_DROP_RATIO = 0.5
+
+# Shortest gap between two vector_index_maintenance operations for one bank. Only
+# consulted once the pre-check has found real work, so a converged bank never
+# pays for it. Index DDL is the expensive thing this guards: a partition
+# oscillating across the threshold asks for an ANN build or drop on every
+# crossing, and a build that keeps failing leaves the plan non-empty so every
+# subsequent write re-queues it. Ignored by the job's own hand-off, whose purpose
+# is to re-check immediately when the bank moved under it. Unused at the default
+# threshold of 0, where the operation does not exist.
+DEFAULT_VECTOR_INDEX_MAINTENANCE_MIN_INTERVAL_SECONDS = 900
 
 # Default MCP tool descriptions (can be customized via env vars)
 DEFAULT_MCP_RETAIN_DESCRIPTION = """Store important information to long-term memory.
@@ -2558,6 +2581,7 @@ class HindsightConfig:
     observation_history_max_entries: int
     enable_mental_model_history: bool
     mental_model_history_max_entries: int
+    mental_model_min_refresh_interval_seconds: int
     consolidation_batch_size: int
     consolidation_dedup_threshold: float
     consolidation_max_memories_per_round: int
@@ -2703,8 +2727,12 @@ class HindsightConfig:
     # refresh (the per-model schedule lives in the mental model trigger). 0 = disabled.
     mental_model_refresh_tick_seconds: int
     # Rows a (bank, fact_type) needs before it gets its own partial vector index.
-    # 0 (default) = no minimum: every partition holding rows is indexed.
+    # 0 (default) = threshold off: indexes are created with the bank, as they were
+    # before the threshold existed, and no maintenance operation runs.
     vector_index_min_rows: int
+    # Shortest gap between two vector_index_maintenance operations for one bank.
+    # Unused while vector_index_min_rows is 0.
+    vector_index_maintenance_min_interval_seconds: int
 
     # Webhook configuration (static - server-level only, not per-bank)
     webhook_url: str | None  # Global webhook URL (None = disabled)
@@ -2866,6 +2894,8 @@ class HindsightConfig:
         "observations_mission",
         "max_observations_per_scope",
         "observation_scope_limits",
+        # Mental model settings
+        "mental_model_min_refresh_interval_seconds",
         # Reflect settings
         "reflect_mission",
         "reflect_source_facts_max_tokens",
@@ -3846,6 +3876,16 @@ class HindsightConfig:
                     str(DEFAULT_MENTAL_MODEL_HISTORY_MAX_ENTRIES),
                 )
             ),
+            # Tolerate a set-but-empty value the way the reranker's _member_int does: this
+            # ships commented out in .env.example, so an uncommented-but-unfilled `VAR=`
+            # in a compose/env file must fall back to the default, not fail config load.
+            mental_model_min_refresh_interval_seconds=max(
+                0,
+                int(
+                    os.getenv(ENV_MENTAL_MODEL_MIN_REFRESH_INTERVAL_SECONDS, "").strip()
+                    or DEFAULT_MENTAL_MODEL_MIN_REFRESH_INTERVAL_SECONDS
+                ),
+            ),
             consolidation_batch_size=int(
                 os.getenv(ENV_CONSOLIDATION_BATCH_SIZE, str(DEFAULT_CONSOLIDATION_BATCH_SIZE))
             ),
@@ -4081,6 +4121,11 @@ class HindsightConfig:
                 ENV_VECTOR_INDEX_MIN_ROWS,
                 os.getenv(ENV_VECTOR_INDEX_MIN_ROWS),
                 DEFAULT_VECTOR_INDEX_MIN_ROWS,
+            ),
+            vector_index_maintenance_min_interval_seconds=_parse_non_negative_int(
+                ENV_VECTOR_INDEX_MAINTENANCE_MIN_INTERVAL_SECONDS,
+                os.getenv(ENV_VECTOR_INDEX_MAINTENANCE_MIN_INTERVAL_SECONDS),
+                DEFAULT_VECTOR_INDEX_MAINTENANCE_MIN_INTERVAL_SECONDS,
             ),
             operation_cleanup_interval_seconds=_parse_non_negative_int(
                 ENV_OPERATION_CLEANUP_INTERVAL_SECONDS,

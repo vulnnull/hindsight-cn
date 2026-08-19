@@ -204,6 +204,7 @@ export interface MentalModel {
     mode?: "full" | "delta";
     refresh_after_consolidation: boolean;
     refresh_cron?: string | null;
+    min_refresh_interval_seconds?: number | null;
     fact_types?: Array<"world" | "experience" | "observation">;
     exclude_mental_models?: boolean;
     exclude_mental_model_ids?: string[];
@@ -637,6 +638,10 @@ export class ControlPlaneClient {
         updated_at?: string | null;
         status: string;
         error_message: string | null;
+        /** For a pending operation, a value in the future means the worker is
+         *  holding it back until then — a mental-model refresh waiting out
+         *  min_refresh_interval_seconds, or an extension deferring the task. */
+        next_retry_at?: string | null;
         progress?: OperationProgress | null;
       }>;
     }>(`/api/operations/${encodeURIComponent(bankId)}${query ? `?${query}` : ""}`);
@@ -817,6 +822,7 @@ export class ControlPlaneClient {
         mode?: "full" | "delta";
         refresh_after_consolidation?: boolean;
         refresh_cron?: string | null;
+        min_refresh_interval_seconds?: number | null;
         fact_types?: Array<"world" | "experience" | "observation">;
         exclude_mental_models?: boolean;
       };
@@ -1331,6 +1337,7 @@ export class ControlPlaneClient {
       updated_at: string | null;
       completed_at: string | null;
       error_message: string | null;
+      next_retry_at?: string | null;
       progress?: OperationProgress | null;
       result_metadata?: {
         items_count?: number;
@@ -1338,6 +1345,14 @@ export class ControlPlaneClient {
         num_sub_batches?: number;
         is_parent?: boolean;
         [key: string]: any;
+      } | null;
+      /** Typed, per-operation-type outcome payload, discriminated by its own
+       *  operation_type. Null for types that report none and for operations
+       *  still in flight. */
+      details?: {
+        operation_type: "refresh_mental_model";
+        outcome: string;
+        failure_reason?: string | null;
       } | null;
       child_operations?: Array<{
         operation_id: string;
@@ -1477,6 +1492,7 @@ export class ControlPlaneClient {
           mode?: "full" | "delta";
           refresh_after_consolidation: boolean;
           refresh_cron?: string | null;
+          min_refresh_interval_seconds?: number | null;
           fact_types?: Array<"world" | "experience" | "observation">;
           exclude_mental_models?: boolean;
           exclude_mental_model_ids?: string[];
@@ -1490,6 +1506,8 @@ export class ControlPlaneClient {
         };
         last_refreshed_at: string;
         last_memory_seen_at: string | null;
+        /** Whether a memory in this model's own scope has been written since it last read them. */
+        is_stale: boolean | null;
         created_at: string;
         reflect_response?: {
           text: string;
@@ -1539,6 +1557,7 @@ export class ControlPlaneClient {
         mode?: "full" | "delta";
         refresh_after_consolidation: boolean;
         refresh_cron?: string | null;
+        min_refresh_interval_seconds?: number | null;
         fact_types?: Array<"world" | "experience" | "observation">;
         exclude_mental_models?: boolean;
         exclude_mental_model_ids?: string[];
@@ -1584,6 +1603,7 @@ export class ControlPlaneClient {
         mode?: "full" | "delta";
         refresh_after_consolidation: boolean;
         refresh_cron?: string | null;
+        min_refresh_interval_seconds?: number | null;
         fact_types?: Array<"world" | "experience" | "observation">;
         exclude_mental_models?: boolean;
         exclude_mental_model_ids?: string[];
@@ -1608,6 +1628,7 @@ export class ControlPlaneClient {
       trigger: {
         refresh_after_consolidation: boolean;
         refresh_cron?: string | null;
+        min_refresh_interval_seconds?: number | null;
         fact_types?: Array<"world" | "experience" | "observation">;
         exclude_mental_models?: boolean;
         exclude_mental_model_ids?: string[];

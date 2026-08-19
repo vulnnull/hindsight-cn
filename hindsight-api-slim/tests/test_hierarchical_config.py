@@ -51,6 +51,9 @@ class FakeBankConfigBackend:
     def acquire(self):
         return FakeBankConfigConnection(self)
 
+    def transaction(self):
+        return FakeBankConfigConnection(self)
+
 
 class FakeBankConfigConnection:
     def __init__(self, backend: FakeBankConfigBackend):
@@ -145,9 +148,10 @@ async def test_hierarchical_fields_categorization():
     assert "enable_temporal_retrieval" in configurable
     assert "enable_graph_retrieval" in configurable
     assert "enable_reranking" in configurable
+    assert "mental_model_min_refresh_interval_seconds" in configurable
 
     # Verify count is correct
-    assert len(configurable) == 45
+    assert len(configurable) == 46
 
     # Verify credential fields (NEVER exposed)
     assert "llm_api_key" in credentials

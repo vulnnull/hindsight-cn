@@ -652,7 +652,8 @@ export class HindsightClient {
   /**
    * Active-path capture: register a major feature as a per-initiative page + a tagged marker memory.
    * New initiative → creates a page under the Initiatives folder tagged `relatedPageId:<pageId>`.
-   * Enhancement (relatesToPageId) → no new page; only a marker accruing to the existing page.
+   * Update (relatesToPageId) → no new page; only a marker accruing to the existing page, so an
+   * enhancement or a mid-work plan change lands on the initiative it belongs to.
    */
   async captureInitiative(args: {
     title: string;
@@ -685,7 +686,9 @@ export class HindsightClient {
       }
       pageId ||= `initiative-${this.slugify(args.title)}`; // last resort if the response lacked an id
     }
-    const verb = args.relatesToPageId ? "Enhancement to an existing initiative" : "New initiative";
+    // "Update", not "Enhancement": a recapture is just as often a plan change (scope/goal/why
+    // rewritten) as an addition, and this string is what the page synthesis reads.
+    const verb = args.relatesToPageId ? "Update to an existing initiative" : "New initiative";
     const content = `${verb}: ${args.title}. ${args.summary}`;
     // Unique marker document id (NOT pageId) so repeated captures accrue instead of replacing.
     const markerId = `initiative-marker-${this.slugify(args.title)}-${Date.now()}`;

@@ -10,7 +10,7 @@ import { HindsightServer, type Logger } from "@vectorize-io/hindsight-all";
 import { HindsightClient, type HindsightClientOptions } from "@vectorize-io/hindsight-client";
 import { RetainQueue } from "./retain-queue.js";
 import { compileSessionPatterns, matchesSessionPattern } from "./session-patterns.js";
-import { createHash } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { dirname, join } from "path";
 import * as log from "./logger.js";
 import { configureLogger, setApiLogger, stopLogger } from "./logger.js";
@@ -88,9 +88,14 @@ let usingExternalApi = false; // Track if using external API (skip daemon manage
 let supportsUpdateModeAppend = false;
 let appendCapabilityProbed = false;
 const MIN_VERSION_FOR_UPDATE_MODE_APPEND = "0.5.0";
+export type AsyncRetainOperationIdCapability = "supported" | "unsupported" | "unknown";
+let asyncRetainOperationIdCapability: AsyncRetainOperationIdCapability = "unknown";
+const MIN_VERSION_FOR_ASYNC_RETAIN_OPERATION_ID = "0.8.6";
 
 // Store the current plugin config for bank ID derivation
 let currentPluginConfig: PluginConfig | null = null;
+let serviceGeneration = 0;
+let serviceAbortController: AbortController | null = null;
 
 // Track which banks have had configured defaults applied (missions + bank config).
 const banksWithDefaultsApplied = new Set<string>();
@@ -106,7 +111,11 @@ const inflightRecalls = new Map<string, Promise<RecallResponse>>();
 // at build time; HindsightClient wants Record<string, string>).
 export interface BankScopedClient {
   readonly bankId: string;
-  retain(req: RetainRequest): Promise<void>;
+  retain(
+    req: RetainRequest,
+    capability?: AsyncRetainOperationIdCapability,
+    signal?: globalThis.AbortSignal
+  ): Promise<void>;
   recall(
     req: {
       query: string;
@@ -126,10 +135,10 @@ export interface BankMissionsUpdate {
   observationsMission?: string;
 }
 
-function scopeClient(c: HindsightClient, bankId: string): BankScopedClient {
+export function scopeClient(c: HindsightClient, bankId: string): BankScopedClient {
   return {
     bankId,
-    async retain(req) {
+    async retain(req, capability = asyncRetainOperationIdCapability, signal) {
       await c.retain(bankId, req.content, {
         documentId: req.documentId,
         context: req.context,
@@ -137,6 +146,8 @@ function scopeClient(c: HindsightClient, bankId: string): BankScopedClient {
         tags: req.tags,
         updateMode: req.updateMode,
         async: true,
+        signal,
+        ...(capability === "supported" && req.operationId ? { operationId: req.operationId } : {}),
       });
     },
     async recall(req, timeoutMs) {
@@ -263,45 +274,87 @@ const DEFAULT_FLUSH_INTERVAL_MS = 60_000; // 1 min
  * Attempt to flush pending retains from the queue.
  * Each item is sent exactly as it would have been originally — same bank, payload, metadata.
  */
-async function flushRetainQueue(): Promise<void> {
-  if (!retainQueue || isFlushInProgress) return;
-  const pending = retainQueue.size();
-  if (pending === 0) return;
+export async function flushRetainQueue(
+  queueOverride?: RetainQueue,
+  clientOverride?: HindsightClient,
+  capabilityOverride?: AsyncRetainOperationIdCapability,
+  expectedGeneration = serviceGeneration,
+  signal: globalThis.AbortSignal | undefined = serviceAbortController?.signal
+): Promise<void> {
+  const activeQueue = queueOverride ?? retainQueue;
+  const activeClient = clientOverride ?? client;
+  if (
+    !activeQueue ||
+    isFlushInProgress ||
+    expectedGeneration !== serviceGeneration ||
+    signal?.aborted
+  )
+    return;
 
   isFlushInProgress = true;
   let flushed = 0;
   let failed = 0;
 
   try {
-    if (!client) return; // no client yet — can't flush
+    // Nothing queued means nothing to be idempotent about, so don't spend a
+    // /version round trip: this runs on a timer *and* after every successful
+    // retain, and probing an empty queue put a request behind every turn. The
+    // capability is re-read here whenever there is actually work to replay,
+    // which is the only moment it changes the outcome.
+    const pending = activeQueue.size();
+    if (pending === 0) return;
+    const capability =
+      capabilityOverride ?? (await refreshQueueOperationIdCapability(expectedGeneration, signal));
+    if (expectedGeneration !== serviceGeneration || signal?.aborted) return;
+    if (capability === "unknown") {
+      // Held back on purpose: a replay without operation_id is the one path that
+      // can duplicate durable memories. Warn rather than debug — if /version
+      // stays unreachable the queue grows without ever draining, and that must
+      // not be silent.
+      log.warn(
+        `retain queue flush deferred (${pending} queued): server operation-id capability unknown`
+      );
+      return;
+    }
+    if (!activeClient) return; // no client yet — can't flush
 
     // Cleanup expired items first
-    retainQueue.cleanup();
+    activeQueue.cleanup();
 
-    const items = retainQueue.peek(50);
-    const flushedIds: string[] = [];
+    const items = activeQueue.peek(50);
     for (const item of items) {
       try {
-        await client.retain(item.bankId, item.content, {
+        if (expectedGeneration !== serviceGeneration || signal?.aborted) return;
+        const operationId =
+          capability === "supported"
+            ? activeQueue.ensureOperationId(item.id, randomUUID())
+            : undefined;
+        await activeClient.retain(item.bankId, item.content, {
           documentId: item.documentId,
           context: item.context,
           metadata: toStringMetadata(item.metadata),
           tags: item.tags,
           updateMode: item.updateMode,
           async: true,
+          signal,
+          ...(operationId ? { operationId } : {}),
         });
 
-        flushedIds.push(item.id);
+        if (expectedGeneration !== serviceGeneration || signal?.aborted) return;
+        // Checkpoint each acknowledgement before the next network await. A
+        // later abort must not replay already-accepted work on legacy servers.
+        activeQueue.remove(item.id);
         flushed++;
       } catch {
+        if (expectedGeneration !== serviceGeneration || signal?.aborted) return;
         // API still down — stop trying this batch
         failed++;
         break;
       }
     }
 
-    if (flushedIds.length > 0) retainQueue.removeMany(flushedIds);
-    const remaining = retainQueue.size();
+    if (expectedGeneration !== serviceGeneration || signal?.aborted) return;
+    const remaining = activeQueue.size();
     if (flushed > 0) {
       log.info(
         `queue flush: ${flushed} queued retains delivered${remaining > 0 ? `, ${remaining} still pending` : ", queue empty"}`
@@ -585,6 +638,40 @@ const RUNTIME_MESSAGE_ID_LINE_RE = /^\[message_id:\s*(?:om|ou|oc)_[A-Za-z0-9_-]+
 const RUNTIME_OPAQUE_ID_LINE_RE = /^(?:om|ou|oc)_[A-Za-z0-9_-]+$/i;
 const RUNTIME_OPAQUE_SENDER_PREFIX_RE = /^\s*(?:om|ou|oc)_[A-Za-z0-9_-]+\s*:\s*/i;
 
+// Opt-in display-name prefix stripping (#3070). Some channels prepend a human
+// display name to the user text ("Alice: today weather?"), which pollutes both
+// the recall query and the retained transcript (the name gets extracted as a
+// fact). No payload field carries the display name, and a generic `Word:`
+// heuristic would eat ordinary user text ("计划: 今天修 retain 污染"), so the
+// pattern is operator-supplied. Unset = byte-identical to the old behaviour.
+// One process-global compiled pattern, armed from getPluginConfig(): the host
+// holds a single hindsight-openclaw config, so every session in the process
+// shares it. Compile per config if that ever stops being true.
+let senderPrefixRe: RegExp | undefined;
+let senderPrefixSource: string | undefined;
+
+/**
+ * Set (or clear) the display-name prefix pattern stripped by
+ * {@link stripRuntimeEnvelope}. The pattern is the name alternation only
+ * (e.g. `Alice|Bob` or `[A-Za-z ]{1,20}`); the anchor, surrounding whitespace
+ * and the `:` separator are supplied here. An invalid regex fails closed:
+ * stripping stays off and nothing throws.
+ */
+export function configureSenderPrefixStripping(pattern: string | undefined): void {
+  if (pattern === senderPrefixSource) return; // no recompile, and no repeat warn
+  senderPrefixSource = pattern;
+  if (!pattern) {
+    senderPrefixRe = undefined;
+    return;
+  }
+  try {
+    senderPrefixRe = new RegExp(`^\\s*(?:${pattern})\\s*:\\s*`);
+  } catch (error) {
+    senderPrefixRe = undefined;
+    log.warn(`ignoring invalid senderPrefixPattern ${JSON.stringify(pattern)}: ${error}`);
+  }
+}
+
 /**
  * Strip inline OpenClaw/Feishu runtime headers that can appear before user text.
  * These identifiers are routing/runtime metadata, not semantic conversation content.
@@ -598,7 +685,8 @@ export function stripRuntimeEnvelope(content: string): string {
     return !RUNTIME_MESSAGE_ID_LINE_RE.test(trimmed) && !RUNTIME_OPAQUE_ID_LINE_RE.test(trimmed);
   });
 
-  return kept.join("\n").replace(RUNTIME_OPAQUE_SENDER_PREFIX_RE, "");
+  const stripped = kept.join("\n").replace(RUNTIME_OPAQUE_SENDER_PREFIX_RE, "");
+  return senderPrefixRe ? stripped.replace(senderPrefixRe, "") : stripped;
 }
 
 /**
@@ -1258,19 +1346,45 @@ export function resolveBankIdForKnowledgeTools(
   return { bankId, resolvedCtx };
 }
 
+/**
+ * Render the event window a memory carries. `mentioned_at` says when the fact
+ * was stated; `occurred_start`/`occurred_end` say when the event itself
+ * happened, which is what the agent needs to order past events against each
+ * other. Either bound can be absent, so each case gets its own wording rather
+ * than an open-ended range the model has to guess at.
+ */
+function formatOccurredWindow(
+  start: string | null | undefined,
+  end: string | null | undefined
+): string {
+  if (start && end) {
+    return start === end ? ` [occurred: ${start}]` : ` [occurred: ${start} → ${end}]`;
+  }
+  if (start) return ` [occurred from: ${start}]`;
+  if (end) return ` [occurred until: ${end}]`;
+  return "";
+}
+
 export function formatMemories(results: MemoryResult[]): string {
   if (!results || results.length === 0) return "";
   return results
     .map((r) => {
       const type = r.type ? ` [${r.type}]` : "";
       const date = r.mentioned_at ? ` (${r.mentioned_at})` : "";
-      return `- ${r.text}${type}${date}`;
+      const occurred = formatOccurredWindow(r.occurred_start, r.occurred_end);
+      const doc = r.document_id ? ` [doc:${r.document_id}]` : "";
+      return `- ${r.text}${type}${date}${occurred}${doc}`;
     })
     .join("\n\n");
 }
 
 // Providers that authenticate via OAuth or run locally — no API key needed.
-const NO_KEY_REQUIRED_PROVIDERS = new Set(["ollama", "openai-codex", "claude-code"]);
+const NO_KEY_REQUIRED_PROVIDERS = new Set([
+  "ollama",
+  "openai-codex",
+  "claude-code",
+  "github-copilot",
+]);
 
 export function detectLLMConfig(pluginConfig?: PluginConfig): {
   provider?: string;
@@ -1421,6 +1535,37 @@ export function supportsAppendFromCapabilities(
   );
 }
 
+export function supportsAsyncRetainOperationIdFromCapabilities(
+  capabilities: HindsightApiCapabilities | null
+): boolean {
+  return asyncRetainOperationIdCapabilityFromCapabilities(capabilities) === "supported";
+}
+
+export function asyncRetainOperationIdCapabilityFromCapabilities(
+  capabilities: HindsightApiCapabilities | null
+): AsyncRetainOperationIdCapability {
+  if (capabilities === null) {
+    return "unknown";
+  }
+  const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(capabilities.version);
+  // JavaScript's `$` can match before a final line terminator, so require the
+  // matched text to consume the complete payload as well as canonical digits.
+  if (!match || match[0] !== capabilities.version) {
+    return "unknown";
+  }
+  return meetsMinimumVersion(capabilities.version, MIN_VERSION_FOR_ASYNC_RETAIN_OPERATION_ID)
+    ? "supported"
+    : "unsupported";
+}
+
+/**
+ * Allocate the identity before the first asynchronous request so a failed
+ * acknowledgement and every durable-queue replay refer to the same server operation.
+ */
+export function createAsyncRetainOperationId(): string {
+  return randomUUID();
+}
+
 /**
  * Probe `<apiUrl>/version` once at service.start to learn the running
  * Hindsight API capabilities. Returns `null` (treated as "no append support")
@@ -1429,14 +1574,16 @@ export function supportsAppendFromCapabilities(
  */
 async function fetchHindsightApiCapabilities(
   apiUrl: string,
-  apiToken?: string | null
+  apiToken?: string | null,
+  serviceSignal?: globalThis.AbortSignal
 ): Promise<HindsightApiCapabilities | null> {
   const versionUrl = `${apiUrl.replace(/\/$/, "")}/version`;
   try {
     const headers: Record<string, string> = { "User-Agent": USER_AGENT };
     if (apiToken) headers["Authorization"] = `Bearer ${apiToken}`;
+    const timeoutSignal = AbortSignal.timeout(5000);
     const response = await fetch(versionUrl, {
-      signal: AbortSignal.timeout(5000),
+      signal: serviceSignal ? AbortSignal.any([serviceSignal, timeoutSignal]) : timeoutSignal,
       headers,
     });
     if (!response.ok) {
@@ -1455,9 +1602,44 @@ async function fetchHindsightApiCapabilities(
   }
 }
 
+export async function refreshAsyncRetainOperationIdCapability(
+  apiUrl: string,
+  apiToken?: string | null,
+  expectedGeneration = serviceGeneration,
+  signal: globalThis.AbortSignal | undefined = serviceAbortController?.signal
+): Promise<AsyncRetainOperationIdCapability> {
+  const capabilities = await fetchHindsightApiCapabilities(apiUrl, apiToken, signal);
+  const capability = asyncRetainOperationIdCapabilityFromCapabilities(capabilities);
+  if (expectedGeneration !== serviceGeneration || signal?.aborted) return "unknown";
+  asyncRetainOperationIdCapability = capability;
+  return capability;
+}
+
+async function refreshQueueOperationIdCapability(
+  expectedGeneration = serviceGeneration,
+  signal: globalThis.AbortSignal | undefined = serviceAbortController?.signal
+): Promise<AsyncRetainOperationIdCapability> {
+  if (expectedGeneration !== serviceGeneration || signal?.aborted) return "unknown";
+  if (!currentPluginConfig) {
+    asyncRetainOperationIdCapability = "unknown";
+    return "unknown";
+  }
+  const externalApi = detectExternalApi(currentPluginConfig);
+  if (!externalApi.apiUrl) {
+    asyncRetainOperationIdCapability = "unknown";
+    return "unknown";
+  }
+  return refreshAsyncRetainOperationIdCapability(
+    externalApi.apiUrl,
+    externalApi.apiToken,
+    expectedGeneration,
+    signal
+  );
+}
+
 /**
- * Probe `/version` and update the module-level `supportsUpdateModeAppend`
- * capability flag accordingly. Logs a one-time WARN block when the API is
+ * Probe `/version` and update the module-level append and async-operation-id
+ * capability flags. Logs a one-time WARN block when the append API is
  * older than 0.5.0 or cannot store document text — without
  * `update_mode: 'append'`, every retain on the same session id silently
  * overwrites prior turns server-side, and append itself requires stored
@@ -1466,9 +1648,16 @@ async function fetchHindsightApiCapabilities(
  * Called from the same code paths as the health check, so capability is
  * always re-evaluated when the plugin (re)connects to the API.
  */
-async function detectAppendCapability(apiUrl: string, apiToken?: string | null): Promise<void> {
-  const capabilities = await fetchHindsightApiCapabilities(apiUrl, apiToken);
+async function detectAppendCapability(
+  apiUrl: string,
+  apiToken?: string | null,
+  expectedGeneration = serviceGeneration,
+  signal: globalThis.AbortSignal | undefined = serviceAbortController?.signal
+): Promise<void> {
+  const capabilities = await fetchHindsightApiCapabilities(apiUrl, apiToken, signal);
+  if (expectedGeneration !== serviceGeneration || signal?.aborted) return;
   const supported = supportsAppendFromCapabilities(capabilities);
+  asyncRetainOperationIdCapability = asyncRetainOperationIdCapabilityFromCapabilities(capabilities);
   const transitionedToUnsupported = supportsUpdateModeAppend && !supported;
   const firstProbe = !appendCapabilityProbed;
   appendCapabilityProbed = true;
@@ -1550,6 +1739,13 @@ export function normalizeRetainTags(value: unknown): string[] {
 
 export function getPluginConfig(api: MoltbotPluginAPI): PluginConfig {
   const config = api.config.plugins?.entries?.["hindsight-openclaw"]?.config || {};
+
+  const senderPrefixPattern =
+    typeof config.senderPrefixPattern === "string" && config.senderPrefixPattern.trim().length > 0
+      ? config.senderPrefixPattern.trim()
+      : undefined;
+  // Arm the shared stripper used by every recall/retain text path (#3070).
+  configureSenderPrefixStripping(senderPrefixPattern);
 
   // No default fallback for missions: if the user doesn't set one, the plugin
   // does not stamp anything. This lets per-bank missions written via the API
@@ -1681,6 +1877,7 @@ export function getPluginConfig(api: MoltbotPluginAPI): PluginConfig {
         ? config.retainQueueFlushIntervalMs
         : undefined,
     enableKnowledgeTools: config.enableKnowledgeTools === true,
+    senderPrefixPattern,
   };
 }
 
@@ -1726,6 +1923,10 @@ export default function (api: MoltbotPluginAPI) {
     api.registerService({
       id: "hindsight-memory",
       async start() {
+        serviceAbortController?.abort();
+        const serviceController = new AbortController();
+        serviceAbortController = serviceController;
+        const startGeneration = ++serviceGeneration;
         log.info("service.start invoked");
         debug("[Hindsight] Service start called - beginning heavy initialization...");
 
@@ -1768,6 +1969,7 @@ export default function (api: MoltbotPluginAPI) {
 
         // Detect external API mode
         const externalApi = detectExternalApi(pluginConfig);
+        usingExternalApi = Boolean(externalApi.apiUrl);
 
         // Get API port from config (default: 9077)
         const apiPort = pluginConfig.apiPort || 9077;
@@ -1799,11 +2001,24 @@ export default function (api: MoltbotPluginAPI) {
 
             // Periodic flush timer
             if (queueFlushInterval > 0) {
-              retainQueueFlushTimer = setInterval(flushRetainQueue, queueFlushInterval);
+              retainQueueFlushTimer = setInterval(() => {
+                void flushRetainQueue(
+                  undefined,
+                  undefined,
+                  undefined,
+                  startGeneration,
+                  serviceController.signal
+                );
+              }, queueFlushInterval);
               retainQueueFlushTimer.unref?.();
             }
           } catch (error) {
-            log.warn(`could not initialize retain queue: ${error}`);
+            // Degrade, don't refuse to start: without the queue a failed retain
+            // is dropped exactly as it was before the queue existed, which is
+            // worth far less than taking the whole plugin down over an
+            // unwritable state directory.
+            retainQueue = null;
+            log.warn(`could not initialize retain queue, continuing without it: ${error}`);
           }
 
           if (externalApi.apiToken) {
@@ -2017,6 +2232,9 @@ export default function (api: MoltbotPluginAPI) {
 
       async stop() {
         try {
+          serviceGeneration++;
+          serviceAbortController?.abort();
+          serviceAbortController = null;
           debug("[Hindsight] Service stopping...");
 
           // Only stop daemon if in local mode
@@ -2043,6 +2261,8 @@ export default function (api: MoltbotPluginAPI) {
 
           client = null;
           clientOptions = null;
+          asyncRetainOperationIdCapability = "unknown";
+          usingExternalApi = false;
           banksWithDefaultsApplied.clear();
           isInitialized = false;
 
@@ -2319,7 +2539,8 @@ export default function (api: MoltbotPluginAPI) {
           `[Hindsight] After topK (${pluginConfig.recallTopK ?? "unlimited"}): ${results.length} results injected`
         );
 
-        // Format memories as JSON with all fields from recall
+        // Format memories as a bullet list (text + type + date + occurred window +
+        // [doc:<document_id>], each part present only when the memory carries it)
         const memoriesFormatted = formatMemories(results);
 
         const contextMessage = `<hindsight_memories>
@@ -2384,6 +2605,15 @@ ${memoriesFormatted}
     ): Promise<void> => {
       const force = retainOptions.force === true;
       const hookName = retainOptions.hookName;
+      const retainGeneration = serviceGeneration;
+      const retainController = serviceAbortController;
+      const retainSignal = retainController?.signal;
+      const retainLifecycleIsCurrent = () =>
+        retainController !== null &&
+        serviceAbortController === retainController &&
+        retainGeneration === serviceGeneration &&
+        !retainSignal?.aborted;
+      if (!retainLifecycleIsCurrent()) return;
       // Optional perf instrumentation (#1406). Only emitted when an actual
       // retain RPC fires; the many early-return skip paths are not measured.
       const perfHookStart = pluginConfig.debugPerfTiming ? Date.now() : 0;
@@ -2611,14 +2841,25 @@ ${memoriesFormatted}
         }
 
         await clientGlobal.waitForReady();
+        if (!retainLifecycleIsCurrent()) return;
 
         // Get client configured for this context's bank (async to handle mission setup)
         const client = await clientGlobal.getClientForContext(resolvedCtxForRetain);
+        if (!retainLifecycleIsCurrent()) return;
         if (!client) {
           log.warn("client not initialized, skipping retain");
           return;
         }
 
+        // Use the cached capability, and only pay for a /version round trip while
+        // it is still unknown. Probing on every retain would put an extra
+        // request in front of every turn, and the answer changes at most once
+        // per server restart — the queue flush re-probes on its own timer.
+        const retainOperationIdCapability =
+          usingExternalApi && asyncRetainOperationIdCapability === "unknown"
+            ? await refreshQueueOperationIdCapability(retainGeneration, retainSignal)
+            : asyncRetainOperationIdCapability;
+        if (!retainLifecycleIsCurrent()) return;
         const retainNow = Date.now();
         const retainRequest = buildRetainRequest(
           transcript,
@@ -2633,6 +2874,7 @@ ${memoriesFormatted}
               : undefined,
             tags: inlineRetainTags,
             appendSupported: supportsUpdateModeAppend,
+            operationId: createAsyncRetainOperationId(),
           }
         );
 
@@ -2645,7 +2887,13 @@ ${memoriesFormatted}
         let retainElapsedMs = 0;
         let retainOutcome: "ok" | "queued" | "error" = "error";
         try {
-          await client.retain(retainRequest);
+          // An unknown capability does not hold up the first send: there is
+          // nothing on the server yet for it to duplicate, so omitting the wire
+          // field is exactly today's behaviour. The id is still allocated and
+          // persisted with the request, so a *replay* can be idempotent once the
+          // capability is known — that is where duplicates actually come from.
+          await client.retain(retainRequest, retainOperationIdCapability, retainSignal);
+          if (!retainLifecycleIsCurrent()) return;
           retainElapsedMs = pluginConfig.debugPerfTiming ? Date.now() - retainStart : 0;
           retainOutcome = "ok";
           log.trackRetain(bankId, messageCount);
@@ -2654,10 +2902,13 @@ ${memoriesFormatted}
           );
 
           // After a successful retain, try flushing any queued items
-          if (retainQueue && retainQueue.size() > 0) {
-            flushRetainQueue().catch(() => {});
+          if (retainQueue) {
+            flushRetainQueue(undefined, undefined, undefined, retainGeneration, retainSignal).catch(
+              () => {}
+            );
           }
         } catch (retainError) {
+          if (!retainLifecycleIsCurrent()) return;
           retainElapsedMs = pluginConfig.debugPerfTiming ? Date.now() - retainStart : 0;
           // Queue the failed retain for later delivery (external API mode only)
           if (retainQueue) {
@@ -2807,6 +3058,8 @@ export function buildRetainRequest(
      * prior turns aren't overwritten. Defaults to false (conservative).
      */
     appendSupported?: boolean;
+    /** Stable UUID allocated before the initial asynchronous retain request. */
+    operationId?: string;
   }
 ): RetainRequest {
   const resolvedCtx = resolveSessionIdentity(effectiveCtx);
@@ -2855,6 +3108,7 @@ export function buildRetainRequest(
       ...(options?.windowTurns !== undefined ? { window_turns: String(options.windowTurns) } : {}),
     },
     tags: mergedTags.length > 0 ? mergedTags : undefined,
+    ...(options?.operationId ? { operationId: options.operationId } : {}),
     updateMode: useSessionScopedDoc ? "append" : undefined,
   };
 }

@@ -1,6 +1,7 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { buildKnowledgeTools } from "./knowledge-tools";
 import { DEFAULT_REFLECT_TOOL_TIMEOUT_MS } from "./config";
@@ -253,6 +254,37 @@ describe("buildKnowledgeTools", () => {
       relatesToPageId: "initiative-uploader",
     });
     expect(JSON.parse(result.content[0].text)).toEqual({ page_id: "initiative-retry-backoff" });
+  });
+
+  // Regression guard for the "ONCE, EARLY" contract that told agents to capture the opening plan
+  // and never recapture, so mid-work pivots never reached the initiative page.
+  it("hindsight_capture_initiative's description tells the agent to recapture when the plan changes", () => {
+    const tools = buildKnowledgeTools(stubClient(), "repo-a");
+    const desc = findTool(tools, "hindsight_capture_initiative").description;
+    expect(desc).not.toMatch(/ONCE, EARLY/i);
+    expect(desc).toMatch(/call it AGAIN/i);
+    expect(desc).toMatch(/goal, scope, or rationale/i);
+    expect(desc).toMatch(/mid-implementation/i);
+    // The recapture must reuse the existing page, not create a parallel one.
+    expect(desc).toMatch(/relates_to_page_id = that/i);
+    expect(desc).toMatch(/[Nn]ever mint a second page/);
+    // Summary guidance must ask for the current intent, not the originally approved plan.
+    expect(desc).toMatch(/CURRENT intent/);
+    // Trivial course-corrections are still out of scope.
+    expect(desc).toMatch(/trivial course-corrections/i);
+  });
+
+  // The recapture-on-plan-change contract lives in three places an agent can read it from: this
+  // tool description, TOOL_GUIDE (knowledge-injection.ts), and the installed skill. SKILL.md is
+  // copied verbatim by skill-sync, so nothing else would catch it drifting back to "once".
+  it("SKILL.md documents the same recapture-on-plan-change trigger", () => {
+    const md = readFileSync(
+      fileURLToPath(new URL("../../skill/SKILL.md", import.meta.url)),
+      "utf8"
+    );
+    expect(md).toMatch(/plan that materially changed/i);
+    expect(md).toMatch(/`relates_to_page_id`/);
+    expect(md).toMatch(/never a second page/i);
   });
 
   it("hindsight_capture_initiative passes relatesToPageId: undefined for a brand-new initiative", async () => {

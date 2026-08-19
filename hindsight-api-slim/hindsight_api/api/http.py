@@ -8,6 +8,7 @@ the FastAPI application with all API endpoints.
 import asyncio
 import json
 import logging
+import os
 import re
 import uuid
 from collections.abc import Awaitable
@@ -165,7 +166,7 @@ def FieldWithDefault(default_factory: Callable, **kwargs) -> Any:
     return Field(default_factory=default_factory, json_schema_extra=json_extra, **kwargs)
 
 
-from hindsight_api.config import get_config
+from hindsight_api.config import HindsightConfig, StaticConfigProxy, get_config
 from hindsight_api.engine.interface import BankTemplateImportWrite
 from hindsight_api.engine.memory_engine import (
     Budget,
@@ -173,7 +174,10 @@ from hindsight_api.engine.memory_engine import (
     _current_schema,
     _get_tiktoken_encoding,
 )
-from hindsight_api.engine.mental_model_refresh import MentalModelDryRunRefreshResult
+from hindsight_api.engine.mental_model_refresh import (
+    MentalModelDryRunRefreshResult,
+    RefreshMentalModelOperationDetails,
+)
 from hindsight_api.engine.providers.none_llm import LLMNotAvailableError
 from hindsight_api.engine.reflect import ReflectToolCallError
 from hindsight_api.engine.response_models import (
@@ -298,7 +302,7 @@ class RecallRequest(BaseModel):
     query: str
     types: list[str] | None = Field(
         default=None,
-        description="List of fact types to recall: 'world', 'experience', 'observation'. Defaults to world and experience if not specified.",
+        description="List of fact types to recall: 'world', 'experience', 'observation'. Defaults to all fact types if not specified.",
     )
     prefer_observations: bool = Field(
         default=False,
@@ -2199,6 +2203,20 @@ class MentalModelTrigger(BaseModel):
             "wasted LLM call. null = no schedule."
         ),
     )
+    min_refresh_interval_seconds: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Minimum seconds between two automatic refreshes of this mental model. A triggered "
+            "refresh that arrives sooner is not dropped: it is queued and parked until the window "
+            "expires, and every further trigger in the meantime folds into that one queued refresh, "
+            "so a burst of retains costs one refresh instead of one per retain. Applies to both "
+            "refresh_after_consolidation and refresh_cron. Explicit refreshes (API, MCP, control "
+            "plane) ignore it and run immediately. 0 disables the floor for this model; null falls "
+            "back to the bank/global mental_model_min_refresh_interval_seconds setting (itself 0 by "
+            "default, i.e. no floor)."
+        ),
+    )
     fact_types: list[Literal["world", "experience", "observation"]] | None = Field(
         default=None,
         description="Filter which fact types are retrieved during reflect. None means all types (world, experience, observation).",
@@ -2339,9 +2357,9 @@ class MentalModelResponse(BaseModel):
         description=(
             "How far through the bank's memories this model is written — the newest in-scope memory "
             "the last refresh saw, in ISO format. Stands still when nothing in the model's scope has "
-            "been written, however often it is refreshed. Compare against `last_memory_write_at` "
-            "from GET /stats to flag a whole list cheaply: at or after it means up to date, older "
-            "means it may need a refresh. Null for a model no refresh has stamped yet."
+            "been written, however often it is refreshed. At or after the bank's `last_memory_write_at` "
+            "(GET /stats) the model is provably up to date; when it is older, `is_stale` settles it "
+            "against the model's own scope. Null for a model no refresh has stamped yet."
         ),
     )
     created_at: str | None = None
@@ -2353,10 +2371,10 @@ class MentalModelResponse(BaseModel):
         default=None,
         description=(
             "True when memories matching this mental model's tag/fact_type scope have been written "
-            "since last_memory_seen_at. Exact, and costly to compute, so it is populated only by the "
-            "single mental-model read at detail=full — never when listing. For a whole list, compare "
-            "each `last_memory_seen_at` against the bank's `last_memory_write_at` from GET /stats: "
-            "at or after it means up to date, older means it may need a refresh."
+            "since last_memory_seen_at — the same check that decides whether a scheduled refresh "
+            "does any work, so a model flagged here is one a refresh would actually rewrite. "
+            "Populated on both the single read and the list. Deletions are not observed: removing "
+            "an in-scope memory leaves no write behind, so it does not raise this flag."
         ),
     )
 
@@ -2394,10 +2412,11 @@ class KnowledgeNode(BaseModel):
     timestamp: str | None = Field(default=None, description="Last refresh (page) or last update (folder).")
     is_stale: bool | None = Field(
         default=None,
-        description="Pages only, populated by the tree endpoint. False means the page is up to date — nothing "
-        "in the bank has been written since its last refresh. True means it *may* need a refresh: something "
-        "was written, but possibly outside the page's tags. Read the page's mental model for the exact answer. "
-        "Shares the bank-stats freshness, so it can lag a just-written memory by up to a minute.",
+        description="Pages only, populated by the tree endpoint. True when a memory in *this page's* "
+        "scope — its tags and fact types — has been written since the page last read the memories. "
+        "That is the same check a scheduled refresh runs before spending an LLM call, so a flagged page "
+        "is one a refresh would actually rewrite. Deletions are not observed: removing an in-scope memory "
+        "leaves no write behind, so it does not raise this flag.",
     )
     trigger: MentalModelTrigger | None = Field(
         default=None,
@@ -2717,6 +2736,15 @@ class BankTemplateConfig(BaseModel):
     )
     reflect_source_facts_max_tokens: int | None = Field(
         default=None, description="Max tokens of source facts per reflect call"
+    )
+    mental_model_min_refresh_interval_seconds: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Minimum seconds between two automatic refreshes of the same mental model in this "
+            "bank. 0 (the default) means no floor. Overridable per model via the trigger's "
+            "min_refresh_interval_seconds."
+        ),
     )
     llm_gemini_safety_settings: list | None = Field(
         default=None, description="Per-bank Gemini/VertexAI safety filter settings"
@@ -3276,6 +3304,17 @@ class OperationResponse(BaseModel):
             "same value under `result_metadata`."
         ),
     )
+    details: RefreshMentalModelOperationDetails | None = Field(
+        default=None,
+        description=(
+            "Typed, per-operation-type outcome detail, discriminated by its own `operation_type`. "
+            "Populated for `refresh_mental_model` operations that have finished; null for operation "
+            "types that report no typed detail, for operations still in flight, and for operations "
+            "recorded before this field existed. Unlike `result_metadata` this is a supported field — "
+            "new operation types add their own shape here rather than flattening fields onto the "
+            "operation."
+        ),
+    )
     created_at: str
     updated_at: str | None = Field(
         default=None,
@@ -3292,9 +3331,11 @@ class OperationResponse(BaseModel):
         description=(
             "When the worker will next attempt this operation. For a pending "
             "operation, a value in the future indicates the task is waiting "
-            "rather than available for immediate pickup — for example, an "
-            "extension may have raised DeferOperation to park the task until "
-            "some backpressure window opens. Always null for completed tasks."
+            "rather than available for immediate pickup — a refresh_mental_model "
+            "held back by min_refresh_interval_seconds, or an extension raising "
+            "DeferOperation until some backpressure window opens. It is not cleared "
+            "when the task finally runs, so on a terminal operation it is a record of "
+            "the last wait rather than a pending one: read it together with status."
         ),
     )
     progress: OperationProgress | None = Field(
@@ -3450,9 +3491,9 @@ class OperationStatusResponse(BaseModel):
         default=None,
         description=(
             "When the worker will next attempt this operation. For a pending "
-            "operation, a value in the future indicates the task is parked "
-            "(e.g. by an extension raising DeferOperation) rather than awaiting "
-            "immediate pickup."
+            "operation, a value in the future indicates the task is parked — a "
+            "refresh_mental_model held back by min_refresh_interval_seconds, or an "
+            "extension raising DeferOperation — rather than awaiting immediate pickup."
         ),
     )
     progress: OperationProgress | None = Field(
@@ -3462,6 +3503,17 @@ class OperationStatusResponse(BaseModel):
     result_metadata: dict[str, Any] | None = Field(
         default=None,
         description="Internal metadata for debugging. Structure may change without notice. Not for production use.",
+    )
+    details: RefreshMentalModelOperationDetails | None = Field(
+        default=None,
+        description=(
+            "Typed, per-operation-type outcome detail, discriminated by its own `operation_type`. "
+            "Populated for `refresh_mental_model` operations that have finished; null for operation "
+            "types that report no typed detail, for operations still in flight, and for operations "
+            "recorded before this field existed. Unlike `result_metadata` this is a supported field — "
+            "new operation types add their own shape here rather than flattening fields onto the "
+            "operation."
+        ),
     )
     child_operations: list[ChildOperationStatus] | None = Field(
         default=None, description="Child operations for batch operations (if applicable)"
@@ -3782,25 +3834,11 @@ def create_app(
             app.state.prometheus_reader = None
             # Metrics collector is already initialized as no-op by default
 
-        # Initialize OpenTelemetry tracing if enabled
-        if config.otel_traces_enabled:
-            if not config.otel_exporter_otlp_endpoint:
-                logging.warning("OTEL tracing enabled but no endpoint configured. Tracing disabled.")
-            else:
-                from hindsight_api.tracing import create_span_recorder, initialize_tracing
+        # Initialize OpenTelemetry tracing if enabled. Shared with the standalone
+        # worker entrypoint so both processes honour the same configuration.
+        from hindsight_api.tracing import initialize_tracing_from_config
 
-                try:
-                    initialize_tracing(
-                        service_name=config.otel_service_name,
-                        endpoint=config.otel_exporter_otlp_endpoint,
-                        headers=config.otel_exporter_otlp_headers,
-                        deployment_environment=config.otel_deployment_environment,
-                    )
-                    create_span_recorder()
-                    logging.info("OpenTelemetry tracing enabled and configured")
-                except Exception as e:
-                    logging.error(f"Failed to initialize tracing: {e}")
-                    logging.warning("Continuing without tracing")
+        initialize_tracing_from_config(config)
 
         # Startup: Initialize database and memory system (migrations run inside initialize if enabled)
         if initialize_memory:
@@ -3891,6 +3929,11 @@ def create_app(
         # Shutdown: Cleanup memory system
         await memory.close()
         logging.info("Memory system closed")
+
+        # Flush any spans still queued in the BatchSpanProcessor.
+        from hindsight_api.tracing import shutdown_tracing
+
+        shutdown_tracing()
 
     from hindsight_api import __version__
     from hindsight_api.config import get_config
@@ -4059,7 +4102,51 @@ def create_app(
     # is to own the raw ASGI receive channel from outside it (issue #2122).
     app.add_middleware(ClientDisconnectCancellationMiddleware)
 
+    _instrument_app_for_tracing(app, config)
+
     return app
+
+
+def _instrument_app_for_tracing(app: FastAPI, config: HindsightConfig | StaticConfigProxy) -> None:
+    """
+    Make incoming requests continue the caller's trace instead of starting a new one.
+
+    The ASGI instrumentation extracts W3C traceparent/tracestate from the request
+    headers and opens a SERVER span; every span the engine opens while handling
+    that request (hindsight.recall, hindsight.retain, the GenAI child spans, ...)
+    then nests under the caller's trace through the ambient context, with no
+    changes at those call sites (issue #3604). Requests without a traceparent
+    still start their own root trace, so this is backwards compatible.
+
+    Must run here rather than in the lifespan: instrument_app patches
+    Starlette.build_middleware_stack, which is built before the lifespan handler
+    runs. The tracer it captures is a proxy that resolves lazily, so the provider
+    installed later by initialize_tracing_from_config is picked up correctly.
+    """
+    if not config.otel_traces_enabled or not config.otel_exporter_otlp_endpoint:
+        return
+
+    try:
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+        # Probe and metrics scrapes would otherwise dominate the trace stream.
+        # OTEL_PYTHON_FASTAPI_EXCLUDED_URLS, when set, takes precedence.
+        excluded_urls = os.getenv("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS") or "health,metrics"
+        FastAPIInstrumentor.instrument_app(
+            app,
+            excluded_urls=excluded_urls,
+            # Two reasons, both load-bearing. Per-ASGI-message spans triple the
+            # span count per request while saying nothing the request span
+            # doesn't. And excluding "receive" makes the instrumentation pass the
+            # raw receive callable through untouched instead of wrapping it,
+            # which is what keeps ClientDisconnectCancellationMiddleware able to
+            # observe an abandoned request (issue #2122).
+            exclude_spans=["receive", "send"],
+        )
+        logging.info("OpenTelemetry HTTP server instrumentation enabled (trace context propagation)")
+    except Exception as e:
+        logging.error(f"Failed to instrument HTTP server for tracing: {e}")
+        logging.warning("Continuing without incoming trace-context propagation")
 
 
 def _register_routes(app: FastAPI):
@@ -4613,9 +4700,11 @@ def _register_routes(app: FastAPI):
         response_model=RecallResponse,
         summary="Recall memory",
         description="Recall memory using semantic similarity and spreading activation.\n\n"
-        "The type parameter is optional and must be one of:\n"
+        "The `types` parameter is optional and may contain any of:\n"
         "- `world`: General knowledge about people, places, events, and things that happen\n"
-        "- `experience`: Memories about experience, conversations, actions taken, and tasks performed",
+        "- `experience`: Memories about experience, conversations, actions taken, and tasks performed\n"
+        "- `observation`: Consolidated knowledge synthesized from facts\n\n"
+        "If `types` is omitted, all fact types are recalled.",
         operation_id="recall_memories",
         tags=["Memory"],
     )
@@ -4644,7 +4733,7 @@ def _register_routes(app: FastAPI):
             )
 
         try:
-            # Default to world and experience if not specified (exclude observation)
+            # Default to all fact types if not specified
             fact_types = request.types if request.types else list(VALID_RECALL_FACT_TYPES)
 
             # Parse query_timestamp if provided
@@ -5296,6 +5385,7 @@ def _register_routes(app: FastAPI):
                 detail=detail,
                 limit=limit,
                 offset=offset,
+                with_staleness=True,
                 request_context=request_context,
             )
             return MentalModelListResponse(

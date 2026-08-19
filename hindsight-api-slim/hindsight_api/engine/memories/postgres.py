@@ -28,6 +28,7 @@ from .base import (
     EntityPrunePassResult,
     MemoriesExtension,
     MemoryPatch,
+    MemoryScopeWatermark,
     RecallArms,
     RelinkPassResult,
     ScanPage,
@@ -418,6 +419,19 @@ class PostgresMemories(MemoriesExtension):
             tag_groups=tag_groups,
         )
 
+    async def any_memory_updated_since_batch(
+        self,
+        *,
+        conn,
+        fq_table,
+        bank_id: str,
+        scopes: list[MemoryScopeWatermark],
+    ) -> dict[str, bool]:
+        return await reads.any_memory_updated_since_batch(conn=conn, fq_table=fq_table, bank_id=bank_id, scopes=scopes)
+
+    async def live_memory_ids(self, *, conn, fq_table, bank_id: str, unit_ids: list[Any]) -> set[str]:
+        return await reads.live_memory_ids(conn=conn, fq_table=fq_table, bank_id=bank_id, unit_ids=unit_ids)
+
     # -- count surfaces --
 
     async def consolidation_freshness(self, *, conn, fq_table, bank_id: str) -> dict[str, Any]:
@@ -543,6 +557,7 @@ class PostgresMemories(MemoriesExtension):
         event_date,
         mentioned_at,
         entity_ids: list[str] | None,
+        entity_names: list[str] | None = None,  # noqa: ARG002 — this store's registry is SQL; the host already minted+linked, so entity_ids is authoritative.
         txn=None,
     ) -> None:
         await writes.apply_edit(

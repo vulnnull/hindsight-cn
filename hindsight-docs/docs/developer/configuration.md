@@ -138,8 +138,9 @@ Hindsight supports four PostgreSQL vector extensions:
 #### Limiting vector indexes on large deployments
 
 On `pgvector`, `pgvectorscale` and `vchord`, a bank's memories are indexed per
-`(bank, fact_type)`. By default every bank that holds memories gets its own
-indexes, which is the right thing for most deployments.
+`(bank, fact_type)`. By default every bank gets its own indexes when it is
+created, which is the right thing for most deployments and needs no
+configuration.
 
 It stops being the right thing when you have thousands of banks. These indexes
 all live on one shared table, and PostgreSQL inspects and locks **every** index
@@ -158,14 +159,21 @@ limit.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HINDSIGHT_API_VECTOR_INDEX_MIN_ROWS` | Memories a bank needs, in one fact type, before that fact type gets its own vector index. `0` (the default) means no minimum — every bank holding memories is indexed. `10000` is a good starting point for deployments with thousands of banks. | `0` |
+| `HINDSIGHT_API_VECTOR_INDEX_MIN_ROWS` | Memories a bank needs, in one fact type, before that fact type gets its own vector index. `0` (the default) turns the threshold **off**: every bank is indexed from the moment it is created. `10000` is a good starting point for deployments with thousands of banks. | `0` |
+| `HINDSIGHT_API_VECTOR_INDEX_MAINTENANCE_MIN_INTERVAL_SECONDS` | Shortest gap between two index-maintenance runs for one bank. Stops a bank whose size hovers at the threshold from building and dropping the same index repeatedly. Unused while the threshold is off. | `900` |
 
-Coverage is maintained for you. Every write that could move a bank across the
-threshold queues a background `vector_index_maintenance` operation, which builds
-an index when a bank grows past the threshold and removes it if the bank shrinks
-well below it (the gap between those two points prevents churn at the boundary).
-Bank creation, ingestion and import never build indexes themselves, so no
-request ever waits on index DDL.
+**With the threshold off (the default),** indexes are created inside the
+transaction that creates the bank — instantly, because the bank is empty — and
+dropped when the bank is deleted. Nothing inspects bank sizes, and no background
+operation runs.
+
+**With a threshold set,** bank creation, ingestion and import build no indexes at
+all, so no request ever waits on index DDL. Instead, a write that could move a
+bank across the threshold queues a background `vector_index_maintenance`
+operation, which builds an index when a bank grows past the threshold and removes
+it if the bank shrinks well below it (the gap between those two points prevents
+churn at the boundary). You will see these operations in the bank's operations
+list.
 
 To reconcile without waiting for a write — after a restore, an upgrade, or an
 extension switch — run:
@@ -173,6 +181,9 @@ extension switch — run:
 ```bash
 hindsight-admin repair-bank --all
 ```
+
+This works in both modes: with the threshold off it rebuilds any index a bank is
+missing, and with one set it also drops what a bank no longer earns.
 
 **Switching extensions:**
 
@@ -213,8 +224,8 @@ For non-English banks (especially CJK) and the language/extraction-language trad
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HINDSIGHT_API_LLM_PROVIDER` | Provider: `openai`, `openai-responses`, `openai-codex`, `claude-code`, `anthropic`, `gemini`, `groq`, `minimax`, `deepseek`, `zai`, `opencode-go`, `nous`, `xai-oauth`, `fireworks`, `ollama`, `ollama-cloud`, `lmstudio`, `llamacpp`, `vertexai`, `bedrock`, `litellm`, `litellmrouter`, `volcano`, `openrouter`, `requesty`, `none` | `openai` |
-| `HINDSIGHT_API_LLM_API_KEY` | API key for LLM provider | - |
+| `HINDSIGHT_API_LLM_PROVIDER` | Provider: `openai`, `openai-responses`, `openai-codex`, `claude-code`, `github-copilot`, `anthropic`, `gemini`, `groq`, `minimax`, `deepseek`, `zai`, `opencode-go`, `nous`, `xai-oauth`, `fireworks`, `ollama`, `ollama-cloud`, `lmstudio`, `llamacpp`, `vertexai`, `bedrock`, `litellm`, `litellmrouter`, `volcano`, `openrouter`, `requesty`, `none` | `openai` |
+| `HINDSIGHT_API_LLM_API_KEY` | API key for providers that require one; unused by `github-copilot` | - |
 | `HINDSIGHT_API_LLM_MODEL` | Model name | `gpt-5-mini` |
 | `HINDSIGHT_API_LLM_BASE_URL` | Custom LLM endpoint | Provider default |
 | `HINDSIGHT_API_LLM_MAX_CONCURRENT` | Max concurrent LLM requests | `32` |
@@ -242,7 +253,7 @@ For non-English banks (especially CJK) and the language/extraction-language trad
 | `HINDSIGHT_API_LLM_STRICT_SCHEMA_CONSOLIDATION` | Override `HINDSIGHT_API_LLM_STRICT_SCHEMA` for consolidation only (both the batch consolidation call and observation dedup). | Inherits global |
 | `HINDSIGHT_API_LLM_SUPPORTS_MAX_ITEMS` | Whether the LLM backend accepts JSON Schema `maxItems` in structured-output schemas. Set to `false` for backends such as Bedrock Converse that reject this keyword; consolidation still enforces observation caps after parsing. | `true` |
 | `HINDSIGHT_API_LLM_STRUCTURED_OUTPUT_FORCED_TOOL` | Request structured output from the LiteLLM-backed providers (`litellm`, `litellmrouter`, `bedrock`) with a single forced tool call — the response schema becomes the tool's parameters — instead of `response_format`. Set to `true` for backends that reject `response_format` outright. This is region-dependent on Bedrock Claude: `ap-southeast-2` (`au.*` inference profiles) refuses the translated Converse `outputConfig` with `Extra inputs are not permitted`, while the same model in `us-east-1` (`us.*`) accepts it and needs nothing here. Verified against both. If the model answers without calling the tool, the reply is parsed as text as before. Other providers ignore it. | `false` |
-| `HINDSIGHT_API_LLM_OLLAMA_NUM_CTX` | Optional native Ollama `num_ctx` override for structured-output calls. Leave unset to use the model/server default; set a positive integer only when you need a larger context window. | Unset |
+| `HINDSIGHT_API_LLM_OLLAMA_NUM_CTX` | Optional native Ollama `num_ctx` override. Leave unset to use the model/server default; set a positive integer only when you need a larger context window. Setting it also routes free-form calls (including the startup connection probe) through the native `/api/chat` API, since the OpenAI-compatible endpoint cannot express a context size — see the note below. | Unset |
 | `HINDSIGHT_API_LLM_GEMINI_SAFETY_SETTINGS` | JSON-encoded list of `{category, threshold}` dicts for Gemini/VertexAI content safety filtering | `null` |
 | `HINDSIGHT_API_LLM_PROMPT_CACHE_ENABLED` | Reuse the fixed system prefix via the provider's explicit prompt cache, billed at the cached-input rate (Gemini/Vertex `CachedContent`). The cached prefix is shared across all banks and soft-fails to an uncached call. Set to `false` to disable. See [Models](./models#provider-capabilities). | `true` |
 | `HINDSIGHT_API_REFLECT_PROMPT_CACHE_ENABLED` | For reflect specifically, roll a step-by-step context cache forward through the agent's tool loop so each turn reuses the whole prior conversation (system + tools + all prior tool results) at the cached-input rate instead of only the static prefix. Requires `HINDSIGHT_API_LLM_PROMPT_CACHE_ENABLED`. The per-reflect caches are ephemeral and deleted when the reflect ends. Set to `false` to run reflect uncached while leaving prompt caching on elsewhere. | `true` |
@@ -250,7 +261,9 @@ For non-English banks (especially CJK) and the language/extraction-language trad
 
 When `HINDSIGHT_API_LLM_PROVIDER=ollama`, Hindsight no longer sends the previous native API default `num_ctx=16384` unless you set it explicitly. To keep the old request behavior, set `HINDSIGHT_API_LLM_OLLAMA_NUM_CTX=16384`; otherwise Ollama uses the model Modelfile or server default.
 
-**`HINDSIGHT_API_LLM_EXTRA_BODY` on the native Ollama path.** For structured-output calls, Ollama uses its native `/api/chat` API, whose request body has *two tiers* — this differs from the OpenAI-compatible endpoint, where the SDK flattens everything to top-level. On the native path `extra_body` is split accordingly:
+**When Hindsight uses Ollama's native API.** Structured-output calls always use the native `/api/chat` API, for schema enforcement. Free-form calls join them as soon as `HINDSIGHT_API_LLM_OLLAMA_NUM_CTX` is set, because Ollama's OpenAI-compatible handler parses a fixed set of fields and drops the rest — there is no way to express `num_ctx` on `/v1/chat/completions`, nested under `options` or otherwise. That matters on a shared Ollama host: Ollama keys a loaded model instance by context size, so a call at the server default reloads the model and re-tunes it for every other consumer.
+
+**`HINDSIGHT_API_LLM_EXTRA_BODY` on the native Ollama path.** The native request body has *two tiers* — this differs from the OpenAI-compatible endpoint, where the SDK flattens everything to top-level. On the native path `extra_body` is split accordingly:
 
 - **Top-level native fields** (`think`, `keep_alive`, ...) pass through directly. For example, gpt-oss models require a thinking level for structured extraction, so set `HINDSIGHT_API_LLM_EXTRA_BODY='{"think": "low"}'` (thinking is disabled by default).
 - **Generation parameters** (`seed`, `top_p`, `top_k`, `num_ctx`, `temperature`, ...) live under Ollama's `options` object, so nest them: `HINDSIGHT_API_LLM_EXTRA_BODY='{"options": {"seed": 42, "top_p": 0.9}}'`. On the OpenAI-compatible endpoints these same params are top-level instead.
@@ -1270,6 +1283,7 @@ For advanced authentication (JWT, OAuth, multi-tenant schemas), implement a cust
 | `HINDSIGHT_API_RECENCY_DECAY_HALFLIFE_DAYS` | For the `exponential` decay function: the age (in days) at which a memory is considered neutral — younger memories get a recency boost, older ones a penalty. Smaller values favour very recent memories more aggressively. Only used when `HINDSIGHT_API_RECENCY_DECAY_FUNCTION=exponential`. | `90` |
 | `HINDSIGHT_API_MENTAL_MODEL_REFRESH_CONCURRENCY` | Max concurrent mental model refreshes | `8` |
 | `HINDSIGHT_API_ENABLE_MENTAL_MODEL_HISTORY` | Track history of content changes to each mental model (previous content + timestamp), stored one row per change in the `mental_model_history` table. Set to `false` to disable entirely — no history rows are written, reducing storage if audit trails are not needed. **This is how you turn the feature off** (not a zero cap). | `true` |
+| `HINDSIGHT_API_MENTAL_MODEL_MIN_REFRESH_INTERVAL_SECONDS` | Minimum seconds between two *automatic* refreshes of the same mental model — the after-consolidation trigger and the cron schedule. A trigger that fires sooner is not dropped: its refresh is queued and parked until the window closes, and every further trigger in the meantime folds into that one queued refresh, so a burst of small retains costs one refresh instead of one per retain. Raise it when a bank ingests continuously and its models do not need to be current to the minute — the parked refresh still sees everything that accumulated while it waited. Explicit refreshes (API, MCP, control plane) ignore the floor and run immediately, and additionally release a parked refresh they fold into. `0` = no floor, every trigger refreshes at once. Hierarchical — overridable per bank via the [config API](#hierarchical-configuration), and per model via `trigger.min_refresh_interval_seconds` (which wins, including an explicit `0` to exempt one hot model from a bank-wide floor). | `0` |
 | `HINDSIGHT_API_MENTAL_MODEL_HISTORY_MAX_ENTRIES` | Max history rows kept per mental model. On each refresh the previous version is inserted into the `mental_model_history` table and the oldest rows beyond this cap are deleted, so per-model history can't grow without bound. `0` or a negative value **removes the cap** (history then grows with every refresh — unbounded); to turn history off entirely set `HINDSIGHT_API_ENABLE_MENTAL_MODEL_HISTORY=false` instead. | `50` |
 
 The five embedding-dependent gates—main semantic retrieval, graph seeds, temporal retrieval, semantic-link
@@ -2116,12 +2130,14 @@ Hindsight provides OpenTelemetry-based observability for LLM calls, conforming t
 | `HINDSIGHT_API_OTEL_TRACES_ENABLED` | Enable distributed tracing for LLM calls | `false` |
 | `HINDSIGHT_API_OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP endpoint URL (e.g., Grafana LGTM, Langfuse, etc.) | - |
 | `HINDSIGHT_API_OTEL_EXPORTER_OTLP_HEADERS` | Headers for OTLP exporter (format: "key1=value1,key2=value2") | - |
-| `HINDSIGHT_API_OTEL_SERVICE_NAME` | Service name for traces | `hindsight-api` |
+| `HINDSIGHT_API_OTEL_SERVICE_NAME` | Service name for traces. Applies to the API and to standalone workers, which default to `hindsight-worker` when it is unset. | `hindsight-api` |
 | `HINDSIGHT_API_OTEL_DEPLOYMENT_ENVIRONMENT` | Deployment environment name (e.g., development, staging, production) | `development` |
 | `HINDSIGHT_API_METRICS_INCLUDE_BANK_ID` | Include `bank_id` in OTel metric attributes. Enable only for deployments with few banks — high cardinality causes unbounded memory growth. | `false` |
 | `HINDSIGHT_API_METRICS_BACKLOG_ENABLED` | Expose async-operation queue depth and consolidation-backlog gauges (`hindsight_async_operations`, `hindsight_consolidation_backlog`, `hindsight_consolidation_failed`). Runs periodic per-schema `COUNT` queries on a background task. | `false` |
+| `OTEL_PYTHON_FASTAPI_EXCLUDED_URLS` | Comma-separated URL patterns excluded from request tracing | `health,metrics` |
 
 **Features:**
+- Continues the caller's trace when a `traceparent` header is present
 - Full prompts and completions recorded as events
 - Token usage tracking (input/output)
 - Model and provider information
@@ -2277,6 +2293,21 @@ Configuration fields are categorized for security:
    - Infrastructure: `database_url`, `port`, `host`, `worker_count`
    - Provider/Model selection: `llm_provider`, `llm_model` (requires presets - not yet implemented)
    - Performance tuning: `llm_max_concurrent`, `llm_timeout`, retrieval settings, optimization flags
+
+#### Concurrent Config Writes
+
+Config writes to the same bank are serialized. Validation and persistence run as
+one unit: the write locks the bank row, re-checks the update against the
+overrides actually committed at that moment, and only then merges it. Two
+requests can therefore never combine into a configuration that neither of them
+validated — for example one raising `retain_chunk_size` while the other removes
+the retain strategy that made the larger size legal.
+
+There is no conflict status to handle and no retry to implement. A request that
+loses the race is rejected with the same `400` validation error it would have
+received had the two updates arrived one after the other; a request whose fields
+are still valid against the newer state succeeds. Fields that no constraint spans
+are merged independently, so unrelated concurrent updates all survive.
 
 #### Enabling the API
 

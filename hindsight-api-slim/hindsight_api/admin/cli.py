@@ -19,6 +19,7 @@ import asyncpg
 import typer
 
 from ..config import DEFAULT_DATABASE_SCHEMA, HindsightConfig, load_dotenv_for_entrypoint
+from ..engine.memories import get_memories
 from ..engine.memory_engine import _current_schema
 from ..engine.retain.bank_utils import _vector_index_clause
 from ..engine.schema import fq_table_explicit as _fq_table
@@ -702,23 +703,27 @@ def repair_bank(
         help="Report what would be repaired without creating or dropping any index.",
     ),
 ):
-    """Reconcile per-(bank, fact_type) vector index coverage against the size threshold.
+    """Reconcile per-(bank, fact_type) vector index coverage.
 
-    A (bank, fact_type) earns a partial vector index once it holds
-    HINDSIGHT_API_VECTOR_INDEX_MIN_ROWS rows; below that the planner answers the
-    same query exactly, and faster, from the (bank_id, fact_type) B-tree plus a
-    top-N sort. This command builds what qualifies and drops what no longer does
-    — including indexes orphaned by a deleted bank — detecting invalid coverage
-    too (an INVALID leftover, or an index whose access method drifted after a
-    backend switch, counts as missing). All DDL is CONCURRENTLY, so it never
-    blocks the live fleet.
+    With HINDSIGHT_API_VECTOR_INDEX_MIN_ROWS at its default of 0 every bank is
+    owed all three indexes from the moment it exists, and this rebuilds whatever
+    is missing or invalid — a bank whose creation lost its DDL to a deadlock, one
+    restored around it, or one whose access method drifted after a backend
+    switch. Nothing is dropped in that mode.
 
-    Writes keep this converged on their own — every insert that could move a bank
-    across the threshold queues a vector_index_maintenance operation. Reach for
-    the command when you want convergence without waiting for a write: after a
-    restore or upgrade, after a backend switch, or to shed indexes in bulk on a
-    deployment recovering from lock-table exhaustion (#3485). Idempotent and safe
-    to re-run.
+    With a threshold set, a (bank, fact_type) earns its index once it holds that
+    many rows; below it the planner answers the same query exactly, and faster,
+    from the (bank_id, fact_type) B-tree plus a top-N sort. This command then
+    also drops what no longer qualifies. Either way it sheds indexes orphaned by
+    a deleted bank, and all DDL is CONCURRENTLY, so it never blocks the live
+    fleet.
+
+    With a threshold set, writes keep this converged on their own — every write
+    that could move a bank across it queues a vector_index_maintenance operation.
+    Reach for the command when you want convergence without waiting for a write:
+    after a restore or upgrade, after a backend switch, or to shed indexes in
+    bulk on a deployment recovering from lock-table exhaustion (#3485).
+    Idempotent and safe to re-run.
     """
     if bool(bank_id) == all_banks:
         typer.echo("Error: pass exactly one of --bank <id> or --all.", err=True)
@@ -772,7 +777,17 @@ def repair_bank(
 
 
 async def _run_export_bank(db_url: str, bank_id: str, output: Path, schema: str, include_history: bool) -> int:
-    """Export a whole bank to a ZIP archive."""
+    """Export a whole bank to a ZIP archive.
+
+    The memories store is resolved from config here and handed to the export, because a bank whose
+    memories live outside SQL cannot be read from this connection: the tables would be empty and the
+    archive would come out well-formed and empty, which an operator only discovers at restore time.
+    A Postgres deployment resolves to the SQL store, whose capability probe sends the export down
+    exactly the path it always took.
+
+    Resolving it in a short-lived CLI process is safe because the store connects lazily on first
+    use rather than in `initialize()`.
+    """
     conn = await _admin_connect(db_url)
     try:
         # export_bank resolves table names via fq_table (the _current_schema
@@ -785,6 +800,7 @@ async def _run_export_bank(db_url: str, bank_id: str, output: Path, schema: str,
             bank_id,
             include_history=include_history,
             bank_rows_json_encoding="decoded",
+            memories=get_memories(),
         )
     finally:
         await conn.close()

@@ -28,7 +28,11 @@ When the user says "store this in hindsight" / "remember this":
 - The **current conversation** is captured automatically at session end — say so; no tool needed.
 - An **external document, notes, or durable findings** → `hindsight_ingest_document(title, content)`.
 - A **new feature/initiative being started** → `hindsight_capture_initiative(title, summary)`,
-  once, right after the plan is agreed and before code is written.
+  right after the plan is agreed and before code is written.
+- A **plan that materially changed** (goal, scope, or rationale — including mid-implementation) →
+  call `hindsight_capture_initiative` again with `relates_to_page_id` set to that initiative's page
+  id, summarising the _current_ intent. Same page, updated plan — never a second page. Trivial
+  course-corrections don't count.
 
 ## Retrieving
 

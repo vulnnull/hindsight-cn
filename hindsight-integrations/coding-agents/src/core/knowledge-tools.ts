@@ -218,15 +218,25 @@ export function buildKnowledgeTools(
       name: "hindsight_capture_initiative",
       description:
         "Record a new feature or initiative as a tracked knowledge page, so future sessions know it " +
-        "exists and can build on it.\n\n" +
-        "WHEN TO CALL: right after the user approves a plan or finishes brainstorming a new feature/" +
-        "capability and you are about to start implementing — BEFORE you write any code. Call it ONCE, EARLY.\n\n" +
-        "WHEN TO SKIP: bug fixes, small tweaks, refactors, and chores are not initiatives — skip " +
-        "them.\n\n" +
-        "- title: short, specific name (e.g. 'Newsletter refinement chat').\n" +
-        "- summary: 2-3 sentences on what you're building and why (the intent, not a code diff).\n" +
-        "- relates_to_page_id: leave empty for a new initiative. Set it only to attach to an " +
-        "initiative that already has a page — pass that page's id from hindsight_list_knowledge_pages.\n\n" +
+        "exists and can build on it — and keep that page tracking the plan as it moves.\n\n" +
+        "WHEN TO CALL:\n" +
+        "- Starting one: right after the user approves a plan or finishes brainstorming a new feature/" +
+        "capability and you are about to start implementing — BEFORE you write any code. Leave " +
+        "relates_to_page_id empty.\n" +
+        "- Plan changed: call it AGAIN — mid-implementation is fine and expected — whenever the goal, " +
+        "scope, or rationale of an initiative you already captured materially changes (an approach is " +
+        "dropped, scope grows or shrinks, the why is rewritten). Pass relates_to_page_id = that " +
+        "initiative's page id so the change lands on the existing page. Never mint a second page for the " +
+        "same initiative.\n\n" +
+        "WHEN TO SKIP: bug fixes, small tweaks, refactors, chores, and trivial course-corrections that " +
+        "leave the goal intact are not initiatives — skip them.\n\n" +
+        "- title: short, specific name (e.g. 'Newsletter refinement chat'). On a recapture, reuse the " +
+        "initiative's existing title.\n" +
+        "- summary: 2-3 sentences on what you're building and why — the CURRENT intent, not the " +
+        "originally approved plan (on a recapture, say what changed and why).\n" +
+        "- relates_to_page_id: leave empty for a new initiative. Set it to an existing initiative's page " +
+        "id — from hindsight_list_knowledge_pages, or the id this tool returned earlier — to record a " +
+        "plan change or an enhancement to it.\n\n" +
         "Returns the page id. The page is generated for you — you never format one yourself.",
       inputSchema: {
         title: z.string(),
