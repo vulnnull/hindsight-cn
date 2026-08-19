@@ -17,6 +17,7 @@ from ..causal_links import (
 )
 from ..db.base import DatabaseConnection
 from ..db.ops import DataAccessOps
+from ..db.postgresql import setting_rejected_by_server
 from ..memory_engine import fq_table
 from .types import CausalRelation, EntityResolutionResult
 
@@ -593,7 +594,14 @@ async def compute_semantic_links_ann(
         # are safe to apply at session/transaction scope for the configured
         # backend. VectorChord probe values are index-shaped, so vchordrq uses
         # index storage fallback parameters instead of a blanket SET LOCAL.
+        #
+        # A GUC the server has already rejected is skipped rather than attempted:
+        # hnsw.iterative_scan needs pgvector 0.8+, and pgvector reserves the "hnsw."
+        # prefix, so an older server errors on it — which inside this transaction would
+        # abort the whole link computation rather than merely fail to apply.
         for guc, value in ann_search_tuning_settings(configured_vector_extension(), kind="low_latency"):
+            if setting_rejected_by_server(guc):
+                continue
             await conn.execute(f"SET LOCAL {guc} = {value}")
 
         t_setup = time_mod.time()

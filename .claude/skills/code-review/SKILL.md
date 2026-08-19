@@ -164,6 +164,28 @@ Flag any new logic that lacks test coverage.
 
 See CLAUDE.md → Key Conventions → Testing for the full pattern.
 
+### 6a. Check tests assert memory state via the engine API, not raw SQL
+
+Tests must verify what a retain / recall / consolidation produced by calling the public
+`MemoryEngine` read API — `list_memory_units` (units and their `metadata` / `tags`; counts via
+`total`; `document_id` / `fact_type` / `entity_id` filters), `list_entities` (canonical names,
+mention counts), `get_graph_data` (nodes/edges), `get_bank_stats`, `recall_async` — **not** by
+reaching into the memory tables (`memory_units`, `memory_links`, `unit_entities`) with raw SQL via
+`pool.acquire()` / `conn.fetch*`. Asserting on those tables couples the test to a storage-layer
+detail and checks a proxy instead of the observable property (see **General Principles** → tests
+assert the property, and the handler rule in **7b**).
+
+**Flag as should fix** any added or changed test whose assertion runs a `SELECT` / `COUNT` against
+`memory_units` / `memory_links` / `unit_entities` where an engine read method returns the same
+fact. Prime tell: `async with pool.acquire() as conn:` followed by `SELECT ... FROM memory_units`
+inside a test body; a `fetchval("SELECT count(*) FROM memory_units ...")` that `list_memory_units`
+`["total"]` would return; a `canonical_name` query that `list_entities` covers.
+
+Direct SQL on those tables is legitimate **only** when it forces or inspects internal state the
+public API cannot express — e.g. an `UPDATE documents SET updated_at` that forges a race, or a
+raw `memory_links` row-count that the deduped `get_graph_data` edge list cannot reproduce. Those
+must carry a comment saying why the direct access is necessary; flag any that do not.
+
 ### 7. Check API consistency
 
 If any files in `hindsight-api-slim/hindsight_api/api/` were changed:

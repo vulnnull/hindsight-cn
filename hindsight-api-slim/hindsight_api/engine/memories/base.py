@@ -1043,7 +1043,7 @@ class MemoriesExtension(Extension, ABC):
         ops,
         fq_table,
         bank_id: str,
-        fact_type: str | None = None,
+        fact_type: str | list[str] | None = None,
         search_query: str | None = None,
         consolidation_state: str | None = None,
         state: str | None = None,

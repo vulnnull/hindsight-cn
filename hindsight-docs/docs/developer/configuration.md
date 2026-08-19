@@ -77,6 +77,8 @@ hindsight-admin run-db-migration --schema tenant_acme
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `HINDSIGHT_API_VECTOR_EXTENSION` | Vector index algorithm: `pgvector`, `vchord`, `pgvectorscale`, or `scann` | `pgvector` |
+| `HINDSIGHT_API_ANN_ITERATIVE_SCAN` | Let a vector index scan resume until the query's `LIMIT` is satisfied, instead of stopping when its first candidate list drains. With it off, a recall can never retrieve more rows than that list holds — on pgvector, `hnsw.ef_search` (200) — so a larger recall budget widens the SQL and retrieves nothing extra. Requires pgvector 0.8.0+; older servers reject the setting and it is dropped automatically after the first attempt. This is the operational kill switch: setting it to `false` and restarting restores the previous retrieval depth exactly, with no code change. | `true` |
+| `HINDSIGHT_API_ANN_MAX_SCAN_TUPLES` | Ceiling on how many tuples a single resumed scan may visit (`hnsw.max_scan_tuples`). This is the knob that governs what iterative scans cost: the filters that thin a result — the similarity floor, tags, date ranges — are applied *after* the index scan, so a selective query resumes repeatedly, and this bounds both the CPU it can spend and the memory it can hold (pgvector otherwise caps the latter at `work_mem × hnsw.scan_mem_multiplier`, which at this default is never approached). Lower it to trade retrieval depth back for latency; the initial scan is not counted, so even `1` leaves the pre-existing depth intact. pgvector's own default is `20000`. Ignored when iterative scans are off. | `4000` |
 
 Hindsight supports four PostgreSQL vector extensions:
 
@@ -1902,7 +1904,7 @@ export HINDSIGHT_API_MCP_ENABLED_TOOLS=recall
 export HINDSIGHT_API_MCP_ENABLED_TOOLS=recall,reflect
 ```
 
-Available tool names: `retain`, `recall`, `reflect`, `list_banks`, `create_bank`, `list_mental_models`, `get_mental_model`, `create_mental_model`, `update_mental_model`, `delete_mental_model`, `refresh_mental_model`, `list_directives`, `create_directive`, `delete_directive`, `list_memories`, `get_memory`, `list_documents`, `get_document`, `delete_document`, `list_operations`, `get_operation`, `cancel_operation`, `list_tags`, `get_bank`, `get_bank_stats`, `update_bank`, `delete_bank`, `clear_memories`.
+Available tool names: `retain`, `recall`, `reflect`, `list_banks`, `create_bank`, `list_mental_models`, `get_mental_model`, `create_mental_model`, `update_mental_model`, `delete_mental_model`, `refresh_mental_model`, `list_directives`, `create_directive`, `delete_directive`, `list_memories`, `get_memory`, `list_documents`, `get_document`, `delete_document`, `list_operations`, `get_operation`, `cancel_operation`, `list_tags`, `get_bank`, `get_bank_stats`, `update_bank`, `delete_bank`, `clear_memories`, `get_knowledge_base_tree`, `search_knowledge_base`, `get_knowledge_page`, `create_knowledge_folder`, `create_knowledge_page`, `update_knowledge_node`, `delete_knowledge_node`.
 
 This can also be overridden per bank via the [config API](#hierarchical-configuration):
 

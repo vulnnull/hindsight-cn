@@ -115,6 +115,7 @@ async def _export_async(memory, bank_id, request_context, **kwargs):
 
 
 @pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
 async def test_import_filters_degenerate_fact_without_shifting_archive_ordinals(memory, request_context):
     """A rejected archive fact must not shift chunks, causal links, or observation sources."""
     dst = _unique_bank("transfer_degenerate_alignment")
@@ -393,6 +394,7 @@ async def test_export_bank_contents(memory, request_context):
 
 
 @pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
 async def test_export_tolerates_legacy_null_and_numeric_fact_metadata(memory, request_context):
     """A bank holding legacy metadata must still be exportable (issue #3209).
 
@@ -522,6 +524,7 @@ async def _observation_count(memory, bank_id):
 
 
 @pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
 async def test_bank_import_preserves_consolidation_lifecycle(memory, request_context):
     """Whole-bank import restores each fact's consolidation lifecycle verbatim, so
     previously-consolidated and previously-failed facts are never re-consolidated
@@ -622,6 +625,7 @@ async def test_bank_import_preserves_consolidation_lifecycle(memory, request_con
 
 
 @pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
 async def test_bank_export_import_exact_roundtrip(memory, request_context):
     """A whole-bank archive restores EXACT bank content (config, docs, facts,
     observations, entities, links, webhooks, directives, mental models) with facts
@@ -793,6 +797,7 @@ async def test_bank_roundtrip_carries_mental_model_history(memory, request_conte
 
 
 @pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
 async def test_bank_roundtrip_carries_knowledge_pages(memory, request_context):
     """A whole-bank archive restores the Knowledge Pages tree — nested folders +
     pages, parent_id / mental_model_id / managed / sort_order preserved — and
@@ -896,6 +901,7 @@ async def test_import_bank_refuses_existing_bank(memory, request_context):
 
 
 @pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
 async def test_export_import_roundtrip_without_llm(memory, request_context, monkeypatch):
     """Export from one bank and import into another without re-running the LLM."""
     src = _unique_bank("transfer_src")
@@ -1019,6 +1025,7 @@ async def _bank_snapshot(memory, bank_id):
 
 
 @pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
 async def test_full_roundtrip_integrity(memory, request_context):
     """Full export → import must reproduce every persisted artifact (counts + sizes)."""
     src = _unique_bank("transfer_integ_src")
@@ -1072,6 +1079,7 @@ async def test_full_roundtrip_integrity(memory, request_context):
 
 
 @pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
 async def test_transfer_preserves_legacy_causal_links(memory, request_context):
     """Legacy causal edges survive export/import without becoming retain inputs."""
     src = _unique_bank("transfer_legacy_causal_src")
@@ -1123,6 +1131,7 @@ async def test_transfer_preserves_legacy_causal_links(memory, request_context):
 
 
 @pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
 async def test_export_import_observations(memory, request_context):
     """With include_observations, observations transfer and their sources re-link."""
     src = _unique_bank("transfer_obs_src")
@@ -1203,6 +1212,7 @@ async def test_export_import_observations(memory, request_context):
 
 
 @pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
 async def test_import_triggers_consolidation(memory, request_context):
     """Importing (without observations) triggers consolidation in the target bank,
     so observations get generated there — same as a normal retain."""
@@ -1366,6 +1376,7 @@ async def test_import_on_conflict_modes(memory, request_context):
 
 
 @pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
 async def test_http_export_import_endpoints(api_client, memory, request_context):
     """Round trip through the async HTTP export (POST + poll + download) and import endpoints."""
     src = _unique_bank("transfer_http_src")
@@ -1547,6 +1558,7 @@ async def test_import_rejects_invalid_on_conflict(memory, request_context):
 
 
 @pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
 async def test_bank_import_classifies_label_entities(memory, request_context):
     """An imported bank's label entities are stored with entity_kind='label'.
 
@@ -1624,6 +1636,7 @@ async def test_bank_import_classifies_label_entities(memory, request_context):
 
 
 @pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
 async def test_async_export_roundtrip(memory, request_context):
     """The async export operation stashes a real archive that re-imports cleanly.
 
@@ -1669,6 +1682,7 @@ async def test_async_export_include_observations_subset_rejected(memory, request
 
 
 @pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
 async def test_export_attach_batching_preserves_entities_and_causal_links(memory, request_context, monkeypatch):
     """Batched attach queries carry every fact's entities and cross-batch causal edges.
 

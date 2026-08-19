@@ -138,6 +138,7 @@ async def _observations(memory: MemoryEngine, bank_id: str) -> list:
 
 
 @pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
 async def test_dedup_create_fold_widens_bounds_of_the_twin(memory: MemoryEngine, request_context, observations_enabled):
     """#3477: a CREATE folded into a near-twin must hand over its source facts' dates.
 
@@ -184,6 +185,7 @@ async def test_dedup_create_fold_widens_bounds_of_the_twin(memory: MemoryEngine,
 
 
 @pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
 async def test_update_widens_bounds_from_its_source_facts(memory: MemoryEngine, request_context, observations_enabled):
     """The ordinary UPDATE path inherits every temporal field from its sources, event_date included."""
     bank_id = f"test-temporal-update-{uuid.uuid4().hex[:8]}"
@@ -235,6 +237,7 @@ async def test_update_widens_bounds_from_its_source_facts(memory: MemoryEngine, 
 
 
 @pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
 async def test_dedup_update_fold_unions_the_bounds_of_both_rows(
     memory: MemoryEngine, request_context, observations_enabled
 ):

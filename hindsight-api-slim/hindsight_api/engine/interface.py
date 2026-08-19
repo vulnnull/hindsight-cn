@@ -328,7 +328,7 @@ class MemoryEngineInterface(ABC):
         self,
         bank_id: str,
         *,
-        fact_type: str | None = None,
+        fact_type: str | list[str] | None = None,
         search_query: str | None = None,
         entity_id: str | None = None,
         created_before: datetime | None = None,
@@ -341,7 +341,8 @@ class MemoryEngineInterface(ABC):
 
         Args:
             bank_id: The memory bank ID.
-            fact_type: Filter by fact type.
+            fact_type: Filter by fact type. A list matches any of them; an empty
+                list is treated as no filter.
             search_query: Full-text search query.
             entity_id: Filter to memory units linked to this entity ID.
             created_before: Keep units with ``created_at`` before this instant.

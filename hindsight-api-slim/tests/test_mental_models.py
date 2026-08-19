@@ -1173,6 +1173,7 @@ class TestMentalModelStaleness:
         assert got["is_stale"] is False
         await memory.delete_bank(bank_id, request_context=request_context)
 
+    @pytest.mark.memory_backend_incompatible
     async def test_untagged_mm_stale_on_any_new_memory(self, memory: MemoryEngine, request_context):
         bank_id = f"test-mm-stale-untagged-{uuid.uuid4().hex[:8]}"
         await memory.get_bank_profile(bank_id, request_context=request_context)
@@ -1201,6 +1202,7 @@ class TestMentalModelStaleness:
         assert got["is_stale"] is False
         await memory.delete_bank(bank_id, request_context=request_context)
 
+    @pytest.mark.memory_backend_incompatible
     async def test_tagged_mm_defaults_to_all_strict(self, memory: MemoryEngine, request_context):
         bank_id = f"test-mm-stale-overlap-{uuid.uuid4().hex[:8]}"
         await memory.get_bank_profile(bank_id, request_context=request_context)
@@ -1221,6 +1223,7 @@ class TestMentalModelStaleness:
         assert got["is_stale"] is True
         await memory.delete_bank(bank_id, request_context=request_context)
 
+    @pytest.mark.memory_backend_incompatible
     async def test_tags_match_any_keeps_overlap_behavior(self, memory: MemoryEngine, request_context):
         bank_id = f"test-mm-stale-any-{uuid.uuid4().hex[:8]}"
         await memory.get_bank_profile(bank_id, request_context=request_context)
@@ -1238,6 +1241,7 @@ class TestMentalModelStaleness:
         assert got["is_stale"] is True
         await memory.delete_bank(bank_id, request_context=request_context)
 
+    @pytest.mark.memory_backend_incompatible
     async def test_tag_groups_define_stale_scope(self, memory: MemoryEngine, request_context):
         bank_id = f"test-mm-stale-groups-{uuid.uuid4().hex[:8]}"
         await memory.get_bank_profile(bank_id, request_context=request_context)
@@ -1262,6 +1266,7 @@ class TestMentalModelStaleness:
         assert got["is_stale"] is True
         await memory.delete_bank(bank_id, request_context=request_context)
 
+    @pytest.mark.memory_backend_incompatible
     async def test_flat_tags_and_fact_types_share_stale_scope(self, memory: MemoryEngine, request_context):
         bank_id = f"test-mm-stale-flat-fact-{uuid.uuid4().hex[:8]}"
         await memory.get_bank_profile(bank_id, request_context=request_context)
@@ -1283,6 +1288,7 @@ class TestMentalModelStaleness:
         assert got["is_stale"] is True
         await memory.delete_bank(bank_id, request_context=request_context)
 
+    @pytest.mark.memory_backend_incompatible
     async def test_tag_groups_and_fact_types_share_stale_scope(self, memory: MemoryEngine, request_context):
         bank_id = f"test-mm-stale-group-fact-{uuid.uuid4().hex[:8]}"
         await memory.get_bank_profile(bank_id, request_context=request_context)
@@ -1328,6 +1334,7 @@ class TestMentalModelStaleness:
         assert got["is_stale"] is True
         await memory.delete_bank(bank_id, request_context=request_context)
 
+    @pytest.mark.memory_backend_incompatible
     async def test_tags_match_all_strict_requires_all_tags(self, memory: MemoryEngine, request_context):
         """tags_match='all_strict' → memory must contain ALL MM tags (and be tagged)."""
         bank_id = f"test-mm-stale-all-{uuid.uuid4().hex[:8]}"
@@ -1353,6 +1360,7 @@ class TestMentalModelStaleness:
 
         await memory.delete_bank(bank_id, request_context=request_context)
 
+    @pytest.mark.memory_backend_incompatible
     async def test_tags_match_any_strict_excludes_untagged(self, memory: MemoryEngine, request_context):
         """tags_match='any_strict' → untagged memory does NOT keep MM in scope."""
         bank_id = f"test-mm-stale-anystrict-{uuid.uuid4().hex[:8]}"
@@ -1376,6 +1384,7 @@ class TestMentalModelStaleness:
 
         await memory.delete_bank(bank_id, request_context=request_context)
 
+    @pytest.mark.memory_backend_incompatible
     async def test_fact_type_filter_narrows_scope(self, memory: MemoryEngine, request_context):
         bank_id = f"test-mm-stale-fact-{uuid.uuid4().hex[:8]}"
         await memory.get_bank_profile(bank_id, request_context=request_context)
@@ -1399,6 +1408,7 @@ class TestMentalModelStaleness:
 
         await memory.delete_bank(bank_id, request_context=request_context)
 
+    @pytest.mark.memory_backend_incompatible
     async def test_tool_search_mental_models_returns_is_stale_per_mm(self, memory: MemoryEngine, request_context):
         """Regression: tool_search_mental_models must compute is_stale per-MM via scope,
         not via a bank-wide pending_consolidation short-circuit."""
@@ -1435,6 +1445,7 @@ class TestMentalModelStaleness:
 
         await memory.delete_bank(bank_id, request_context=request_context)
 
+    @pytest.mark.memory_backend_incompatible
     async def test_tool_search_mental_models_skips_the_scan_below_the_watermark(
         self, memory: MemoryEngine, request_context
     ):
@@ -1621,6 +1632,7 @@ class TestMentalModelRefreshTimestamps:
 
         await memory.delete_bank(bank_id, request_context=request_context)
 
+    @pytest.mark.memory_backend_incompatible
     async def test_staleness_keys_off_memories_seen_not_refresh_time(self, memory: MemoryEngine, request_context):
         """The inverse regression: making ``last_refreshed_at`` a wall clock must not let
         a recent refresh mask a memory the document has never seen."""
@@ -2585,6 +2597,7 @@ class TestMentalModelRefreshFactTypeFilter:
         memory._reflect_llm_config = wrapper
         return mock_llm
 
+    @pytest.mark.memory_backend_incompatible
     async def test_refresh_with_fact_types_experience_grounds_on_experience_facts(
         self, memory: MemoryEngine, request_context
     ):

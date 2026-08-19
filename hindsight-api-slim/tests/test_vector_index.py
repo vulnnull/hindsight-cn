@@ -98,8 +98,12 @@ def test_scann_index_creation_defers_until_table_is_large_enough():
 
 
 def test_ann_search_tuning_settings_pgvector_dispatches_hnsw_ef_search():
-    assert ann_search_tuning_settings("pgvector", kind="low_latency") == (("hnsw.ef_search", "60"),)
-    assert ann_search_tuning_settings("pgvector", kind="high_recall") == (("hnsw.ef_search", "200"),)
+    # Looked up rather than compared as a whole tuple: the profiles also carry the
+    # iterative-scan settings, which test_ann_iterative_scan.py covers. Pinning the
+    # exact tuple here would make every future addition to a profile fail this test
+    # for a reason it is not about.
+    assert dict(ann_search_tuning_settings("pgvector", kind="low_latency"))["hnsw.ef_search"] == "60"
+    assert dict(ann_search_tuning_settings("pgvector", kind="high_recall"))["hnsw.ef_search"] == "200"
 
 
 def test_ann_search_tuning_settings_vchord_leaves_probes_to_index_defaults():

@@ -9459,7 +9459,7 @@ class MemoryEngine(MemoryEngineInterface):
         self,
         bank_id: str,
         *,
-        fact_type: str | None = None,
+        fact_type: str | list[str] | None = None,
         search_query: str | None = None,
         consolidation_state: str | None = None,
         state: str | None = None,
@@ -9477,7 +9477,9 @@ class MemoryEngine(MemoryEngineInterface):
 
         Args:
             bank_id: Filter by bank ID
-            fact_type: Filter by fact type (world, experience)
+            fact_type: Filter by fact type (world, experience). A list matches any
+                of them (e.g. ``['world', 'experience']`` for source facts); an
+                empty list is treated as no filter.
             search_query: Full-text search query (searches text and context fields)
             document_id: Optional filter to a single source document.
             entity_id: Optional filter to memory units linked to this entity ID

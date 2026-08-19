@@ -552,6 +552,7 @@ async def test_document_deletion_with_slashes_in_id(api_client):
 
 
 @pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
 async def test_delete_bank(api_client):
     """Test delete bank endpoint.
 

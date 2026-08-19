@@ -500,6 +500,7 @@ class TestDefaultThresholdIsBackwardsCompatible:
 
 class TestReconcileMechanics:
     @pytest.mark.asyncio
+    @pytest.mark.memory_backend_incompatible
     async def test_invalid_shape_index_is_rebuilt(
         self, memory: MemoryEngine, request_context: RequestContext, low_threshold
     ):

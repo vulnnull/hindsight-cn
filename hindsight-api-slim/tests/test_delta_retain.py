@@ -2,7 +2,6 @@
 Tests for delta retain — upsert optimization that only re-processes changed chunks.
 """
 
-import json
 import logging
 from datetime import datetime, timezone
 
@@ -237,6 +236,7 @@ async def test_delta_retain_modified_chunk(memory, request_context):
 
 
 @pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
 async def test_delta_retain_entities_preserved_for_unchanged_chunks(memory, request_context):
     """
     Entities linked to unchanged chunks should be preserved after delta retain.
@@ -256,13 +256,8 @@ async def test_delta_retain_entities_preserved_for_unchanged_chunks(memory, requ
         assert len(v1_units) > 0
 
         # Check entities exist
-        pool = await memory._get_pool()
-        async with pool.acquire() as conn:
-            v1_entities = await conn.fetch(
-                "SELECT canonical_name FROM entities WHERE bank_id = $1",
-                bank_id,
-            )
-        v1_entity_names = {e["canonical_name"].lower() for e in v1_entities}
+        v1_listing = await memory.list_entities(bank_id, request_context=request_context)
+        v1_entity_names = {e["canonical_name"].lower() for e in v1_listing["items"]}
         assert len(v1_entity_names) > 0, "Should have entities after v1 retain"
 
         # Upsert with same content — entities should persist
@@ -274,12 +269,8 @@ async def test_delta_retain_entities_preserved_for_unchanged_chunks(memory, requ
             request_context=request_context,
         )
 
-        async with pool.acquire() as conn:
-            v2_entities = await conn.fetch(
-                "SELECT canonical_name FROM entities WHERE bank_id = $1",
-                bank_id,
-            )
-        v2_entity_names = {e["canonical_name"].lower() for e in v2_entities}
+        v2_listing = await memory.list_entities(bank_id, request_context=request_context)
+        v2_entity_names = {e["canonical_name"].lower() for e in v2_listing["items"]}
 
         # All v1 entities should still exist
         assert v1_entity_names.issubset(v2_entity_names), (
@@ -308,13 +299,8 @@ async def test_delta_retain_new_entities_created_for_new_chunks(memory, request_
             request_context=request_context,
         )
 
-        pool = await memory._get_pool()
-        async with pool.acquire() as conn:
-            v1_entities = await conn.fetch(
-                "SELECT canonical_name FROM entities WHERE bank_id = $1",
-                bank_id,
-            )
-        v1_entity_names = {e["canonical_name"].lower() for e in v1_entities}
+        v1_listing = await memory.list_entities(bank_id, request_context=request_context)
+        v1_entity_names = {e["canonical_name"].lower() for e in v1_listing["items"]}
 
         # Append content mentioning new entities
         v2_content = v1_content + "\n\nBob joined Facebook. He works with Charlie on the Reality Labs project."
@@ -326,12 +312,8 @@ async def test_delta_retain_new_entities_created_for_new_chunks(memory, request_
             request_context=request_context,
         )
 
-        async with pool.acquire() as conn:
-            v2_entities = await conn.fetch(
-                "SELECT canonical_name FROM entities WHERE bank_id = $1",
-                bank_id,
-            )
-        v2_entity_names = {e["canonical_name"].lower() for e in v2_entities}
+        v2_listing = await memory.list_entities(bank_id, request_context=request_context)
+        v2_entity_names = {e["canonical_name"].lower() for e in v2_listing["items"]}
 
         # Should have more entities after adding content with new people/orgs
         assert len(v2_entity_names) > len(v1_entity_names), (
@@ -343,6 +325,7 @@ async def test_delta_retain_new_entities_created_for_new_chunks(memory, request_
 
 
 @pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
 async def test_delta_retain_links_preserved_for_unchanged_chunks(memory, request_context):
     """
     Memory links (temporal, semantic, entity) for unchanged chunks should be preserved.
@@ -444,6 +427,7 @@ async def test_delta_retain_document_metadata_updated(memory, request_context):
 
 
 @pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
 async def test_delta_retain_metadata_consistent_for_unchanged_units(memory, request_context):
     """Metadata updates should reach facts preserved by metadata-only retain."""
     bank_id = f"test_delta_unit_meta_{_ts()}"
@@ -479,25 +463,19 @@ async def test_delta_retain_metadata_consistent_for_unchanged_units(memory, requ
         assert doc is not None
         assert doc["document_metadata"] == {"source": "crm"}
 
-        pool = await memory._get_pool()
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                "SELECT metadata FROM memory_units WHERE bank_id = $1 AND document_id = $2",
-                bank_id,
-                document_id,
-            )
+        listing = await memory.list_memory_units(bank_id, document_id=document_id, request_context=request_context)
+        rows = listing["items"]
 
         assert rows
         for row in rows:
-            metadata = row["metadata"]
-            if isinstance(metadata, str):
-                metadata = json.loads(metadata)
-            assert metadata == {"source": "crm"}
+            # list_memory_units already parses the JSON metadata into a dict.
+            assert row["metadata"] == {"source": "crm"}
     finally:
         await memory.delete_bank(bank_id, request_context=request_context)
 
 
 @pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
 async def test_delta_retain_drops_null_metadata_values(memory, request_context):
     """A null-valued metadata key must never reach memory_units (issue #3209).
 
@@ -519,21 +497,12 @@ async def test_delta_retain_drops_null_metadata_values(memory, request_context):
     async def _unit_metadata() -> dict[str, dict]:
         """The document's memory units, keyed by unit id, so a later call can
         tell units that survived a delta from ones re-extracted from scratch."""
-        pool = await memory._get_pool()
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                "SELECT id, metadata FROM memory_units WHERE bank_id = $1 AND document_id = $2",
-                bank_id,
-                document_id,
-            )
+        listing = await memory.list_memory_units(bank_id, document_id=document_id, request_context=request_context)
+        rows = listing["items"]
         assert rows, "expected memory units for the document"
-        units = {}
-        for row in rows:
-            metadata = row["metadata"]
-            if isinstance(metadata, str):
-                metadata = json.loads(metadata)
-            units[str(row["id"])] = metadata
-        return units
+        # list_memory_units already parses the JSON metadata into a dict and
+        # returns ids as strings.
+        return {row["id"]: row["metadata"] for row in rows}
 
     async def _retain(content: str, source: str) -> None:
         await memory.retain_batch_async(
@@ -598,13 +567,8 @@ async def test_delta_retain_tags_propagated_to_existing_units(memory, request_co
             request_context=request_context,
         )
 
-        pool = await memory._get_pool()
-        async with pool.acquire() as conn:
-            v1_tags = await conn.fetch(
-                "SELECT tags FROM memory_units WHERE bank_id = $1 AND document_id = $2",
-                bank_id,
-                document_id,
-            )
+        v1_listing = await memory.list_memory_units(bank_id, document_id=document_id, request_context=request_context)
+        v1_tags = v1_listing["items"]
         assert all("team-a" in row["tags"] for row in v1_tags), "v1 units should have team-a tag"
 
         # v2 with same content but different tags
@@ -620,12 +584,8 @@ async def test_delta_retain_tags_propagated_to_existing_units(memory, request_co
             request_context=request_context,
         )
 
-        async with pool.acquire() as conn:
-            v2_tags = await conn.fetch(
-                "SELECT tags FROM memory_units WHERE bank_id = $1 AND document_id = $2",
-                bank_id,
-                document_id,
-            )
+        v2_listing = await memory.list_memory_units(bank_id, document_id=document_id, request_context=request_context)
+        v2_tags = v2_listing["items"]
         for row in v2_tags:
             assert "team-b" in row["tags"], f"v2 units should have team-b tag, got {row['tags']}"
             assert "important" in row["tags"], f"v2 units should have important tag, got {row['tags']}"
@@ -923,13 +883,8 @@ async def test_delta_retain_with_user_entities(memory, request_context):
             request_context=request_context,
         )
 
-        pool = await memory._get_pool()
-        async with pool.acquire() as conn:
-            v1_entities = await conn.fetch(
-                "SELECT canonical_name FROM entities WHERE bank_id = $1",
-                bank_id,
-            )
-        v1_names = {e["canonical_name"].lower() for e in v1_entities}
+        v1_listing = await memory.list_entities(bank_id, request_context=request_context)
+        v1_names = {e["canonical_name"].lower() for e in v1_listing["items"]}
 
         # v2 with additional entity, same content
         # Note: same content = delta path (no re-extraction)
@@ -951,12 +906,8 @@ async def test_delta_retain_with_user_entities(memory, request_context):
         )
 
         # Should have entities from both v1 and v2
-        async with pool.acquire() as conn:
-            v2_entities = await conn.fetch(
-                "SELECT canonical_name FROM entities WHERE bank_id = $1",
-                bank_id,
-            )
-        v2_names = {e["canonical_name"].lower() for e in v2_entities}
+        v2_listing = await memory.list_entities(bank_id, request_context=request_context)
+        v2_names = {e["canonical_name"].lower() for e in v2_listing["items"]}
 
         # v1 entities should be preserved
         assert v1_names.issubset(v2_names), f"v1 entities should be preserved: {v1_names} not in {v2_names}"

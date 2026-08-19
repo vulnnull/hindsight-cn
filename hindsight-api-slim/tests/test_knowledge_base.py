@@ -227,6 +227,7 @@ class TestTree:
         assert loose["trigger"]["refresh_after_consolidation"] is False
         assert loose["trigger"]["mode"] == "delta"  # untouched by the patch
 
+    @pytest.mark.memory_backend_incompatible
     async def test_tree_staleness_follows_the_bank_watermark(self, api_client, memory, kb_bank):
         """The tree answers from one bank-wide watermark, not a scan per page.
 

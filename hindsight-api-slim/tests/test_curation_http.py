@@ -48,6 +48,7 @@ async def _insert_fact(memory: MemoryEngine, bank_id: str, text: str) -> str:
 
 
 @pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
 async def test_patch_invalidate_and_revert_over_http(api_client, memory):
     bank_id = f"curation-http-{uuid.uuid4().hex[:8]}"
     mem_id = await _insert_fact(memory, bank_id, "srv-04 runs PostgreSQL 14.")
@@ -80,6 +81,7 @@ async def test_patch_invalidate_and_revert_over_http(api_client, memory):
 
 
 @pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
 async def test_patch_clears_occurred_dates_with_explicit_null(api_client, memory):
     bank_id = f"curation-http-clear-dates-{uuid.uuid4().hex[:8]}"
     mem_id = await _insert_fact(memory, bank_id, "Release v1.2 happened on Monday.")
@@ -138,6 +140,7 @@ async def test_patch_empty_body_is_rejected(api_client, memory):
 
 
 @pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
 async def test_patch_resolve_entities_reaches_the_engine(api_client, memory):
     """resolve_entities must survive the HTTP boundary, and default to True when omitted (#3479)."""
     bank_id = f"curation-http-resolve-{uuid.uuid4().hex[:8]}"

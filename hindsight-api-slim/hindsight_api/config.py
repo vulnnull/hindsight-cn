@@ -533,6 +533,8 @@ ENV_RERANKER_GOOGLE_PROJECT_ID = "HINDSIGHT_API_RERANKER_GOOGLE_PROJECT_ID"
 ENV_RERANKER_GOOGLE_SERVICE_ACCOUNT_KEY = "HINDSIGHT_API_RERANKER_GOOGLE_SERVICE_ACCOUNT_KEY"
 
 ENV_VECTOR_EXTENSION = "HINDSIGHT_API_VECTOR_EXTENSION"
+ENV_ANN_ITERATIVE_SCAN = "HINDSIGHT_API_ANN_ITERATIVE_SCAN"
+ENV_ANN_MAX_SCAN_TUPLES = "HINDSIGHT_API_ANN_MAX_SCAN_TUPLES"
 ENV_TEXT_SEARCH_EXTENSION = "HINDSIGHT_API_TEXT_SEARCH_EXTENSION"
 ENV_TEXT_SEARCH_EXTENSION_NATIVE_LANGUAGE = "HINDSIGHT_API_TEXT_SEARCH_EXTENSION_NATIVE_LANGUAGE"
 ENV_TEXT_SEARCH_EXTENSION_PG_SEARCH_TOKENIZER = "HINDSIGHT_API_TEXT_SEARCH_EXTENSION_PG_SEARCH_TOKENIZER"
@@ -1144,6 +1146,22 @@ DEFAULT_RERANKER_GOOGLE_MODEL = "semantic-ranker-default-004"
 
 # Vector extension (pgvector, vchord, pgvectorscale, or AlloyDB ScaNN)
 DEFAULT_VECTOR_EXTENSION = "pgvector"  # Options: "pgvector", "vchord", "pgvectorscale", "scann"
+# Let an ANN scan resume until the query's LIMIT is met, instead of stopping when its
+# first candidate list drains. Off, a recall can never retrieve more rows than the
+# candidate list holds (pgvector: hnsw.ef_search, 200), so a larger recall budget
+# widens the SQL and changes nothing. On is the intended behaviour; this exists as an
+# operational kill switch, because turning it off restores exactly the previous
+# retrieval depth without a deploy.
+DEFAULT_ANN_ITERATIVE_SCAN = True
+# Ceiling on how many tuples one resumed scan may visit. Bounds both the CPU a
+# selective query can spend resuming (the filters that thin a result are applied after
+# the index scan, so a selective one resumes repeatedly) and the scan's memory, which
+# pgvector otherwise caps at work_mem * hnsw.scan_mem_multiplier. Measured at this
+# value the memory ceiling is never approached — squeezing work_mem to 256kB changes
+# neither rows nor latency — so this is the knob that governs the cost, not work_mem.
+# Lower it to trade retrieval depth back for latency; the initial scan is not counted,
+# so even 1 leaves the pre-existing behaviour intact. pgvector's own default is 20000.
+DEFAULT_ANN_MAX_SCAN_TUPLES = 4000
 
 # Text search extension (native PostgreSQL, vchord BM25, Timescale pg_textsearch,
 # pgroonga, or ParadeDB pg_search)
@@ -2190,6 +2208,8 @@ class HindsightConfig:
     migration_database_url: str | None
     database_schema: str
     vector_extension: str  # "pgvector", "vchord", "pgvectorscale", or "scann"
+    ann_iterative_scan: bool
+    ann_max_scan_tuples: int
     text_search_extension: str  # "native", "vchord", "pg_textsearch", "pgroonga", or "pg_search"
     # PostgreSQL text search dictionary for the "native" backend (ignored by
     # other backends). Only the "native" backend reads this field; pgroonga
@@ -3007,6 +3027,12 @@ class HindsightConfig:
         # Validate vector_extension
         validate_extension(self.vector_extension)
 
+        if self.ann_iterative_scan and self.ann_max_scan_tuples < 1:
+            raise ValueError(
+                f"Invalid ann_max_scan_tuples: {self.ann_max_scan_tuples}. Must be >= 1 when "
+                f"iterative ANN scans are enabled (set {ENV_ANN_ITERATIVE_SCAN}=false to disable them)"
+            )
+
         # pg_trgm requires the similarity threshold in (0, 1]. Fail fast here
         # rather than let an out-of-range value raise on every pool connection's
         # setup (which would leave the API unable to serve any request).
@@ -3175,6 +3201,10 @@ class HindsightConfig:
             migration_database_url=os.getenv(ENV_MIGRATION_DATABASE_URL) or None,
             database_schema=os.getenv(ENV_DATABASE_SCHEMA, DEFAULT_DATABASE_SCHEMA),
             vector_extension=os.getenv(ENV_VECTOR_EXTENSION, DEFAULT_VECTOR_EXTENSION).lower(),
+            ann_iterative_scan=_parse_boolean_env(ENV_ANN_ITERATIVE_SCAN, DEFAULT_ANN_ITERATIVE_SCAN),
+            ann_max_scan_tuples=_parse_non_negative_int(
+                ENV_ANN_MAX_SCAN_TUPLES, os.getenv(ENV_ANN_MAX_SCAN_TUPLES), DEFAULT_ANN_MAX_SCAN_TUPLES
+            ),
             text_search_extension=os.getenv(ENV_TEXT_SEARCH_EXTENSION, DEFAULT_TEXT_SEARCH_EXTENSION).lower(),
             text_search_extension_native_language=os.getenv(
                 ENV_TEXT_SEARCH_EXTENSION_NATIVE_LANGUAGE,
