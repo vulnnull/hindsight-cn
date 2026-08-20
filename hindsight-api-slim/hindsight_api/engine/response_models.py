@@ -411,6 +411,15 @@ class ReflectResult(BaseModel):
     )
 
     text: str = Field(description="The formulated answer text")
+    document: Any | None = Field(
+        default=None,
+        exclude=True,
+        description=(
+            "Internal: the structured document the agent emitted when the caller asked for one. "
+            "``text`` is its deterministic render. Excluded from the API response — callers read "
+            "the rendered text; the structure is persistence-side state."
+        ),
+    )
     based_on: dict[str, Any] = Field(
         description="Facts used to formulate the answer, organized by type (world, experience, observation, mental-models, directives)"
     )

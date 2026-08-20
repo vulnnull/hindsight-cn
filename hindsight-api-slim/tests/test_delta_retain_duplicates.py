@@ -25,6 +25,9 @@ def _ts():
 
 
 @pytest.mark.asyncio
+# Asserts chunk indexes by selecting from the Postgres `chunks` table, which a store-owned bank
+# leaves empty — its chunks live in the store.
+@pytest.mark.memory_backend_incompatible
 async def test_repeated_upsert_chunks_not_scrambled(memory, request_context):
     """
     Verify that chunks are stored with correct indices matching the
@@ -154,6 +157,10 @@ async def test_delta_detects_unchanged_after_first_retain(memory, request_contex
 
 
 @pytest.mark.asyncio
+# Forces the race by writing `documents.updated_at` directly, as the test itself notes; that row
+# is not what a store-owned bank consults. The race is fenced there by the store's own
+# compare-and-set on the document watermark, covered by test_concurrent_appends_keep_every_turn.
+@pytest.mark.memory_backend_incompatible
 async def test_stale_request_skipped_when_newer_retain_completed(memory, request_context):
     """
     When two retains race on the same document, the one that started earlier

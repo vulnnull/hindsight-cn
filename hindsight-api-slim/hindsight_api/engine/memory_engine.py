@@ -671,6 +671,34 @@ def _build_llm(
     return MultiLLMProvider([base, *extra], strategy)
 
 
+async def validate_retain_batch_support(
+    retain_llm_config: "LLMConfig | MultiLLMProvider", config: HindsightConfig
+) -> None:
+    """Fail startup when batch retain is enabled but nothing configured can serve it.
+
+    Otherwise the server would silently fall back to sync mode on every retain,
+    which is confusing and wastes a config knob. For a multi-LLM chain the
+    capability is evaluated across ALL members, not just the primary: batch
+    capacity may live on a secondary (issue #3645), and gating on the primary
+    alone rejected configurations that would in fact have worked.
+    """
+    if not config.retain_batch_enabled:
+        return
+    if await retain_llm_config.supports_batch_api():
+        return
+
+    if isinstance(retain_llm_config, MultiLLMProvider):
+        members = ", ".join(f"'{member.provider}'" for member in retain_llm_config.members)
+        cause = f"no member of the retain LLM chain ({members}) supports the batch API"
+    else:
+        cause = f"the retain LLM provider '{retain_llm_config.provider}' does not support the batch API"
+    raise RuntimeError(
+        f"Configuration error: HINDSIGHT_API_RETAIN_BATCH_ENABLED=true but {cause}. "
+        f"Either switch to a provider that supports batch operations "
+        f"(e.g. 'openai', 'groq', 'gemini') or set HINDSIGHT_API_RETAIN_BATCH_ENABLED=false."
+    )
+
+
 def _is_oracledb_connection_error(e: Exception) -> bool:
     """Check if an exception is an Oracle connection/interface error."""
     try:
@@ -4077,21 +4105,10 @@ class MemoryEngine(MemoryEngineInterface):
                             e,
                         )
 
-                # Validate batch API compatibility: if retain_batch_enabled is set,
-                # the retain LLM provider must actually support the batch API.
-                # Otherwise the server would silently fall back to sync mode on
-                # every retain, which is confusing and wastes a config knob.
-                config = get_config()
-                if config.retain_batch_enabled:
-                    supports_batch = await self._retain_llm_config._provider_impl.supports_batch_api()
-                    if not supports_batch:
-                        raise RuntimeError(
-                            f"Configuration error: HINDSIGHT_API_RETAIN_BATCH_ENABLED=true "
-                            f"but the retain LLM provider '{self._retain_llm_config.provider}' "
-                            f"does not support the batch API. Either switch to a provider "
-                            f"that supports batch operations (e.g. 'openai', 'groq', 'gemini') or "
-                            f"set HINDSIGHT_API_RETAIN_BATCH_ENABLED=false."
-                        )
+                # Validate batch API compatibility: if retain_batch_enabled is
+                # set, the retain LLM configuration must actually be able to
+                # serve a batch (any member of a chain will do).
+                await validate_retain_batch_support(self._retain_llm_config, get_config())
 
         # Build list of initialization tasks. The cross-encoder is initialized
         # eagerly here (single-threaded, before any request is served) so that
@@ -8270,7 +8287,7 @@ class MemoryEngine(MemoryEngineInterface):
                             # Store-owned: the tombstone is the ONLY write here (the relink/prune
                             # enqueues above join memory_units/unit_entities, which this store keeps
                             # no rows in — so they touch nothing; stale-observation cleanup routes to
-                            # the store and is not part of this txn either). One memlake delete needs
+                            # the store and is not part of this txn either). One store-side delete needs
                             # no write-group — a plain, immediately-durable tombstone leaves no witness
                             # to go undecided (a store-owned retain creates none of these either).
                             await _store.delete_facts(bank_id, [unit_id])
@@ -12007,6 +12024,7 @@ class MemoryEngine(MemoryEngineInterface):
         recall_chunks_max_tokens_override: int | None = None,
         created_after: datetime | None = None,
         created_before: datetime | None = None,
+        answer_as_document: bool = False,
         _skip_span: bool = False,
         _operation_label: str = "reflect",
     ) -> ReflectResult:
@@ -12310,6 +12328,7 @@ class MemoryEngine(MemoryEngineInterface):
                         llm_output_language=getattr(resolved_reflect_config, "llm_output_language", None),
                         cancel_check=request_context.raise_if_cancelled,
                         store_document_text=config_dict.get("store_document_text", DEFAULT_STORE_DOCUMENT_TEXT),
+                        answer_as_document=answer_as_document,
                     ),
                     timeout=wall_timeout,
                 )
@@ -12486,6 +12505,7 @@ class MemoryEngine(MemoryEngineInterface):
             # Return response (compatible with existing API)
             result = ReflectResult(
                 text=agent_result.text,
+                document=agent_result.document,
                 based_on=based_on,
                 structured_output=agent_result.structured_output,
                 usage=usage,
@@ -13550,7 +13570,17 @@ class MemoryEngine(MemoryEngineInterface):
         max_tokens: int | None,
         trigger: dict[str, Any] | None,
     ) -> ResultRow:
-        """Insert a pinned model using the caller's transaction."""
+        """Insert a pinned model using the caller's transaction.
+
+        ``content`` is stored as the render of its own structure: a mental model
+        created from authored markdown is on the structured schema from the
+        first byte, not from its first delta refresh. Leaving the column NULL
+        here would mean the first refresh silently reshapes a document nobody
+        asked it to touch.
+        """
+        from .reflect.structured_doc import canonical_document
+
+        document = canonical_document(content)
         # VectorChord needs mental_models.search_vector tokenized on write; every
         # other backend either generates it or indexes the source columns.
         #
@@ -13570,8 +13600,10 @@ class MemoryEngine(MemoryEngineInterface):
         row = await conn.fetchrow(
             f"""
             INSERT INTO {fq_table("mental_models")}
-            (id, bank_id, subtype, name, description, source_query, content, embedding, tags, max_tokens, trigger{sv_col})
-            VALUES ($1, $2, 'pinned', $3::text, ' ', $4, $5, $6, $7, COALESCE($8, 2048), COALESCE($9, '{{"refresh_after_consolidation": false}}'::jsonb){sv_val})
+            (id, bank_id, subtype, name, description, source_query, content, embedding, tags, max_tokens,
+             trigger, structured_content{sv_col})
+            VALUES ($1, $2, 'pinned', $3::text, ' ', $4, $5, $6, $7, COALESCE($8, 2048),
+                    COALESCE($9, '{{"refresh_after_consolidation": false}}'::jsonb), $10{sv_val})
             RETURNING id, bank_id, name, source_query, content, tags,
                       last_refreshed_at, last_memory_seen_at, created_at, reflect_response,
                       max_tokens, trigger, structured_content
@@ -13580,11 +13612,12 @@ class MemoryEngine(MemoryEngineInterface):
             bank_id,
             name,
             source_query,
-            content,
+            document.markdown,
             embedding,
             tags or [],
             max_tokens,
             json.dumps(trigger) if trigger else None,
+            json.dumps(document.structure.model_dump()),
         )
         assert row is not None
         return row
@@ -13874,6 +13907,11 @@ class MemoryEngine(MemoryEngineInterface):
             recall_include_chunks=recall_include_chunks_override,
             recall_max_tokens_override=recall_max_tokens_override,
             recall_chunks_max_tokens_override=recall_chunks_max_tokens_override,
+            # The refresh stores a document, so the agent states its structure and
+            # the markdown is rendered from it. The model never writes the markdown
+            # that gets persisted, and nothing has to read markdown back to find
+            # out what the model meant (#3361).
+            answer_as_document=True,
             _skip_span=True,
             # Attribute these LLM calls to the mental-model refresh, not a
             # plain reflect, so traces group under the right operation.
@@ -14098,8 +14136,9 @@ class MemoryEngine(MemoryEngineInterface):
             build_structured_retraction_prompt,
         )
         from .reflect.structured_doc import (
-            parse_markdown,
             render_document,
+            split_markdown,
+            structured_document_from_stored,
         )
 
         final_content = reflect_result.text
@@ -14123,34 +14162,21 @@ class MemoryEngine(MemoryEngineInterface):
             return _op_llm_config
 
         if use_delta:
-            # Use the previously stored structured doc when available; otherwise
-            # parse the existing markdown so the very first delta refresh can
-            # still operate without waiting for a full rebuild.
-            #
-            # A stored doc that fails validation (hand-edited JSON, a shape from an
-            # older schema) is NOT fatal: the markdown in ``content`` is the same
-            # document and ``parse_markdown`` is lenient, so re-deriving the baseline
-            # from it keeps the delta path alive and rebuilds the structured doc as a
-            # side effect. Giving up here would refuse every subsequent refresh
-            # (nothing else repairs the column) over a baseline we can reconstruct.
+            # The stored structure is the baseline. A model that has never been
+            # refreshed in delta mode, or was last written under an older schema,
+            # has its baseline imported once from the stored markdown — a lossless
+            # split on headings and blank lines, not a re-interpretation of the
+            # prose (see ``structured_document_from_stored``). From this refresh on
+            # the structure is authoritative and the markdown is its render.
             current_doc: StructuredDocument | None = None
-            if stored_structured_content is not None:
-                try:
-                    current_doc = StructuredDocument.model_validate(stored_structured_content)
-                except Exception as exc:
-                    logger.warning(
-                        f"[MENTAL_MODELS] Stored structured doc for {mental_model_id} is unusable "
-                        f"({exc}); re-deriving the delta baseline from the stored markdown"
-                    )
-            if current_doc is None:
-                try:
-                    current_doc = parse_markdown(current_content)
-                except Exception as exc:
-                    logger.warning(
-                        f"[MENTAL_MODELS] Could not load structured doc for {mental_model_id} "
-                        f"({exc}); delta has no baseline to edit"
-                    )
-                    mode_fallback_reason = "structured_doc_unreadable"
+            try:
+                current_doc = structured_document_from_stored(stored_structured_content, current_content)
+            except Exception as exc:
+                logger.warning(
+                    f"[MENTAL_MODELS] Could not load structured doc for {mental_model_id} "
+                    f"({exc}); delta has no baseline to edit"
+                )
+                mode_fallback_reason = "structured_doc_unreadable"
 
             if current_doc is not None:
                 supporting_facts = delta_supporting_facts
@@ -14266,12 +14292,23 @@ class MemoryEngine(MemoryEngineInterface):
                 # transport cap — see the call below.
                 doc_max_tokens = stored_max_tokens or 2048
                 delta_max_tokens = max(2048, int(doc_max_tokens * 1.5))
+                # The document's own budget. Nothing else measures it on this leg:
+                # a delta refresh only adds, so a page grows every round and drifts
+                # past its configured size with no signal (~20 tokens/round measured,
+                # which crosses the 4096 default after a couple of hundred refreshes).
+                # The model is told where it stands so it can reclaim space from
+                # stale content; truncating here would delete knowledge instead.
+                from .reflect.tokenization import count_cl100k_tokens
+
+                document_tokens = count_cl100k_tokens(current_content)
                 user_prompt = build_structured_delta_prompt(
                     current_document_json=current_doc.model_dump_json(),
                     candidate_markdown=reflect_result.text,
                     supporting_facts=supporting_facts,
                     source_query=source_query,
                     max_output_tokens=delta_max_tokens,
+                    document_tokens=document_tokens,
+                    document_budget=doc_max_tokens,
                 )
                 # Trace the delta call. Unlike the synthesis, this runs on the raw
                 # ``_reflect_llm_config`` outside ``reflect_async``'s trace context,
@@ -14327,6 +14364,18 @@ class MemoryEngine(MemoryEngineInterface):
                         final_structured = apply_outcome.document
                         final_content = render_document(apply_outcome.document)
                         delta_applied = True
+                        # Surfaced rather than enforced: a page that keeps growing past
+                        # its budget is a page whose content needs a decision, and that
+                        # is visible here instead of only in the byte count.
+                        final_tokens = count_cl100k_tokens(final_content)
+                        reflect_response_payload["document_tokens"] = final_tokens
+                        reflect_response_payload["document_budget"] = doc_max_tokens
+                        if final_tokens > doc_max_tokens:
+                            warnings.append(
+                                f"The document is ~{final_tokens} tokens, over its {doc_max_tokens}-token "
+                                "budget. Delta refreshes were asked to reclaim space from superseded "
+                                "content; if it keeps growing, raise max_tokens or narrow the source query."
+                            )
                         logger.info(
                             f"[MENTAL_MODELS] Delta refresh for {mental_model_id}: "
                             f"applied {len(apply_outcome.applied)} op(s), "
@@ -14427,17 +14476,35 @@ class MemoryEngine(MemoryEngineInterface):
                 outcome="refresh_failed_delta_not_applied",
             )
 
-        # When delta is not applied (full mode, or delta fallback), parse the
+        # When delta is not applied (full mode, or delta fallback), split the
         # candidate markdown so the next refresh has a structured baseline to
-        # operate against.
+        # operate against, and store the render of that structure as the content.
+        #
+        # Writing the render rather than the raw candidate is what keeps the two
+        # columns in agreement: under v1 the full leg stored the candidate verbatim
+        # while deriving the structure from it lossily, so the first delta refresh
+        # afterwards silently replaced the user-visible markdown with the render of
+        # a degraded structure (#3361). The split is lossless, so this now changes
+        # nothing but whitespace between blocks — and if it ever did more, it would
+        # show up on the refresh that caused it instead of one refresh later.
         if final_structured is None:
             try:
-                final_structured = parse_markdown(final_content)
+                # The agent emitted the document (``answer_as_document``), so its
+                # structure is used as-is. Splitting is the fallback for a run that
+                # produced plain text instead — an older stub, a provider that
+                # dropped the tool call, or the iteration-limit answer.
+                structured = reflect_result.document or split_markdown(final_content)
+                rendered = render_document(structured)
             except Exception as exc:
+                # Both or neither: a half-applied split would store a structure the
+                # content does not match, which is the very state this replaces.
                 logger.warning(
-                    f"[MENTAL_MODELS] Could not parse final markdown into structured form "
+                    f"[MENTAL_MODELS] Could not split final markdown into structured form "
                     f"for {mental_model_id} ({exc}); leaving structured_content unchanged"
                 )
+            else:
+                final_structured = structured
+                final_content = rendered
 
         # Report by observable effect, not by which branch got here. A delta run
         # whose model emitted *zero* operations lands in the applied path — the
@@ -14793,6 +14860,20 @@ class MemoryEngine(MemoryEngineInterface):
                 )
                 await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         backend = await self._get_backend()
+
+        # A caller that hands over markdown alone (an import, a hand-authored
+        # document) gets its structure derived here, so the two columns can never
+        # be written out of step — the divergence that let a degraded document
+        # reach users one refresh after it was written (#3361). A refresh passes
+        # both (the structure is authoritative there and the markdown is already
+        # its render) and is left exactly as it supplied them. Derived up front so
+        # the embedding, the history snapshot and the UPDATE all see one text.
+        if content is not None and structured_content is None:
+            from .reflect.structured_doc import canonical_document
+
+            document = canonical_document(content)
+            content = document.markdown
+            structured_content = document.structure.model_dump()
 
         # Compute the new embedding BEFORE acquiring a pooled connection: a slow
         # embedder must never pin a DB connection. The embedding text depends only
@@ -15274,6 +15355,27 @@ class MemoryEngine(MemoryEngineInterface):
         if row["kind"] != "folder":
             raise ValueError(f"Parent '{parent_id}' is not a folder")
 
+    async def _kp_lock_bank(self, conn, bank_id: str) -> None:
+        """Serialize structural knowledge-tree writers on the bank row.
+
+        FOR NO KEY UPDATE conflicts with other tree writers but not with the
+        FOR KEY SHARE locks taken by inserts into tables that reference banks.
+        Oracle rewrites it to FOR UPDATE, which does not block indexed-FK child
+        inserts there.
+
+        Correctness relies on READ COMMITTED (the default here): the waiter's
+        snapshot is taken per statement, so the hierarchy it reads *after* this
+        call reflects whatever the previous writer committed.
+
+        A missing bank row takes no lock and is not an error: there is then no
+        tree to serialize, and each caller already surfaces "not found" from its
+        own query (create paths ensure the bank in this same transaction first).
+        """
+        await conn.fetchrow(
+            f"SELECT bank_id FROM {fq_table('banks')} WHERE bank_id = $1 FOR NO KEY UPDATE",
+            bank_id,
+        )
+
     async def create_knowledge_folder(
         self,
         bank_id: str,
@@ -15303,6 +15405,7 @@ class MemoryEngine(MemoryEngineInterface):
         async with acquire_with_retry(backend) as conn:
             async with conn.transaction():
                 await self._ensure_bank_exists(bank_id, request_context, conn=conn)
+                await self._kp_lock_bank(conn, bank_id)
                 await self._kp_assert_folder_parent(conn, bank_id, parent_id)
                 row = await conn.fetchrow(
                     f"""
@@ -15366,6 +15469,7 @@ class MemoryEngine(MemoryEngineInterface):
                 # share a transaction instead of compensating after a partial commit.
                 async with conn.transaction():
                     created = await self._ensure_bank_exists(bank_id, request_context, conn=conn)
+                    await self._kp_lock_bank(conn, bank_id)
                     await self._kp_assert_folder_parent(conn, bank_id, parent_id)
                     mm_row = await self._insert_pinned_mental_model(
                         conn,
@@ -15761,6 +15865,9 @@ class MemoryEngine(MemoryEngineInterface):
         backend = await self._get_backend()
         async with acquire_with_retry(backend) as conn:
             async with conn.transaction():
+                # Structural tree writers lock this bank row before reading or
+                # changing the hierarchy, serializing moves with creates/deletes.
+                await self._kp_lock_bank(conn, bank_id)
                 await self._kp_assert_folder_parent(conn, bank_id, new_parent_id)
                 # Cycle guard: walk up from the new parent; if we reach node_id,
                 # the move would create a loop. Done in Python so the check stays
@@ -15773,10 +15880,19 @@ class MemoryEngine(MemoryEngineInterface):
                             bank_id,
                         )
                     }
+                    # `seen` bounds the walk. The lock above stops this process
+                    # from creating a loop, but a tree corrupted before the lock
+                    # existed (or restored from such an export) would otherwise
+                    # spin here forever, holding a connection and an open
+                    # transaction. Refuse the move instead of hanging.
+                    seen: set[str] = set()
                     cursor: str | None = new_parent_id
                     while cursor is not None:
                         if cursor == node_id:
                             raise ValueError("Cannot move a node into its own subtree")
+                        if cursor in seen:
+                            raise ValueError(f"Knowledge tree for bank '{bank_id}' contains a parent cycle")
+                        seen.add(cursor)
                         cursor = parents.get(cursor)
                 row = await conn.fetchrow(
                     f"""
@@ -15811,6 +15927,7 @@ class MemoryEngine(MemoryEngineInterface):
         backend = await self._get_backend()
         async with acquire_with_retry(backend) as conn:
             async with conn.transaction():
+                await self._kp_lock_bank(conn, bank_id)
                 all_rows = await conn.fetch(
                     f"SELECT id, parent_id, mental_model_id FROM {fq_table('knowledge_pages')} WHERE bank_id = $1",
                     bank_id,
@@ -15821,10 +15938,19 @@ class MemoryEngine(MemoryEngineInterface):
                 if not any(r["id"] == node_id for r in all_rows):
                     return False
                 # BFS the subtree rooted at node_id, collecting page mental models.
+                # `visited` bounds the walk: a tree corrupted before the bank lock
+                # existed (or restored from such an export) contains a parent cycle
+                # the FK does not forbid, and an unguarded walk would spin forever
+                # holding a connection and an open transaction. Visiting each node
+                # once still deletes every reachable node.
                 stack = [node_id]
+                visited: set[str] = set()
                 mm_ids: list[str] = []
                 while stack:
                     current = stack.pop()
+                    if current in visited:
+                        continue
+                    visited.add(current)
                     for child in by_parent.get(current, []):
                         stack.append(child["id"])
                     node_row = next((r for r in all_rows if r["id"] == current), None)

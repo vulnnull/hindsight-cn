@@ -24,6 +24,9 @@ def disable_observations():
 
 
 @pytest.mark.asyncio
+# Looks the entity up with a raw SELECT on `entities` / `unit_entities`. A store-owned retain
+# registers its entities in the store's registry, which those tables do not mirror.
+@pytest.mark.memory_backend_incompatible
 async def test_entity_extraction_on_retain(memory, request_context):
     """
     Test that entities are extracted when new facts are added.

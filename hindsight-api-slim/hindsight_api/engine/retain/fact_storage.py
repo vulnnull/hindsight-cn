@@ -446,15 +446,38 @@ async def update_memory_units_metadata_and_tags(
         Number of memory units updated.
     """
     from ..memories import MemoryPatch, get_memories
+    from ..memories.base import META_METADATA_JSON
 
     store = get_memories()
     if not store.writes_memory_rows_in_sql_for(bank_id):
         # A store that keeps memories outside SQL: page the document's memories and patch each
-        # one's tags through the store — the UPDATE below is a no-op on its empty memory_units.
+        # one's tags and metadata through the store — the UPDATE below is a no-op on its empty
+        # memory_units.
         page = await store.scan_memories(
             conn=conn, fq_table=fq_table, bank_id=bank_id, document_id=document_id, limit=1_000_000
         )
-        patches = [MemoryPatch(unit_id=m.unit_id, tags=list(tags or [])) for m in page.memories]
+        # Metadata too, not just tags: the SQL branch below sets both, and a survivor left carrying
+        # the PREVIOUS retain's metadata is exactly what this function exists to prevent — measured
+        # on an append, older units still read {"source": "email"} after a retain carrying
+        # {"source": "crm"}.
+        #
+        # Written under META_METADATA_JSON as one JSON value, which is where the bag contract puts a
+        # memory's user metadata and what every read reconstructs it from. A flat {"source": "crm"}
+        # would merge a stray top-level key into the record's own bag instead: applied, reported as
+        # applied, and invisible to every reader. The bag's other keys are internal (context,
+        # chunk_id, consolidation_failed_at, …) and a patch that carried user keys loose among them
+        # could not be told apart from one setting an internal field.
+        #
+        # Set unconditionally, mirroring `SET metadata = $4`: a document whose metadata was cleared
+        # must clear on its survivors too, which an absent key would not do.
+        patches = [
+            MemoryPatch(
+                unit_id=m.unit_id,
+                tags=list(tags or []),
+                metadata={META_METADATA_JSON: json.dumps(drop_null_values(metadata or {}))},
+            )
+            for m in page.memories
+        ]
         if patches:
             await store.update_memories(bank_id, patches)
         return len(patches)

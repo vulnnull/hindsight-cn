@@ -27,6 +27,13 @@ from .prompts import (
     build_system_prompt_for_tools,
     split_context_history,
 )
+from .structured_doc import (
+    CanonicalDocument,
+    StructuredDocument,
+    document_from_sections,
+    render_document,
+    split_markdown,
+)
 from .tokenization import count_cl100k_tokens
 from .tools_schema import get_reflect_tools
 
@@ -441,6 +448,7 @@ async def _run_reflect_agent_inner(
     llm_output_language: str | None = None,
     cancel_check: Callable[[], None] | None = None,
     store_document_text: bool = True,
+    answer_as_document: bool = False,
     *,
     reflect_id: str,
     provider_impl: Any,
@@ -504,6 +512,7 @@ async def _run_reflect_agent_inner(
         include_observations=include_observations,
         include_recall=include_recall,
         include_expand=include_expand,
+        answer_as_document=answer_as_document,
     )
     # Build set of enabled tool names to guard against LLM hallucinating disabled tool calls
     enabled_tools: frozenset[str] = frozenset(t["function"]["name"] for t in tools if t.get("type") == "function")
@@ -516,6 +525,7 @@ async def _run_reflect_agent_inner(
         has_mental_models=has_mental_models,
         include_observations=include_observations,
         budget=budget,
+        answer_as_document=answer_as_document,
     )
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": system_prompt},
@@ -1163,6 +1173,32 @@ def _tool_call_to_dict(tc: "LLMToolCall") -> dict[str, Any]:
     return d
 
 
+def _document_from_rewrite(rewritten: str, previous_answer: str) -> CanonicalDocument:
+    """Read a shortened document back, falling back to the text if it is not JSON.
+
+    The rewrite is asked for as sections, but it is still model output on a path
+    where failing would throw away a whole reflect. A response that does not parse
+    is treated as the prose it looks like and split, which is lossless — so the
+    worst case is the old behaviour rather than a lost answer.
+    """
+    from hindsight_api.engine.llm_wrapper import parse_llm_json
+
+    text = rewritten.strip()
+    try:
+        payload = parse_llm_json(text)
+    except json.JSONDecodeError:
+        payload = None
+    if isinstance(payload, dict) and payload.get("sections"):
+        document = document_from_sections(payload)
+        rendered = render_document(document).strip()
+        if rendered:
+            return CanonicalDocument(markdown=rendered, structure=document)
+    if not text:
+        # An empty rewrite must not empty the answer; keep what was there.
+        return CanonicalDocument(markdown=previous_answer, structure=split_markdown(previous_answer))
+    return CanonicalDocument(markdown=text, structure=split_markdown(text))
+
+
 async def _process_done_tool(
     done_call: "LLMToolCall",
     available_memory_ids: set[str],
@@ -1186,37 +1222,65 @@ async def _process_done_tool(
     # ``done`` is a structured tool call: trust its ``answer`` field verbatim.
     # Sibling id fields (memory_ids, ...) live in their own arguments and are
     # validated separately below -- they can't bleed into a parsed answer string.
-    answer = args.get("answer", "").strip()
+    #
+    # In document mode the model states the document's structure instead, and the
+    # markdown is rendered from it. The rendered text still flows on as ``text``
+    # so every consumer (structured-output extraction, the length rewrite, the
+    # HTTP response) is unchanged -- what changes is that nobody has to read the
+    # model's markdown back to find out what it meant.
+    document: StructuredDocument | None = None
+    raw_document = args.get("document")
+    if isinstance(raw_document, dict):
+        document = document_from_sections(raw_document)
+        answer = render_document(document).strip()
+    else:
+        answer = args.get("answer", "").strip()
     if not answer:
+        document = None
         answer = NO_ANSWER_TEXT
 
     final_usage = usage
     if llm_config and max_tokens is not None and count_cl100k_tokens(answer) > max_tokens:
         rewrite_start = time.time()
-        # The token budget is enforced via the prompt, not a hard provider cap:
-        # on thinking models a hard cap is eaten by reasoning tokens and would
-        # truncate the rewrite mid-word (#3365). Cost is bounded by the separate
-        # reflect_max_completion_tokens config (uncapped by default).
+        # In document mode the trim is asked for as a document too. Asking for
+        # prose here would put the model back in the business of writing the
+        # markdown that gets stored — on the one path where the answer is long
+        # enough that its structure matters most.
+        if document is not None:
+            rewrite_system = (
+                "Shorten the user's document so it fits within the requested token budget. "
+                "Preserve the key facts and the document's structure; drop lower-priority detail. "
+                'Respond ONLY with JSON: {"sections": [{"heading": "...", "level": 2, '
+                '"blocks": ["...", "..."]}]}. A heading carries no "#", and each block is one '
+                "paragraph, list, table or code fence."
+            )
+            rewrite_user = f"Target budget: {max_tokens} tokens.\n\nDocument to shorten:\n{answer}"
+        else:
+            # The token budget is enforced via the prompt, not a hard provider cap:
+            # on thinking models a hard cap is eaten by reasoning tokens and would
+            # truncate the rewrite mid-word (#3365). Cost is bounded by the separate
+            # reflect_max_completion_tokens config (uncapped by default).
+            rewrite_system = (
+                "Rewrite the user's text so it fits within the requested token budget. "
+                "Preserve the key facts and structure; drop lower-priority detail. "
+                "Respond with the rewritten text only, no preamble."
+            )
+            rewrite_user = f"Target budget: {max_tokens} tokens.\n\nText to rewrite:\n{answer}"
+
         rewritten, rewrite_usage = await llm_config.call(
             messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "Rewrite the user's text so it fits within the requested token budget. "
-                        "Preserve the key facts and structure; drop lower-priority detail. "
-                        "Respond with the rewritten text only, no preamble."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": f"Target budget: {max_tokens} tokens.\n\nText to rewrite:\n{answer}",
-                },
+                {"role": "system", "content": rewrite_system},
+                {"role": "user", "content": rewrite_user},
             ],
             scope="reflect",
             max_completion_tokens=get_config().reflect_max_completion_tokens,
             return_usage=True,
         )
-        answer = rewritten.strip()
+        if document is not None:
+            trimmed = _document_from_rewrite(rewritten, answer)
+            document, answer = trimmed.structure, trimmed.markdown
+        else:
+            answer = rewritten.strip()
         final_usage = TokenUsageSummary(
             input_tokens=usage.input_tokens + rewrite_usage.input_tokens,
             output_tokens=usage.output_tokens + rewrite_usage.output_tokens,
@@ -1255,6 +1319,7 @@ async def _process_done_tool(
     log_completion(answer, iterations)
     return ReflectAgentResult(
         text=answer,
+        document=document,
         structured_output=structured_output,
         iterations=iterations,
         tools_called=total_tools_called,
@@ -1469,6 +1534,17 @@ def _summarize_input(tool_name: str, args: dict[str, Any]) -> str:
         depth = args.get("depth", "chunk")
         return f"(memory_ids=[{len(memory_ids)} ids], depth={depth})"
     elif tool_name == "done":
+        raw_document = args.get("document")
+        if isinstance(raw_document, dict):
+            sections = raw_document.get("sections") or []
+            blocks = sum(len(s.get("blocks") or []) for s in sections if isinstance(s, dict))
+            memory_ids = args.get("memory_ids", [])
+            mental_model_ids = args.get("mental_model_ids", [])
+            observation_ids = args.get("observation_ids", [])
+            return (
+                f"(document={len(sections)} sections/{blocks} blocks, mem={len(memory_ids)}, "
+                f"mm={len(mental_model_ids)}, obs={len(observation_ids)})"
+            )
         answer = args.get("answer", "")
         answer_preview = f"'{answer[:30]}...'" if len(answer) > 30 else f"'{answer}'"
         memory_ids = args.get("memory_ids", [])

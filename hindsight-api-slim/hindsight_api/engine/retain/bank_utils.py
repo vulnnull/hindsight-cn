@@ -2,6 +2,7 @@
 bank profile utilities for disposition and mission management.
 """
 
+import asyncio
 import json
 import logging
 import uuid
@@ -550,8 +551,79 @@ async def list_banks(pool, *, search_query: str | None = None) -> list:
                 }
             )
 
-        result.sort(key=lambda bank: sort_keys[bank["bank_id"]], reverse=True)
-        return result
+    # Banks whose memories live outside SQL have no `documents` / `memory_units` rows for the joins
+    # above to take a MAX over, so their `last_write_at` came back NULL and they sorted as if never
+    # written. The store can answer it, and the Counters RPC is BATCHED — every such bank costs one
+    # call in total — so it is done BEFORE the sort. Doing it in the page-level overlay instead
+    # would fix the field but leave the order wrong, and inconsistent across pages, which is worse
+    # than uniformly wrong.
+    #
+    # Outside the connection block on purpose: these are network calls to another service and
+    # nothing below needs `conn`. Holding a pooled connection across them is what starves the pool
+    # under load, and the retain path enforces the same rule everywhere else.
+    await _apply_store_last_write(result, sort_keys)
+
+    result.sort(key=lambda bank: sort_keys[bank["bank_id"]], reverse=True)
+    return result
+
+
+async def _apply_store_last_write(banks: list[dict], sort_keys: "dict[str, datetime]") -> None:
+    """Fill `last_write_at` (and the sort key) from the store, for banks SQL cannot answer for.
+
+    One batched call for all of them. A bank the store has no time for is left exactly as it was —
+    absent means "unknown", never "the epoch", so an un-folded bank keeps whatever ordering it had
+    rather than being pushed to the bottom on a guess.
+    """
+    from ..memories import get_memories
+
+    store = get_memories()
+    external = [b for b in banks if not store.writes_memory_rows_in_sql_for(b["bank_id"])]
+    if not external:
+        return
+    ids = [b["bank_id"] for b in external]
+    # Asked for separately, because they are different questions: `last_document_at` is INGESTION
+    # time and must not move when an existing document is re-retained, while `last_write_at` must.
+    # Reporting one under both names looked harmless and is not — it makes a rewrite read as a new
+    # document.
+    #
+    # Gathered, not awaited in sequence: they are independent round trips to the same service, and
+    # `return_exceptions` keeps one failing from discarding the other's answer — a list that sorts
+    # correctly but shows no ingestion time is better than one that does neither.
+    # The try wraps the gather because building its arguments already calls into the store: a store
+    # that does not implement these raises AttributeError right here, before `return_exceptions` can
+    # see anything. They are optional — the interface defaults return `{}` — so a store without them
+    # must leave the list rendering, not break it.
+    try:
+        times_r, doc_times_r = await asyncio.gather(
+            store.last_write_at_many(bank_ids=ids),
+            store.last_document_at_many(bank_ids=ids),
+            return_exceptions=True,
+        )
+    except Exception as e:  # noqa: BLE001 - ordering is a nicety; the list itself must still render
+        logger.warning(f"Store cannot report write times for {len(external)} bank(s): {e}")
+        return
+    if isinstance(times_r, BaseException):
+        logger.warning(f"Could not read last_write_at from the store for {len(external)} bank(s): {times_r}")
+        times = {}
+    else:
+        times = times_r
+    if isinstance(doc_times_r, BaseException):
+        logger.warning(f"Could not read last_document_at from the store for {len(external)} bank(s): {doc_times_r}")
+        doc_times = {}
+    else:
+        doc_times = doc_times_r
+    if not times and not doc_times:
+        return
+    for bank in external:
+        doc_when = doc_times.get(bank["bank_id"])
+        if doc_when is not None:
+            bank["last_document_at"] = doc_when.isoformat()
+    for bank in external:
+        when = times.get(bank["bank_id"])
+        if when is None:
+            continue
+        bank["last_write_at"] = when.isoformat()
+        sort_keys[bank["bank_id"]] = when
 
 
 async def apply_store_fact_counts(pool, banks: list[dict]) -> None:

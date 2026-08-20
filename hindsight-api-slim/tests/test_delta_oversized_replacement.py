@@ -212,6 +212,53 @@ async def test_oversized_replacement_still_skips_unchanged_chunks(memory, reques
 
 
 @pytest.mark.asyncio
+async def test_oversized_replacement_edit_in_slice_one_keeps_the_rest(memory, request_context, monkeypatch):
+    """The edit lands in slice 1, which is what makes the delta diff destructive if it is taken
+    against the slice instead of the whole body.
+
+    With ``edited_idx=1`` (the test above) slice 1 has no changed chunk, so the retain routes to
+    ``_delta_metadata_only`` before anything is tombstoned and the diff's scope never matters. Put a
+    changed chunk in slice 1 and the diff runs for real: taken against the slice alone, every chunk
+    of the document that is merely absent from it classifies as REMOVED — measured on a 20-chunk
+    document, ``unchanged=1 changed=0 new=0 removed=19`` — and those memories are deleted.
+
+    Asserted on the surviving unit ids rather than on extraction counts: the previous test already
+    covers "was it re-extracted", and a document can be fully re-extracted while still ending up
+    with the right memories. What must hold here is that the unchanged sections' memories are the
+    SAME ones, not replacements.
+    """
+    bank_id = f"test_3282_slice1_{_ts()}"
+    document_id = "doc-3282-slice1"
+    edited_idx = 0
+    spy = _ExtractionSpy()
+
+    try:
+        v2 = await _retain_v1_then_v2(
+            memory,
+            request_context,
+            bank_id,
+            document_id,
+            replacement_batch_tokens=_OVERSIZED_BATCH_TOKENS,
+            monkeypatch=monkeypatch,
+            spy=spy,
+            edited_idx=edited_idx,
+        )
+        assert count_tokens(v2) > _OVERSIZED_BATCH_TOKENS
+
+        after = await memory.list_memory_units(
+            bank_id, document_id=document_id, limit=10000, request_context=request_context
+        )
+        texts = " ".join(row["text"] or "" for row in after["items"])
+        missing = [m for m in _unchanged_markers(edited_idx) if m not in texts]
+        assert not missing, (
+            f"sections {missing} lost their memories: the delta diff for the slice holding the edit "
+            f"classified every chunk absent from that slice as removed and tombstoned it"
+        )
+    finally:
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+
+@pytest.mark.asyncio
 async def test_oversized_replacement_screens_document_body_once(memory, request_context, monkeypatch):
     """Companion to #3282: the split fallback must not re-run Memory Defense over
     the whole document for every sub-batch.

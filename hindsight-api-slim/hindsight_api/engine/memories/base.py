@@ -855,6 +855,28 @@ class MemoriesExtension(Extension, ABC):
                 out[bank_id] = counts
         return out
 
+    async def last_write_at_many(self, *, bank_ids: "list[str]") -> "dict[str, datetime]":
+        """When each bank was last written — ``{bank_id: datetime}``, for many banks at once.
+
+        The bank list is ORDERED by this. Postgres derives it with ``MAX`` over live
+        ``documents`` / ``memory_units`` rows, which a store owning those rows leaves empty, so
+        without an answer here such a bank's ordering silently degenerates to created-at.
+
+        Empty by default: the SQL path already has the columns and does not need this, and a store
+        that cannot answer should say nothing rather than guess. **A bank absent from the result
+        keeps whatever the caller already had — absent means "unknown", never "the epoch".**
+        """
+        return {}
+
+    async def last_document_at_many(self, *, bank_ids: "list[str]") -> "dict[str, datetime]":
+        """When each bank last INGESTED a new document — ``{bank_id: datetime}``.
+
+        Not the same question as :meth:`last_write_at_many`: re-retaining an existing document is a
+        write but not a new document, and the bank list shows the two separately. Empty by default,
+        with the same rule — a bank absent from the result keeps whatever the caller had.
+        """
+        return {}
+
     async def get_chunk_texts(self, *, bank_id: str, refs: "list[tuple[str, int]]") -> "list[str | None]":
         """Many chunks' text at once — ``refs`` is ``(document_id, chunk_index)``.
 

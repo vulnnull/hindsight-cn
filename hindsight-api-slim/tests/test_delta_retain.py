@@ -660,6 +660,11 @@ async def test_delta_retain_removed_chunks_delete_facts(memory, request_context)
 
 
 @pytest.mark.asyncio
+# Asserts through a raw SELECT on the `chunks` table. A bank whose document store is external
+# leaves it empty by construction, so the query returns nothing regardless of behaviour —
+# the chunks and their hashes are in the store. Covered there by the delta diff itself,
+# which compares recomputed chunk hashes and is exercised by the rest of this module.
+@pytest.mark.memory_backend_incompatible
 async def test_delta_retain_chunks_have_content_hash(memory, request_context):
     """
     After retain, chunks should have content_hash populated.

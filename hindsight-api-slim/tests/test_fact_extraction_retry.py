@@ -470,6 +470,7 @@ def _make_batch_temp_config(temperature):
     cfg.llm_temperature_retain = temperature
     cfg.retain_max_completion_tokens = None
     cfg.llm_strict_schema = False
+    cfg.llm_strict_schema_retain = False
     return cfg
 
 
@@ -500,6 +501,45 @@ def test_build_request_body_omits_temperature_when_none():
 
     body = _build_request_body(_make_batch_llm_config(), _make_batch_temp_config(None), "sys", "user", dict)
     assert "temperature" not in body
+
+
+def test_build_request_body_uses_retain_strict_schema_flag_for_schema_and_request():
+    """The batch retain path must use one resolved strict-schema flag consistently."""
+    from hindsight_api.engine.retain.fact_extraction import _build_request_body
+
+    config = _make_batch_temp_config(None)
+    config.llm_strict_schema = False
+    config.llm_strict_schema_retain = True
+    response_schema = MagicMock()
+    response_schema.model_json_schema.return_value = {"schema": "non-strict"}
+
+    with patch(
+        "hindsight_api.engine.retain.fact_extraction.strict_json_schema",
+        return_value={"schema": "strict"},
+    ) as strict_schema:
+        body = _build_request_body(_make_batch_llm_config(), config, "sys", "user", response_schema)
+
+    strict_schema.assert_called_once_with(response_schema)
+    assert body["response_format"]["json_schema"]["schema"] == {"schema": "strict"}
+    assert body["response_format"]["json_schema"]["strict"] is True
+
+
+def test_build_request_body_retain_strict_false_overrides_global_true():
+    """The retain opt-out must disable strict schema in the batch request body."""
+    from hindsight_api.engine.retain.fact_extraction import _build_request_body
+
+    config = _make_batch_temp_config(None)
+    config.llm_strict_schema = True
+    config.llm_strict_schema_retain = False
+    response_schema = MagicMock()
+    response_schema.model_json_schema.return_value = {"schema": "non-strict"}
+
+    with patch("hindsight_api.engine.retain.fact_extraction.strict_json_schema") as strict_schema:
+        body = _build_request_body(_make_batch_llm_config(), config, "sys", "user", response_schema)
+
+    strict_schema.assert_not_called()
+    assert body["response_format"]["json_schema"]["schema"] == {"schema": "non-strict"}
+    assert body["response_format"]["json_schema"]["strict"] is False
 
 
 # --- Retry budget semantics (issue #2731) -----------------------------------

@@ -93,7 +93,7 @@ class TestMentalModelStructuredOutput:
         # reflect is no longer asked to derive structured_output.
         assert reflect_calls[0].get("response_schema") is None
         # Extraction runs against the final content (== the answer in full mode).
-        assert so_calls == ["# Team\n\nRegenerated answer."]
+        assert so_calls == ["# Team\n\nRegenerated answer.\n"]
         assert refreshed["reflect_response"]["structured_output"] == {"summary": "A team."}
 
     async def test_no_schema_no_structured_output(
@@ -200,7 +200,7 @@ class TestMentalModelStructuredOutput:
 
         # The refresh was aborted, so the prior content is untouched.
         reloaded = await memory.get_mental_model(bank_id, mm["id"], request_context=request_context)
-        assert reloaded["content"] == "# Doc\n\nOriginal."
+        assert reloaded["content"] == "# Doc\n\nOriginal.\n"
         # …and the failure is auditable, like every other refresh failure: this
         # path used to raise without recording anything, so the only trace of it
         # was a log line.

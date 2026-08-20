@@ -230,19 +230,19 @@ Two strategies are available for how a refresh produces the new content:
 
 #### How delta mode works
 
-Hindsight keeps an authoritative **structured** representation of the document — an ordered list of sections, each holding typed blocks (paragraph, bullet list, ordered list, code) — and the markdown you read is a deterministic render of that structure. A delta refresh never asks the LLM to rewrite the document; it asks for operations against that structure:
+Hindsight keeps an authoritative **structured** representation of the document — an ordered list of sections, each holding a list of blocks, where a block is one markdown fragment (a paragraph, a list, a table, a code fence) stored exactly as written. The markdown you read is a deterministic render of that structure. Because a block is never re-interpreted, formatting a refresh didn't touch cannot be rewritten by one — a table stays a table. A delta refresh never asks the LLM to rewrite the document; it asks for operations against that structure:
 
 | Operation | Effect |
 |---|---|
 | `add_section` / `remove_section` | Add or drop a whole section |
 | `rename_section` | Change a section's heading |
 | `replace_section_blocks` | Replace a section's contents wholesale |
-| `append_block` / `insert_block` | Add a block at the end of, or at a position in, a section |
+| `append_block` / `insert_block` | Add a block at the end of, or after a named block in, a section |
 | `replace_block` / `remove_block` | Change or drop one block |
 
 Anything no operation mentions is copied through untouched, so unchanged prose is preserved rather than regenerated and checked. This matters because "preserve the unchanged content" is only a soft constraint on an LLM — generating the next token from a gestalt of the input is what it intrinsically does, so instructed-to-preserve prose drifts over many refreshes.
 
-Failure modes are conservative by design: an operation referencing a section or block that doesn't exist is **dropped** rather than guessed at, and the rest of the operations still apply. The refresh records which ones were dropped and why, so you can see that part of that round's new information didn't make it into the document.
+Sections and blocks are addressed by id, never by position, so an operation cannot land on the wrong one by miscounting. Failure modes are conservative by design: an operation referencing a section or block that doesn't exist — or a block that lives in a different section than the one it names — is **dropped** rather than guessed at, and the rest of the operations still apply. The refresh records which ones were dropped and why, so you can see that part of that round's new information didn't make it into the document.
 
 Delta mode falls back to a full regeneration automatically in two cases:
 1. The mental model has no existing content yet (nothing to anchor edits on).

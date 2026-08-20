@@ -113,7 +113,9 @@ _RETENTION_BATCH_PAUSE_SECONDS = 0.25
 class MaintenanceLoop:
     """Owns the single periodic maintenance task for a :class:`MemoryEngine`."""
 
-    def __init__(self, engine: "MemoryEngine") -> None:
+    def __init__(self, engine: "MemoryEngine | None") -> None:
+        """``engine`` is optional so the loop can be exercised for its scheduling alone — the
+        cadence tests construct it that way. Every job that needs the engine checks first."""
         self._engine = engine
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
@@ -454,7 +456,16 @@ class MaintenanceLoop:
         store = get_memories()
         if store.writes_memory_rows_in_sql:
             return
-        backend = self._engine._backend
+        # Best-effort includes not having an engine to ask: the loop can be constructed without one
+        # (see `__init__`), and this reap is explicitly allowed to be skipped. Only a store-owned
+        # deployment reaches this line — the SQL stores return above — where it would otherwise
+        # raise AttributeError. `_run` catches per tick and this reap is the tick's last job, so the
+        # cost was a logged traceback rather than lost work; it is still noise standing in for a
+        # condition the code should simply state.
+        engine = self._engine
+        if engine is None:
+            return
+        backend = engine._backend
         try:
             async with acquire_with_retry(backend, max_retries=1) as conn:
                 bank_ids = [r[0] for r in await conn.fetch(f"SELECT bank_id FROM {fq_table('banks')}")]

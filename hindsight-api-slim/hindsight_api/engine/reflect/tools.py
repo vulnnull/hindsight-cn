@@ -441,9 +441,44 @@ async def tool_expand(
     doc_ids_from_chunks: set[str] = set()
     doc_ids_direct: set[str] = set()
 
-    # Batch fetch all chunks
+    # Batch fetch all chunks. A store that owns the document store leaves the `chunks` and
+    # `documents` tables empty, so the SQL below would return nothing and `expand` would answer
+    # without the chunk or document it was asked for — the memories read above was routed to the
+    # store but these two were not.
+    _docs_in_store = _store.owns_document_store_for(bank_id)
     chunk_map: dict[str, Any] = {}
-    if chunk_ids:
+    if chunk_ids and _docs_in_store:
+        # The store addresses a chunk by (document_id, index), and `chunk_id` is
+        # `{bank_id}_{document_id}_{index}` by construction — so the index is what remains once
+        # that known prefix is removed. Built from the ids in hand rather than by splitting on
+        # "_", which a bank or document id containing one would break.
+        # Deduped by chunk_id: co-located memories share one chunk, and the SQL branch collapses
+        # them through `= ANY($1)`. Without this the store is asked for the same chunk once per
+        # memory sitting in it.
+        refs: list[tuple[str, int]] = []
+        ref_owner: list[dict] = []
+        _seen_chunks: set[str] = set()
+        for m in memories:
+            cid, did = m["chunk_id"], m["document_id"]
+            if not cid or not did:
+                continue
+            if cid in _seen_chunks:
+                continue
+            suffix = cid.removeprefix(f"{bank_id}_{did}_")
+            if suffix == cid or not suffix.isdigit():
+                continue
+            _seen_chunks.add(cid)
+            refs.append((did, int(suffix)))
+            ref_owner.append({"chunk_id": cid, "document_id": did, "chunk_index": int(suffix)})
+        if refs:
+            texts = await _store.get_chunk_texts(bank_id=bank_id, refs=refs)
+            for owner, text in zip(ref_owner, texts):
+                if text is None:
+                    continue
+                chunk_map[owner["chunk_id"]] = {**owner, "chunk_text": text}
+        if depth == "document":
+            doc_ids_from_chunks = {c["document_id"] for c in chunk_map.values() if c["document_id"]}
+    elif chunk_ids:
         chunks = await conn.fetch(
             f"""
             SELECT chunk_id, chunk_text, chunk_index, document_id
@@ -465,7 +500,24 @@ async def tool_expand(
     # Batch fetch all documents
     doc_map: dict[str, Any] = {}
     all_doc_ids = list(doc_ids_from_chunks | doc_ids_direct)
-    if all_doc_ids:
+    if all_doc_ids and _docs_in_store:
+        # One read per document: the store addresses a document by id and has no batch form here.
+        # The set is the documents behind the memories being expanded, which is bounded by the
+        # caller's own memory_ids rather than by corpus size.
+        for did in all_doc_ids:
+            record = await _store.get_document_record(bank_id=bank_id, document_id=did, include_text=True)
+            if record is None:
+                continue
+            # The store has no `retain_params` column; it keeps the retain params inside the
+            # document record's metadata bag, under that key and serialised as JSON. So they are
+            # read back out of the bag rather than reconstructed — `_document_metadata_from_retain_params`
+            # already parses the JSON form, which is the same thing Postgres hands it from JSONB.
+            doc_map[did] = {
+                "id": did,
+                "original_text": record.get("original_text"),
+                "retain_params": (record.get("metadata") or {}).get("retain_params"),
+            }
+    elif all_doc_ids:
         docs = await conn.fetch(
             f"""
             SELECT id, original_text, retain_params

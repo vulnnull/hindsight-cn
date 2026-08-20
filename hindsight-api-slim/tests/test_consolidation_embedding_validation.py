@@ -103,6 +103,9 @@ def _forbid_embedder(monkeypatch):
 
 
 @pytest.mark.asyncio
+# Seeds source liveness through a mocked `conn`, which a store-owned bank never reads: the
+# preflight asks the store, finds nothing, and short-circuits before the behaviour under test.
+@pytest.mark.memory_backend_incompatible
 async def test_create_observation_rejects_zero_length_embedding_before_insert():
     # Preflight passes (fetchval -> live); the real embedder then yields a zero-length vector,
     # which must be rejected before any write. _WriteForbiddenConn fails hard if a write runs.
@@ -151,6 +154,9 @@ async def test_update_action_skips_before_embedding_when_all_sources_dead(monkey
 
 
 @pytest.mark.asyncio
+# Seeds source liveness through a mocked `conn`, which a store-owned bank never reads: the
+# preflight asks the store, finds nothing, and short-circuits before the behaviour under test.
+@pytest.mark.memory_backend_incompatible
 async def test_update_action_rejects_zero_length_embedding_before_write():
     # Preflight passes (a live source exists -> fetchval=1); the real embedder then yields a
     # zero-length vector, which must be rejected before any write. _WriteForbiddenConn fails

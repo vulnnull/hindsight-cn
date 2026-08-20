@@ -895,6 +895,151 @@ def test_query_analyzer_prefers_explicit_date_over_leading_weak_word(query_analy
     assert analysis.temporal_constraint.start_date.day == 10
 
 
+@pytest.mark.parametrize(
+    "text",
+    ["9077", "9077 and", "the 2019", "in 2019", "2000"],
+)
+def test_date_match_score_rejects_bare_year_integers(text):
+    """#3250: an isolated four-digit integer (port, ticket id, chunk size) is
+    not a date signal, however dateparser resolves it."""
+    from hindsight_api.engine.query_analyzer import _date_match_score
+
+    assert _date_match_score(text) == 0
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["on 2026-06-10", "from 1890-03-05", "year 2019", "on 31 October, 2022", "on the 21st", "at 15:30"],
+)
+def test_date_match_score_keeps_years_with_date_structure(text):
+    """The #3250 rejection is limited to lone integers: a second number, a
+    calendar word or an ordinal all keep the span scoring."""
+    from hindsight_api.engine.query_analyzer import _date_match_score
+
+    assert _date_match_score(text) > 0
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "is hindsight listening on port 9077",
+        "check job 4417 for Castle Pines",
+        "what did PR 2024 change",
+        "buffer size 1024 vs 4096",
+    ],
+)
+def test_query_analyzer_rejects_bare_integer_as_year(query_analyzer, query):
+    """#3250: identifiers must not silently become a temporal constraint.
+
+    Includes an in-range number (``PR 2024``) because a reference-relative
+    plausibility window alone would let that one through.
+    """
+    reference_date = datetime(2026, 8, 7, 12, 0, 0)
+
+    analysis = query_analyzer.analyze(query, reference_date)
+
+    assert analysis.temporal_constraint is None
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "what happened in 2019",
+        "during 2019",
+        "throughout 2019",
+        "the year 2019",
+        "что было в 2019 году",
+        "qué pasó en 2019",
+        "cosa è successo nel 2019",
+        "was ist im 2019 passiert",
+    ],
+)
+def test_query_analyzer_bare_year_resolves_to_whole_year(query_analyzer, query):
+    """#3250: a year a word disambiguates is temporal, and spans the year.
+
+    dateparser returns the same span for "in 2019" and "port 2019", so the
+    introducing word is the only signal — which is why the rule lives in
+    extract_period, where the whole query is still in hand.
+    """
+    reference_date = datetime(2026, 8, 7, 12, 0, 0)
+
+    analysis = query_analyzer.analyze(query, reference_date)
+
+    assert analysis.temporal_constraint is not None
+    assert analysis.temporal_constraint.start_date.date() == datetime(2019, 1, 1).date()
+    assert analysis.temporal_constraint.end_date.date() == datetime(2019, 12, 31).date()
+
+
+@pytest.mark.parametrize(
+    ("query", "expected_start", "expected_end"),
+    [
+        # The word has to introduce the number directly, not merely precede it.
+        ("meeting in room 2019", None, None),
+        # An implausible year is a port someone happened to put a preposition on.
+        ("listening in 8080", None, None),
+        # An explicit date must not collapse to its year.
+        ("in 2026-06-10", datetime(2026, 6, 10), datetime(2026, 6, 10)),
+        # Month+year is more precise than the year, and already handled above it.
+        ("in june 2019", datetime(2019, 6, 1), datetime(2019, 6, 30)),
+    ],
+)
+def test_query_analyzer_bare_year_rule_does_not_overreach(query_analyzer, query, expected_start, expected_end):
+    """#3250: the year rule must not swallow ports, exact dates or month+year."""
+    reference_date = datetime(2026, 8, 7, 12, 0, 0)
+
+    analysis = query_analyzer.analyze(query, reference_date)
+
+    if expected_start is None:
+        assert analysis.temporal_constraint is None
+        return
+    assert analysis.temporal_constraint is not None
+    assert analysis.temporal_constraint.start_date.date() == expected_start.date()
+    assert analysis.temporal_constraint.end_date.date() == expected_end.date()
+
+
+def test_query_analyzer_implausible_bare_year_keeps_a_real_date(query_analyzer):
+    """#3250: an implausible year falls through instead of dropping the query.
+
+    Returning NO_TEMPORAL_CONSTRAINT here would lose "last Tuesday" as well.
+    """
+    reference_date = datetime(2026, 8, 7, 12, 0, 0)  # Friday
+
+    analysis = query_analyzer.analyze("listening in 8080 and also last Tuesday", reference_date)
+
+    assert analysis.temporal_constraint is not None
+    assert analysis.temporal_constraint.start_date.date() == datetime(2026, 8, 4).date()
+
+
+def test_query_analyzer_prefers_real_date_over_bare_integer(query_analyzer):
+    """#3250: rejection happens during scoring, so a genuine date elsewhere in
+    the same query still wins instead of the query going non-temporal."""
+    reference_date = datetime(2026, 8, 7, 12, 0, 0)  # Friday
+
+    analysis = query_analyzer.analyze("port 9077 and also last Tuesday", reference_date)
+
+    assert analysis.temporal_constraint is not None
+    assert analysis.temporal_constraint.start_date.date() == datetime(2026, 8, 4).date()
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("notes from 1890-03-05", datetime(1890, 3, 5)),
+        ("the roadmap milestone on 2050-01-15", datetime(2050, 1, 15)),
+        ("notes from March 1890", datetime(1890, 3, 1)),
+    ],
+)
+def test_query_analyzer_keeps_dates_far_from_reference(query_analyzer, query, expected):
+    """#3250: the rejection keys on span structure, not on how far the year is
+    from the reference date, so distant but explicit dates survive."""
+    reference_date = datetime(2026, 8, 7, 12, 0, 0)
+
+    analysis = query_analyzer.analyze(query, reference_date)
+
+    assert analysis.temporal_constraint is not None
+    assert analysis.temporal_constraint.start_date.date() == expected.date()
+
+
 def test_query_analyzer_keeps_real_month_with_leading_weak_word(query_analyzer):
     """#2768: the real month must survive even when a weak word precedes it in
     the query."""

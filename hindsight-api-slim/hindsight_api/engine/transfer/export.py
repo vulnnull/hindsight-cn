@@ -172,6 +172,26 @@ def _chunk_index_from_chunk_id(chunk_id: str | None) -> int | None:
         return None
 
 
+def _resolve_memories(memories: Any) -> Any:
+    """The memories store to export through, asking for it when the caller did not pass one.
+
+    The loaders read `memory_units` / `documents` directly, and for a store-owned bank those tables
+    are empty — so treating "no store supplied" as "SQL-backed" produces a silently EMPTY archive
+    with a success status. That has already happened once (see the call in
+    `MemoryEngine.export_documents`), and it was fixed at the call sites while the default that
+    causes it stayed. An export is the last thing that should fail quietly, so the default now asks
+    rather than assumes.
+    """
+    if memories is not None:
+        return memories
+    try:
+        from ..memories import get_memories
+
+        return get_memories()
+    except Exception:  # noqa: BLE001 - no store configured at all is genuinely SQL-backed
+        return None
+
+
 def _is_store_owned(memories: Any, bank_id: str) -> bool:
     """Whether this bank's memories live outside SQL, so the loaders must go through the store."""
     if memories is None:
@@ -212,6 +232,8 @@ async def export_documents(
     # — reject the combination instead so the caller isn't surprised.
     if include_observations and document_ids is not None:
         raise ValueError("include_observations is only supported when exporting the whole bank (omit document_id)")
+
+    memories = _resolve_memories(memories)
 
     # Carry per-fact consolidation lifecycle exactly when observations are
     # carried: with observations in the archive the target must NOT re-derive
@@ -390,6 +412,7 @@ async def export_bank(
     ``_current_schema`` and passes its raw connection; the engine acquires one
     after tenant auth).
     """
+    memories = _resolve_memories(memories)
     # Whole-bank export always carries observations (they're bank-level state)
     # and, with them, the per-fact consolidation lifecycle so the target restores
     # exact eligibility instead of re-consolidating historical facts (#2965).
@@ -636,7 +659,7 @@ async def _load_observations_from_store(
 
     Same rule as the SQL loader: an observation referencing a fact outside the export would import
     as a dangling reference, so it is skipped rather than emitted. Sources come off the memory's own
-    `source_memory_ids` here instead of a column, which is also how the memlake path already
+    `source_memory_ids` here instead of a column, which is also how a store-owned path already
     resolves them — an observation's sources are denormalised onto it at write time.
     """
     stored = await _scan_all_memories(memories, bank_id, ["observation"])

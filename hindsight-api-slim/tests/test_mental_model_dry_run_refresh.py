@@ -131,7 +131,7 @@ class TestDryRunPersistsNothing:
         result = await memory.dry_run_refresh_mental_model(bank_id, mm["id"], request_context=request_context)
 
         assert result is not None
-        assert result.preview_content == "# Team\n\nCompletely rewritten."
+        assert result.preview_content == "# Team\n\nCompletely rewritten.\n"
         assert result.would_persist is True
 
         after = await memory.get_mental_model(bank_id, mm["id"], request_context=request_context)
@@ -689,7 +689,7 @@ class TestKeepTrace:
             )
 
         stored = await memory.get_mental_model(bank_id, mm["id"], request_context=request_context)
-        assert stored["content"] == "# Team\n\nStill here."
+        assert stored["content"] == "# Team\n\nStill here.\n"
         trace = (stored.get("reflect_response") or {}).get("trace")
         assert trace is not None
         assert trace["outcome"] == "refresh_failed_empty_candidate"
@@ -736,13 +736,13 @@ class TestDryRunRefreshEndpoint:
 
         assert response.status_code == 200, response.text
         body = response.json()
-        assert body["preview_content"] == "# Team\n\nRewritten."
+        assert body["preview_content"] == "# Team\n\nRewritten.\n"
         assert body["effective_mode"] == "full"
         assert body["would_persist"] is True
         assert "trace" in body
 
         stored = await memory.get_mental_model(bank_id, mm["id"], request_context=request_context)
-        assert stored["content"] == "# Team\n\nOriginal.", "the endpoint must not persist"
+        assert stored["content"] == "# Team\n\nOriginal.\n", "the endpoint must not persist"
 
         await memory.delete_bank(bank_id, request_context=request_context)
 

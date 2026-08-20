@@ -908,7 +908,7 @@ class TestMentalModelHistory:
 
         history = await memory.get_mental_model_history(bank_id, mm["id"], request_context=request_context)
         assert len(history) == 1
-        assert history[0]["previous_content"] == "Original content"
+        assert history[0]["previous_content"] == "Original content\n"
         assert "changed_at" in history[0]
         assert "previous_reflect_response" in history[0]
 
@@ -958,10 +958,10 @@ class TestMentalModelHistory:
         assert len(history) == 2
         # Most recent first: replacing v2 snapshotted rr_v1's based_on (the only slice
         # the UI consumes). The bulky `text` and `mental_models` fields are dropped.
-        assert history[0]["previous_content"] == "v2"
+        assert history[0]["previous_content"] == "v2\n"
         assert history[0]["previous_reflect_response"] == {"based_on": rr_v1["based_on"]}
         # The first update replaced v1, which had no reflect_response stored yet.
-        assert history[1]["previous_content"] == "v1"
+        assert history[1]["previous_content"] == "v1\n"
         assert history[1]["previous_reflect_response"] is None
 
         await memory.delete_bank(bank_id, request_context=request_context)
@@ -1049,8 +1049,8 @@ class TestMentalModelHistory:
         history = await memory.get_mental_model_history(bank_id, mm["id"], request_context=request_context)
         assert len(history) == 2
         # Most recent first: second update recorded "v2" as previous, first recorded "v1"
-        assert history[0]["previous_content"] == "v2"
-        assert history[1]["previous_content"] == "v1"
+        assert history[0]["previous_content"] == "v2\n"
+        assert history[1]["previous_content"] == "v1\n"
 
         await memory.delete_bank(bank_id, request_context=request_context)
 
@@ -1125,9 +1125,9 @@ class TestMentalModelHistory:
         # Most recent first ordering (per test_history_ordered_most_recent_first):
         # the trimmed window keeps the newest 3 — v5, v4, v3 — and drops v2, v1.
         assert len(history) == 3
-        assert history[0]["previous_content"] == "v5"
-        assert history[1]["previous_content"] == "v4"
-        assert history[2]["previous_content"] == "v3"
+        assert history[0]["previous_content"] == "v5\n"
+        assert history[1]["previous_content"] == "v4\n"
+        assert history[2]["previous_content"] == "v3\n"
 
         await memory.delete_bank(bank_id, request_context=request_context)
 
@@ -2557,7 +2557,7 @@ class TestClearMentalModel:
             content="Some existing content",
             request_context=request_context,
         )
-        assert mm["content"] == "Some existing content"
+        assert mm["content"] == "Some existing content\n"
 
         cleared = await memory.clear_mental_model(
             bank_id=bank_id,

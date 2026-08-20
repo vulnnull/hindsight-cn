@@ -349,6 +349,9 @@ async def test_grounding_on_another_mental_model_is_never_read_as_retracted(
 
 
 @pytest.mark.asyncio
+# Retracts the grounding with a raw DELETE FROM memory_units. A store-owned bank keeps its
+# memories elsewhere, so the delete removes nothing and the precondition never holds.
+@pytest.mark.memory_backend_incompatible
 async def test_sweep_schedules_a_refresh_for_a_page_whose_grounding_is_gone(
     memory: MemoryEngine, request_context: RequestContext
 ):
@@ -436,6 +439,39 @@ async def test_sweep_defers_to_consolidation_when_facts_are_pending(
 # ---------------------------------------------------------------------------
 
 
+# Blocks are addressed by id, and the ids only exist in the document the model is
+# shown. A canned op therefore cannot name one up front — so it names this marker
+# and the fake resolves it out of the prompt, which is exactly what a real model
+# does. Hardcoding a position instead is the defect the id addressing removed.
+_FIRST_BLOCK = "<first-block-of-section>"
+
+
+def _remove_first_block_of(section_id: str) -> dict[str, Any]:
+    """A retraction op removing that section's first block, resolved at call time."""
+    return {"op": "remove_block", "section_id": section_id, "block_id": _FIRST_BLOCK}
+
+
+def _resolve_block_markers(ops: list[dict[str, Any]], user_prompt: str) -> list[dict[str, Any]]:
+    """Swap ``_FIRST_BLOCK`` for the real id from the document in the prompt."""
+    import json as _json
+    import re as _re
+
+    match = _re.search(r"```json\n(.*?)\n```", user_prompt, _re.DOTALL)
+    document = _json.loads(match.group(1)) if match else {"sections": []}
+    first_block: dict[str, str] = {}
+    for section in document.get("sections", []):
+        blocks = section.get("blocks") or []
+        if blocks:
+            first_block[section["id"]] = blocks[0]["id"]
+
+    resolved: list[dict[str, Any]] = []
+    for op in ops:
+        if op.get("block_id") == _FIRST_BLOCK:
+            op = {**op, "block_id": first_block.get(op["section_id"], "missing-block")}
+        resolved.append(op)
+    return resolved
+
+
 def _patch_op_calls(monkeypatch, memory: MemoryEngine, *, retraction_ops, delta_ops):
     """Route the two op-generating LLM calls by their system prompt.
 
@@ -452,7 +488,7 @@ def _patch_op_calls(monkeypatch, memory: MemoryEngine, *, retraction_ops, delta_
         system = messages[0]["content"]
         is_retraction = system == STRUCTURED_RETRACTION_SYSTEM_PROMPT
         calls.append({"kind": "retraction" if is_retraction else "delta", "messages": messages, **kwargs})
-        ops = retraction_ops if is_retraction else delta_ops
+        ops = _resolve_block_markers(retraction_ops if is_retraction else delta_ops, messages[1]["content"])
         return DeltaOperationList.model_validate({"operations": ops})
 
     monkeypatch.setattr(memory._reflect_llm_config, "call", fake_call)
@@ -488,7 +524,7 @@ async def test_delta_refresh_removes_content_resting_on_a_retracted_fact(
     calls = _patch_op_calls(
         monkeypatch,
         memory,
-        retraction_ops=[{"op": "remove_block", "section_id": "conventions", "index": 0}],
+        retraction_ops=[_remove_first_block_of("conventions")],
         delta_ops=[],
     )
 
@@ -545,7 +581,7 @@ async def test_unsay_runs_even_when_no_new_facts_arrived(
     calls = _patch_op_calls(
         monkeypatch,
         memory,
-        retraction_ops=[{"op": "remove_block", "section_id": "conventions", "index": 0}],
+        retraction_ops=[_remove_first_block_of("conventions")],
         delta_ops=[],
     )
 
@@ -560,6 +596,9 @@ async def test_unsay_runs_even_when_no_new_facts_arrived(
 
 
 @pytest.mark.asyncio
+# Establishes 'pending consolidation' with a raw UPDATE of memory_units.consolidated_at,
+# which a store-owned bank does not read, so the deferral precondition is never set up.
+@pytest.mark.memory_backend_incompatible
 async def test_unsay_is_deferred_while_facts_are_pending_consolidation(
     memory: MemoryEngine, request_context: RequestContext, monkeypatch, patch_reflect
 ):
@@ -595,7 +634,7 @@ async def test_unsay_is_deferred_while_facts_are_pending_consolidation(
     calls = _patch_op_calls(
         monkeypatch,
         memory,
-        retraction_ops=[{"op": "remove_block", "section_id": "conventions", "index": 0}],
+        retraction_ops=[_remove_first_block_of("conventions")],
         delta_ops=[],
     )
 

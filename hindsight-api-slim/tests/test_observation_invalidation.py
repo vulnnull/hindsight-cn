@@ -1149,6 +1149,9 @@ class TestConsolidationSourceMemoryFiltering:
         await memory.delete_bank(bank_id, request_context=request_context)
 
     @pytest.mark.asyncio
+    # Asserts the in-transaction `FOR SHARE` liveness skip — a Postgres row-locking mechanism. The
+    # store-owned path re-checks liveness through the store instead, so there is no lock to observe.
+    @pytest.mark.memory_backend_incompatible
     async def test_update_observation_skipped_when_source_deleted_after_preflight(
         self, memory: MemoryEngine, request_context: RequestContext
     ):

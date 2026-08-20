@@ -334,6 +334,9 @@ def test_dedup_prompt_contract_requests_json_not_key_value() -> None:
     assert "{existing}" not in prompt
 
 
+# Seeds source liveness through a mocked `conn`, which a store-owned bank never reads: the
+# preflight asks the store, finds nothing, and short-circuits before the behaviour under test.
+@pytest.mark.memory_backend_incompatible
 async def test_dedup_llm_merge_folds_into_twin() -> None:
     kwargs, conn, llm = _ctx()
     kwargs["create_source_ids"] = [uuid.uuid4(), uuid.uuid4()]
@@ -359,6 +362,9 @@ async def test_dedup_llm_merge_folds_into_twin() -> None:
     )
 
 
+# Seeds source liveness through a mocked `conn`, which a store-owned bank never reads: the
+# preflight asks the store, finds nothing, and short-circuits before the behaviour under test.
+@pytest.mark.memory_backend_incompatible
 async def test_dedup_llm_merge_sanitizes_text_before_write() -> None:
     # The merge path writes the LLM's synthesized text straight to the fold UPDATE, so it needs
     # the same character-safety scrub _CreateAction/_UpdateAction already apply via field_validator.
@@ -522,6 +528,9 @@ def test_dedup_active_none_config() -> None:
 # source deleted) during the connection-free window can't drop a CREATE or fold a dead id.
 
 
+# Seeds source liveness through a mocked `conn`, which a store-owned bank never reads: the
+# preflight asks the store, finds nothing, and short-circuits before the behaviour under test.
+@pytest.mark.memory_backend_incompatible
 async def test_dedup_create_twin_vanished_returns_none_so_caller_creates() -> None:
     # If the twin is deleted during the (connection-free) LLM window, the fold UPDATE matches
     # no row (fetchval -> None); the helper must return None so the caller still CREATEs.
@@ -537,6 +546,9 @@ async def test_dedup_create_twin_vanished_returns_none_so_caller_creates() -> No
     conn.fetchval.assert_awaited_once()
 
 
+# Seeds source liveness through a mocked `conn`, which a store-owned bank never reads: the
+# preflight asks the store, finds nothing, and short-circuits before the behaviour under test.
+@pytest.mark.memory_backend_incompatible
 async def test_dedup_create_fold_uses_only_live_new_sources() -> None:
     kwargs, conn, llm = _ctx()
     live_source_id = uuid.uuid4()
@@ -568,6 +580,9 @@ async def test_dedup_create_all_new_sources_deleted_returns_none() -> None:
     conn.fetchval.assert_not_called()
 
 
+# Seeds source liveness through a mocked `conn`, which a store-owned bank never reads: the
+# preflight asks the store, finds nothing, and short-circuits before the behaviour under test.
+@pytest.mark.memory_backend_incompatible
 async def test_dedup_update_twin_vanished_does_not_delete_updated() -> None:
     # If the fold matches no row (twin vanished mid-window), the updated row must NOT be deleted.
     kwargs, conn, llm = _update_ctx()
@@ -579,6 +594,9 @@ async def test_dedup_update_twin_vanished_does_not_delete_updated() -> None:
     conn.execute.assert_not_called()  # but no delete, since the fold touched nothing
 
 
+# Seeds source liveness through a mocked `conn`, which a store-owned bank never reads: the
+# preflight asks the store, finds nothing, and short-circuits before the behaviour under test.
+@pytest.mark.memory_backend_incompatible
 async def test_dedup_update_fold_uses_only_live_updated_sources() -> None:
     kwargs, conn, llm = _update_ctx()
     live_source_id = uuid.uuid4()

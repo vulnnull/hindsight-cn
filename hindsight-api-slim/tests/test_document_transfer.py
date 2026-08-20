@@ -779,7 +779,7 @@ async def test_bank_roundtrip_carries_mental_model_history(memory, request_conte
         await memory.update_mental_model(bank, mental_model_id="mm-1", content="v3", request_context=request_context)
         # Two refreshes → two snapshots (previous content v1 then v2), newest-first.
         before = await memory.get_mental_model_history(bank, "mm-1", request_context=request_context)
-        assert [h["previous_content"] for h in before] == ["v2", "v1"]
+        assert [h["previous_content"] for h in before] == ["v2\n", "v1\n"]
 
         from hindsight_api.engine.transfer import export_bank
 
@@ -791,7 +791,7 @@ async def test_bank_roundtrip_carries_mental_model_history(memory, request_conte
         assert result.mental_model_history_imported == 2
 
         after = await memory.get_mental_model_history(bank, "mm-1", request_context=request_context)
-        assert [h["previous_content"] for h in after] == ["v2", "v1"]
+        assert [h["previous_content"] for h in after] == ["v2\n", "v1\n"]
     finally:
         await memory.delete_bank(bank, request_context=request_context)
 
@@ -1863,10 +1863,85 @@ async def test_download_route_rejects_unauthorized_keys(api_client, memory, requ
 
 
 class _StoreOwnedMemories:
-    """A memories store that keeps memories outside SQL, like the memlake extension."""
+    """A memories store that keeps memories outside SQL, like an external store extension."""
 
     def writes_memory_rows_in_sql_for(self, bank_id: str) -> bool:
         return False
+
+
+@pytest.mark.asyncio
+async def test_export_bank_asks_for_the_store_when_the_caller_did_not_pass_one(monkeypatch):
+    """`memories=None` must not be read as "SQL-backed".
+
+    The loaders read `documents` / `memory_units` directly, which a store-owned bank leaves empty,
+    so treating an absent store as SQL produced a VALID, EMPTY archive with a success status. That
+    already happened once and was fixed at the two call sites while the default that causes it
+    stayed. Asserted on archive contents, because an empty archive is exactly what the broken
+    version returned successfully.
+    """
+    from hindsight_api.engine.transfer import export as export_mod
+    import hindsight_api.engine.memories as memories_mod
+
+    # Patch the lookup, not `_resolve_memories` itself — the resolution is what is under test, and
+    # `_resolve_memories` imports `get_memories` at call time.
+    monkeypatch.setattr(memories_mod, "get_memories", lambda: _FakeStoreOwned())
+
+    conn = _BankRowsOnlyConn()
+    archive = await export_mod.export_bank(conn, "bank-x")  # note: no memories= argument
+
+    with zipfile.ZipFile(io.BytesIO(archive)) as zf:
+        manifest = json.loads(zf.read("manifest.json"))
+        doc_names = [n for n in zf.namelist() if n.startswith("documents/")]
+    assert manifest["document_count"] == 1, f"empty archive from the default path: {manifest}"
+    assert doc_names, "the archive carried no document files"
+
+
+@pytest.mark.asyncio
+async def test_resolve_target_id_asks_the_store_that_holds_the_document(monkeypatch):
+    """Every `on_conflict` mode depends on the existence check, and it was SQL-only.
+
+    For a bank whose document store is external the SQL row is absent, so the check always said "no
+    conflict": `skip` re-imported the document it was told to leave alone, `new-id` kept the original
+    id, and `replace` degenerated to a plain insert — all reported as success.
+    """
+    from hindsight_api.engine.transfer import importer as importer_mod
+
+    store = _RecordingStoreOwned()
+    await store.put_document(bank_id="bank-x", document_id="doc-1", content_hash="h")
+    monkeypatch.setattr(importer_mod, "get_memories", lambda: store, raising=False)
+    import hindsight_api.engine.memories as memories_mod
+
+    monkeypatch.setattr(memories_mod, "get_memories", lambda: store)
+
+    # Present in the store: skip declines, new-id remaps, replace keeps the id.
+    assert await importer_mod._resolve_target_id(None, "bank-x", "doc-1", "skip") is None
+    remapped = await importer_mod._resolve_target_id(None, "bank-x", "doc-1", "new-id")
+    assert remapped not in (None, "doc-1")
+    assert await importer_mod._resolve_target_id(None, "bank-x", "doc-1", "replace") == "doc-1"
+
+    # Absent from the store: no conflict, the original id is used.
+    assert await importer_mod._resolve_target_id(None, "bank-x", "doc-absent", "skip") == "doc-absent"
+
+
+class _RecordingStoreOwned(_StoreOwnedMemories):
+    """A store-owned bank that records the writes an import makes against it.
+
+    The importer's document write is what the live suite exercises; this covers the same call
+    without a server, so it runs on Postgres CI too — which is where a regression would otherwise
+    only show up as a store-owned bank that restores with no documents.
+    """
+
+    def __init__(self):
+        self.documents: dict[str, dict] = {}
+
+    def owns_document_store_for(self, bank_id: str) -> bool:
+        return True
+
+    async def get_document_record(self, *, bank_id, document_id, include_text=False):
+        return self.documents.get(document_id)
+
+    async def put_document(self, *, bank_id, document_id, **kw):
+        self.documents[document_id] = {"content_hash": kw.get("content_hash", ""), **kw}
 
 
 class _BankRowsOnlyConn:

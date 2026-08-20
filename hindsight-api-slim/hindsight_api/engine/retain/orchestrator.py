@@ -650,6 +650,7 @@ async def _streaming_batch_write_ext(
     is_first_batch: bool,
     is_last: bool,
     doc_tracking_done: list[bool],
+    doc_replace_done: list[bool],
     pipeline_aborted: list[bool],
     append_base_hash,
     new_content_hash,
@@ -705,6 +706,7 @@ async def _streaming_batch_write_ext(
             append_base_hash=append_base_hash,
             ext_txn=ext_txn,
             doc_tracking_done=doc_tracking_done,
+            doc_replace_done=doc_replace_done,
             p2_start=p2_start,
         )
 
@@ -905,6 +907,7 @@ async def _streaming_store_owned_retain(
     append_base_hash,
     ext_txn,
     doc_tracking_done: list[bool],
+    doc_replace_done: list[bool],
     p2_start: float,
 ) -> _ExtStreamingWriteResult:
     """The PG-free retain write for a store that owns entity resolution + atomicity.
@@ -986,7 +989,13 @@ async def _streaming_store_owned_retain(
         # NULL, so an append's first batch carried the NEW content alone and replacing would have
         # dropped every earlier turn). With the base read from the store that holds it, the first
         # batch is the whole document again and replace is the correct — and the only safe — move.
-        replace_id = effective_doc_id if is_first_batch else ""
+        # `is_first_batch` is a parameter of the whole `retain_batch` call and stays True for every
+        # consumer batch a streaming retain produces, so it cannot express "the first batch of this
+        # document" on its own. `doc_tracking_done` is the latch that can — it is set below, after
+        # the first batch writes. Without it every batch replaced, tombstoning the siblings the
+        # comment above says must survive: measured on a ten-batch document, the retain returned 100
+        # unit ids and the bank held 10, the last batch's.
+        replace_id = effective_doc_id if (is_first_batch and not doc_replace_done[0]) else ""
         # 0.0 → the server's default trigram-Jaccard threshold; a configured value overrides it.
         threshold = float(getattr(config, "entity_similarity_threshold", 0.0) or 0.0)
         resp = await provider.retain(
@@ -998,6 +1007,10 @@ async def _streaming_store_owned_retain(
             replace_document_id=replace_id,
             resolve_threshold=threshold,
         )
+        # Latched HERE, where the replace was actually issued — not after the write, which also runs
+        # when this batch produced no units and therefore replaced nothing.
+        if replace_id:
+            doc_replace_done[0] = True
         log_buffer.append(
             f"[streaming] pg-free retain doc={effective_doc_id} units={len(unit_ids)} "
             f"seq={resp.seq} new_entities={resp.new_entities}"
@@ -1739,6 +1752,29 @@ async def retain_batch(
             return [[] for _ in contents], TokenUsage(), 0
 
     # --- Delta retain: check if we can skip unchanged chunks ---
+    #
+    # An APPEND is the one shape where `document_body_override` is not the body being written: the
+    # splitter fills it with the incoming item's own text, and the append above then PREPENDS the
+    # stored body onto slice 1 — so the body actually being written is `existing + override`, and
+    # the override alone is only the new tail. Diffing the whole stored document against that tail
+    # classifies every pre-existing chunk as REMOVED and drops it; measured on an oversized append,
+    # chunks ended up covering 4,348 of 18,538 chars. `contents` already carries the prepend, so an
+    # append keeps diffing against that and only slice 1 (the slice holding the prepend) may delta,
+    # exactly as before. `update_mode` is readable on every slice because the splitter copies it
+    # onto each one, so slices 2..N opt out here too rather than re-deleting the body slice 1 wrote.
+    _delta_full_body = document_body_override if update_mode != "append" else None
+
+    # Every slice of an OVERSIZED replacement gets to try, not just the first. Each one diffs the
+    # same complete body against what is stored, so the first slice does the real work and the rest
+    # find nothing left to change and fall through to the metadata-only path. Gating on the first
+    # slice alone left slices 2..N doing a full extraction of their own content regardless, which is
+    # what made an oversized replacement re-extract a document it had just diffed correctly.
+    # Delta runs ONLY on the first sub-batch. Widening this to every slice changes the Postgres path
+    # too, and three things downstream assume the narrow gate: the caller keeps one result list per
+    # sub-batch item (`sub_origins` is length 1 for an oversized slice, so a multi-chunk delta's
+    # extra ids are dropped), `chunk_index_offset` advances by the splitter's per-slice count rather
+    # than by what a delta wrote, and a brand-new oversized document would extract its whole tail in
+    # one step — the bound the sub-batch splitting exists to keep.
     if is_first_batch:
         delta_result = await _try_delta_retain(
             pool,
@@ -1761,6 +1797,7 @@ async def retain_batch(
             outbox_callback,
             db_semaphore,
             document_body_override=document_body_override,
+            delta_full_body=_delta_full_body,
             append_base_hash=append_base_hash,
         )
         if delta_result is not None:
@@ -2177,6 +2214,12 @@ async def _streaming_retain_batch(
 
     # Track whether document tracking has been done (by the first batch)
     doc_tracking_done = [False]
+    # Whether the document's prior version has actually been REPLACED. Distinct from
+    # `doc_tracking_done`, which records that tracking completed and is set even when a batch wrote
+    # zero units — there `provider.retain` was never called and no replace was issued, so reusing
+    # that latch would let batch 1 replace nothing, latch, and leave the prior version standing
+    # beside the new memories for every batch after it.
+    doc_replace_done = [False]
     # Track whether the transactional-outbox callback has already fired inside a
     # batch write TXN. The in-TXN fire only runs on a final facts-bearing batch
     # (is_last=True); two success paths never reach it — a committed-chunk count
@@ -2447,9 +2490,10 @@ async def _streaming_retain_batch(
                 if _edge_provider.store_owned_retain_for(bank_id):
                     # Store-owned 0-fact (re-)ingest: the document's bodies are already in the store
                     # (via _store_document_bodies) and there are no new memories. A re-ingest that now
-                    # yields 0 facts must drop the document's PRIOR memories — ONE plain memlake
-                    # delete-by-document. No Postgres documents row, no lock, no write-group
-                    # (memlake-only), so nothing is left undecided to stall the store's indexer. This
+                    # yields 0 facts must drop the document's PRIOR memories — ONE plain store-side
+                    # delete-by-document. No Postgres documents row, no lock, no write-group (there is
+                    # no SQL witness to decide), so nothing is left undecided to stall the store's
+                    # indexer. This
                     # is the 0-fact analogue of the fact-bearing PG-free path's replace-tombstone.
                     await _edge_provider.delete_document(
                         conn=None, fq_table=fq_table, bank_id=bank_id, document_id=effective_doc_id
@@ -2608,6 +2652,7 @@ async def _streaming_retain_batch(
                     is_first_batch=is_first_batch,
                     is_last=is_last,
                     doc_tracking_done=doc_tracking_done,
+                    doc_replace_done=doc_replace_done,
                     pipeline_aborted=pipeline_aborted,
                     append_base_hash=append_base_hash,
                     new_content_hash=new_content_hash,
@@ -3142,6 +3187,9 @@ async def _try_delta_retain(
     db_semaphore: "asyncio.Semaphore | None" = None,
     *,
     document_body_override: str | None = None,
+    # The complete body to diff against, when the caller could establish one. Distinct from
+    # `document_body_override`, which an append fills with only the new tail.
+    delta_full_body: str | None = None,
     append_base_hash: str | None = None,
 ) -> tuple[list[list[str]], TokenUsage, int | None] | None:
     """
@@ -3153,28 +3201,26 @@ async def _try_delta_retain(
     (``0`` if the submission matched prior content exactly and nothing was
     re-extracted).
     """
-    # Delta is DISABLED for a store-owned (PG-free) bank, and the reason is the write path, not the
-    # chunk diff. Two things this path relies on do not exist for such a bank:
+    # Delta RUNS for a store-owned (PG-free) bank. It did not always: the two things this path
+    # relies on are absent for such a bank, and each had to be replaced rather than assumed.
     #
     #   * the concurrency control. `_delta_batch_write_ext` serializes concurrent writers on
     #     `SELECT content_hash FROM documents ... FOR UPDATE`. A store-owned bank has no such row,
-    #     so `current_hash` is NULL, the ownership recheck is skipped, and parallel appends each
-    #     plan against the same base and overwrite each other — turns are lost, silently, with
-    #     every call returning success. The store's own compare-and-set (`put_document`'s
-    #     `expect_watermark`) is what would have to take the row lock's place.
+    #     so parallel appends each planned against the same base and overwrote each other — turns
+    #     lost silently, every call returning success. Its place is taken by the store's own
+    #     compare-and-set: `put_document(expect_watermark=...)`, which must be the batch's FIRST
+    #     store write, because the guard is on the namespace's WAL head and this batch's own fact
+    #     writes move it.
     #   * the document write itself. The delta path updates the document through
-    #     `upsert_document_metadata`, which is SQL — it writes nothing for a store-owned bank, so
-    #     the record would keep its pre-delta body.
+    #     `upsert_document_metadata`, which is SQL and writes nothing for such a bank, so the record
+    #     would keep its pre-delta body. `_store_document_bodies` carries it instead.
     #
-    # Falling through to the full streaming retain is therefore correct, but it is NOT free, and
-    # the cost is not the one previously recorded here ("full retain of an unchanged doc is still
-    # cheap"). Full replace deletes the document's facts and rebuilds them, so re-submitting a
-    # document that changed NOTHING orphans or destroys every observation standing on those facts
-    # and requeues them for consolidation — verified by
-    # test_delta_retain_orphan_observations.py, which fails against a store-owned bank for exactly
-    # that reason. Enabling delta here without first giving the write path a store-side CAS trades
-    # that for silent append loss, which is worse; both are covered by tests, in opposite
-    # directions, so the trade is measurable rather than a matter of opinion.
+    # Leaving delta off was not free, which is why it was worth replacing both. A full replace
+    # deletes the document's facts and rebuilds them, so re-submitting a document that changed
+    # NOTHING orphans or destroys every observation standing on those facts and requeues them for
+    # consolidation — test_delta_retain_orphan_observations.py covers that, and enabling delta
+    # without the store-side CAS would have traded it for silent append loss, which is worse. Both
+    # directions are covered by tests, so the trade was measurable rather than a matter of opinion.
     from ..memories import get_memories as _get_memories_delta
 
     _delta_store = _get_memories_delta()
@@ -3260,9 +3306,19 @@ async def _try_delta_retain(
         logger.info(f"Delta retain skipped for {effective_doc_id}: existing chunks lack content_hash (pre-migration)")
         return None
 
-    # Chunk new content and classify changes
+    # Chunk new content and classify changes.
+    #
+    # For an OVERSIZED item the retain is split into slices, and `contents` is only this slice while
+    # `existing_chunks` covers the whole stored document. Diffing those two classifies every chunk
+    # merely absent from this slice as REMOVED — measured on a 20-chunk document:
+    # `unchanged=1 changed=0 new=0 removed=19` — so their memories were tombstoned and the later
+    # slices re-added and re-extracted them. `delta_full_body` is the complete body for exactly the
+    # shapes where the caller could establish one, so the diff is taken against that and compares
+    # like with like. It is None for an append, whose complete body is the already-prepended
+    # `contents` — see the gate in `retain_batch`.
     step_start = time.time()
-    new_chunks_with_contents = _chunk_contents_for_delta(contents, config)
+    _diff_contents = [RetainContent(content=delta_full_body)] if delta_full_body is not None else contents
+    new_chunks_with_contents = _chunk_contents_for_delta(_diff_contents, config)
     log_buffer.append(
         f"[delta] Chunked new content: {len(new_chunks_with_contents)} chunks in {time.time() - step_start:.3f}s"
     )
@@ -3755,6 +3811,15 @@ async def _delta_metadata_only(
             tags=merged_tags,
             metadata=retain_params,
         )
+        # The document record now carries the new labels, but the memories do not: the SQL branch
+        # below propagates them onto the units with the same call, and without it a tags-only
+        # re-retain relabelled the document and left every unit on the OLD tags and metadata —
+        # measured, v2 units still read ['team-a'] after a retain carrying ['team-b', 'important'].
+        # This is the whole work of a metadata-only retain for such a bank, not a detail of it.
+        async with acquire_with_retry(pool) as conn:
+            await fact_storage.update_memory_units_metadata_and_tags(
+                conn, bank_id, document_id, merged_tags, retain_params.get("metadata", {})
+            )
         if outbox_callback is not None:
             # The outbox is still SQL for every deployment, so it keeps its own connection.
             async with acquire_with_retry(pool) as conn:

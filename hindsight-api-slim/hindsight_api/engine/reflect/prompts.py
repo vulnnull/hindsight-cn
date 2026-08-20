@@ -115,6 +115,7 @@ def build_system_prompt_for_tools(
     has_mental_models: bool = False,
     include_observations: bool = True,
     budget: str | None = None,
+    answer_as_document: bool = False,
 ) -> str:
     """
     Build the system prompt for tool-calling reflect agent.
@@ -393,19 +394,48 @@ def build_system_prompt_for_tools(
     steps.append("When ready, call done() with your answer and supporting IDs")
     parts.extend(f"{idx}. {step}" for idx, step in enumerate(steps, 1))
 
-    parts.extend(
-        [
-            "",
-            "## Output Format: Well-Formatted Markdown Answer",
-            "Call done() with a well-formatted markdown 'answer' field.",
-            "- USE markdown formatting for structure (headers, lists, bold, italic, code blocks, tables, etc.)",
-            "- CRITICAL: Add blank lines before and after block elements (tables, code blocks, lists)",
-            "- Format for clarity and readability with proper spacing and hierarchy",
-            "- NEVER include memory IDs, UUIDs, or 'Memory references' in the answer text",
-            "- Put IDs ONLY in the memory_ids/mental_model_ids/observation_ids arrays, not in the answer",
-            "- CRITICAL: This is a NON-CONVERSATIONAL system. NEVER ask follow-up questions, offer further assistance, or suggest next steps. Your answer must be complete and self-contained. The user cannot reply.",
-        ]
-    )
+    common_output_rules = [
+        "- NEVER include memory IDs, UUIDs, or 'Memory references' in the answer text",
+        "- Put IDs ONLY in the memory_ids/mental_model_ids/observation_ids arrays, not in the answer",
+        "- CRITICAL: This is a NON-CONVERSATIONAL system. NEVER ask follow-up questions, offer further assistance, or suggest next steps. Your answer must be complete and self-contained. The user cannot reply.",
+    ]
+    if answer_as_document:
+        # The document is stored as structure and the markdown is rendered from
+        # it, so asking for "a markdown answer" here would be asking for the one
+        # thing the caller does not want (see tools_schema's document tool).
+        parts.extend(
+            [
+                "",
+                "## Output Format: Structured Document",
+                "Call done() with a 'document' field. Do NOT write a markdown document — "
+                "state its structure and the markdown is generated from it.",
+                "- Each section carries its heading text (no '#') and a level; the heading is NOT a block",
+                "- 'blocks' holds the section's content, ONE block per paragraph, list, table or code fence",
+                "- Never put two paragraphs in one block, and never put a heading inside a block",
+                "- Inside a block, write list items and table rows on their own lines as usual",
+                # Stating the structure is a more clerical task than writing prose, and a
+                # model doing clerical work gets terse: measured against the markdown
+                # answer it replaced, the first version of this produced noticeably
+                # shorter documents that judges liked less. Say plainly that the
+                # structure is the shape, not a budget.
+                "- The structure is how the answer is laid out, NOT a reason to say less: give each "
+                "block the same specifics, numbers, names and examples you would write in prose",
+                "- Prefer a section with several blocks over one block that summarises them away",
+                *common_output_rules,
+            ]
+        )
+    else:
+        parts.extend(
+            [
+                "",
+                "## Output Format: Well-Formatted Markdown Answer",
+                "Call done() with a well-formatted markdown 'answer' field.",
+                "- USE markdown formatting for structure (headers, lists, bold, italic, code blocks, tables, etc.)",
+                "- CRITICAL: Add blank lines before and after block elements (tables, code blocks, lists)",
+                "- Format for clarity and readability with proper spacing and hierarchy",
+                *common_output_rules,
+            ]
+        )
 
     # Volatile "now" reference goes here — after all the static instructions and
     # right before the bank-specific/custom data. Everything above is identical
@@ -848,10 +878,11 @@ STRUCTURED_DELTA_SYSTEM_PROMPT = """You are integrating *new information* into a
 You will be given:
 1. TOPIC — the question this document answers. Content that does not help
    answer this question is OFF-TOPIC and should be removed.
-2. CURRENT DOCUMENT (JSON) — the existing structured mental model. Each section
-   has a stable ``id``, a ``heading``, a ``level`` (1..6), and an ordered list
-   of ``blocks``. Blocks are typed: ``paragraph``, ``bullet_list``,
-   ``ordered_list``, ``code``, or ``table``.
+2. CURRENT DOCUMENT (JSON) — the existing structured mental model. It is a list
+   of sections; each section has a stable ``id``, a ``heading``, a ``level``
+   (1..6) and an ordered list of ``blocks``. Each block has a stable ``id`` and
+   a ``text`` field holding one markdown fragment — a paragraph, a list, a
+   table, or a fenced code block.
 3. NEW INFORMATION SYNTHESIS (markdown) — a synthesis showing how the new facts
    relate to the document's topic. Use it to understand context and relevance,
    but do NOT copy its formatting or wording wholesale.
@@ -880,9 +911,11 @@ RULES
   and illustrative ✅/❌ comparisons are MORE valuable than abstract rules.
   When facts contain examples, include them. Never drop an example to make
   room for an abstract restatement of the same point.
-- Operations target sections by ``section_id`` (use the ``id`` field of the
-  section in CURRENT DOCUMENT, NOT the heading). Block operations target
-  blocks by ``index`` (0-based, against the section's current block list).
+- Operations target sections by ``section_id`` and blocks by ``block_id``. Both
+  are the ``id`` values printed in CURRENT DOCUMENT — **copy them exactly**,
+  never invent one, never use a heading in place of an id, and never guess an
+  id for a block you cannot see. An operation naming an id that does not exist
+  is dropped, and its content never reaches the document.
 - **Add** new content with ``append_block``, ``insert_block``, or ``add_section``
   when facts introduce information not yet covered. Prefer extending an
   existing section over creating a new one.
@@ -891,6 +924,10 @@ RULES
   about topics already in the document.
 - **Remove** content with ``remove_block`` or ``remove_section`` ONLY when
   the new facts explicitly contradict or supersede it.
+- Prefer the *smallest* operation that expresses the change: appending or
+  replacing one block leaves every other block byte-identical, while
+  ``replace_section_blocks`` makes you retype the whole section and risks
+  losing detail you did not intend to change.
 - NEVER emit operations whose only effect is to reword unchanged content.
 - NEVER emit operations to "normalize" formatting (numbered → bulleted, casing
   changes, paragraph → list, etc).
@@ -899,46 +936,52 @@ RULES
   in the document (e.g., from a concurrent update).
 
 ALLOWED OPERATIONS (each line shows the JSON shape)
-- ``{"op": "append_block", "section_id": "...", "block": {...}}``
-- ``{"op": "insert_block", "section_id": "...", "index": N, "block": {...}}``
-- ``{"op": "replace_block", "section_id": "...", "index": N, "block": {...}}``
-- ``{"op": "remove_block", "section_id": "...", "index": N}``
-- ``{"op": "add_section", "heading": "...", "level": 2, "blocks": [...], "after_section_id": "..."}``
+- ``{"op": "append_block", "section_id": "...", "text": "..."}``
+- ``{"op": "insert_block", "section_id": "...", "after_block_id": "...", "text": "..."}``
+- ``{"op": "replace_block", "section_id": "...", "block_id": "...", "text": "..."}``
+- ``{"op": "remove_block", "section_id": "...", "block_id": "..."}``
+- ``{"op": "add_section", "heading": "...", "level": 2, "blocks": ["...", "..."], "after_section_id": "..."}``
 - ``{"op": "remove_section", "section_id": "..."}``
-- ``{"op": "replace_section_blocks", "section_id": "...", "blocks": [...]}``
+- ``{"op": "replace_section_blocks", "section_id": "...", "blocks": ["...", "..."]}``
 - ``{"op": "rename_section", "section_id": "...", "new_heading": "..."}``
 
-Block shapes
-- ``{"type": "paragraph", "text": "..."}``
-- ``{"type": "bullet_list", "items": ["...", "..."]}``
-- ``{"type": "ordered_list", "items": ["...", "..."]}``
-- ``{"type": "code", "language": "json", "text": "..."}``
-- ``{"type": "table", "headers": ["col1", "col2"], "rows": [["a", "b"], ["c", "d"]]}``
+BLOCK TEXT RULES
+- Every ``text`` (and every entry of ``blocks``) is ONE markdown fragment:
+  a single paragraph, a single list, a single table, or a single fenced code
+  block. Do not put two paragraphs in one block — emit two operations, or pass
+  two entries in ``blocks``.
+- Write real markdown inside it, with real line breaks encoded as ``\\n``:
+  a list is ``"- one\\n- two"``, a table is
+  ``"| col | col |\\n| --- | --- |\\n| a | b |"``. A table whose rows are not
+  separated by ``\\n`` is not a table.
+- To add a row to an existing table, or an item to an existing list, use
+  ``replace_block`` on that block and re-emit it *with* the addition. A lone
+  table row or bullet appended as its own block is a separate fragment, and a
+  table row on its own is not a table.
+- ``insert_block`` places the new block directly after ``after_block_id``; use
+  ``"after_block_id": null`` to place it first in the section.
 
-OUTPUT FORMAT
-Return ONLY a single JSON object on its own, with no prose before or after,
-no markdown code fences, no commentary. The object must have exactly one
-top-level key, ``operations``, whose value is an array of operation objects
-(empty array when nothing changes).
+JSON STRING RULES (critical)
+- Every string must be valid JSON: escape ``"`` as ``\\"``, backslashes as
+  ``\\\\``, and every line break as ``\\n``. Never put a raw newline inside a
+  JSON string.
+- Return ONLY a single JSON object, with no prose before or after, no markdown
+  code fences, no commentary. The object must have exactly one top-level key,
+  ``operations``, whose value is an array of operation objects (empty array
+  when nothing changes).
+- Do not append extra ``]`` or ``}`` after the closing ``}`` of the root object.
 
 Examples
 - No changes needed → ``{"operations": []}``
-- Add one bullet to an existing "Members" section →
+- Add one bullet list to an existing "Members" section →
   ``{"operations": [{"op": "append_block", "section_id": "members",
-  "block": {"type": "bullet_list", "items": ["Carol — junior engineer"]}}]}``
-- Replace a paragraph that has been corrected by new facts →
+  "text": "- Carol — junior engineer"}]}``
+- Replace a paragraph that new facts have corrected →
   ``{"operations": [{"op": "replace_block", "section_id": "overview",
-  "index": 0, "block": {"type": "paragraph", "text": "Updated summary."}}]}``
+  "block_id": "b3f9a1c2", "text": "Updated summary."}]}``
 - Remove an obsolete block →
-  ``{"operations": [{"op": "remove_block", "section_id": "status", "index": 2}]}``
-
-JSON STRING RULES (critical)
-- Every ``text`` and ``items`` string must be valid JSON: escape ``"`` as ``\\"``,
-  backslashes as ``\\\\``, and newlines as ``\\n``. Do not use raw backticks inside
-  strings unless needed; prefer plain quotes for file paths.
-- ``replace_block``, ``insert_block``, and ``remove_block`` MUST include ``index`` (0-based block position in that section). Use ``replace_section_blocks`` only when replacing every block in a section.
-
-- Do not append extra ``]`` or ``}`` after the closing ``}`` of the root object."""
+  ``{"operations": [{"op": "remove_block", "section_id": "status",
+  "block_id": "b17c4d80"}]}``"""
 
 _STRUCTURED_DELTA_DEFAULT_MAX_INPUT_TOKENS = 24_000
 
@@ -970,7 +1013,7 @@ def _fit_structured_delta_prompt_parts(
 
     fixed = (
         f"## Topic\n{source_query}\n\n"
-        f"## CURRENT DOCUMENT (apply ops to this; reference section ids as listed)\n"
+        f"## CURRENT DOCUMENT (apply ops to this; copy section and block ids from it verbatim)\n"
         f"```json\n\n```\n\n"
         f"## NEW INFORMATION SYNTHESIS (context for how new facts relate to the topic)\n"
         f"```markdown\n\n```\n\n"
@@ -999,6 +1042,8 @@ def build_structured_delta_prompt(
     source_query: str,
     max_output_tokens: int | None = None,
     max_input_tokens: int | None = None,
+    document_tokens: int | None = None,
+    document_budget: int | None = None,
 ) -> str:
     """Build the user prompt for a structured-delta mental model refresh.
 
@@ -1024,10 +1069,38 @@ def build_structured_delta_prompt(
         budget_hint = (
             f"\n\n## Output budget\n"
             f"Your JSON response must fit within ~{max_output_tokens} tokens. If you "
-            "would need more than this to express every change, prefer the highest-"
-            "leverage edits first (a few ``replace_section_blocks`` ops over many "
-            "block-level ops) so the response always parses as valid JSON."
+            "would need more than this to express every change, emit the highest-"
+            "leverage edits first and drop the rest — a truncated response parses as "
+            "nothing and loses every change, while a short one keeps the ones you sent."
         )
+
+    # The *document's* budget, which is a different thing from the response budget
+    # above and was previously not mentioned to this call at all. A delta refresh
+    # only ever adds, so a long-lived page grows a little on every round and
+    # crosses its configured budget after a few hundred of them with nothing in
+    # the pipeline noticing. Enforcing it by truncation would delete knowledge
+    # nobody asked to delete, so it is stated as a constraint the model satisfies
+    # the same way it does everything else here — with operations, on the content
+    # that has actually gone stale.
+    document_hint = ""
+    if document_budget is not None and document_tokens is not None:
+        if document_tokens >= document_budget:
+            document_hint = (
+                f"\n\n## Document budget (EXCEEDED)\n"
+                f"The document is ~{document_tokens} tokens against a budget of {document_budget}. "
+                "As well as integrating the new facts, make room: remove or merge blocks that are "
+                "superseded, duplicated, or no longer help answer the TOPIC, using remove_block, "
+                "replace_block or replace_section_blocks. Reclaim space from stale content — never "
+                "by dropping the facts you are integrating, and never by summarising a section that "
+                "is still current into a sentence."
+            )
+        elif document_tokens >= int(document_budget * 0.8):
+            document_hint = (
+                f"\n\n## Document budget\n"
+                f"The document is ~{document_tokens} tokens against a budget of {document_budget}. "
+                "It is close to the limit, so prefer replacing stale blocks over appending new ones "
+                "where the new facts update something the document already covers."
+            )
 
     task_footer = (
         "## Task\n"
@@ -1054,12 +1127,12 @@ def build_structured_delta_prompt(
 
     return (
         f"## Topic\n{source_query}\n\n"
-        f"## CURRENT DOCUMENT (apply ops to this; reference section ids as listed)\n"
+        f"## CURRENT DOCUMENT (apply ops to this; copy section and block ids from it verbatim)\n"
         f"```json\n{doc_json}\n```\n\n"
         f"## NEW INFORMATION SYNTHESIS (context for how new facts relate to the topic)\n"
         f"```markdown\n{candidate}\n```\n\n"
         f"## SUPPORTING FACTS (new since last refresh — integrate these)\n{facts_body}"
-        f"{budget_hint}{truncation_note}\n\n"
+        f"{document_hint}{budget_hint}{truncation_note}\n\n"
         f"{task_footer}"
     )
 
@@ -1070,8 +1143,8 @@ You will be given:
 1. TOPIC — the question this document answers.
 2. CURRENT DOCUMENT (JSON) — the existing document. Each section has a stable
    ``id``, a ``heading``, a ``level`` (1..6), and an ordered list of ``blocks``.
-   Blocks are typed: ``paragraph``, ``bullet_list``, ``ordered_list``, ``code``,
-   or ``table``.
+   Each block has a stable ``id`` and a ``text`` field holding one markdown
+   fragment — a paragraph, a list, a table, or a fenced code block.
 3. RETRACTED FACTS — facts this document was built from that have since been
    removed from the memory bank. They are no longer true, no longer supported,
    or were withdrawn. The document may still state them.
@@ -1106,21 +1179,19 @@ RULES
   facts. That is a normal, expected answer.
 
 ALLOWED OPERATIONS (each line shows the JSON shape)
-- ``{"op": "remove_block", "section_id": "...", "index": N}``
+- ``{"op": "remove_block", "section_id": "...", "block_id": "..."}``
 - ``{"op": "remove_section", "section_id": "..."}``
-- ``{"op": "replace_block", "section_id": "...", "index": N, "block": {...}}``
-- ``{"op": "replace_section_blocks", "section_id": "...", "blocks": [...]}``
+- ``{"op": "replace_block", "section_id": "...", "block_id": "...", "text": "..."}``
+- ``{"op": "replace_section_blocks", "section_id": "...", "blocks": ["...", "..."]}``
 
-Block shapes
-- ``{"type": "paragraph", "text": "..."}``
-- ``{"type": "bullet_list", "items": ["...", "..."]}``
-- ``{"type": "ordered_list", "items": ["...", "..."]}``
-- ``{"type": "code", "language": "json", "text": "..."}``
-- ``{"type": "table", "headers": ["col1", "col2"], "rows": [["a", "b"], ["c", "d"]]}``
+Blocks are addressed by ``block_id`` — the ``id`` printed beside each block in
+CURRENT DOCUMENT. Copy it exactly; never invent one, and never use a position.
+An operation naming an id that does not exist is dropped, so a retraction that
+guesses removes nothing.
 
-IMPORTANT: ``remove_block`` operations are applied in the order you emit them, and
-each one shifts the indices of every later block in that section. When removing
-several blocks from the same section, emit them in DESCENDING index order.
+Every ``text`` (and every entry of ``blocks``) is ONE markdown fragment, written
+as it should appear: ``"- one\\n- two"`` for a list,
+``"| col | col |\\n| --- | --- |\\n| a | b |"`` for a table.
 
 OUTPUT FORMAT
 Return ONLY a single JSON object, with no prose before or after, no markdown code
@@ -1129,8 +1200,9 @@ fences, no commentary. The object must have exactly one top-level key,
 nothing changes).
 
 JSON STRING RULES (critical)
-- Every ``text`` and ``items`` string must be valid JSON: escape ``"`` as ``\\"``,
-  backslashes as ``\\\\``, and newlines as ``\\n``.
+- Every string must be valid JSON: escape ``"`` as ``\\"``, backslashes as
+  ``\\\\``, and every line break as ``\\n``. Never put a raw newline inside a
+  JSON string.
 - Do not append extra ``]`` or ``}`` after the closing ``}`` of the root object."""
 
 

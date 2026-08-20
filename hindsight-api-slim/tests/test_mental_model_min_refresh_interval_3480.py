@@ -339,6 +339,9 @@ def test_a_malformed_stored_value_is_ignored_not_raised(memory: MemoryEngine):
 
 
 @pytest.mark.asyncio
+# Seeds the facts it consolidates straight into `memory_units`, which a store-owned bank leaves
+# empty, so the trigger has nothing to fire on.
+@pytest.mark.memory_backend_incompatible
 async def test_the_after_consolidation_trigger_marks_its_submits_automatic(
     memory: MemoryEngine, request_context, monkeypatch
 ):

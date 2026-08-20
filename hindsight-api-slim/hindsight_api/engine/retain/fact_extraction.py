@@ -1262,10 +1262,17 @@ Text:
 {sanitized_chunk}"""
 
 
-def _build_request_body(llm_config, config, prompt: str, user_message: str, response_schema: type) -> dict:
-    """Build request body for LLM API call."""
+def _build_request_body(batch_impl, config, prompt: str, user_message: str, response_schema: type) -> dict:
+    """Build request body for the batch LLM API call.
+
+    ``batch_impl`` is the provider implementation that will serve the batch. For
+    a multi-LLM chain this is the first batch-capable member (see
+    ``MultiLLMProvider.batch_provider_impl``), not necessarily the primary — so
+    ``model``/``provider``/``service_tier`` must come from THIS impl, matching the
+    account the batch is submitted to.
+    """
     request_body = {
-        "model": llm_config.model,
+        "model": batch_impl.model,
         "messages": [{"role": "system", "content": prompt}, {"role": "user", "content": user_message}],
     }
 
@@ -1282,9 +1289,12 @@ def _build_request_body(llm_config, config, prompt: str, user_message: str, resp
     if config.retain_max_completion_tokens:
         request_body["max_completion_tokens"] = config.retain_max_completion_tokens
 
-    # Add service_tier for OpenAI Flex Processing
-    if llm_config.provider == "openai" and llm_config._provider_impl.openai_service_tier:
-        request_body["service_tier"] = llm_config._provider_impl.openai_service_tier
+    # Add service_tier for OpenAI Flex Processing. ``provider`` is set by every
+    # LLMInterface, and the short-circuit keeps impls without a service tier
+    # (gemini/anthropic/fireworks) from ever reaching the second attribute — so a
+    # renamed field fails loudly here instead of silently dropping flex pricing.
+    if batch_impl.provider == "openai" and batch_impl.openai_service_tier:
+        request_body["service_tier"] = batch_impl.openai_service_tier
 
     # Add response_format (JSON schema). The batch path builds the request body
     # directly instead of going through LLMProvider.call(), so resolve the
@@ -1293,12 +1303,11 @@ def _build_request_body(llm_config, config, prompt: str, user_message: str, resp
     # retain-scoped field, which already folds in the global HINDSIGHT_API_LLM_STRICT_SCHEMA
     # fallback, so the batch and streaming paths can't disagree.
     if hasattr(response_schema, "model_json_schema"):
-        schema = (
-            strict_json_schema(response_schema) if config.llm_strict_schema else response_schema.model_json_schema()
-        )
+        retain_strict_schema = config.llm_strict_schema_retain
+        schema = strict_json_schema(response_schema) if retain_strict_schema else response_schema.model_json_schema()
         request_body["response_format"] = {
             "type": "json_schema",
-            "json_schema": {"name": "facts", "schema": schema, "strict": config.llm_strict_schema_retain},
+            "json_schema": {"name": "facts", "schema": schema, "strict": retain_strict_schema},
         }
 
     return request_body
@@ -2000,8 +2009,14 @@ async def extract_facts_from_contents_batch_api(
     # Check config for causal link extraction (used throughout)
     extract_causal_links = config.retain_extract_causal_links
 
-    # Check if provider supports batch API
-    if not await llm_config._provider_impl.supports_batch_api():
+    # Resolve the provider implementation that serves the batch. For a multi-LLM
+    # chain this is the first batch-capable member (not necessarily the primary);
+    # for a single provider it is the primary itself, and ``None`` when nothing
+    # configured can serve a batch at all. The whole batch lifecycle (submit →
+    # poll → retrieve) must target this ONE impl, so resolve it once and reuse it.
+    batch_impl = await llm_config.batch_provider_impl()
+
+    if batch_impl is None:
         raise RuntimeError(
             f"retain_batch_enabled=True but provider '{llm_config.provider}' does not "
             f"support the batch API. This should have been caught at startup — check "
@@ -2028,6 +2043,21 @@ async def extract_facts_from_contents_batch_api(
             batch_id = metadata.get("batch_id")
 
             if batch_id:
+                # Member selection is deterministic by declared order, but the
+                # chain configuration can change between the submit and the
+                # resume (a member added, removed, or given batch capacity). A
+                # batch_id only exists on the account that created it, so polling
+                # a different one would hang until the wall clock ran out and then
+                # report a provider error nobody can act on. Fail on the mismatch
+                # instead, naming both sides.
+                submitted_provider = metadata.get("batch_provider")
+                if submitted_provider and submitted_provider != batch_impl.provider:
+                    raise RuntimeError(
+                        f"Cannot resume batch {batch_id}: it was submitted to "
+                        f"'{submitted_provider}' but the retain LLM configuration now "
+                        f"serves batch from '{batch_impl.provider}'. Restore the LLM "
+                        f"member that submitted it, or fail this operation and retain again."
+                    )
                 logger.info(f"Resuming existing batch: batch_id={batch_id} (crash recovery)")
 
     # Step 1: Chunk all contents and build batch requests (skip if resuming)
@@ -2063,7 +2093,7 @@ async def extract_facts_from_contents_batch_api(
             )
 
             # Build request body using helper function
-            request_body = _build_request_body(llm_config, config, prompt, user_message, response_schema)
+            request_body = _build_request_body(batch_impl, config, prompt, user_message, response_schema)
 
             batch_requests.append(
                 {"custom_id": custom_id, "method": "POST", "url": "/v1/chat/completions", "body": request_body}
@@ -2076,7 +2106,7 @@ async def extract_facts_from_contents_batch_api(
     if not batch_id:
         logger.info(f"Submitting batch with {len(batch_requests)} chunk requests")
 
-        batch_metadata = await llm_config._provider_impl.submit_batch(batch_requests)
+        batch_metadata = await batch_impl.submit_batch(batch_requests)
         batch_id = batch_metadata["batch_id"]
 
         logger.info(f"Batch submitted: {batch_id}, polling every {config.retain_batch_poll_interval_seconds}s")
@@ -2086,7 +2116,7 @@ async def extract_facts_from_contents_batch_api(
         if operation_id and pool:
             batch_state = {
                 "batch_id": batch_id,
-                "batch_provider": llm_config.provider,
+                "batch_provider": batch_impl.provider,
                 "chunk_count": len(batch_requests),
             }
 
@@ -2114,7 +2144,7 @@ async def extract_facts_from_contents_batch_api(
 
     start_time = time.time()
     while True:
-        status_info = await llm_config._provider_impl.get_batch_status(batch_id)
+        status_info = await batch_impl.get_batch_status(batch_id)
         status = status_info["status"]
 
         elapsed = time.time() - start_time
@@ -2136,7 +2166,7 @@ async def extract_facts_from_contents_batch_api(
     logger.info(f"Batch {batch_id} completed in {elapsed:.0f}s, retrieving results")
 
     # Step 4: Retrieve results
-    batch_results = await llm_config._provider_impl.retrieve_batch_results(batch_id)
+    batch_results = await batch_impl.retrieve_batch_results(batch_id)
 
     # Map results by custom_id
     results_by_id = {result["custom_id"]: result for result in batch_results}

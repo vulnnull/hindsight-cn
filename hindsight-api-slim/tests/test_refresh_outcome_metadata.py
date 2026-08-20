@@ -344,19 +344,19 @@ def test_delta_failure_reason_narrows_the_fallback_vocabulary():
 # ---------------------------------------------------------------------------
 
 # The document each scenario starts from. It round-trips through
-# parse_markdown -> render_document unchanged, which is what lets the zero-op
+# split_markdown -> render_document unchanged, which is what lets the zero-op
 # delta case below be byte-identical rather than merely equivalent.
 _BASELINE = "# Team\n\nAlice is the lead.\n"
 
 _VALID_OP = {
     "op": "append_block",
     "section_id": "team",
-    "block": {"type": "paragraph", "text": "Bob joined the team."},
+    "text": "Bob joined the team.",
 }
 _UNKNOWN_SECTION_OP = {
     "op": "append_block",
     "section_id": "does-not-exist",
-    "block": {"type": "paragraph", "text": "Bob joined the team."},
+    "text": "Bob joined the team.",
 }
 _FACTS = [{"id": "obs-new", "text": "Bob joined", "type": "observation", "context": None}]
 _SCHEMA = {"type": "object", "properties": {"summary": {"type": "string"}}}
@@ -512,10 +512,10 @@ async def test_refresh_outcome_matrix(case: _OutcomeCase, memory: MemoryEngine, 
     if case.unparseable_baseline:
         from hindsight_api.engine.reflect import structured_doc
 
-        def unparseable(_markdown: str):
-            raise ValueError("simulated unparseable markdown")
+        def unreadable(_stored, _markdown: str):
+            raise ValueError("simulated unreadable structured document")
 
-        monkeypatch.setattr(structured_doc, "parse_markdown", unparseable)
+        monkeypatch.setattr(structured_doc, "structured_document_from_stored", unreadable)
     if case.structured_output_fails:
         import types
 

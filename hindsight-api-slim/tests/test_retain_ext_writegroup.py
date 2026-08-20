@@ -168,6 +168,10 @@ def _kwargs(tracker, provider, er, *, doc_tracking_done, existing_hash, new_hash
         is_first_batch=True,
         is_last=is_last,
         doc_tracking_done=doc_tracking_done,
+        # Separate latch: `doc_tracking_done` says tracking finished (set even for a zero-unit
+        # batch), while this says the document's prior version was actually replaced. These tests
+        # drive one batch at a time, so a fresh latch per call is what they want.
+        doc_replace_done=[False],
         pipeline_aborted=[False],
         append_base_hash=None,
         new_content_hash=new_hash,

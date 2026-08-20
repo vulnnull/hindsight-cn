@@ -49,7 +49,7 @@ class TestMentalModelsCRUD:
 
         assert mental_model["name"] == "Team Preferences"
         assert mental_model["source_query"] == "What are the team's communication preferences?"
-        assert mental_model["content"] == "The team prefers async communication via Slack"
+        assert mental_model["content"] == "The team prefers async communication via Slack\n"
         assert mental_model["tags"] == ["team"]
         assert "id" in mental_model
 
@@ -191,7 +191,7 @@ class TestMentalModelsCRUD:
         )
 
         assert updated["name"] == "Updated Name"
-        assert updated["content"] == "Updated Content"
+        assert updated["content"] == "Updated Content\n"
 
         # Cleanup
         await memory.delete_bank(bank_id, request_context=request_context)
