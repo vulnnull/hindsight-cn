@@ -116,6 +116,8 @@ async def test_batch_causal_targets_use_each_chunk_start(monkeypatch):
     ]
 
     class Provider:
+        provider = "test"
+
         async def supports_batch_api(self):
             return True
 
@@ -154,7 +156,15 @@ async def test_batch_causal_targets_use_each_chunk_start(monkeypatch):
         retain_structured_chunk_size=100,
         retain_batch_poll_interval_seconds=0,
     )
-    llm_config = SimpleNamespace(_provider_impl=Provider(), provider="test")
+    # The batch lifecycle targets the impl `batch_provider_impl()` resolves — for a
+    # multi-LLM chain the first batch-capable member, not necessarily the primary
+    # (#3649). Stubbing `_provider_impl` instead would model the pre-#3649 shape.
+    batch_impl = Provider()
+
+    async def _batch_provider_impl():
+        return batch_impl
+
+    llm_config = SimpleNamespace(batch_provider_impl=_batch_provider_impl, provider="test")
     facts, _, _ = await fact_extraction.extract_facts_from_contents_batch_api(
         [RetainContent(content="preceding"), RetainContent(content="first|second")],
         llm_config=llm_config,

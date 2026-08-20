@@ -270,7 +270,10 @@ def test_batch_request_body_strict_follows_retain_config(strict):
     """
     from hindsight_api.engine.retain.fact_extraction import _build_request_body
 
-    llm_config = SimpleNamespace(model="gpt-4o-mini", provider="openai", _provider_impl=SimpleNamespace())
+    # The batch impl that serves the batch — since #3649 this is what
+    # _build_request_body reads model/provider/service tier off, rather than the
+    # wrapper, so that they match the account the batch is submitted to.
+    batch_impl = SimpleNamespace(model="gpt-4o-mini", provider="openai", openai_service_tier=None)
     config = SimpleNamespace(
         retain_max_completion_tokens=None,
         # Global deliberately set opposite to the retain override: if the batch path
@@ -279,10 +282,8 @@ def test_batch_request_body_strict_follows_retain_config(strict):
         llm_strict_schema_retain=strict,
         llm_temperature_retain=None,
     )
-    # provider != "openai" service-tier branch skipped via _provider_impl without attr
-    llm_config._provider_impl.openai_service_tier = None
 
-    body = _build_request_body(llm_config, config, "system prompt", "user message", _Resp)
+    body = _build_request_body(batch_impl, config, "system prompt", "user message", _Resp)
     assert body["response_format"]["json_schema"]["strict"] is strict
 
 

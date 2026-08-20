@@ -3388,7 +3388,16 @@ async def _try_delta_retain(
     # Build content items for only the changed/new chunks
     delta_contents, delta_chunk_map = _build_delta_contents(contents, new_chunks_with_contents, chunks_to_process)
 
-    if not delta_contents:
+    # Only bail out to the metadata-only path when there is genuinely nothing to WRITE — not
+    # merely nothing to EXTRACT. A re-retain that only DELETES content (drop the last section of
+    # a document, leave the rest byte-identical) classifies as `changed=0 new=0 removed=N`, so
+    # `delta_contents` is empty while `removed_indices` is not. Returning here updated the
+    # document row to the shrunken body and deleted nothing: the removed sections' chunks and
+    # facts stayed recallable as part of a document that no longer contained them, and the state
+    # was stable — the document's stored hash now matched the new body, so re-submitting it was a
+    # no-op that never revisited the leftovers. The write path below deletes `removed_indices`
+    # whether or not it also has facts to insert, so let it run.
+    if not delta_contents and not removed_indices:
         return await _delta_metadata_only(
             pool,
             bank_id,
