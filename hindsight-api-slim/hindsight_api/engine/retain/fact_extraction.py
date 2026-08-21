@@ -14,7 +14,7 @@ from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator
 
-from ..llm_interface import ProviderRateLimitResetError
+from ..llm_interface import ProviderContentPolicyError, ProviderRateLimitResetError
 from ..llm_wrapper import LLMConfig, OutputTooLongError, parse_llm_json, sanitize_llm_output
 from ..operation_metadata import RetainExtractionErrors
 from ..response_models import TokenUsage
@@ -1914,6 +1914,21 @@ async def extract_facts_from_text(
                 ),
             ) from quota_errors[0]
 
+        # A content-policy refusal is deterministic: the offending chunk earns
+        # the same refusal on every replay, so no amount of task-level retrying
+        # can complete this retain. Re-raise the permanent type (rather than a
+        # generic RuntimeError) so the worker fails the operation immediately
+        # instead of burning a full retry schedule on it (issue #3690). One
+        # refused chunk is enough — the retain cannot succeed while it is in the
+        # batch, whatever the other failures were.
+        policy_errors = [err for _, err in failed_chunks if isinstance(err, ProviderContentPolicyError)]
+        if policy_errors:
+            raise ProviderContentPolicyError(
+                f"Fact extraction refused by provider content policy: {len(policy_errors)} of "
+                f"{len(failed_chunks)} failed chunks ({len(chunks)} total) were refused; retrying cannot "
+                f"succeed. First failures: {failed_summary}"
+            ) from policy_errors[0]
+
         # Fail the entire retain — partial extraction is not acceptable.
         # All successfully extracted facts are discarded because the transaction
         # hasn't committed yet. The worker poller will retry the entire task.
@@ -2009,22 +2024,13 @@ async def extract_facts_from_contents_batch_api(
     # Check config for causal link extraction (used throughout)
     extract_causal_links = config.retain_extract_causal_links
 
-    # Resolve the provider implementation that serves the batch. For a multi-LLM
-    # chain this is the first batch-capable member (not necessarily the primary);
-    # for a single provider it is the primary itself, and ``None`` when nothing
-    # configured can serve a batch at all. The whole batch lifecycle (submit →
-    # poll → retrieve) must target this ONE impl, so resolve it once and reuse it.
-    batch_impl = await llm_config.batch_provider_impl()
-
-    if batch_impl is None:
-        raise RuntimeError(
-            f"retain_batch_enabled=True but provider '{llm_config.provider}' does not "
-            f"support the batch API. This should have been caught at startup — check "
-            f"HINDSIGHT_API_RETAIN_BATCH_ENABLED and your LLM provider configuration."
-        )
-
-    # Check if we're resuming an existing batch (crash recovery)
+    # Check if we're resuming an existing batch (crash recovery). This is read
+    # BEFORE the serving member is resolved: a resume must target the account
+    # that owns the batch, not whichever member the current configuration would
+    # pick for a fresh one.
     batch_id = None
+    submitted_account: str | None = None
+    submitted_provider: str | None = None
     if operation_id and pool:
         from ..db_utils import acquire_with_retry
         from ..task_backend import fq_table
@@ -2041,24 +2047,54 @@ async def extract_facts_from_contents_batch_api(
             if isinstance(metadata, str):
                 metadata = json.loads(metadata)
             batch_id = metadata.get("batch_id")
-
             if batch_id:
-                # Member selection is deterministic by declared order, but the
-                # chain configuration can change between the submit and the
-                # resume (a member added, removed, or given batch capacity). A
-                # batch_id only exists on the account that created it, so polling
-                # a different one would hang until the wall clock ran out and then
-                # report a provider error nobody can act on. Fail on the mismatch
-                # instead, naming both sides.
+                submitted_account = metadata.get("batch_account")
                 submitted_provider = metadata.get("batch_provider")
-                if submitted_provider and submitted_provider != batch_impl.provider:
-                    raise RuntimeError(
-                        f"Cannot resume batch {batch_id}: it was submitted to "
-                        f"'{submitted_provider}' but the retain LLM configuration now "
-                        f"serves batch from '{batch_impl.provider}'. Restore the LLM "
-                        f"member that submitted it, or fail this operation and retain again."
-                    )
-                logger.info(f"Resuming existing batch: batch_id={batch_id} (crash recovery)")
+
+    # Resolve the provider implementation that serves the batch. For a multi-LLM
+    # chain a fresh batch goes to the first batch-capable member (not necessarily
+    # the primary); for a single provider it is the primary itself, and ``None``
+    # when nothing configured can serve a batch at all. The whole batch lifecycle
+    # (submit → poll → retrieve) must target this ONE impl, so resolve it once
+    # and reuse it.
+    #
+    # Resuming pins the lookup to the account that submitted the batch. The chain
+    # configuration can change between submit and resume — a member added,
+    # removed, reordered, or given batch capacity — and two members of the same
+    # provider on different credentials are indistinguishable by provider name,
+    # so "first batch-capable member" can resolve to an account that has never
+    # seen this batch id (#3671).
+    batch_impl = await llm_config.batch_provider_impl(account_key=submitted_account)
+
+    if batch_impl is None:
+        if batch_id:
+            # Polling an account that does not own the batch would hang until the
+            # wall clock ran out and then report a provider error nobody can act
+            # on. Fail before the first poll instead, naming both sides.
+            raise RuntimeError(
+                f"Cannot resume batch {batch_id}: it was submitted by the LLM member "
+                f"'{submitted_account or submitted_provider}', which the retain LLM "
+                f"configuration no longer serves batch from. Restore the LLM member "
+                f"(provider, base URL and API key) that submitted it, or fail this "
+                f"operation and retain again."
+            )
+        raise RuntimeError(
+            f"retain_batch_enabled=True but provider '{llm_config.provider}' does not "
+            f"support the batch API. This should have been caught at startup — check "
+            f"HINDSIGHT_API_RETAIN_BATCH_ENABLED and your LLM provider configuration."
+        )
+
+    if batch_id:
+        # Batches submitted before ``batch_account`` was persisted carry only the
+        # provider name; keep guarding those on the coarse signal we do have.
+        if submitted_account is None and submitted_provider and submitted_provider != batch_impl.provider:
+            raise RuntimeError(
+                f"Cannot resume batch {batch_id}: it was submitted to "
+                f"'{submitted_provider}' but the retain LLM configuration now "
+                f"serves batch from '{batch_impl.provider}'. Restore the LLM "
+                f"member that submitted it, or fail this operation and retain again."
+            )
+        logger.info(f"Resuming existing batch: batch_id={batch_id} (crash recovery)")
 
     # Step 1: Chunk all contents and build batch requests (skip if resuming)
     all_chunks_info = []  # List of (chunk_text, content_index, chunk_index_in_content, event_date, context)
@@ -2117,6 +2153,10 @@ async def extract_facts_from_contents_batch_api(
             batch_state = {
                 "batch_id": batch_id,
                 "batch_provider": batch_impl.provider,
+                # Binds the batch to the exact account that owns it, so a resume
+                # after a member reorder resolves that account instead of a
+                # same-provider lookalike (#3671). Non-secret by construction.
+                "batch_account": batch_impl.batch_account_key,
                 "chunk_count": len(batch_requests),
             }
 

@@ -62,7 +62,7 @@ from .db.ops_postgresql import pg_search_vector_expr
 from .db.postgresql import PostgreSQLBackend
 from .db.postgresql import apply_session_settings as _apply_session_settings
 from .db_budget import budgeted_operation
-from .llm_interface import ProviderRateLimitResetError
+from .llm_interface import ProviderContentPolicyError, ProviderRateLimitResetError
 from .llm_trace import (
     LLMRequestEntry,
     LLMRequestListResponse,
@@ -548,6 +548,7 @@ from .response_models import (
     MinScores,
     RecallScores,
     ReflectResult,
+    TemporalWindow,
     TokenUsage,
     ToolCallTrace,
 )
@@ -1098,6 +1099,10 @@ def _is_non_retryable_task_error(e: Exception) -> bool:
         isinstance(e, asyncpg.exceptions.IntegrityConstraintViolationError)
         or _is_oracledb_integrity_error(e)
         or _is_invalid_embedding_dimension_error(e)
+        # A provider content-policy refusal is a function of the content, not of
+        # the moment: re-running the task feeds the same chunk to the same model
+        # and earns the same refusal (issue #3690).
+        or isinstance(e, ProviderContentPolicyError)
     )
 
 
@@ -5870,6 +5875,7 @@ class MemoryEngine(MemoryEngineInterface):
         created_after: datetime | None = None,
         created_before: datetime | None = None,
         min_scores: MinScores | None = None,
+        temporal_window: TemporalWindow | None = None,
         _connection_budget: int | None = None,
         _quiet: bool = False,
         reranking: RecallReranking = "cross_encoder",
@@ -5915,6 +5921,10 @@ class MemoryEngine(MemoryEngineInterface):
                   it", so an edited memory re-enters it. That is what the mental-model delta
                   refresh chases from its watermark (see META_UPDATED_AT in memories/base.py).
             created_before: Upper bound on the same window, exclusive.
+            temporal_window: Window for the temporal retrieval arm, used instead of
+                  extracting dates from ``query``. It ranks memories dated inside it
+                  higher; it does not exclude memories dated outside it, and it does
+                  nothing when the bank has ``enable_temporal_retrieval`` off.
 
         Returns:
             RecallResultModel containing:
@@ -6068,6 +6078,7 @@ class MemoryEngine(MemoryEngineInterface):
                             created_after=created_after,
                             created_before=created_before,
                             min_scores=min_scores,
+                            temporal_window=temporal_window,
                             connection_budget=_connection_budget,
                             quiet=_quiet,
                             include_source_facts=include_source_facts,
@@ -6209,6 +6220,7 @@ class MemoryEngine(MemoryEngineInterface):
         created_after: datetime | None = None,
         created_before: datetime | None = None,
         min_scores: MinScores | None = None,
+        temporal_window: TemporalWindow | None = None,
         connection_budget: int | None = None,
         quiet: bool = False,
         include_source_facts: bool = False,
@@ -6353,6 +6365,7 @@ class MemoryEngine(MemoryEngineInterface):
                         created_before=created_before,
                         min_semantic=min_scores.semantic if min_scores else None,
                         min_keyword=min_scores.keyword if min_scores else None,
+                        temporal_window=temporal_window,
                         enable_temporal_retrieval=enable_temporal_retrieval,
                         enable_graph_retrieval=enable_graph_retrieval,
                     )
