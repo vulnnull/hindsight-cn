@@ -51,7 +51,13 @@ export function getProjectRootFromGit(directory: string): string | null {
     const commonDir = execFileSync(
       "git",
       ["rev-parse", "--path-format=absolute", "--git-common-dir"],
-      { cwd: directory, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], timeout: 1000 }
+      {
+        cwd: directory,
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 1000,
+        windowsHide: true,
+      }
     ).trim();
     if (!commonDir) return null;
     // clones + `git worktree add`: common-dir is `<main root>/.git`; bare repos: the dir itself.
