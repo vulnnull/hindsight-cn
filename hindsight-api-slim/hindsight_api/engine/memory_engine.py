@@ -202,8 +202,8 @@ def _bind_bank_id(
 
 
 def count_tokens(text: str) -> int:
-    """Count tokens in text using tiktoken (cl100k_base encoding for GPT-4/3.5)."""
-    return len(_get_tiktoken_encoding().encode(text))
+    """Count tokens in text under the configured encoding (see engine/token_encoding.py)."""
+    return _token_encoding_count(text)
 
 
 def _parse_chunk_id(chunk_id: str | None) -> "tuple[str, str, int] | None":
@@ -572,7 +572,8 @@ from .task_backend import TaskBackend
 #                     arm's top hits a slot (used by consolidation dedup recall, where RRF
 #                     buried the near-identical twin below budget). See interleave_fusion.
 RecallReranking = Literal["cross_encoder", "rrf", "interleave"]
-from .token_encoding import count_tokens_windowed, get_token_encoding
+from .token_encoding import count_tokens as _token_encoding_count
+from .token_encoding import get_token_encoding
 
 RetainOutboxCallback = Callable[[asyncpg.Connection], Awaitable[None]]
 RetainOutboxCallbackFactory = Callable[[list[RetainContentDict]], RetainOutboxCallback | None]
@@ -968,7 +969,7 @@ def _iter_raw_sub_batches(
 
     for original_idx, item in enumerate(contents):
         content_str = item.get("content", "") or ""
-        item_tokens = count_tokens_windowed(content_str)
+        item_tokens = count_tokens(content_str)
 
         if item_tokens > tokens_per_batch:
             # Oversized single item: flush anything in flight, then emit runs of
@@ -1070,7 +1071,7 @@ def _split_contents_into_async_children(
 
     Unlike ``_split_contents_into_sub_batches`` (used by the in-process
     path), this NEVER fragments a single input item across multiple
-    children. Items where ``count_tokens_windowed(content) > tokens_per_batch``
+    children. Items where ``count_tokens(content) > tokens_per_batch``
     are emitted as their own single-item child holding the FULL
     un-chunked content; the in-process ``retain_batch_async`` then
     re-chunks them SEQUENTIALLY inside one worker slot with correct
@@ -1103,7 +1104,7 @@ def _split_contents_into_async_children(
             current_tokens = 0
 
     for item in contents:
-        item_tokens = count_tokens_windowed(item.get("content", "") or "")
+        item_tokens = count_tokens(item.get("content", "") or "")
 
         if item_tokens > tokens_per_batch:
             # Oversized: flush in-flight items into their own child,
@@ -1268,17 +1269,8 @@ logger = logging.getLogger(__name__)
 from .db_utils import acquire_with_retry, retry_with_backoff
 
 
-def _get_tiktoken_encoding():
-    """Get cached tiktoken encoding (cl100k_base for GPT-4/3.5).
-
-    Returns a wrapper that tolerates special-token literals in user content
-    (see hindsight_api.engine.token_encoding).
-    """
-    return get_token_encoding()
-
-
 def _truncate_query_to_token_limit(query: str, max_query_tokens: int, log_prefix: str = "") -> str:
-    """Bound a recall query to ``max_query_tokens`` cl100k tokens (``0`` disables the cap).
+    """Bound a recall query to ``max_query_tokens`` tokens (``0`` disables the cap).
 
     Truncation, not rejection: this runs on the path every *internal* caller takes
     (consolidation, reflect tools, MCP tools, the context extension), and those must
@@ -1290,16 +1282,16 @@ def _truncate_query_to_token_limit(query: str, max_query_tokens: int, log_prefix
     if max_query_tokens <= 0 or len(query) <= max_query_tokens:
         return query
 
-    encoding = _get_tiktoken_encoding()
-    tokens = encoding.encode(query)
-    if len(tokens) <= max_query_tokens:
+    encoding = get_token_encoding()
+    query_tokens = encoding.count(query)
+    if query_tokens <= max_query_tokens:
         return query
 
     logger.warning(
-        f"{log_prefix}Query truncated to {max_query_tokens} tokens (was {len(tokens)}); "
+        f"{log_prefix}Query truncated to {max_query_tokens} tokens (was {query_tokens}); "
         f"raise HINDSIGHT_API_RECALL_MAX_QUERY_TOKENS to allow longer queries"
     )
-    return encoding.decode(tokens[:max_query_tokens])
+    return encoding.decode(encoding.encode(query)[:max_query_tokens])
 
 
 @dataclass(frozen=True)
@@ -2207,7 +2199,7 @@ class MemoryEngine(MemoryEngineInterface):
         self._put_semaphore = asyncio.Semaphore(get_config().retain_max_concurrent)
 
         # initialize encoding eagerly to avoid delaying the first time
-        _get_tiktoken_encoding()
+        get_token_encoding()
 
         # Store operation validator extension (optional)
         self._operation_validator = operation_validator
@@ -5237,7 +5229,7 @@ class MemoryEngine(MemoryEngineInterface):
 
         # Auto-chunk large batches by token count to avoid timeouts and memory issues
         # Calculate total token count
-        total_tokens = sum(count_tokens_windowed(item.get("content", "")) for item in contents)
+        total_tokens = sum(count_tokens(item.get("content", "")) for item in contents)
         total_usage = TokenUsage()
         # Aggregate "content tokens that actually went through extraction after
         # chunk-level dedup" across sub-batches. ``None`` in any sub-batch
@@ -7066,7 +7058,7 @@ class MemoryEngine(MemoryEngineInterface):
 
                 if chunk_ids_ordered:
                     chunks_dict = {}
-                    encoding = _get_tiktoken_encoding()
+                    encoding = get_token_encoding()
 
                     # Fetch all candidate chunks in a single query. Token-budget accounting
                     # happens in Python after the fetch — one round-trip is always faster
@@ -7175,11 +7167,12 @@ class MemoryEngine(MemoryEngineInterface):
 
                         row = chunks_lookup[chunk_id]
                         chunk_text = row["chunk_text"]
-                        chunk_tokens = len(encoding.encode(chunk_text))
+                        chunk_tokens = encoding.count(chunk_text)
 
                         if total_chunk_tokens + chunk_tokens > max_chunk_tokens:
                             remaining_tokens = max_chunk_tokens - total_chunk_tokens
                             if remaining_tokens > 0:
+                                # Only now are the ids needed — the fits-in-budget path above never builds them.
                                 truncated_text = encoding.decode(encoding.encode(chunk_text)[:remaining_tokens])
                                 chunks_dict[chunk_id] = ChunkInfo(
                                     chunk_text=truncated_text, chunk_index=row["chunk_index"], truncated=True
@@ -7192,8 +7185,8 @@ class MemoryEngine(MemoryEngineInterface):
                             )
                             total_chunk_tokens += chunk_tokens
 
-            # Chunk fetch involves up to two SQL round-trips plus per-chunk tiktoken
-            # encoding; record it only when chunks were actually requested (issue #2361).
+            # Chunk fetch involves up to two SQL round-trips plus per-chunk token
+            # counting; record it only when chunks were actually requested (issue #2361).
             if tracer and include_chunks:
                 tracer.add_phase_metric(
                     "chunk_fetch",
@@ -7204,12 +7197,12 @@ class MemoryEngine(MemoryEngineInterface):
             # Step 6: Token budget filtering
             step_start = time.time()
 
-            encoding = _get_tiktoken_encoding()
+            encoding = get_token_encoding()
             selection = select_facts_within_budget(
                 fact_ids_ordered=[sr.id for sr in top_scored],
                 text_by_id={sr.id: sr.retrieval.text for sr in top_scored},
                 max_tokens=max_tokens,
-                count_tokens=lambda text: len(encoding.encode(text)),
+                count_tokens=encoding.count,
             )
             total_tokens = selection.total_tokens
             selected_ids = set(selection.ids)
@@ -7430,7 +7423,7 @@ class MemoryEngine(MemoryEngineInterface):
                                     )
                                 }
 
-                            encoding = _get_tiktoken_encoding()
+                            encoding = get_token_encoding()
 
                             def _make_source_fact(sid: str, r: Any) -> MemoryFact:
                                 return MemoryFact(
@@ -7453,14 +7446,14 @@ class MemoryEngine(MemoryEngineInterface):
                                 text_by_id={sid: r["text"] for sid, r in source_row_by_id.items()},
                                 max_total_tokens=max_source_facts_tokens,
                                 max_tokens_per_observation=max_source_facts_tokens_per_observation,
-                                count_tokens=lambda text: len(encoding.encode(text)),
+                                count_tokens=encoding.count,
                             )
                             source_facts_truncated = selection.truncated
                             source_facts_dict = {
                                 sid: _make_source_fact(sid, source_row_by_id[sid]) for sid in selection.ids
                             }
 
-            # Source-fact enrichment is two SQL passes + tiktoken encoding; record it
+            # Source-fact enrichment is two SQL passes + token counting; record it
             # only when requested (issue #2361).
             if tracer and include_source_facts:
                 tracer.add_phase_metric(
@@ -14361,9 +14354,9 @@ class MemoryEngine(MemoryEngineInterface):
                 # which crosses the 4096 default after a couple of hundred refreshes).
                 # The model is told where it stands so it can reclaim space from
                 # stale content; truncating here would delete knowledge instead.
-                from .reflect.tokenization import count_cl100k_tokens
+                from .reflect.tokenization import count_prompt_tokens
 
-                document_tokens = count_cl100k_tokens(current_content)
+                document_tokens = count_prompt_tokens(current_content)
                 user_prompt = build_structured_delta_prompt(
                     current_document_json=current_doc.model_dump_json(),
                     candidate_markdown=reflect_result.text,
@@ -14430,7 +14423,7 @@ class MemoryEngine(MemoryEngineInterface):
                         # Surfaced rather than enforced: a page that keeps growing past
                         # its budget is a page whose content needs a decision, and that
                         # is visible here instead of only in the byte count.
-                        final_tokens = count_cl100k_tokens(final_content)
+                        final_tokens = count_prompt_tokens(final_content)
                         reflect_response_payload["document_tokens"] = final_tokens
                         reflect_response_payload["document_budget"] = doc_max_tokens
                         if final_tokens > doc_max_tokens:
@@ -17998,7 +17991,7 @@ class MemoryEngine(MemoryEngineInterface):
             )
 
         # Calculate total token count and determine if we need to split
-        total_tokens = sum(count_tokens_windowed(item.get("content", "")) for item in contents)
+        total_tokens = sum(count_tokens(item.get("content", "")) for item in contents)
         config = get_config()
         tokens_per_batch = config.retain_batch_tokens
 

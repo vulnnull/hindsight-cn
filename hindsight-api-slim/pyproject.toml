@@ -27,7 +27,11 @@ dependencies = [
     "pgvector>=0.4.1",
     "greenlet>=3.2.4,<3.4.0", # 3.4.0 lacks arm64 wheels for manylinux_2_41
     "psycopg2-binary>=2.9.11",
-    "tiktoken>=0.12.0",
+    # Tokenizer for all token counting and chunking. Replaces tiktoken: same ids,
+    # several times faster, a count-only API that allocates no id list, and the
+    # vocabularies ship in the wheel so nothing is downloaded at runtime.
+    # Contained to engine/token_encoding.py — see that module for the rationale.
+    "quicktok-v1>=0.4.0",
     "httpx>=0.27.0",
     "PyJWT[crypto]>=2.8.0",
     "fastmcp>=3.2.0", # SSRF/path traversal, OAuth confused deputy, command injection fixes

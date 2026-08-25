@@ -34,7 +34,7 @@ from .structured_doc import (
     render_document,
     split_markdown,
 )
-from .tokenization import count_cl100k_tokens
+from .tokenization import count_prompt_tokens
 from .tools_schema import get_reflect_tools
 
 
@@ -284,21 +284,21 @@ OUTPUT:"""
 
 
 def _count_messages_tokens(messages: list[dict[str, Any]]) -> int:
-    """Estimate the token count of the messages list using cl100k_base encoding."""
+    """Estimate the token count of the messages list using the configured encoding."""
     total = 0
     for msg in messages:
         content = msg.get("content") or ""
         if isinstance(content, str):
-            total += count_cl100k_tokens(content)
+            total += count_prompt_tokens(content)
         elif isinstance(content, list):
             for part in content:
                 if isinstance(part, dict) and isinstance(part.get("text"), str):
-                    total += count_cl100k_tokens(part["text"])
+                    total += count_prompt_tokens(part["text"])
         # Tool call arguments and results also count
         for tc in msg.get("tool_calls") or []:
             if isinstance(tc, dict):
                 func = tc.get("function", {})
-                total += count_cl100k_tokens(func.get("arguments", ""))
+                total += count_prompt_tokens(func.get("arguments", ""))
     return total
 
 
@@ -1263,7 +1263,7 @@ async def _process_done_tool(
         )
 
     final_usage = usage
-    if llm_config and max_tokens is not None and count_cl100k_tokens(answer) > max_tokens:
+    if llm_config and max_tokens is not None and count_prompt_tokens(answer) > max_tokens:
         rewrite_start = time.time()
         # In document mode the trim is asked for as a document too. Asking for
         # prose here would put the model back in the business of writing the

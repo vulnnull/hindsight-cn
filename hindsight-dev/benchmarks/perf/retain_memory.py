@@ -105,22 +105,22 @@ def build_document(target_chars: int) -> str:
 
 
 def run(doc_mb: int, chunk_size: int) -> list[Measurement]:
-    from hindsight_api.engine.memory_engine import _split_contents_into_sub_batches
+    from hindsight_api.engine.memory_engine import _iter_raw_sub_batches
     from hindsight_api.engine.retain import fact_extraction
-    from hindsight_api.engine.token_encoding import count_tokens_windowed
+    from hindsight_api.engine.token_encoding import count_tokens
 
     doc = build_document(doc_mb * 1024 * 1024)
     print(f"document: {len(doc):,} chars ({len(doc) / 1024 / 1024:.1f} MB), chunk_size={chunk_size}")
 
-    # Load tiktoken's encoding table before measuring. It is ~80 MB, paid once per process
-    # and shared with recall, so it is a worker's startup cost rather than a retain's.
-    count_tokens_windowed(_FILLER)
+    # Load the tokenizer's vocabulary before measuring. It is parsed once per process and
+    # shared with recall, so it is a worker's startup cost rather than a retain's.
+    count_tokens(_FILLER)
     print(f"resident before measurement: {_current_rss_mb():.1f} MB\n")
 
     return [
         measure(
-            "sizing check (windowed)",
-            lambda: count_tokens_windowed(doc),
+            "sizing check (count_tokens)",
+            lambda: count_tokens(doc),
             lambda n: f"{n:,} tokens",
         ),
         # What retain does: consume chunks one at a time, never holding the list. Both the
@@ -138,17 +138,22 @@ def run(doc_mb: int, chunk_size: int) -> list[Measurement]:
             lambda: fact_extraction.chunk_text(doc, chunk_size, structured_chunk_size=None),
             lambda chunks: f"{len(chunks):,} chunks",
         ),
-        # Also about one copy of the document: the returned slices ARE the document, cut up
-        # for the caller to process sequentially.
+        # The splitter's slices ARE the document, cut up for the caller to process
+        # sequentially, so collecting them cost about one copy of the document. #3770 made
+        # it yield instead, which is why this consumes the iterator rather than listing it:
+        # what it allocates now is one sub-batch, not the whole split.
         measure(
-            "split into sub-batches",
-            lambda: _split_contents_into_sub_batches(
-                [{"content": doc}],
-                _SUB_BATCH_TOKENS,
-                chunk_size=chunk_size,
-                structured_chunk_size=None,
+            "split into sub-batches (streamed)",
+            lambda: sum(
+                1
+                for _ in _iter_raw_sub_batches(
+                    [{"content": doc}],
+                    _SUB_BATCH_TOKENS,
+                    chunk_size=chunk_size,
+                    structured_chunk_size=None,
+                )
             ),
-            lambda split: f"{len(split.sub_batches):,} sub-batches",
+            lambda n: f"{n:,} sub-batches",
         ),
     ]
 
