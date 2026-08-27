@@ -1413,6 +1413,14 @@ class CreateBankRequest(BaseModel):
         default=None,
         description="Controls what gets synthesised into observations. Replaces built-in consolidation rules entirely.",
     )
+    enable_text_search: bool | None = Field(
+        default=None,
+        description=(
+            "Toggle the keyword (BM25) retrieval arm during recall. Disabling leaves pure vector "
+            "search: the arm is left out of the query entirely rather than filtered to nothing, so "
+            "none of its cost is paid. Also drops the keyword arm from knowledge-page search."
+        ),
+    )
     enable_temporal_retrieval: bool | None = Field(
         default=None,
         description=(
@@ -1467,6 +1475,7 @@ class CreateBankRequest(BaseModel):
             "retain_structured_chunk_size",
             "enable_observations",
             "observations_mission",
+            "enable_text_search",
             "enable_temporal_retrieval",
             "enable_graph_retrieval",
             "enable_reranking",
@@ -2720,6 +2729,9 @@ class BankTemplateConfig(BaseModel):
     )
     enable_observations: bool | None = Field(default=None, description="Toggle observation consolidation")
     observations_mission: str | None = Field(default=None, description="Controls what gets synthesised")
+    enable_text_search: bool | None = Field(
+        default=None, description="Toggle the keyword (BM25) arm during recall, leaving pure vector search"
+    )
     enable_temporal_retrieval: bool | None = Field(
         default=None, description="Toggle the temporal arm (and its date-aware query analysis) during recall"
     )

@@ -467,6 +467,8 @@
     "recallDescription": "呢個記憶庫召回時會行嘅檢索階段",
     "recallServerDefault": "伺服器預設值",
     "recallFailedToSave": "儲存召回流程設定失敗",
+    "recallTextSearchLabel": "文字檢索",
+    "recallTextSearchDescription": "召回時行關鍵字（BM25）檢索分支。停用之後淨係剩返純向量檢索，呢個分支會完全喺查詢裏面移除，所以唔使畀任何成本。",
     "recallTemporalRetrievalLabel": "時間檢索",
     "recallTemporalRetrievalDescription": "行日期感知嘅查詢分析。停用之後亦會略過時間檢索分支。如果呢個記憶庫嘅內容冇乜有意義嘅日期，就會用得着。",
     "recallGraphRetrievalLabel": "圖檢索",

@@ -675,6 +675,7 @@ async def _load_observations_from_store(
             continue
         observations.append(
             TransferObservation(
+                source_id=str(memory.unit_id),
                 text=memory.text,
                 tags=list(memory.tags or []),
                 event_date=memory.event_date,
@@ -777,6 +778,7 @@ async def _load_observations(
             continue
         observations.append(
             TransferObservation(
+                source_id=str(row["id"]),
                 text=row["text"],
                 tags=list(row["tags"] or []),
                 event_date=row["event_date"],
@@ -849,6 +851,7 @@ async def _load_facts(conn: Any, bank_id: str, doc_ids: list[str], include_lifec
         bucket = loaded.facts_by_doc.setdefault(doc_id, [])
         ordinal = len(bucket)
         fact = TransferFact(
+            source_id=str(row["id"]),
             text=row["text"],
             fact_type=row["fact_type"],
             context=row["context"],

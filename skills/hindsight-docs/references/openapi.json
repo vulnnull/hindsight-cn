@@ -7639,6 +7639,18 @@
             "title": "Observations Mission",
             "description": "Controls what gets synthesised"
           },
+          "enable_text_search": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enable Text Search",
+            "description": "Toggle the keyword (BM25) arm during recall, leaving pure vector search"
+          },
           "enable_temporal_retrieval": {
             "anyOf": [
               {
@@ -8834,6 +8846,18 @@
             ],
             "title": "Observations Mission",
             "description": "Controls what gets synthesised into observations. Replaces built-in consolidation rules entirely."
+          },
+          "enable_text_search": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enable Text Search",
+            "description": "Toggle the keyword (BM25) retrieval arm during recall. Disabling leaves pure vector search: the arm is left out of the query entirely rather than filtered to nothing, so none of its cost is paid. Also drops the keyword arm from knowledge-page search."
           },
           "enable_temporal_retrieval": {
             "anyOf": [

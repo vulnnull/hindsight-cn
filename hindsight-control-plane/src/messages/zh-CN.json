@@ -461,6 +461,8 @@
     "recallDescription": "该记忆库召回时执行的检索阶段",
     "recallServerDefault": "服务器默认值",
     "recallFailedToSave": "保存召回流水线设置失败",
+    "recallTextSearchLabel": "文本检索",
+    "recallTextSearchDescription": "在召回时执行关键词（BM25）检索分支。禁用后仅保留纯向量检索，该分支会完全从查询中移除，因此不产生任何开销。",
     "recallTemporalRetrievalLabel": "时间检索",
     "recallTemporalRetrievalDescription": "执行日期感知的查询分析。禁用后也会跳过时间检索分支。当该记忆库的内容不含有意义的日期时很有用。",
     "recallGraphRetrievalLabel": "图检索",

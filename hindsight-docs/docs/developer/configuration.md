@@ -215,6 +215,10 @@ Hindsight supports five backends for BM25 keyword retrieval:
 - **pgroonga** — pgroonga full-text search. Multilingual / CJK out of the box.
 - **pg_search** — ParadeDB pg_search. True BM25; the only backend that is Citus-compatible.
 
+A bank can also use none of them: [`enable_text_search`](#recall-pipeline-stages)
+switches the keyword arm off per bank, leaving pure vector search. Every setting in
+this table is then unused by that bank.
+
 To switch backends: set `HINDSIGHT_API_TEXT_SEARCH_EXTENSION`. With existing data, you'll get an error and migration instructions; with an empty database the columns/indexes are recreated automatically on startup.
 
 `HINDSIGHT_API_TEXT_SEARCH_EXTENSION_PG_SEARCH_TOKENIZER` only applies when `HINDSIGHT_API_TEXT_SEARCH_EXTENSION=pg_search`, and only when BM25 indexes are created. Changing it for an existing database requires rebuilding the `pg_search` indexes or recreating the database. Supported values are empty/unset, `unicode_words`, `simple`, `whitespace`, `literal`, `literal_normalized`, `chinese_compatible`, `icu`, `jieba`, `source_code`, `chinese_lindera`/`lindera(chinese)`, `japanese_lindera`/`lindera(japanese)`, `korean_lindera`/`lindera(korean)`, `ngram(min,max)`, and `edge_ngram(min,max)`.
@@ -1344,16 +1348,21 @@ ingested with `retain_extraction_mode: chunks` and used as plain retrieval.
 
 These switch the individual stages off. All are hierarchical — overridable per bank via the
 [config API](#hierarchical-configuration) — so one bank can run lean without changing how the
-rest of the deployment recalls. Semantic and BM25 always run; they are the baseline retrieval.
+rest of the deployment recalls. Semantic always runs; it is the baseline retrieval.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
+| `HINDSIGHT_API_ENABLE_TEXT_SEARCH` | Run the keyword (BM25) retrieval arm. `false` leaves **pure vector search** — the arm is left out of the query entirely rather than filtered to nothing, so its SQL, its query tokenization and its `pg_stats` term-selection lookup are all skipped. Also drops the keyword arm from knowledge-page search. | `true` |
 | `HINDSIGHT_API_ENABLE_TEMPORAL_RETRIEVAL` | Run the temporal retrieval arm. `false` also skips the date-aware query analysis that feeds it — without a detected constraint there is nothing to filter on. | `true` |
 | `HINDSIGHT_API_ENABLE_GRAPH_RETRIEVAL` | Run the entity/link graph traversal arm. `false` skips those queries and returns no graph results. | `true` |
 | `HINDSIGHT_API_ENABLE_RERANKING` | Rerank fused candidates with the cross-encoder. `false` returns the RRF-fused ordering directly — faster, but less precise. | `true` |
 
-Turning all three off leaves semantic + BM25 fused by RRF, which is the lowest-latency
-recall configuration.
+Turning all four off reduces recall to a single vector query, which is the
+lowest-latency configuration there is.
+
+Disabling text search leaves the write path alone: `search_vector` and its index are
+still maintained, so a bank can be switched back without a reindex. The
+[text-search backend](#text-search-extension) it would have used is simply unread.
 
 ##### Pairing with the retain side: plain-retrieval ("RAG") banks
 

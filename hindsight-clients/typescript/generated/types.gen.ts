@@ -515,6 +515,12 @@ export type BankTemplateConfig = {
    */
   observations_mission?: string | null;
   /**
+   * Enable Text Search
+   *
+   * Toggle the keyword (BM25) arm during recall, leaving pure vector search
+   */
+  enable_text_search?: boolean | null;
+  /**
    * Enable Temporal Retrieval
    *
    * Toggle the temporal arm (and its date-aware query analysis) during recall
@@ -1219,6 +1225,12 @@ export type CreateBankRequest = {
    * Controls what gets synthesised into observations. Replaces built-in consolidation rules entirely.
    */
   observations_mission?: string | null;
+  /**
+   * Enable Text Search
+   *
+   * Toggle the keyword (BM25) retrieval arm during recall. Disabling leaves pure vector search: the arm is left out of the query entirely rather than filtered to nothing, so none of its cost is paid. Also drops the keyword arm from knowledge-page search.
+   */
+  enable_text_search?: boolean | null;
   /**
    * Enable Temporal Retrieval
    *

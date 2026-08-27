@@ -6275,6 +6275,7 @@ class MemoryEngine(MemoryEngineInterface):
 
         # Recall pipeline stages, resolved per bank. A bank can switch off arms its
         # content cannot use, trading recall breadth for latency.
+        enable_text_search = bool(budget_config_dict.get("enable_text_search", True))
         enable_temporal_retrieval = bool(budget_config_dict.get("enable_temporal_retrieval", True))
         enable_graph_retrieval = bool(budget_config_dict.get("enable_graph_retrieval", True))
         reranking = _resolve_reranking(budget_config_dict, reranking)
@@ -6337,6 +6338,7 @@ class MemoryEngine(MemoryEngineInterface):
                             max_source_facts_tokens_per_observation=max_source_facts_tokens_per_observation,
                             reranking=reranking,
                             reranker_max_candidates=reranker_max_candidates,
+                            enable_text_search=enable_text_search,
                             enable_temporal_retrieval=enable_temporal_retrieval,
                             enable_graph_retrieval=enable_graph_retrieval,
                         )
@@ -6479,6 +6481,7 @@ class MemoryEngine(MemoryEngineInterface):
         max_source_facts_tokens_per_observation: int = -1,
         reranking: RecallReranking = "cross_encoder",
         reranker_max_candidates: int | None = None,
+        enable_text_search: bool = True,
         enable_temporal_retrieval: bool = True,
         enable_graph_retrieval: bool = True,
     ) -> RecallResultModel:
@@ -6617,6 +6620,7 @@ class MemoryEngine(MemoryEngineInterface):
                         min_semantic=min_scores.semantic if min_scores else None,
                         min_keyword=min_scores.keyword if min_scores else None,
                         temporal_window=temporal_window,
+                        enable_text_search=enable_text_search,
                         enable_temporal_retrieval=enable_temporal_retrieval,
                         enable_graph_retrieval=enable_graph_retrieval,
                     )
@@ -6770,15 +6774,19 @@ class MemoryEngine(MemoryEngineInterface):
                         fact_type=ft_name,
                     )
 
-                    # Add BM25 retrieval results for this fact type
-                    tracer.add_retrieval_results(
-                        method_name="bm25",
-                        results=to_tuple_format(rr.bm25),
-                        duration_seconds=rr.timings.get("bm25", 0.0),
-                        score_field="bm25_score",
-                        metadata={"limit": thinking_budget},
-                        fact_type=ft_name,
-                    )
+                    # Add BM25 retrieval results for this fact type, unless the bank has
+                    # text search off — then the arm was never in the SQL, and recording
+                    # an empty entry would read as "ran, matched nothing" rather than
+                    # "absent". Same reasoning as the graph guard below.
+                    if enable_text_search:
+                        tracer.add_retrieval_results(
+                            method_name="bm25",
+                            results=to_tuple_format(rr.bm25),
+                            duration_seconds=rr.timings.get("bm25", 0.0),
+                            score_field="bm25_score",
+                            metadata={"limit": thinking_budget},
+                            fact_type=ft_name,
+                        )
 
                     # Add graph retrieval results for this fact type.
                     # Skipped entirely when the arm is off: an empty graph entry is
@@ -15883,7 +15891,8 @@ class MemoryEngine(MemoryEngineInterface):
         The BM25 arm is dispatched on the configured text-search backend
         (:func:`knowledge_bm25_arm`); backends whose ``mental_models`` BM25 index
         is unpopulated (``vchord``) degrade to a vector-only search rather than
-        erroring.
+        erroring. ``enable_text_search=false`` drops that arm outright, leaving a
+        vector-only ranking.
         """
         await self._authenticate_tenant(request_context)
         if self._operation_validator and not _nested_operation_authorized.get():
@@ -15915,10 +15924,31 @@ class MemoryEngine(MemoryEngineInterface):
         # BM25 clauses for the configured text-search backend (same per-backend
         # dispatch the memory-recall BM25 arm uses — see knowledge_bm25_arm).
         text_search_extension = get_config().text_search_extension
+        # enable_text_search is per bank, so it is resolved rather than read off the
+        # global config: a bank that switched the keyword arm off in recall must not
+        # keep hitting a text index here. Costs one config round trip, the same one
+        # recall already pays. With no embedding either there is no arm left to run,
+        # so the search has no answer to give rather than a degraded one.
+        bank_config = await self._config_resolver.get_bank_config(bank_id, request_context)
+        enable_text_search = bool(bank_config.get("enable_text_search", True))
+        if not enable_text_search and emb_str is None:
+            return []
 
         backend = await self._get_backend()
         async with acquire_with_retry(backend) as conn:
-            if emb_str is not None:
+            if emb_str is not None and not enable_text_search:
+                # Vector-only: no BM25 arm to fuse with, so rank straight off the ANN scan.
+                sql = f"""
+                    SELECT kp.id, kp.name, kp.mental_model_id,
+                           LEFT(mm.content, 280) AS snippet, mm.last_refreshed_at AS updated_at,
+                           1.0 / (60 + ROW_NUMBER() OVER (ORDER BY mm.embedding <=> $1::vector)) AS score
+                    FROM {join}
+                    WHERE kp.bank_id = $2 AND kp.kind = 'page' AND mm.embedding IS NOT NULL
+                    ORDER BY mm.embedding <=> $1::vector
+                    LIMIT {limit}
+                """
+                rows = await conn.fetch(sql, emb_str, bank_id)
+            elif emb_str is not None:
                 bm25 = knowledge_bm25_arm(text_search_extension, table_alias="mm", text_param="$3")
                 # Vector arm (ANN over mm.embedding) + BM25 arm, each ranked
                 # independently, then RRF-fused (k=60) in SQL.

@@ -635,6 +635,7 @@ class Hindsight:
         retain_structured_chunk_size: int | None = None,
         enable_observations: bool | None = None,
         observations_mission: str | None = None,
+        enable_text_search: bool | None = None,
         enable_temporal_retrieval: bool | None = None,
         enable_graph_retrieval: bool | None = None,
         enable_reranking: bool | None = None,
@@ -659,6 +660,8 @@ class Hindsight:
                 turn to keep whole during retain. Defaults to retain_chunk_size when unset.
             enable_observations: Toggle automatic observation consolidation after retain().
             observations_mission: Controls what gets synthesised into observations. Replaces built-in rules.
+            enable_text_search: Run the keyword (BM25) retrieval arm during recall. False
+                leaves pure vector search — the arm is left out of the query entirely.
             enable_temporal_retrieval: Run the temporal retrieval arm during recall. False also
                 skips the date-aware query analysis that feeds it.
             enable_graph_retrieval: Run the entity/link graph traversal arm during recall.
@@ -684,6 +687,7 @@ class Hindsight:
                 retain_structured_chunk_size=retain_structured_chunk_size,
                 enable_observations=enable_observations,
                 observations_mission=observations_mission,
+                enable_text_search=enable_text_search,
                 enable_temporal_retrieval=enable_temporal_retrieval,
                 enable_graph_retrieval=enable_graph_retrieval,
                 enable_reranking=enable_reranking,
@@ -708,6 +712,7 @@ class Hindsight:
         retain_structured_chunk_size: int | None = None,
         enable_observations: bool | None = None,
         observations_mission: str | None = None,
+        enable_text_search: bool | None = None,
         enable_temporal_retrieval: bool | None = None,
         enable_graph_retrieval: bool | None = None,
         enable_reranking: bool | None = None,
@@ -751,6 +756,8 @@ class Hindsight:
             body["enable_observations"] = enable_observations
         if observations_mission is not None:
             body["observations_mission"] = observations_mission
+        if enable_text_search is not None:
+            body["enable_text_search"] = enable_text_search
         if enable_temporal_retrieval is not None:
             body["enable_temporal_retrieval"] = enable_temporal_retrieval
         if enable_graph_retrieval is not None:
@@ -794,6 +801,7 @@ class Hindsight:
         retain_structured_chunk_size: int | None = None,
         enable_observations: bool | None = None,
         observations_mission: str | None = None,
+        enable_text_search: bool | None = None,
         enable_temporal_retrieval: bool | None = None,
         enable_graph_retrieval: bool | None = None,
         enable_reranking: bool | None = None,
@@ -818,6 +826,8 @@ class Hindsight:
                 turn to keep whole during retain. Defaults to retain_chunk_size when unset.
             enable_observations: Toggle automatic observation consolidation after retain().
             observations_mission: Controls what gets synthesised into observations. Replaces built-in rules.
+            enable_text_search: Run the keyword (BM25) retrieval arm during recall. False
+                leaves pure vector search — the arm is left out of the query entirely.
             enable_temporal_retrieval: Run the temporal retrieval arm during recall. False also
                 skips the date-aware query analysis that feeds it.
             enable_graph_retrieval: Run the entity/link graph traversal arm during recall.
@@ -842,6 +852,7 @@ class Hindsight:
             retain_structured_chunk_size=retain_structured_chunk_size,
             enable_observations=enable_observations,
             observations_mission=observations_mission,
+            enable_text_search=enable_text_search,
             enable_temporal_retrieval=enable_temporal_retrieval,
             enable_graph_retrieval=enable_graph_retrieval,
             enable_reranking=enable_reranking,
@@ -1917,6 +1928,7 @@ class Hindsight:
         # Observation / consolidation settings
         enable_observations: bool | None = None,
         observations_mission: str | None = None,
+        enable_text_search: bool | None = None,
         enable_temporal_retrieval: bool | None = None,
         enable_graph_retrieval: bool | None = None,
         enable_reranking: bool | None = None,
@@ -1955,6 +1967,8 @@ class Hindsight:
             entities_allow_free_form: Whether to allow entity types outside entity_labels (default: True).
             enable_observations: Toggle automatic observation consolidation after retain().
             observations_mission: Controls what gets synthesised into observations.
+            enable_text_search: Run the keyword (BM25) retrieval arm during recall. False
+                leaves pure vector search.
             enable_temporal_retrieval: Run the temporal retrieval arm during recall.
             enable_graph_retrieval: Run the entity/link graph traversal arm during recall.
             enable_reranking: Rerank fused candidates with the cross-encoder.
@@ -1988,6 +2002,7 @@ class Hindsight:
                 "entities_allow_free_form": entities_allow_free_form,
                 "enable_observations": enable_observations,
                 "observations_mission": observations_mission,
+                "enable_text_search": enable_text_search,
                 "enable_temporal_retrieval": enable_temporal_retrieval,
                 "enable_graph_retrieval": enable_graph_retrieval,
                 "enable_reranking": enable_reranking,

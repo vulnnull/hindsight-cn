@@ -81,6 +81,9 @@ class ImportResult:
     # Per-document outcomes, for the engine's post-retain hook. Not serialized
     # into operation result_metadata (the worker handler writes counts only).
     imported_documents: list[ImportedDocument] = field(default_factory=list)
+    # Source memory-unit id -> regenerated target id. Used by whole-bank import
+    # to repair mental-model evidence after the replayed facts are inserted.
+    remapped_unit_ids: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -89,6 +92,7 @@ class _ObservationOutcome:
 
     imported: int = 0
     skipped: int = 0
+    remapped_unit_ids: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -229,6 +233,10 @@ async def import_documents(
         )
         for ordinal, unit_id in zip(imported_facts.original_ordinals, imported_facts.unit_ids, strict=True):
             ref_map[(document.id, ordinal)] = unit_id
+        for ordinal, unit_id in zip(imported_facts.original_ordinals, imported_facts.unit_ids, strict=True):
+            source_id = document.facts[ordinal].source_id
+            if source_id is not None:
+                result.remapped_unit_ids[source_id] = unit_id
 
     if parsed.observations:
         outcome = await _import_observations(
@@ -241,6 +249,7 @@ async def import_documents(
         )
         result.observations_imported = outcome.imported
         result.observations_skipped = outcome.skipped
+        result.remapped_unit_ids.update(outcome.remapped_unit_ids)
 
     logger.info(
         "[transfer] Imported %d document(s), %d fact(s), %d observation(s) into bank %s "
@@ -603,6 +612,14 @@ async def import_bank(
         facts_imported=doc_result.facts_imported,
         observations_imported=doc_result.observations_imported,
     )
+
+    # Facts and observations are replayed with fresh ids, but mental-model rows
+    # keep their ids and are restored verbatim below. Repair their grounding
+    # references before insertion so current and historical based_on data points
+    # at the target bank's units rather than the source bank's units.
+    unit_id_map = doc_result.remapped_unit_ids
+    _remap_mental_model_evidence(parsed.bank_rows.get("mental_models", []), unit_id_map)
+    _remap_mental_model_evidence(parsed.bank_rows.get("mental_model_history", []), unit_id_map)
 
     # Re-embed restored mental models off-connection (the source embedding was
     # stripped on export), so no DB connection is held across the embedding call.
@@ -1014,6 +1031,8 @@ async def _import_observations(
                 source_uuids = [uuid.UUID(s) for s in sources]
                 all_source_ids.update(source_uuids)
                 await _link_observation_sources(conn, ops, bank_id, observation_uuid, source_uuids, obs.proof_count)
+                if obs.source_id is not None:
+                    outcome.remapped_unit_ids[obs.source_id] = str(observation_uuid)
 
             # Mark source facts consolidated so the target consolidator skips
             # them. COALESCE keeps the exact source timestamp already restored by
@@ -1029,6 +1048,58 @@ async def _import_observations(
 
     outcome.imported = len(resolved)
     return outcome
+
+
+def _remap_based_on_ids(payload: dict[str, Any] | None, unit_id_map: dict[str, str]) -> None:
+    """Rewrite memory-unit ids in a persisted reflect response after transfer.
+
+    Mental-model rows retain their ids during a whole-bank restore, while facts
+    and observations are replayed and receive new ids. The response is otherwise
+    copied verbatim, so update only evidence ids and preserve all generated text
+    and metadata. Older archives without source ids simply have no entries to
+    rewrite.
+    """
+    if not payload or not unit_id_map:
+        return
+    based_on = payload.get("based_on")
+    if not isinstance(based_on, dict):
+        return
+    for entries in based_on.values():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if isinstance(entry, dict):
+                source_id = entry.get("id")
+                if isinstance(source_id, str) and source_id in unit_id_map:
+                    entry["id"] = unit_id_map[source_id]
+
+
+def _remap_mental_model_evidence(rows: list[dict], unit_id_map: dict[str, str]) -> None:
+    """Repair current and historical mental-model reflect-response evidence."""
+    for row in rows:
+        reflect_response = _decode_json_object(row.get("reflect_response"))
+        if isinstance(reflect_response, dict):
+            _remap_based_on_ids(reflect_response, unit_id_map)
+            row["reflect_response"] = reflect_response
+        previous = _decode_json_object(row.get("previous_reflect_response"))
+        if isinstance(previous, dict):
+            _remap_based_on_ids(previous, unit_id_map)
+            row["previous_reflect_response"] = previous
+
+
+def _decode_json_object(value: Any) -> Any:
+    """Accept decoded JSONB values and one or more serialized JSON layers."""
+    for _ in range(3):
+        if not isinstance(value, str):
+            return value
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            return value
+        if decoded == value:
+            return value
+        value = decoded
+    return value
 
 
 async def _link_observation_sources(

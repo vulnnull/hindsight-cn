@@ -5224,6 +5224,9 @@ components:
         observations_mission:
           nullable: true
           type: string
+        enable_text_search:
+          nullable: true
+          type: boolean
         enable_temporal_retrieval:
           nullable: true
           type: boolean
@@ -5785,6 +5788,9 @@ components:
         observations_mission:
           nullable: true
           type: string
+        enable_text_search:
+          nullable: true
+          type: boolean
         enable_temporal_retrieval:
           nullable: true
           type: boolean

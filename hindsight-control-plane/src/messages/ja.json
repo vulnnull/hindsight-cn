@@ -467,6 +467,8 @@
     "recallDescription": "このバンクのリコール時に実行される検索ステージ",
     "recallServerDefault": "サーバーのデフォルト",
     "recallFailedToSave": "リコールパイプラインの設定を保存できませんでした",
+    "recallTextSearchLabel": "テキスト検索",
+    "recallTextSearchDescription": "リコール時にキーワード（BM25）検索の分岐を実行します。無効にすると純粋なベクトル検索だけになり、この分岐はクエリから完全に除外されるため、そのコストは一切かかりません。",
     "recallTemporalRetrievalLabel": "時間検索",
     "recallTemporalRetrievalDescription": "日付を考慮したクエリ解析を実行します。無効にすると時間的検索も省略されます。このバンクの内容に意味のある日付が含まれない場合に有用です。",
     "recallGraphRetrievalLabel": "グラフ検索",

@@ -107,6 +107,19 @@
           "description": "Controls what gets synthesised",
           "title": "Observations Mission"
         },
+        "enable_text_search": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Toggle the keyword (BM25) arm during recall, leaving pure vector search",
+          "title": "Enable Text Search"
+        },
         "enable_temporal_retrieval": {
           "anyOf": [
             {

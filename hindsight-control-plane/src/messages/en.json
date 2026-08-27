@@ -467,6 +467,8 @@
     "recallDescription": "Which retrieval stages run during recall for this bank",
     "recallServerDefault": "Server Default",
     "recallFailedToSave": "Failed to save recall pipeline settings",
+    "recallTextSearchLabel": "Text Search",
+    "recallTextSearchDescription": "Run the keyword (BM25) retrieval arm during recall. Disabling leaves pure vector search — the arm is left out of the query entirely, so none of its cost is paid.",
     "recallTemporalRetrievalLabel": "Temporal Retrieval",
     "recallTemporalRetrievalDescription": "Run date-aware query analysis. Disabling also skips the temporal retrieval arm. Useful when this bank's content carries no meaningful dates.",
     "recallGraphRetrievalLabel": "Graph Retrieval",

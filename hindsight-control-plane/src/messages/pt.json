@@ -467,6 +467,8 @@
     "recallDescription": "Quais etapas de recuperação são executadas durante o recall neste banco",
     "recallServerDefault": "Padrão do servidor",
     "recallFailedToSave": "Falha ao salvar as configurações do pipeline de recall",
+    "recallTextSearchLabel": "Pesquisa de texto",
+    "recallTextSearchDescription": "Executar o ramo de recuperação por palavras-chave (BM25) durante o recall. Desativá-lo deixa apenas a pesquisa vetorial: o ramo é removido por completo da consulta, portanto nenhum dos seus custos é pago.",
     "recallTemporalRetrievalLabel": "Recuperação temporal",
     "recallTemporalRetrievalDescription": "Executar a análise de consultas com reconhecimento de datas. Desativar também ignora o ramo de recuperação temporal. Útil quando o conteúdo deste banco não contém datas relevantes.",
     "recallGraphRetrievalLabel": "Recuperação por grafo",

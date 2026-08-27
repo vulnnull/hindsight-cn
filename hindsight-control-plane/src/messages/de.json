@@ -467,6 +467,8 @@
     "recallDescription": "Welche Abrufphasen beim Recall für diesen Speicher ausgeführt werden",
     "recallServerDefault": "Serverstandard",
     "recallFailedToSave": "Recall-Pipeline-Einstellungen konnten nicht gespeichert werden",
+    "recallTextSearchLabel": "Textsuche",
+    "recallTextSearchDescription": "Den Keyword-Zweig (BM25) beim Recall ausführen. Beim Deaktivieren bleibt reine Vektorsuche — der Zweig entfällt vollständig aus der Abfrage, sodass keine seiner Kosten anfallen.",
     "recallTemporalRetrievalLabel": "Zeitlicher Abruf",
     "recallTemporalRetrievalDescription": "Datumsbewusste Abfrageanalyse ausführen. Beim Deaktivieren entfällt auch der zeitliche Abrufzweig. Sinnvoll, wenn die Inhalte dieses Speichers keine relevanten Daten enthalten.",
     "recallGraphRetrievalLabel": "Graph-Abruf",

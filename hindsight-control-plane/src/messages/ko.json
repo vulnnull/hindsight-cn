@@ -467,6 +467,8 @@
     "recallDescription": "이 뱅크의 리콜 시 실행되는 검색 단계",
     "recallServerDefault": "서버 기본값",
     "recallFailedToSave": "리콜 파이프라인 설정을 저장하지 못했습니다",
+    "recallTextSearchLabel": "텍스트 검색",
+    "recallTextSearchDescription": "리콜 중 키워드(BM25) 검색 단계를 실행합니다. 비활성화하면 순수 벡터 검색만 남으며, 해당 단계는 쿼리에서 완전히 제외되므로 비용이 전혀 들지 않습니다.",
     "recallTemporalRetrievalLabel": "시간 검색",
     "recallTemporalRetrievalDescription": "날짜를 인식하는 쿼리 분석을 실행합니다. 비활성화하면 시간 검색 단계도 생략됩니다. 이 뱅크의 콘텐츠에 의미 있는 날짜가 없을 때 유용합니다.",
     "recallGraphRetrievalLabel": "그래프 검색",

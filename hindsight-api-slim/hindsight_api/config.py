@@ -824,6 +824,7 @@ ENV_RECALL_CHUNKS_MAX_TOKENS = "HINDSIGHT_API_RECALL_CHUNKS_MAX_TOKENS"
 # (e.g. a chunk-extraction bank used as plain retrieval). These switch the
 # individual stages off; per-bank, so one bank can run lean without changing how
 # the rest of the deployment recalls.
+ENV_ENABLE_TEXT_SEARCH = "HINDSIGHT_API_ENABLE_TEXT_SEARCH"
 ENV_ENABLE_TEMPORAL_RETRIEVAL = "HINDSIGHT_API_ENABLE_TEMPORAL_RETRIEVAL"
 ENV_ENABLE_GRAPH_RETRIEVAL = "HINDSIGHT_API_ENABLE_GRAPH_RETRIEVAL"
 ENV_ENABLE_RERANKING = "HINDSIGHT_API_ENABLE_RERANKING"
@@ -1175,7 +1176,7 @@ DEFAULT_ANN_ITERATIVE_SCAN = True
 DEFAULT_ANN_MAX_SCAN_TUPLES = 4000
 
 # Text search extension (native PostgreSQL, vchord BM25, Timescale pg_textsearch,
-# pgroonga, or ParadeDB pg_search)
+# pgroonga, or ParadeDB pg_search). Unused by banks with enable_text_search off.
 DEFAULT_TEXT_SEARCH_EXTENSION = "native"  # Options: "native", "vchord", "pg_textsearch", "pgroonga", "pg_search"
 
 # PostgreSQL text search dictionary used by the native tsvector backend. Only
@@ -1460,6 +1461,10 @@ DEFAULT_RECALL_CHUNKS_MAX_TOKENS = 1000  # Token budget for raw chunks returned 
 
 # Recall pipeline stages — all on by default, so recall behaviour is unchanged
 # unless a bank opts out.
+# The keyword arm. False leaves recall as pure vector search — the arm's SQL, its
+# query tokenization and its pg_stats term-selection lookup are all skipped, not
+# merely filtered to nothing.
+DEFAULT_ENABLE_TEXT_SEARCH = True
 DEFAULT_ENABLE_TEMPORAL_RETRIEVAL = True  # Temporal retrieval arm + the date-aware query analysis feeding it
 DEFAULT_ENABLE_GRAPH_RETRIEVAL = True  # Entity/link graph traversal arm
 DEFAULT_ENABLE_RERANKING = True  # Cross-encoder rerank of the fused candidates
@@ -2658,6 +2663,7 @@ class HindsightConfig:
     reflect_source_facts_max_tokens: int
 
     # Recall pipeline stages (per-bank; all default True)
+    enable_text_search: bool
     enable_temporal_retrieval: bool
     enable_graph_retrieval: bool
     enable_reranking: bool
@@ -2925,6 +2931,7 @@ class HindsightConfig:
         "entity_labels",
         "entities_allow_free_form",
         # Recall pipeline stages
+        "enable_text_search",
         "enable_temporal_retrieval",
         "enable_graph_retrieval",
         "enable_reranking",
@@ -4075,6 +4082,8 @@ class HindsightConfig:
                 if os.getenv(ENV_REFLECT_MAX_COMPLETION_TOKENS)
                 else DEFAULT_REFLECT_MAX_COMPLETION_TOKENS
             ),
+            enable_text_search=os.getenv(ENV_ENABLE_TEXT_SEARCH, str(DEFAULT_ENABLE_TEXT_SEARCH)).lower()
+            in ("true", "1", "yes"),
             enable_temporal_retrieval=os.getenv(
                 ENV_ENABLE_TEMPORAL_RETRIEVAL, str(DEFAULT_ENABLE_TEMPORAL_RETRIEVAL)
             ).lower()

@@ -961,6 +961,7 @@ class MemoriesExtension(Extension, ABC):
         created_before: datetime | None = None,
         min_semantic: float | None = None,
         min_keyword: float | None = None,
+        enable_text_search: bool = True,
         enable_graph: bool = True,
     ) -> "dict[str, RecallArms]":
         """Run ALL retrieval arms for every fact_type — the whole recall interface, in one call.
@@ -968,7 +969,8 @@ class MemoriesExtension(Extension, ABC):
         Returns ``{fact_type: RecallArms(semantic, bm25, graph, temporal)}`` of
         ``RetrievalResult``: the four per-arm candidate lists, unfused (RRF/rerank happen
         downstream, unchanged). ``temporal`` is empty unless ``temporal_window`` is given;
-        ``graph`` is empty when ``enable_graph`` is False.
+        ``bm25`` is empty when ``enable_text_search`` is False, and ``graph`` when
+        ``enable_graph`` is False.
 
         This is the ONE method recall goes through — how a store answers the arms is entirely its
         own business. Postgres runs the split per-arm SQL orchestration behind this (a dense+BM25

@@ -568,6 +568,8 @@ export class HindsightClient {
       enableObservations?: boolean;
       /** Controls what gets synthesised into observations. Replaces built-in rules. */
       observationsMission?: string;
+      /** Run the keyword (BM25) retrieval arm during recall. False leaves pure vector search. */
+      enableTextSearch?: boolean;
       /** Run the temporal retrieval arm during recall, and the date-aware query analysis feeding it. */
       enableTemporalRetrieval?: boolean;
       /** Run the entity/link graph traversal arm during recall. */
@@ -596,6 +598,7 @@ export class HindsightClient {
         retain_structured_chunk_size: options.retainStructuredChunkSize,
         enable_observations: options.enableObservations,
         observations_mission: options.observationsMission,
+        enable_text_search: options.enableTextSearch,
         enable_temporal_retrieval: options.enableTemporalRetrieval,
         enable_graph_retrieval: options.enableGraphRetrieval,
         enable_reranking: options.enableReranking,
@@ -671,6 +674,8 @@ export class HindsightClient {
       retainStructuredChunkSize?: number;
       enableObservations?: boolean;
       observationsMission?: string;
+      /** Run the keyword (BM25) retrieval arm during recall. False leaves pure vector search. */
+      enableTextSearch?: boolean;
       /** Run the temporal retrieval arm during recall, and the date-aware query analysis feeding it. */
       enableTemporalRetrieval?: boolean;
       /** Run the entity/link graph traversal arm during recall. */
@@ -700,6 +705,8 @@ export class HindsightClient {
       updates.enable_observations = options.enableObservations;
     if (options.observationsMission !== undefined)
       updates.observations_mission = options.observationsMission;
+    if (options.enableTextSearch !== undefined)
+      updates.enable_text_search = options.enableTextSearch;
     if (options.enableTemporalRetrieval !== undefined)
       updates.enable_temporal_retrieval = options.enableTemporalRetrieval;
     if (options.enableGraphRetrieval !== undefined)
