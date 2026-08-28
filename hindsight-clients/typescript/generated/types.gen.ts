@@ -8278,6 +8278,12 @@ export type ExportDocumentsData = {
      * Also export consolidated observations (restored on import; whole-bank only)
      */
     include_observations?: boolean;
+    /**
+     * Include Knowledge Base
+     *
+     * Also export Mental Models and Knowledge Pages (restored on import; whole-bank only)
+     */
+    include_knowledge_base?: boolean;
   };
   url: "/v1/default/banks/{bank_id}/document-transfer/export";
 };

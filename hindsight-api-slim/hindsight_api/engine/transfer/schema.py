@@ -117,6 +117,7 @@ class TransferObservation(BaseModel):
     # needed when rewriting mental-model based_on references.
     source_id: str | None = None
     text: str
+    created_at: datetime | None = None
     tags: list[str] = Field(default_factory=list)
     event_date: datetime | None = None
     occurred_start: datetime | None = None
@@ -176,11 +177,11 @@ class TransferManifest(BaseModel):
     document_count: int = 0
     fact_count: int = 0
     observation_count: int = 0
+    mental_model_count: int = 0
+    knowledge_page_count: int = 0
     # "documents" = doc/fact/observation subset; "bank" = whole-bank export
     # (also carries bank config, mental models, directives, webhooks).
     archive_type: Literal["documents", "bank"] = "documents"
-    mental_model_count: int = 0
-    knowledge_page_count: int = 0
     directive_count: int = 0
     webhook_count: int = 0
     # True when --include-history carried audit_log / llm_requests.
