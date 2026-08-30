@@ -18,7 +18,7 @@ import sys
 import warnings
 from collections.abc import Callable
 
-from ..config import get_config
+from ..config import get_config, load_dotenv_for_entrypoint
 from ..engine.task_backend import WorkerTaskBackend
 from .poller import WorkerPoller
 
@@ -58,6 +58,7 @@ def create_worker_app(poller: WorkerPoller, memory):
     from fastapi.responses import JSONResponse, Response
     from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
+    from ..liveness import WorkerLivenessResponse, worker_liveness_response
     from ..metrics import create_metrics_collector, get_metrics_collector, initialize_metrics
 
     app = FastAPI(
@@ -81,19 +82,57 @@ def create_worker_app(poller: WorkerPoller, memory):
         metrics_collector.set_db_pool(memory._pool)
         logger.info("DB pool metrics configured")
 
-    @app.get(
-        "/health",
-        summary="Health check endpoint",
-        description="Returns worker health status including database connectivity",
-        tags=["Monitoring"],
-    )
-    async def health_endpoint():
-        """Health check endpoint."""
+    async def _readiness_response() -> JSONResponse:
+        """Shared body of /health and /health/ready: 200 if healthy, 503 if not."""
         health = await memory.health_check()
         health["worker_id"] = poller.worker_id
         health["is_shutdown"] = poller.is_shutdown
         status_code = 200 if health.get("status") == "healthy" else 503
         return JSONResponse(content=health, status_code=status_code)
+
+    @app.get(
+        "/health",
+        summary="Health check endpoint",
+        description="Readiness check: returns worker health status including database "
+        "connectivity. Alias of /health/ready. Use /health/live for liveness probes.",
+        tags=["Monitoring"],
+    )
+    async def health_endpoint():
+        """Health check endpoint."""
+        return await _readiness_response()
+
+    @app.get(
+        "/health/ready",
+        summary="Readiness probe",
+        description="Returns 200 when the worker can reach the database, 503 otherwise. "
+        "Identical to /health, which stays supported as its alias.",
+        tags=["Monitoring"],
+    )
+    async def readiness_endpoint():
+        """Readiness probe that verifies database connectivity."""
+        return await _readiness_response()
+
+    @app.get(
+        "/health/live",
+        response_model=WorkerLivenessResponse,
+        summary="Liveness probe",
+        description="Returns 200 whenever the worker process can serve a request. Performs "
+        "no database access, so a slow database never restarts the worker and never "
+        "requeues its claimed operations. Point livenessProbe here.",
+        tags=["Monitoring"],
+    )
+    async def liveness_endpoint() -> WorkerLivenessResponse:
+        """Liveness probe: in-process only, never touches the database.
+
+        ``seconds_since_last_poll`` exposes poller progress for alerting; it never
+        changes the status code, because a stalled poll cycle under database
+        pressure is precisely the case where restarting makes things worse.
+        """
+        return worker_liveness_response(
+            worker_id=poller.worker_id,
+            is_shutdown=poller.is_shutdown,
+            seconds_since_last_poll=poller.seconds_since_last_poll,
+        )
 
     @app.get(
         "/metrics",
@@ -125,6 +164,8 @@ def create_worker_app(poller: WorkerPoller, memory):
 
 def main():
     """Main entry point for the hindsight-worker CLI."""
+    load_dotenv_for_entrypoint()
+
     # Load configuration from environment
     config = get_config()
 
@@ -177,6 +218,14 @@ def main():
 
     # Configure logging
     config.configure_logging()
+
+    # Initialize OpenTelemetry tracing if enabled. The worker runs consolidation,
+    # batch retain and mental-model refresh, so without this the LLM-heaviest half
+    # of a deployment emits no spans at all (issue #3614). Done after logging setup
+    # so the "Tracing initialized" line is visible.
+    from ..tracing import initialize_tracing_from_config
+
+    initialize_tracing_from_config(config, default_service_name="hindsight-worker")
 
     from ..utils import warn_if_container_default_worker_id
 
@@ -269,8 +318,7 @@ def main():
             max_slots=config.worker_max_slots,
             slot_reservations=config.worker_slot_reservations,
             consolidation_bank_priority=config.worker_consolidation_bank_priority or None,
-            operation_retention_days=config.operation_retention_days,
-            operation_cleanup_batch_size=config.operation_cleanup_batch_size,
+            max_retries=config.worker_max_retries,
         )
 
         # Create the HTTP app for metrics/health
@@ -321,6 +369,13 @@ def main():
         )
         server = uvicorn.Server(uvicorn_config)
 
+        # Start the event-loop stall watchdog: if a task blocks the loop, this
+        # logs the culprit stack so a failing /health can be attributed to a
+        # blocked loop (vs DB-pool exhaustion, which the pool instrumentation logs).
+        from ..loop_watchdog import start_loop_watchdog
+
+        loop_watchdog = start_loop_watchdog(loop)
+
         # Run the poller and HTTP server concurrently
         poller_task = asyncio.create_task(poller.run())
         http_task = asyncio.create_task(server.serve())
@@ -334,6 +389,9 @@ def main():
             print("\nReceived interrupt, initiating graceful shutdown...")
 
         # Graceful shutdown
+        if loop_watchdog is not None:
+            loop_watchdog.stop()
+
         print("Shutting down HTTP server...")
         server.should_exit = True
 
@@ -357,6 +415,13 @@ def main():
 
         # Close memory engine
         await memory.close()
+
+        # Flush queued spans before exiting: a consolidation span can be minutes
+        # long, and everything still batched is lost if the process just exits.
+        from ..tracing import shutdown_tracing
+
+        shutdown_tracing()
+
         print("Worker shutdown complete")
 
     def cleanup():

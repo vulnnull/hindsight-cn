@@ -241,6 +241,7 @@ def prestart_daemon_background(config, debug_fn=None):
         return
 
     llm_env = get_llm_env_vars(llm_config)
+    embed_cmd = _get_embed_command(config)
     daemon_env = dict(os.environ)
     daemon_env.update(llm_env)
     idle_timeout = config.get("daemonIdleTimeout", 0)
@@ -248,8 +249,6 @@ def prestart_daemon_background(config, debug_fn=None):
     if platform.system() == "Darwin":
         daemon_env["HINDSIGHT_API_EMBEDDINGS_LOCAL_FORCE_CPU"] = "1"
         daemon_env["HINDSIGHT_API_RERANKER_LOCAL_FORCE_CPU"] = "1"
-
-    embed_cmd = _get_embed_command(config)
 
     profile_args = ["profile", "create", PROFILE_NAME, "--merge", "--port", str(port)]
     for env_name, env_val in llm_env.items():

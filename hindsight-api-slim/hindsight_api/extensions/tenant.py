@@ -2,10 +2,14 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from hindsight_api.extensions.bank_tables import BankScopedTable
 from hindsight_api.extensions.base import Extension
 from hindsight_api.models import RequestContext
+
+if TYPE_CHECKING:
+    import asyncpg
 
 
 class AuthenticationError(Exception):
@@ -63,6 +67,17 @@ class TenantExtension(Extension, ABC):
 
     The returned schema_name is used for fully-qualified table names in queries,
     enabling tenant isolation at the database level.
+
+    By default the only request data reaching authenticate() is the Authorization
+    header, surfaced as RequestContext.api_key. A deployment that authenticates on
+    something else — say a per-caller identity assertion sent alongside a shared
+    bearer token by a proxy — can opt those headers in:
+
+        HINDSIGHT_API_EXTENSION_PASSTHROUGH_HEADERS=x-user-assertion
+
+    They then arrive in RequestContext.extra_headers, keyed by lower-cased name,
+    on both the HTTP and MCP transports. Unset by default, so extensions receive
+    no header data unless an operator asks for it.
     """
 
     @abstractmethod
@@ -140,6 +155,50 @@ class TenantExtension(Extension, ABC):
         Returns:
             Set of allowed field names, or None to allow all configurable fields.
             Returned fields must be a subset of HindsightConfig.get_configurable_fields().
+        """
+        return None
+
+    def extra_bank_tables(self) -> list[BankScopedTable]:
+        """Bank-scoped tables this extension provisions in the tenant schema.
+
+        Core consults this list so extension-owned tables participate in the
+        per-tenant data-lifecycle operations it manages — admin backup/restore
+        and :meth:`MemoryEngine.delete_bank` teardown — instead of silently
+        falling out of them (dropped on restore, or leaked as orphaned rows on
+        bank deletion). See :class:`BankScopedTable`.
+
+        The extension still owns the DDL; this only declares which tables exist.
+        The default is no extra tables.
+
+        Returns:
+            The extension's bank-scoped tables. Empty by default.
+        """
+        return []
+
+    async def provision_bank_tables(self, conn: "asyncpg.Connection", schema: str) -> None:
+        """Create/evolve this extension's tables in ``schema`` (idempotent DDL).
+
+        Called from the **migration path** for every schema — both when a
+        tenant schema is provisioned (via ``ExtensionContext.run_migration``)
+        and by the ``hindsight-admin run-db-migration`` sweep across all
+        existing schemas — right after core migrations complete. This is the
+        counterpart to :meth:`extra_bank_tables`: that one *declares* the
+        tables for backup/teardown, this one *creates* them, so extension
+        schema evolves on the same lifecycle as core schema instead of via a
+        lazy per-request path.
+
+        Implementations MUST be idempotent (``CREATE TABLE IF NOT EXISTS`` /
+        ``ADD COLUMN IF NOT EXISTS``) — it runs on every provision and every
+        migration sweep — and MUST schema-qualify every statement with
+        ``schema`` (the connection's ``search_path`` is not set for you).
+        Exceptions propagate so a failed provision surfaces at migration time
+        rather than as a runtime error on a later request.
+
+        Args:
+            conn: An open connection to the target database.
+            schema: The schema to provision tables into.
+
+        The default does nothing.
         """
         return None
 

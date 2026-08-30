@@ -247,20 +247,6 @@ class HindsightCallback(CustomLogger):
                         return " ".join(text_parts)
         return None
 
-    def _messages_to_query(self, messages: List[Dict[str, Any]]) -> str:
-        """Concatenate all message contents into a single query string."""
-        message_parts = []
-        for msg in messages:
-            content = msg.get("content", "")
-            if isinstance(content, str) and content:
-                message_parts.append(content)
-            elif isinstance(content, list):
-                # Handle structured content (e.g., vision messages)
-                for item in content:
-                    if isinstance(item, dict) and item.get("type") == "text":
-                        message_parts.append(item.get("text", ""))
-        return "\n".join(message_parts)
-
     def _compute_conversation_hash(
         self,
         user_input: str,

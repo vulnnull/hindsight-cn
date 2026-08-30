@@ -8,14 +8,28 @@ extracted facts and the generated embeddings caused
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from datetime import datetime
-from unittest.mock import MagicMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from hindsight_api.engine.retain import embedding_utils
-from hindsight_api.engine.retain.orchestrator import _map_results_to_contents
-from hindsight_api.engine.retain.types import ProcessedFact, RetainContent
+from hindsight_api.engine.retain import embedding_utils, entity_processing, link_creation, link_utils, orchestrator
+from hindsight_api.engine.retain.orchestrator import (
+    _map_results_to_contents,
+    _pre_resolve_phase1,
+    _process_extracted_facts,
+    _remap_causal_relations,
+    _run_final_semantic_ann,
+)
+from hindsight_api.engine.retain.types import (
+    CausalRelation,
+    EntityResolutionResult,
+    ExtractedFact,
+    ProcessedFact,
+    RetainContent,
+)
 
 
 def _make_processed_fact(content_index: int, text: str = "fact") -> ProcessedFact:
@@ -34,6 +48,18 @@ def _make_processed_fact(content_index: int, text: str = "fact") -> ProcessedFac
 
 def _make_content(text: str = "x") -> RetainContent:
     return RetainContent(content=text)
+
+
+def _make_extracted_fact(text: str, chunk_index: int, causal_targets: list[int] | None = None) -> ExtractedFact:
+    return ExtractedFact(
+        fact_text=text,
+        fact_type="world",
+        chunk_index=chunk_index,
+        mentioned_at=datetime(2026, 1, 1),
+        causal_relations=[
+            CausalRelation(relation_type="caused_by", target_fact_index=target) for target in causal_targets or []
+        ],
+    )
 
 
 class TestMapResultsToContents:
@@ -90,33 +116,70 @@ class TestMapResultsToContents:
         assert result == [["u-a1"], ["u-b1", "u-b2"]]
 
 
-class TestEmbeddingSingleValidation:
-    def test_generate_embedding_preserves_validation_runtime_error(self):
-        backend = MagicMock()
-        backend.dimension = 3
-        backend.encode_documents.return_value = [[]]
+class TestProcessExtractedFacts:
+    def test_filters_extracted_and_processed_facts_in_lockstep(self):
+        extracted = [
+            _make_extracted_fact("Alice joined Acme", 10),
+            _make_extracted_fact("...", 11),
+            _make_extracted_fact("Bob leads the ML team", 12),
+        ]
+        embeddings = [[10.0], [11.0], [12.0]]
 
-        with pytest.raises(RuntimeError, match="embedding 0 has dimension 0; expected 3"):
-            embedding_utils.generate_embedding(backend, "a")
+        result = _process_extracted_facts(extracted, embeddings)
 
-    def test_generate_embedding_raises_when_backend_returns_wrong_count(self):
-        backend = MagicMock()
-        backend.dimension = 3
-        backend.encode_documents.return_value = [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]
+        assert [fact.fact_text for fact in result.extracted_facts] == ["Alice joined Acme", "Bob leads the ML team"]
+        assert [fact.chunk_index for fact in result.extracted_facts] == [10, 12]
+        assert [fact.fact_text for fact in result.processed_facts] == ["Alice joined Acme", "Bob leads the ML team"]
+        # Packed on the way in (#3756), so compare against the packed form: the point of
+        # the assertion is that the SURVIVING facts keep THEIR embeddings — that the
+        # rejected fact's 11.0 did not shift the mapping by one — not the container type.
+        assert [list(fact.embedding) for fact in result.processed_facts] == [[10.0], [12.0]]
+        assert result.retained_index_by_original == [0, None, 1]
 
-        with pytest.raises(RuntimeError, match="returned 2 vectors for 1 input text"):
-            embedding_utils.generate_embedding(backend, "a")
+    def test_remaps_canonical_relations_and_drops_rejected_targets(self):
+        extracted = [
+            _make_extracted_fact("Initial event", 10),
+            _make_extracted_fact("...", 11),
+            _make_extracted_fact("Consequence", 12, [0, 1]),
+            _make_extracted_fact("Later consequence", 13, [1, 2]),
+        ]
 
-    def test_generate_embedding_uses_query_encoder_when_requested(self):
-        backend = MagicMock()
-        backend.dimension = 2
-        backend.encode_query.return_value = [[0.1, 0.2]]
+        result = _process_extracted_facts(extracted, [[0.0], [1.0], [2.0], [3.0]])
 
-        result = embedding_utils.generate_embedding(backend, "a", input_type="query")
+        assert [
+            [relation.target_fact_index for relation in fact.causal_relations] for fact in result.processed_facts
+        ] == [
+            [],
+            [0],
+            [1],
+        ]
+        assert [fact.causal_relations for fact in result.extracted_facts] == [
+            fact.causal_relations for fact in result.processed_facts
+        ]
 
-        assert result == [0.1, 0.2]
-        backend.encode_query.assert_called_once_with(["a"])
-        backend.encode_documents.assert_not_called()
+    def test_remaps_transfer_relation_matrix_with_original_source_ordinals(self):
+        relations = [
+            [],
+            [],
+            [
+                CausalRelation(relation_type="causes", target_fact_index=0),
+                CausalRelation(relation_type="prevents", target_fact_index=1),
+            ],
+            [CausalRelation(relation_type="enables", target_fact_index=2)],
+        ]
+
+        remapped = _remap_causal_relations(relations, [0, None, 1, 2])
+
+        assert [
+            [(relation.relation_type, relation.target_fact_index) for relation in fact_relations]
+            for fact_relations in remapped
+        ] == [[], [("causes", 0)], [("enables", 1)]]
+
+    def test_rejects_fact_embedding_length_mismatch(self):
+        extracted = [_make_extracted_fact("one", 1), _make_extracted_fact("two", 2)]
+
+        with pytest.raises(ValueError, match="length mismatch"):
+            _process_extracted_facts(extracted, [[1.0]])
 
 
 class TestEmbeddingsBatchLengthGuarantee:
@@ -161,3 +224,88 @@ class TestEmbeddingsBatchLengthGuarantee:
 
         with pytest.raises(RuntimeError, match="embedding 1 has dimension 2; expected 3"):
             asyncio.run(embedding_utils.generate_embeddings_batch(backend, ["a", "b"]))
+
+
+class TestSemanticLinkThresholdPropagation:
+    @pytest.mark.asyncio
+    async def test_phase1_ann_uses_resolved_semantic_link_threshold(self, monkeypatch):
+        """Normal retain must pass the resolved threshold into its pre-write ANN probe."""
+        captured_thresholds: list[float] = []
+
+        @asynccontextmanager
+        async def fake_acquire_with_retry(_pool):
+            yield object()
+
+        async def fake_resolve_entities(*_args, **_kwargs):
+            return EntityResolutionResult(resolved_entities=[], entity_to_unit=[], unit_to_entity_ids={})
+
+        async def fake_compute_semantic_links_ann(*_args, **kwargs):
+            captured_thresholds.append(kwargs["threshold"])
+            return []
+
+        monkeypatch.setattr(orchestrator, "acquire_with_retry", fake_acquire_with_retry)
+        monkeypatch.setattr(entity_processing, "resolve_entities", fake_resolve_entities)
+        monkeypatch.setattr(link_utils, "compute_semantic_links_ann", fake_compute_semantic_links_ann)
+
+        await _pre_resolve_phase1(
+            pool=object(),
+            entity_resolver=object(),
+            bank_id="bank",
+            contents=[_make_content()],
+            processed_facts=[_make_processed_fact(0)],
+            config=SimpleNamespace(entity_labels=None, semantic_link_min_similarity=0.82),
+            log_buffer=[],
+        )
+
+        assert captured_thresholds == [0.82]
+
+    @pytest.mark.asyncio
+    async def test_link_creation_forwards_threshold_to_link_utils(self, monkeypatch):
+        """The Phase 2 wrapper forwards the resolved threshold to link_utils."""
+        captured_thresholds: list[float] = []
+
+        async def fake_create_semantic_links_batch(*_args, **kwargs):
+            captured_thresholds.append(kwargs["threshold"])
+            return 0
+
+        monkeypatch.setattr(link_utils, "create_semantic_links_batch", fake_create_semantic_links_batch)
+
+        await link_creation.create_semantic_links_batch(
+            conn=object(),
+            bank_id="bank",
+            unit_ids=["unit"],
+            embeddings=[[1.0]],
+            threshold=0.83,
+        )
+
+        assert captured_thresholds == [0.83]
+
+    @pytest.mark.asyncio
+    async def test_streaming_final_ann_uses_resolved_threshold(self, monkeypatch):
+        """Streaming retain's deferred ANN pass uses the same configured construction gate."""
+        captured_thresholds: list[float] = []
+        conn = SimpleNamespace(
+            fetch=AsyncMock(return_value=[{"id": "unit", "embedding": "[1.0]", "fact_type": "world"}])
+        )
+        pool = SimpleNamespace(ops=object())
+
+        @asynccontextmanager
+        async def fake_acquire_with_retry(_pool):
+            yield conn
+
+        async def fake_compute_semantic_links_ann(*_args, **kwargs):
+            captured_thresholds.append(kwargs["threshold"])
+            return []
+
+        monkeypatch.setattr(orchestrator, "acquire_with_retry", fake_acquire_with_retry)
+        monkeypatch.setattr(link_utils, "compute_semantic_links_ann", fake_compute_semantic_links_ann)
+
+        await _run_final_semantic_ann(
+            pool,
+            "bank",
+            ["unit"],
+            threshold=0.84,
+            log_buffer=[],
+        )
+
+        assert captured_thresholds == [0.84]

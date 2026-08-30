@@ -32,12 +32,17 @@ import {
   Clock,
   AlertCircle,
   CheckCircle,
-  Loader2,
   X,
   RotateCcw,
   Code,
   Ban,
+  Trash2,
+  FileText,
+  Download,
 } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
+import { DocumentChunkModal } from "./document-chunk-modal";
+import { withBasePath } from "@/lib/base-path";
 
 interface Operation {
   id: string;
@@ -48,6 +53,7 @@ interface Operation {
   updated_at?: string | null;
   status: string;
   error_message: string | null;
+  next_retry_at?: string | null;
   progress?: OperationProgress | null;
 }
 
@@ -59,6 +65,14 @@ interface ChildOperationStatus {
   error_message: string | null;
 }
 
+/** Per-operation-type outcome payload the API reports under `details`.
+ *  Discriminated by its own `operation_type`; refresh is the only type today. */
+interface RefreshOperationDetail {
+  operation_type: "refresh_mental_model";
+  outcome: string;
+  failure_reason?: string | null;
+}
+
 type OperationDetails =
   | {
       operation_id: string;
@@ -68,6 +82,7 @@ type OperationDetails =
       updated_at: string | null;
       completed_at: string | null;
       error_message: string | null;
+      next_retry_at?: string | null;
       progress?: OperationProgress | null;
       result_metadata?: {
         items_count?: number;
@@ -76,6 +91,7 @@ type OperationDetails =
         is_parent?: boolean;
         [key: string]: any;
       } | null;
+      details?: RefreshOperationDetail | null;
       child_operations?: ChildOperationStatus[] | null;
       task_payload?: Record<string, unknown> | null;
       error?: never; // Not present in success case
@@ -89,8 +105,10 @@ type OperationDetails =
       updated_at?: never;
       completed_at?: never;
       error_message?: never;
+      next_retry_at?: never;
       progress?: never;
       result_metadata?: never;
+      details?: never;
       child_operations?: never;
       task_payload?: never;
     };
@@ -103,6 +121,9 @@ const OPERATION_TYPE_VALUES = [
   "file_convert_retain",
   "webhook_delivery",
   "graph_maintenance",
+  "vector_index_maintenance",
+  "export_documents",
+  "import_documents",
 ] as const;
 
 const STATUS_FILTER_VALUES = [
@@ -125,12 +146,14 @@ export function BankOperationsView() {
   const [offset, setOffset] = useState(0);
   const [cancellingOpId, setCancellingOpId] = useState<string | null>(null);
   const [retryingOpId, setRetryingOpId] = useState<string | null>(null);
+  const [deletingOpId, setDeletingOpId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [selectedOperation, setSelectedOperation] = useState<OperationDetails | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [loadingPayload, setLoadingPayload] = useState(false);
   const [payloadLoadedFor, setPayloadLoadedFor] = useState<string | null>(null);
+  const [documentModalId, setDocumentModalId] = useState<string | null>(null);
   // Ticks once a second so the "last heartbeat" relative time counts up live between
   // the 5s data polls — a heartbeat that keeps aging without the snapshot advancing is
   // the signal a job is stuck.
@@ -153,6 +176,9 @@ export function BankOperationsView() {
     file_convert_retain: t("operationType.fileConvertRetain"),
     webhook_delivery: t("operationType.webhookDelivery"),
     graph_maintenance: t("operationType.graphMaintenance"),
+    vector_index_maintenance: t("operationType.vectorIndexMaintenance"),
+    export_documents: t("operationType.exportDocuments"),
+    import_documents: t("operationType.importDocuments"),
   };
 
   const formatStatus = (status: string | null | undefined) =>
@@ -161,10 +187,33 @@ export function BankOperationsView() {
   const formatOperationType = (operationType: string | null | undefined) =>
     operationType ? (operationTypeLabels[operationType] ?? operationType) : t("notAvailable");
 
-  const renderStatusBadge = (status: string | null | undefined, title?: string | null) => {
+  const renderStatusBadge = (
+    status: string | null | undefined,
+    title?: string | null,
+    nextRetryAt?: string | null
+  ) => {
     const label = formatStatus(status);
 
     if (status === "pending") {
+      // "Pending" alone cannot distinguish "queued, waiting for a worker" from
+      // "deliberately held back until a known time" — which is what a refresh
+      // parked by min_refresh_interval_seconds, or any extension-deferred task,
+      // actually is. Without this the UI just looks stuck.
+      const deferredUntil = nextRetryAt ? new Date(nextRetryAt) : null;
+      if (deferredUntil && deferredUntil.getTime() > Date.now()) {
+        return (
+          <span
+            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+            title={t("deferredUntilTitle", { time: deferredUntil.toLocaleString() })}
+          >
+            <Clock className="w-3 h-3" />
+            {t("status.deferred")}
+            <span className="opacity-70">
+              {deferredUntil.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            </span>
+          </span>
+        );
+      }
       return (
         <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
           <Clock className="w-3 h-3" />
@@ -176,7 +225,7 @@ export function BankOperationsView() {
     if (status === "processing") {
       return (
         <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
-          <Loader2 className="w-3 h-3 animate-spin" />
+          <Spinner size="xs" />
           {label}
         </span>
       );
@@ -384,6 +433,24 @@ export function BankOperationsView() {
     }
   };
 
+  const handleDeleteOperation = async (operationId: string) => {
+    if (!currentBank) return;
+
+    setDeletingOpId(operationId);
+    try {
+      await client.deleteOperation(currentBank, operationId);
+      if (selectedOperation?.operation_id === operationId) {
+        setDialogOpen(false);
+        setSelectedOperation(null);
+      }
+      await loadOperations();
+    } catch (error) {
+      // Error toast is shown automatically by the API client interceptor
+    } finally {
+      setDeletingOpId(null);
+    }
+  };
+
   const handleOperationClick = async (operationId: string) => {
     if (!currentBank) return;
 
@@ -549,7 +616,7 @@ export function BankOperationsView() {
                     <TableHead className="w-[300px]">{t("table.status")}</TableHead>
                     {/* Fixed width + always-present label so the column doesn't grow
                         when a pending/failed row's Cancel/Retry button appears. */}
-                    <TableHead className="w-[110px]">{t("table.actions")}</TableHead>
+                    <TableHead className="w-[150px]">{t("table.actions")}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -584,12 +651,12 @@ export function BankOperationsView() {
                       </TableCell>
                       <TableCell className="w-[300px]">
                         <div className="flex items-center gap-2 whitespace-nowrap">
-                          {renderStatusBadge(op.status, op.error_message)}
+                          {renderStatusBadge(op.status, op.error_message, op.next_retry_at)}
                           {op.status === "processing" &&
                             renderProgress(op.progress, { compact: true })}
                         </div>
                       </TableCell>
-                      <TableCell className="w-[110px] whitespace-nowrap">
+                      <TableCell className="w-[150px] whitespace-nowrap">
                         {op.status === "pending" && (
                           <Button
                             variant="ghost"
@@ -602,7 +669,7 @@ export function BankOperationsView() {
                             disabled={cancellingOpId === op.id}
                           >
                             {cancellingOpId === op.id ? (
-                              <Loader2 className="w-3 h-3 animate-spin" />
+                              <Spinner size="xs" />
                             ) : (
                               <X className="w-3 h-3 mr-1" />
                             )}
@@ -621,11 +688,32 @@ export function BankOperationsView() {
                             disabled={retryingOpId === op.id}
                           >
                             {retryingOpId === op.id ? (
-                              <Loader2 className="w-3 h-3 animate-spin" />
+                              <Spinner size="xs" />
                             ) : (
                               <RotateCcw className="w-3 h-3 mr-1" />
                             )}
                             {retryingOpId === op.id ? "" : t("action.retry")}
+                          </Button>
+                        )}
+                        {(op.status === "failed" ||
+                          op.status === "cancelled" ||
+                          op.status === "completed") && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs text-muted-foreground hover:text-red-600 dark:hover:text-red-400"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteOperation(op.id);
+                            }}
+                            disabled={deletingOpId === op.id}
+                          >
+                            {deletingOpId === op.id ? (
+                              <Spinner size="xs" />
+                            ) : (
+                              <Trash2 className="w-3 h-3 mr-1" />
+                            )}
+                            {deletingOpId === op.id ? "" : t("action.delete")}
                           </Button>
                         )}
                       </TableCell>
@@ -687,7 +775,7 @@ export function BankOperationsView() {
           </DialogHeader>
           {loadingDetails ? (
             <div className="flex items-center justify-center py-8">
-              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+              <Spinner size="md" variant="jump" />
             </div>
           ) : selectedOperation ? (
             <div className="space-y-4">
@@ -701,7 +789,13 @@ export function BankOperationsView() {
                       <div className="text-sm font-medium text-muted-foreground">
                         {t("field.status")}
                       </div>
-                      <div className="mt-1">{renderStatusBadge(selectedOperation.status)}</div>
+                      <div className="mt-1">
+                        {renderStatusBadge(
+                          selectedOperation.status,
+                          null,
+                          selectedOperation.next_retry_at
+                        )}
+                      </div>
                     </div>
                     <div>
                       <div className="text-sm font-medium text-muted-foreground">
@@ -776,8 +870,10 @@ export function BankOperationsView() {
                   {/* Action buttons */}
                   {(selectedOperation.status === "pending" ||
                     selectedOperation.status === "failed" ||
-                    selectedOperation.status === "cancelled") && (
-                    <div className="flex gap-2">
+                    selectedOperation.status === "cancelled" ||
+                    selectedOperation.status === "completed" ||
+                    selectedOperation.result_metadata?.document_id) && (
+                    <div className="flex flex-wrap gap-2">
                       {selectedOperation.status === "pending" && (
                         <Button
                           variant="outline"
@@ -787,7 +883,7 @@ export function BankOperationsView() {
                           disabled={cancellingOpId === selectedOperation.operation_id}
                         >
                           {cancellingOpId === selectedOperation.operation_id ? (
-                            <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                            <Spinner size="xs" className="mr-1" />
                           ) : (
                             <X className="w-3 h-3 mr-1" />
                           )}
@@ -804,13 +900,86 @@ export function BankOperationsView() {
                           disabled={retryingOpId === selectedOperation.operation_id}
                         >
                           {retryingOpId === selectedOperation.operation_id ? (
-                            <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                            <Spinner size="xs" className="mr-1" />
                           ) : (
                             <RotateCcw className="w-3 h-3 mr-1" />
                           )}
                           {t("action.retry")}
                         </Button>
                       )}
+                      {(selectedOperation.status === "failed" ||
+                        selectedOperation.status === "cancelled" ||
+                        selectedOperation.status === "completed") && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-xs"
+                          onClick={() => handleDeleteOperation(selectedOperation.operation_id)}
+                          disabled={deletingOpId === selectedOperation.operation_id}
+                        >
+                          {deletingOpId === selectedOperation.operation_id ? (
+                            <Spinner size="xs" className="mr-1" />
+                          ) : (
+                            <Trash2 className="w-3 h-3 mr-1" />
+                          )}
+                          {t("action.delete")}
+                        </Button>
+                      )}
+                      {selectedOperation.result_metadata?.document_id && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-xs"
+                          onClick={() =>
+                            setDocumentModalId(
+                              String(selectedOperation.result_metadata?.document_id)
+                            )
+                          }
+                        >
+                          <FileText className="w-3 h-3 mr-1" />
+                          {t("viewDocument")}
+                        </Button>
+                      )}
+                      {/* Export archives are downloadable straight from the completed
+                          operation — the stored file is proxied through the CP so the
+                          browser gets an attachment. */}
+                      {selectedOperation.result_metadata?.download_url && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-xs"
+                          onClick={() => {
+                            const url = withBasePath(
+                              `/api/files/download?path=${encodeURIComponent(
+                                String(selectedOperation.result_metadata?.download_url)
+                              )}`
+                            );
+                            const a = document.createElement("a");
+                            a.href = url;
+                            a.download = String(
+                              selectedOperation.result_metadata?.filename ?? "export.zip"
+                            );
+                            document.body.appendChild(a);
+                            a.click();
+                            a.remove();
+                          }}
+                        >
+                          <Download className="w-3 h-3 mr-1" />
+                          {t("action.download")}
+                        </Button>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Outcome details (typed, per-operation-type) */}
+                  {selectedOperation.details && (
+                    <div>
+                      <div className="text-sm font-medium text-muted-foreground mb-2">
+                        {t("outcomeDetails")}
+                      </div>
+                      <pre className="rounded-lg border bg-muted/30 p-3 text-xs font-mono overflow-x-auto max-h-96 whitespace-pre-wrap break-words">
+                        {JSON.stringify(selectedOperation.details, null, 2)}
+                      </pre>
                     </div>
                   )}
 
@@ -897,7 +1066,7 @@ export function BankOperationsView() {
                               disabled={loadingPayload}
                             >
                               {loadingPayload ? (
-                                <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                <Spinner size="xs" className="mr-1" />
                               ) : (
                                 <Code className="w-3 h-3 mr-1" />
                               )}
@@ -925,6 +1094,12 @@ export function BankOperationsView() {
           ) : null}
         </DialogContent>
       </Dialog>
+
+      <DocumentChunkModal
+        type="document"
+        id={documentModalId}
+        onClose={() => setDocumentModalId(null)}
+      />
     </div>
   );
 }

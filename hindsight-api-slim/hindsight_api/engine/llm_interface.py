@@ -5,11 +5,57 @@ This module defines the interface that all LLM providers must implement,
 enabling support for multiple LLM backends (OpenAI, Anthropic, Gemini, Codex, etc.)
 """
 
+import hashlib
+import logging
 from abc import ABC, abstractmethod
+from contextlib import AbstractAsyncContextManager
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from enum import StrEnum
+from typing import Any, Callable, Self
 
 from .response_models import LLMToolCallResult
+
+logger = logging.getLogger(__name__)
+
+
+class LLMToolChoiceMode(StrEnum):
+    """Canonical tool-selection modes shared by every LLM provider."""
+
+    AUTO = "auto"
+    NONE = "none"
+    REQUIRED = "required"
+    NAMED = "named"
+
+
+@dataclass(frozen=True, slots=True)
+class LLMToolChoice:
+    """Typed internal tool selection serialized only at provider boundaries."""
+
+    mode: LLMToolChoiceMode
+    function_name: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.mode is LLMToolChoiceMode.NAMED:
+            if self.function_name is None or not self.function_name or self.function_name != self.function_name.strip():
+                raise ValueError("Named tool choice requires a non-empty canonical function name")
+        elif self.function_name is not None:
+            raise ValueError(f"Tool choice mode {self.mode.value!r} cannot include a function name")
+
+    @classmethod
+    def named(cls, function_name: str) -> Self:
+        return cls(mode=LLMToolChoiceMode.NAMED, function_name=function_name)
+
+    @property
+    def selected_function_name(self) -> str:
+        if self.function_name is None:
+            raise ValueError("Tool choice does not select a named function")
+        return self.function_name
+
+
+LLM_TOOL_CHOICE_AUTO = LLMToolChoice(mode=LLMToolChoiceMode.AUTO)
+LLM_TOOL_CHOICE_NONE = LLMToolChoice(mode=LLMToolChoiceMode.NONE)
+LLM_TOOL_CHOICE_REQUIRED = LLMToolChoice(mode=LLMToolChoiceMode.REQUIRED)
 
 
 class LLMInterface(ABC):
@@ -26,7 +72,7 @@ class LLMInterface(ABC):
         api_key: str,
         base_url: str,
         model: str,
-        reasoning_effort: str = "low",
+        reasoning_effort: str | None = None,
         **kwargs: Any,
     ):
         """
@@ -37,14 +83,37 @@ class LLMInterface(ABC):
             api_key: API key or authentication token.
             base_url: Base URL for the API.
             model: Model name.
-            reasoning_effort: Reasoning effort level for supported providers.
+            reasoning_effort: Reasoning effort level, or None when the operator
+                configured none — in which case no provider sends the parameter and
+                every model runs at its own default effort.
             **kwargs: Additional provider-specific parameters.
         """
         self.provider = provider.lower()
         self.api_key = api_key
         self.base_url = base_url
         self.model = model
-        self.reasoning_effort = reasoning_effort
+        # None means "the operator said nothing", and nothing is what gets sent: no
+        # provider may invent a level. Hindsight used to resolve unset to "low" here and
+        # ship it to whichever lanes their capability check happened to accept, which
+        # made the setting both invisible (a configured value could be silently dropped —
+        # issue #3449) and presumptuous (an unconfigured one was still transmitted).
+        # An empty string is an unset environment variable, not a level.
+        self.reasoning_effort: str | None = reasoning_effort or None
+
+    def _warn_reasoning_effort_unsupported(self) -> None:
+        """Report, once at startup, that this provider cannot honour a configured effort.
+
+        Providers with no reasoning knob to turn call this from ``__init__``. Silence is
+        what made issue #3449 expensive: the variable is set, documented and visible in
+        the environment, so every signal the operator has says it is in force. A setting
+        this provider cannot act on has to say so out loud.
+        """
+        if self.reasoning_effort is None:
+            return
+        logger.warning(
+            f"reasoning_effort={self.reasoning_effort!r} is ignored: the {self.provider} provider "
+            f"has no reasoning-effort control. Remove the setting or switch provider to apply it."
+        )
 
     @abstractmethod
     async def verify_connection(self) -> None:
@@ -71,6 +140,7 @@ class LLMInterface(ABC):
         strict_schema: bool = False,
         return_usage: bool = False,
         cached_prefix: str | None = None,
+        attempt_context: Callable[[], AbstractAsyncContextManager[None]] | None = None,
     ) -> Any:
         """
         Make an LLM API call with retry logic.
@@ -92,6 +162,11 @@ class LLMInterface(ABC):
             cached_prefix: Opaque handle from ``get_or_create_cached_prefix`` for the
                 cacheable system prefix, or None. Providers without explicit prompt
                 caching ignore it (and the wrapper only forwards it when set).
+            attempt_context: Factory for an async context manager holding the shared
+                concurrency permits. Passed only when the provider declares
+                ``supports_attempt_scoped_concurrency()``; the provider must enter it
+                around each individual upstream request so retry backoff never
+                occupies a permit.
 
         Returns:
             If return_usage=False: Parsed response if response_format is provided, otherwise text content.
@@ -114,8 +189,10 @@ class LLMInterface(ABC):
         max_retries: int = 5,
         initial_backoff: float = 1.0,
         max_backoff: float = 30.0,
-        tool_choice: str | dict[str, Any] = "auto",
+        tool_choice: LLMToolChoice = LLM_TOOL_CHOICE_AUTO,
         cached_prefix: str | None = None,
+        cached_prefix_message_count: int = 0,
+        attempt_context: Callable[[], AbstractAsyncContextManager[None]] | None = None,
     ) -> LLMToolCallResult:
         """
         Make an LLM API call with tool/function calling support.
@@ -129,7 +206,9 @@ class LLMInterface(ABC):
             max_retries: Maximum retry attempts.
             initial_backoff: Initial backoff time in seconds.
             max_backoff: Maximum backoff time in seconds.
-            tool_choice: How to choose tools - "auto", "none", "required", or specific function.
+            tool_choice: Canonical tool-selection policy.
+            attempt_context: Factory for an async context manager holding the shared
+                concurrency permits — see ``call``.
 
         Returns:
             LLMToolCallResult with content and/or tool_calls.
@@ -143,6 +222,38 @@ class LLMInterface(ABC):
         Returns:
             True if provider supports submit_batch/get_batch_status/retrieve_batch_results
         """
+        return False
+
+    @property
+    def batch_account_key(self) -> str:
+        """Stable, non-secret identifier for the provider *account* this impl calls.
+
+        A batch id only exists on the account that created it, so crash recovery
+        has to resolve the exact configured member again. ``provider`` cannot do
+        that on its own: two members of the same provider on different
+        credentials are indistinguishable by name, so reordering them (or
+        inserting a new one in front) would route a resume through the wrong
+        account and poll a batch id it has never seen — issue #3671.
+
+        The key is the endpoint identity (provider + base URL) plus a truncated
+        SHA-256 of the credential: enough to tell two accounts apart, never the
+        credential itself, since this is persisted in ``async_operations``
+        metadata and quoted back in operator-facing errors. The model is
+        deliberately excluded — a batch belongs to the account, not to the model
+        a request happened to name — so retargeting a member's model still
+        resumes. Rotating its API key does not: the key changes and recovery
+        fails loudly naming both sides, which is the safe direction to fail in.
+
+        A provider that rotates its credential in place (a refreshed OAuth/JWT
+        token rather than an operator edit) must override this with a key built
+        from the stable account identity — none of the batch-capable providers
+        does so today.
+        """
+        credential = hashlib.sha256((self.api_key or "").encode("utf-8")).hexdigest()[:12]
+        return f"{self.provider}|{self.base_url or ''}|{credential}"
+
+    def supports_attempt_scoped_concurrency(self) -> bool:
+        """Whether retries can acquire concurrency permits per upstream attempt."""
         return False
 
     # ── Prompt prefix caching (optional, per-provider) ─────────────────────────
@@ -183,6 +294,45 @@ class LLMInterface(ABC):
         Returns None when caching is disabled/unsupported or the prefix is too
         small; callers MUST fall back to an uncached call in that case.
         """
+        return None
+
+    # ── Step-by-step incremental prompt caching (optional) ─────────────────────
+    #
+    # For agentic loops (reflect) the dominant cost is the conversation prefix
+    # re-sent every turn, not the static system prefix. Providers that can cache
+    # a *growing* prefix implement these: the caller rolls one cache per step
+    # (each covering the previous step's full input), passes its handle plus the
+    # message count it covers to ``call_with_tools`` so only the new turns are
+    # sent fresh, and tears the caches down when the loop ends. Default no-ops so
+    # non-supporting providers transparently run uncached.
+
+    def supports_incremental_prompt_cache(self) -> bool:
+        """Whether this provider can cache a growing multi-turn conversation prefix."""
+        return False
+
+    async def create_incremental_cache(
+        self,
+        *,
+        session_id: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> str | None:
+        """Cache ``system + tools + messages`` and return an opaque handle, or None.
+
+        The handle is passed back to ``call_with_tools(cached_prefix=...,
+        cached_prefix_message_count=len(messages))``. Caches are grouped under
+        ``session_id`` for teardown via ``delete_cache_session``. Returns None
+        when caching is unavailable or the prefix is too small — caller falls
+        back to an uncached call.
+        """
+        return None
+
+    async def delete_cached_prefix(self, name: str) -> None:
+        """Best-effort delete of a single cache handle (a superseded step)."""
+        return None
+
+    async def delete_cache_session(self, session_id: str) -> None:
+        """Best-effort teardown of every cache created under ``session_id``."""
         return None
 
     async def submit_batch(
@@ -253,6 +403,21 @@ class OutputTooLongError(Exception):
     """
 
     pass
+
+
+class ProviderContentPolicyError(RuntimeError):
+    """Raised when a provider refuses a request on content-policy (AUP) grounds.
+
+    A refusal is a deterministic function of the content, not a transient fault:
+    the same prompt earns the same refusal on every attempt. Retrying it — inside
+    the provider's transport loop or by re-running the whole worker task — burns
+    identical calls for a guaranteed-identical failure (issue #3690), so both
+    layers treat this as permanent: the provider raises it without retrying, and
+    ``_is_non_retryable_task_error`` marks the operation failed on first sight.
+
+    A ``RuntimeError`` subclass so existing ``except RuntimeError`` handlers
+    around LLM calls keep behaving as they did before the class existed.
+    """
 
 
 class ProviderRateLimitResetError(Exception):

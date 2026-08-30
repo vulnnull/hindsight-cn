@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations, useLocale } from "next-intl";
 import { toast } from "sonner";
 import { client, LLMRequestEntry } from "@/lib/api";
 import { useBank } from "@/lib/bank-context";
@@ -75,7 +75,13 @@ import {
   Upload,
   Lock,
   RotateCcw,
+  Search,
 } from "lucide-react";
+import { TagFilterInput } from "./tag-filter-input";
+import { FacetLegend, MetadataChip, TagChip } from "@/components/ui/facet-chip";
+import { Spinner } from "@/components/ui/spinner";
+import { HarnessLogo } from "@/components/ui/harness-logo";
+import { documentHarness, resolveHarnessLogo } from "@/lib/harness-logo";
 
 const ITEMS_PER_PAGE = 50;
 
@@ -84,14 +90,21 @@ const ITEMS_PER_PAGE = 50;
 // client-side store — so the status survives reloads, tabs and devices.
 const PENDING_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const PENDING_POLL_INTERVAL_MS = 4000;
+// Idle cadence for auto-refreshing the whole table (new/updated docs, counts,
+// "Updating" badges) so it stays live without a manual reload. Gentler than the
+// active poll above — a quiet table shouldn't hammer the API.
+const DOCUMENTS_AUTO_REFRESH_MS = 8000;
 // A file_convert_retain operation flips to "completed" a couple of seconds
 // before the document becomes visible in listDocuments. Keep showing the
 // pending row for recently-completed operations so it stays on screen until
 // the real document row takes over (dedup by document_id) — no flicker.
 const PENDING_BRIDGE_MS = 30000;
 const DOCUMENTS_REFRESH_EVENT = "hindsight:documents-refresh";
+// Debounce between a filter edit (search text, tags) and the list request.
+const FILTER_DEBOUNCE_MS = 250;
 
 type PendingUpload = {
+  operationId: string;
   id: string;
   filename: string | null;
   status: "processing" | "failed";
@@ -115,27 +128,141 @@ function formatRelativeTime(dateStr: string): string {
   return `${Math.floor(months / 12)}y ago`;
 }
 
+// Live "Refreshed N seconds ago" label next to the documents count. It owns a
+// 1s ticker so only this label re-renders each second (not the whole table), and
+// uses Intl.RelativeTimeFormat with the active locale — no per-unit translation
+// keys needed. The list's own formatRelativeTime floors anything under a minute
+// to "just now", which is useless for an ~8s auto-refresh, so we format seconds
+// here directly.
+function LastRefreshedLabel({ at }: { at: number }) {
+  const t = useTranslations("documentsView");
+  const locale = useLocale();
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => tick((n) => n + 1), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const sec = Math.max(0, Math.round((Date.now() - at) / 1000));
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
+  const rel =
+    sec < 60
+      ? rtf.format(-sec, "second")
+      : sec < 3600
+        ? rtf.format(-Math.round(sec / 60), "minute")
+        : rtf.format(-Math.round(sec / 3600), "hour");
+
+  return (
+    <span className="text-xs text-muted-foreground/70">· {t("lastRefreshed", { time: rel })}</span>
+  );
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// Detail-dialog rendering of document metadata. Unlike the list row this shows
+// every entry with its full value and no truncation — the dialog is where you
+// come to read the whole thing, so a "+N" here would just be a dead end.
 function MetadataBadges({ metadata }: { metadata: Record<string, any> }) {
   const entries = Object.entries(metadata);
   if (entries.length === 0) return <span>-</span>;
   return (
-    <div className="flex flex-wrap gap-1">
-      {entries.slice(0, 3).map(([k, v]) => (
-        <span
-          key={k}
-          className="text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 font-medium"
-        >
-          {k}={String(v)}
-        </span>
+    <div className="flex flex-wrap gap-1.5">
+      {entries.map(([k, v]) => (
+        <MetadataChip key={k} entryKey={k} value={String(v)} />
       ))}
-      {entries.length > 3 && (
-        <span className="text-xs px-2 py-0.5 text-muted-foreground">+{entries.length - 3}</span>
+    </div>
+  );
+}
+
+// Tags and metadata share one list column: both are short chips describing the
+// same document, and two half-empty columns wasted the width that the size and
+// memory-unit numbers need.
+//
+// The column header carries a legend — one specimen chip per kind, labelled —
+// so the two treatments are defined once, up front, instead of being asserted
+// per row. That is what lets the rows stay bare chips: nothing is spent
+// restating the category on every one of them.
+//
+// Colours and shapes come from ui/facet-chip, the single place tags, entities
+// and metadata are styled app-wide. Do not hand-roll chip classes here.
+//
+// The cap is on the TOTAL chip count, not per kind, because the column is
+// narrow enough that each extra chip costs a whole wrapped line. Tags fill the
+// slots first (they're the actionable half) and metadata takes what's left;
+// the rest collapses into a "+N" tooltip. The full, untruncated set lives in
+// the document dialog — this column is for scanning, not reading.
+const ROW_CHIP_LIMIT = 3;
+
+// Bounds a single chip so one long metadata value can't claim the whole row.
+const ROW_CHIP_WIDTH = "max-w-[180px]";
+
+function TagsAndMetadataCell({
+  tags,
+  metadata,
+  selectedTags,
+  onToggleTag,
+  harnessShownAsLogo = false,
+}: {
+  tags: string[];
+  metadata: Record<string, any> | null | undefined;
+  selectedTags: string[];
+  onToggleTag: (tag: string) => void;
+  /**
+   * The row already shows the harness as a logo, so `harness=…` would be the
+   * same fact twice — and chip slots here are scarce. The `harness:<id>` TAG
+   * stays: unlike the metadata chip it filters the list when clicked.
+   */
+  harnessShownAsLogo?: boolean;
+}) {
+  const t = useTranslations("documentsView");
+  const metadataEntries = Object.entries(metadata ?? {}).filter(
+    ([k]) => !(harnessShownAsLogo && k === "harness")
+  );
+  const shownTags = tags.slice(0, ROW_CHIP_LIMIT);
+  const shownMetadata = metadataEntries.slice(0, ROW_CHIP_LIMIT - shownTags.length);
+  const overflow = [
+    ...tags.slice(shownTags.length).map((tag) => `#${tag}`),
+    ...metadataEntries.slice(shownMetadata.length).map(([k, v]) => `${k}=${String(v)}`),
+  ];
+
+  if (shownTags.length === 0 && shownMetadata.length === 0) {
+    return <span className="text-muted-foreground">-</span>;
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+      {shownTags.map((tag) => (
+        <TagChip
+          key={`tag-${tag}`}
+          tag={tag}
+          truncate
+          className={ROW_CHIP_WIDTH}
+          active={selectedTags.includes(tag)}
+          title={`${t("labelTags")}: ${tag} — ${t("filterByThisTag")}`}
+          onClick={() => onToggleTag(tag)}
+        />
+      ))}
+      {shownMetadata.map(([k, v]) => (
+        <MetadataChip
+          key={`meta-${k}`}
+          entryKey={k}
+          value={String(v)}
+          truncate
+          className={ROW_CHIP_WIDTH}
+          title={`${t("labelMetadata")}: ${k}=${String(v)}`}
+        />
+      ))}
+      {overflow.length > 0 && (
+        <span
+          className="text-xs px-1.5 py-0.5 text-muted-foreground"
+          title={`${t("seeAllInDocument")}\n\n${overflow.join("\n")}`}
+        >
+          +{overflow.length}
+        </span>
       )}
     </div>
   );
@@ -593,12 +720,28 @@ export function DocumentsView() {
   const t = useTranslations("documentsView");
   const tCommon = useTranslations("common");
   const tBank = useTranslations("bank");
+  const tApiError = useTranslations("api.errors.documents");
+  const tOperations = useTranslations("bankOperations");
   const { currentBank } = useBank();
   const { features } = useFeatures();
   const [documents, setDocuments] = useState<any[]>([]);
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
+  // Document IDs targeted by a pending/processing retain op → badged as "updating".
+  const [inFlightDocIds, setInFlightDocIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
+  // Whether the first document fetch has completed. The mount fetch is debounced
+  // (see the load effect), so without this the empty state ("No documents found")
+  // flashes for the initial paint + debounce window before `loading` ever flips.
+  // Gate the empty state on this so we show the loader until we actually know.
+  const [loaded, setLoaded] = useState(false);
+  // Wall-clock time of the last list refresh, shown next to the count so the
+  // auto-refresh is visible ("Refreshed 14:41:32").
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  // The UI exposes the two useful modes; both map to their *_strict variant so
+  // that filtering by a tag never surfaces untagged documents.
+  const [tagsMatch, setTagsMatch] = useState<"any" | "all">("any");
   const [total, setTotal] = useState(0);
 
   // Document transfer (export/import) state
@@ -606,6 +749,7 @@ export function DocumentsView() {
   const [importing, setImporting] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportIncludeObservations, setExportIncludeObservations] = useState(false);
+  const [exportIncludeKnowledgeBase, setExportIncludeKnowledgeBase] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importOnConflict, setImportOnConflict] = useState<"skip" | "replace" | "new-id">("skip");
@@ -619,6 +763,7 @@ export function DocumentsView() {
   const [selectedDocument, setSelectedDocument] = useState<any>(null);
   const [loadingDocument, setLoadingDocument] = useState(false);
   const [deletingDocumentId, setDeletingDocumentId] = useState<string | null>(null);
+  const [deletingUploadOperationId, setDeletingUploadOperationId] = useState<string | null>(null);
 
   // Tag editing state
   const [editingTags, setEditingTags] = useState(false);
@@ -662,6 +807,8 @@ export function DocumentsView() {
         const data: any = await client.listDocuments({
           bank_id: currentBank,
           q: searchQuery,
+          tags: selectedTags,
+          tags_match: tagsMatch === "all" ? "all_strict" : "any_strict",
           limit: ITEMS_PER_PAGE,
           offset: pageOffset,
         });
@@ -671,9 +818,11 @@ export function DocumentsView() {
         // Error toast is shown automatically by the API client interceptor
       } finally {
         setLoading(false);
+        setLoaded(true);
+        setLastRefreshedAt(Date.now());
       }
     },
-    [currentBank, searchQuery]
+    [currentBank, searchQuery, selectedTags, tagsMatch]
   );
 
   // Pull in-flight/failed file uploads straight from the server's
@@ -709,6 +858,7 @@ export function DocumentsView() {
           return false;
         })
         .map((op) => ({
+          operationId: op.id,
           id: op.document_id || op.id,
           filename: op.filename ?? null,
           status: op.status === "failed" ? "failed" : "processing",
@@ -721,8 +871,43 @@ export function DocumentsView() {
     }
   }, [currentBank]);
 
+  // Cross-check in-flight retain operations against the visible documents: a
+  // pending/processing op that targets an existing document_id means that
+  // document is being rewritten. Fetched broadly (not just file uploads) so text
+  // re-retains and reprocesses are caught too — the API surfaces the target
+  // document_id for single-document retains (batch/file), which is the case here.
+  const loadUpdatingOps = useCallback(async () => {
+    if (!currentBank) {
+      setInFlightDocIds(new Set());
+      return;
+    }
+    try {
+      const data = await client.listOperations(currentBank, { limit: 100 });
+      const ids = new Set<string>();
+      for (const op of data.operations || []) {
+        if ((op.status === "pending" || op.status === "processing") && op.document_id) {
+          ids.add(op.document_id);
+        }
+      }
+      setInFlightDocIds(ids);
+    } catch {
+      // Keep the previous set; the Operations tab is the detailed source of truth.
+    }
+  }, [currentBank]);
+
+  // Only badge documents that are actually visible in the table.
+  const updatingDocIds = useMemo(() => {
+    if (inFlightDocIds.size === 0) return new Set<string>();
+    const realIds = new Set(documents.map((doc) => doc.id));
+    return new Set([...inFlightDocIds].filter((id) => realIds.has(id)));
+  }, [inFlightDocIds, documents]);
+  const hasUpdatingDocs = updatingDocIds.size > 0;
+
   // Pending rows: in-flight/failed uploads that aren't yet in the real list.
+  // A tag filter hides them entirely — their tags only exist on the document
+  // row the conversion hasn't produced yet, so we can't honestly match them.
   const pendingRows = useMemo<PendingUpload[]>(() => {
+    if (selectedTags.length > 0) return [];
     const realIds = new Set(documents.map((doc) => doc.id));
     const q = searchQuery.trim().toLowerCase();
     return pendingUploads
@@ -734,7 +919,21 @@ export function DocumentsView() {
           (upload.filename?.toLowerCase().includes(q) ?? false)
         );
       });
-  }, [documents, pendingUploads, searchQuery]);
+  }, [documents, pendingUploads, searchQuery, selectedTags]);
+
+  const hasActiveFilters = searchQuery.trim().length > 0 || selectedTags.length > 0;
+
+  const clearFilters = () => {
+    setSearchQuery("");
+    setSelectedTags([]);
+  };
+
+  // Clicking a tag chip in the table toggles it in the filter.
+  const toggleTagFilter = (tag: string) => {
+    setSelectedTags((prev) =>
+      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+    );
+  };
 
   // Keep polling while any *visible* pending row is still processing (i.e. its
   // real document hasn't shown up yet). Basing this on pendingRows rather than
@@ -744,6 +943,15 @@ export function DocumentsView() {
     [pendingRows]
   );
   const displayTotal = total + pendingRows.length;
+
+  // The detail response nests the document's metadata under `retain_params`,
+  // where the list response returns it flat as `document_metadata` — same map,
+  // two shapes, so the harness is resolved once per surface rather than inline.
+  const selectedHarness = documentHarness(
+    selectedDocument?.retain_params?.metadata,
+    selectedDocument?.tags
+  );
+  const selectedHarnessLogo = resolveHarnessLogo(selectedHarness);
 
   // Handle page change
   const handlePageChange = (newPage: number) => {
@@ -805,6 +1013,9 @@ export function DocumentsView() {
         success: true,
         message: `Reprocessing started (operation: ${result.operation_id})`,
       });
+      // Surface the "Updating" badge immediately instead of waiting for the next
+      // poll tick; the poll then keeps it live and clears it when the op finishes.
+      loadUpdatingOps();
     } catch (error) {
       setReprocessResult({
         success: false,
@@ -849,6 +1060,22 @@ export function DocumentsView() {
 
   const requestDeleteDocument = (documentId: string, memoryCount?: number) => {
     setDocumentToDelete({ id: documentId, memoryCount });
+  };
+
+  const deleteFailedUpload = async (operationId: string) => {
+    if (!currentBank) return;
+
+    setDeletingUploadOperationId(operationId);
+    try {
+      // Failed uploads have no document row to delete. Remove their terminal
+      // operation record instead, using the same API as the Operations view.
+      await client.deleteOperation(currentBank, operationId);
+      await loadPendingUploads();
+    } catch {
+      // Error toast is shown automatically by the API client interceptor
+    } finally {
+      setDeletingUploadOperationId(null);
+    }
   };
 
   const startEditTags = () => {
@@ -936,29 +1163,54 @@ export function DocumentsView() {
     }
   };
 
-  // Auto-load documents when component mounts or bank changes
+  // Load page 1 on mount, on bank change and whenever a filter changes.
+  // `loadDocuments` re-identifies exactly on those inputs, so this single
+  // debounced effect covers all of them — typing in the search box no longer
+  // fires one request per keystroke *plus* a second undebounced one.
   useEffect(() => {
-    if (currentBank) {
+    if (!currentBank) return;
+    const timeoutId = setTimeout(() => {
       setCurrentPage(1);
       loadDocuments(1);
+    }, FILTER_DEBOUNCE_MS);
+    return () => clearTimeout(timeoutId);
+  }, [currentBank, loadDocuments]);
+
+  useEffect(() => {
+    if (currentBank) {
       loadPendingUploads();
+      loadUpdatingOps();
     } else {
       setPendingUploads([]);
+      setInFlightDocIds(new Set());
     }
-  }, [currentBank, loadDocuments, loadPendingUploads]);
+  }, [currentBank, loadPendingUploads, loadUpdatingOps]);
 
-  // While any upload is converting, poll the operations endpoint and refresh
-  // the document list so finished uploads flip from "Processing" to a real row.
+  // Auto-refresh the whole table on a timer so new/updated documents, counts,
+  // pending uploads, and "Updating" badges all appear without a manual reload.
+  // Refresh faster while something is actively in flight (uploads converting or a
+  // document being rewritten), and on the gentler idle cadence otherwise.
   useEffect(() => {
-    if (!currentBank || !hasActiveUploads) return;
+    if (!currentBank) return;
 
+    const period =
+      hasActiveUploads || hasUpdatingDocs ? PENDING_POLL_INTERVAL_MS : DOCUMENTS_AUTO_REFRESH_MS;
     const interval = window.setInterval(() => {
+      loadUpdatingOps();
       loadPendingUploads();
       loadDocuments(currentPage);
-    }, PENDING_POLL_INTERVAL_MS);
+    }, period);
 
     return () => window.clearInterval(interval);
-  }, [currentBank, hasActiveUploads, currentPage, loadDocuments, loadPendingUploads]);
+  }, [
+    currentBank,
+    hasActiveUploads,
+    hasUpdatingDocs,
+    currentPage,
+    loadDocuments,
+    loadPendingUploads,
+    loadUpdatingOps,
+  ]);
 
   // Refresh immediately after an upload is submitted elsewhere (bank selector).
   useEffect(() => {
@@ -966,23 +1218,12 @@ export function DocumentsView() {
 
     const onRefresh = () => {
       loadPendingUploads();
+      loadUpdatingOps();
       loadDocuments(currentPage);
     };
     window.addEventListener(DOCUMENTS_REFRESH_EVENT, onRefresh);
     return () => window.removeEventListener(DOCUMENTS_REFRESH_EVENT, onRefresh);
-  }, [currentBank, currentPage, loadDocuments, loadPendingUploads]);
-
-  // Reload when search query changes (with debounce)
-  useEffect(() => {
-    if (!currentBank) return;
-
-    const timeoutId = setTimeout(() => {
-      setCurrentPage(1);
-      loadDocuments(1);
-    }, 300); // 300ms debounce
-
-    return () => clearTimeout(timeoutId);
-  }, [searchQuery]);
+  }, [currentBank, currentPage, loadDocuments, loadPendingUploads, loadUpdatingOps]);
 
   const triggerDownload = (blob: Blob, filename: string) => {
     const url = URL.createObjectURL(blob);
@@ -995,17 +1236,27 @@ export function DocumentsView() {
     URL.revokeObjectURL(url);
   };
 
-  const exportDocuments = async (documentIds?: string[], includeObservations = false) => {
+  const exportDocuments = async (
+    documentIds?: string[],
+    includeObservations = false,
+    includeKnowledgeBase = false
+  ) => {
     if (!currentBank || exporting) return;
     setExporting(true);
     try {
-      const blob = await client.exportDocuments(currentBank, documentIds, includeObservations);
+      const blob = await client.exportDocuments(
+        currentBank,
+        documentIds,
+        includeObservations,
+        includeKnowledgeBase
+      );
       const suffix = documentIds && documentIds.length === 1 ? `-${documentIds[0]}` : "-documents";
       triggerDownload(blob, `${currentBank}${suffix}.zip`);
       toast.success(t("exportSuccess"));
       setExportDialogOpen(false);
-    } catch {
-      // Errors surface via the API client / route; nothing extra to do here.
+    } catch (error) {
+      // Binary transfer requests bypass the API client's shared error interceptor.
+      toast.error(error instanceof Error ? error.message : tApiError("export"));
     } finally {
       setExporting(false);
     }
@@ -1045,8 +1296,9 @@ export function DocumentsView() {
       loadDocuments(currentPage);
       setImportDialogOpen(false);
       setImportFile(null);
-    } catch {
-      // Error toast handled by the API client.
+    } catch (error) {
+      // Multipart transfer requests bypass the API client's shared error interceptor.
+      toast.error(error instanceof Error ? error.message : tApiError("import"));
     } finally {
       setImporting(false);
     }
@@ -1100,7 +1352,7 @@ export function DocumentsView() {
         )}
       </div>
 
-      {/* Export dialog: explains the action and offers the observations choice. */}
+      {/* Export dialog: offers opt-in inclusion of derived/bank-level knowledge. */}
       <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
         <DialogContent>
           <DialogHeader>
@@ -1120,6 +1372,19 @@ export function DocumentsView() {
               <p className="text-xs text-muted-foreground">{t("exportIncludeObservationsHint")}</p>
             </div>
           </div>
+          <div className="flex items-start gap-2 py-2">
+            <Checkbox
+              id="export-include-knowledge-base"
+              checked={exportIncludeKnowledgeBase}
+              onCheckedChange={(v) => setExportIncludeKnowledgeBase(v === true)}
+            />
+            <div className="grid gap-1 leading-none">
+              <Label htmlFor="export-include-knowledge-base">
+                {t("exportIncludeKnowledgeBaseLabel")}
+              </Label>
+              <p className="text-xs text-muted-foreground">{t("exportIncludeKnowledgeBaseHint")}</p>
+            </div>
+          </div>
           <DialogFooter>
             <Button
               variant="outline"
@@ -1131,7 +1396,9 @@ export function DocumentsView() {
             </Button>
             <Button
               size="sm"
-              onClick={() => exportDocuments(undefined, exportIncludeObservations)}
+              onClick={() =>
+                exportDocuments(undefined, exportIncludeObservations, exportIncludeKnowledgeBase)
+              }
               disabled={exporting}
             >
               <Download className="h-4 w-4 mr-2" />
@@ -1155,13 +1422,18 @@ export function DocumentsView() {
             <DialogDescription>{t("importDialogDescription")}</DialogDescription>
           </DialogHeader>
           <div className="py-2 space-y-4">
-            <input
-              type="file"
-              accept=".zip,application/zip"
-              disabled={importing}
-              onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
-              className="block w-full text-sm text-muted-foreground file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-muted/80"
-            />
+            <div className="grid gap-1.5">
+              <input
+                type="file"
+                accept=".zip,application/zip"
+                disabled={importing}
+                onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
+                className="block w-full text-sm text-muted-foreground file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-muted/80"
+              />
+              {/* Spelled out because "Import from zip" reads like a bulk upload
+                  of ordinary files, which this is not — that's Add Document. */}
+              <p className="text-xs text-muted-foreground">{t("importFileHint")}</p>
+            </div>
             <div className="grid gap-1.5">
               <Label htmlFor="import-on-conflict">{t("importConflictLabel")}</Label>
               <Select
@@ -1203,149 +1475,237 @@ export function DocumentsView() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {/* Filter toolbar — rendered even when nothing matches, so a filter that
+          empties the list can still be undone. */}
+      {/* items-start: the tag filter is a two-row block (controls + applied
+          chips), so the other controls align to its first row. */}
+      <div className="mb-3 flex flex-wrap items-start gap-3">
+        <div className="relative w-72">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <Input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder={t("searchPlaceholder")}
+            className="pl-8 pr-8 h-9"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery("")}
+              aria-label={t("clearSearch")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+        <TagFilterInput
+          value={selectedTags}
+          onChange={setSelectedTags}
+          bankId={currentBank}
+          matchMode={tagsMatch}
+          onMatchModeChange={setTagsMatch}
+          className="flex-1 min-w-[260px]"
+        />
+        {hasActiveFilters && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={clearFilters}
+            className="h-9 gap-1 text-xs shrink-0"
+          >
+            <X className="h-3.5 w-3.5" />
+            {t("clearFilters")}
+          </Button>
+        )}
+      </div>
+
+      {/* Hide the count during the very first load so it doesn't read
+          "0 total documents" above the loading spinner. */}
+      {(loaded || documents.length > 0 || pendingRows.length > 0) && (
+        <div className="mb-4 flex items-baseline gap-2 text-sm text-muted-foreground">
+          <span>
+            {hasActiveFilters
+              ? t("matchingDocuments", { total: displayTotal })
+              : t("totalDocuments", { total: displayTotal })}
+          </span>
+          {lastRefreshedAt !== null && <LastRefreshedLabel at={lastRefreshedAt} />}
+        </div>
+      )}
+
       {/* Documents List Section */}
-      {loading && documents.length === 0 && pendingRows.length === 0 ? (
+      {/* Show the loader until the first fetch resolves (`!loaded`), not just while
+          `loading`. Two reasons the empty state would otherwise flash first:
+          (1) the mount fetch is debounced, and (2) on a hard refresh currentBank
+          is null until bank-context resolves it from the URL in an effect (after
+          the first paint / before hydration + theme). `!loaded` covers both — and
+          it can't get stuck: on any /banks/[id] route currentBank always resolves,
+          the fetch runs, and its `finally` flips `loaded` (even if the bank is
+          invalid and the fetch errors). */}
+      {(loading || !loaded) && documents.length === 0 && pendingRows.length === 0 ? (
         <div className="flex items-center justify-center py-20">
           <div className="text-center">
-            <div className="text-4xl mb-2">⏳</div>
+            <Spinner size="xl" variant="jump" className="mx-auto mb-2" />
             <div className="text-sm text-muted-foreground">{t("loadingDocuments")}</div>
           </div>
         </div>
       ) : documents.length > 0 || pendingRows.length > 0 ? (
         <>
-          <div className="mb-4 text-sm text-muted-foreground">
-            {t("totalDocuments", { total: displayTotal })}
-          </div>
           {/* Documents Table */}
           <div className="w-full">
-            <div className="px-5 mb-4">
-              <Input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={t("searchPlaceholder")}
-                className="max-w-2xl"
-              />
-            </div>
-
-            <div className="overflow-x-auto px-5 pb-5">
-              <Table>
+            <div className="overflow-x-auto pb-5">
+              {/* table-fixed so the column widths below are honoured. With the
+                  default auto layout the long unbreakable mono document IDs
+                  sized the first column themselves, starving the chip column
+                  and stopping `truncate` from ever kicking in. */}
+              <Table className="table-fixed">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>{t("colDocumentId")}</TableHead>
-                    <TableHead>{t("colCreated")}</TableHead>
-                    <TableHead>{t("colUpdated")}</TableHead>
-                    <TableHead>{t("colTags")}</TableHead>
-                    <TableHead>{t("colMetadata")}</TableHead>
-                    <TableHead>{t("colSize")}</TableHead>
-                    <TableHead>{t("colMemoryUnits")}</TableHead>
+                    <TableHead className="w-[38%]">{t("colDocument")}</TableHead>
+                    <TableHead>
+                      <FacetLegend
+                        items={[
+                          { kind: "tag", label: t("labelTags") },
+                          { kind: "metadata", label: t("labelMetadata") },
+                        ]}
+                      />
+                    </TableHead>
+                    <TableHead className="w-[110px] text-right whitespace-nowrap">
+                      {t("colSize")}
+                    </TableHead>
+                    <TableHead className="w-[130px] text-right whitespace-nowrap">
+                      {t("colMemoryUnits")}
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {pendingRows.map((upload) => (
                     <TableRow key={`pending-${upload.id}`} className="bg-muted/30">
-                      <TableCell className="text-card-foreground font-mono text-xs break-all">
-                        <div>{upload.id}</div>
-                        {upload.filename && (
-                          <div className="mt-1 font-sans text-[11px] text-muted-foreground">
-                            {upload.filename}
-                          </div>
-                        )}
-                      </TableCell>
-                      <TableCell
-                        className="text-card-foreground"
-                        title={new Date(upload.createdAt).toLocaleString()}
-                      >
-                        {formatRelativeTime(upload.createdAt)}
-                      </TableCell>
-                      <TableCell className="text-card-foreground">-</TableCell>
-                      <TableCell className="text-card-foreground">-</TableCell>
                       <TableCell className="text-card-foreground">
-                        <span className="text-xs text-muted-foreground">
-                          {t("pendingUploadMetadata")}
-                        </span>
+                        <div className="min-w-0">
+                          <div className="font-mono text-sm truncate" title={upload.id}>
+                            {upload.id}
+                          </div>
+                          <div className="mt-0.5 text-xs text-muted-foreground truncate">
+                            {upload.filename ? `${upload.filename} · ` : ""}
+                            <span title={new Date(upload.createdAt).toLocaleString()}>
+                              {formatRelativeTime(upload.createdAt)}
+                            </span>
+                          </div>
+                        </div>
                       </TableCell>
-                      <TableCell className="text-card-foreground">-</TableCell>
                       <TableCell className="text-card-foreground">
                         {upload.status === "failed" ? (
-                          <span
-                            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20"
-                            title={upload.error || t("pendingUploadFailed")}
-                          >
-                            <X className="w-3 h-3" />
-                            {t("pendingUploadFailedStatus")}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20"
+                              title={upload.error || t("pendingUploadFailed")}
+                            >
+                              <X className="w-3 h-3" />
+                              {t("pendingUploadFailedStatus")}
+                            </span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 text-xs text-muted-foreground hover:text-red-600 dark:hover:text-red-400"
+                              onClick={() => deleteFailedUpload(upload.operationId)}
+                              disabled={deletingUploadOperationId === upload.operationId}
+                            >
+                              {deletingUploadOperationId === upload.operationId ? (
+                                <Spinner size="xs" />
+                              ) : (
+                                <Trash2 className="w-3 h-3 mr-1" />
+                              )}
+                              {deletingUploadOperationId === upload.operationId
+                                ? ""
+                                : tOperations("action.delete")}
+                            </Button>
+                          </div>
                         ) : (
-                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                          <span
+                            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20"
+                            title={t("pendingUploadMetadata")}
+                          >
                             <RefreshCw className="w-3 h-3 animate-spin" />
                             {t("pendingUploadProcessingStatus")}
                           </span>
                         )}
                       </TableCell>
+                      <TableCell className="text-card-foreground text-right">-</TableCell>
+                      <TableCell className="text-card-foreground text-right">-</TableCell>
                     </TableRow>
                   ))}
                   {documents.length > 0 ? (
-                    documents.map((doc) => (
-                      <TableRow
-                        key={doc.id}
-                        className={`cursor-pointer hover:bg-muted/50 ${selectedDocument?.id === doc.id ? "bg-primary/10" : ""}`}
-                        onClick={() => viewDocumentText(doc.id)}
-                      >
-                        <TableCell className="text-card-foreground font-mono text-xs break-all">
-                          {doc.id}
-                        </TableCell>
-                        <TableCell
-                          className="text-card-foreground"
-                          title={doc.created_at ? new Date(doc.created_at).toLocaleString() : ""}
+                    documents.map((doc) => {
+                      const harness = documentHarness(doc.document_metadata, doc.tags);
+                      const harnessLogo = resolveHarnessLogo(harness);
+                      return (
+                        <TableRow
+                          key={doc.id}
+                          className={`cursor-pointer hover:bg-muted/50 ${selectedDocument?.id === doc.id ? "bg-primary/10" : ""}`}
+                          onClick={() => viewDocumentText(doc.id)}
                         >
-                          {doc.created_at ? formatRelativeTime(doc.created_at) : "N/A"}
-                        </TableCell>
-                        <TableCell
-                          className="text-card-foreground"
-                          title={doc.updated_at ? new Date(doc.updated_at).toLocaleString() : ""}
-                        >
-                          {doc.updated_at ? formatRelativeTime(doc.updated_at) : "N/A"}
-                        </TableCell>
-                        <TableCell className="text-card-foreground">
-                          {doc.tags && doc.tags.length > 0 ? (
-                            <div className="flex flex-wrap gap-1">
-                              {doc.tags.slice(0, 3).map((tag: string, i: number) => (
-                                <span
-                                  key={i}
-                                  className="text-xs px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 font-medium"
-                                >
-                                  {tag}
-                                </span>
-                              ))}
-                              {doc.tags.length > 3 && (
-                                <span className="text-xs px-2 py-0.5 text-muted-foreground">
-                                  +{doc.tags.length - 3}
-                                </span>
-                              )}
+                          {/* Identity block: the ID reads first, with when it was
+                              last touched underneath. Created-at was dropped —
+                              for almost every document it repeated updated-at. */}
+                          <TableCell className="text-card-foreground">
+                            <div className="min-w-0">
+                              <div className="font-mono text-sm truncate" title={doc.id}>
+                                {doc.id}
+                              </div>
+                              {/* The harness logo trails the timestamp rather
+                                  than leading the ID: as a leading mark it only
+                                  exists on some rows, so every ID shifted
+                                  horizontally depending on whether its document
+                                  had one. Here it appends to a line that is
+                                  already ragged, and nothing moves. */}
+                              <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                                {doc.updated_at ? (
+                                  <span title={new Date(doc.updated_at).toLocaleString()}>
+                                    {t("colUpdated")} {formatRelativeTime(doc.updated_at)}
+                                  </span>
+                                ) : (
+                                  "N/A"
+                                )}
+                                <HarnessLogo
+                                  harness={harness}
+                                  size={14}
+                                  titlePrefix={tCommon("harness")}
+                                />
+                                {updatingDocIds.has(doc.id) && (
+                                  <span
+                                    className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+                                    title={t("documentUpdating")}
+                                  >
+                                    <span className="h-1.5 w-1.5 rounded-full bg-blue-500/70 animate-pulse" />
+                                    {t("documentUpdating")}
+                                  </span>
+                                )}
+                              </div>
                             </div>
-                          ) : (
-                            "-"
-                          )}
-                        </TableCell>
-                        <TableCell className="text-card-foreground">
-                          {doc.document_metadata &&
-                          Object.keys(doc.document_metadata).length > 0 ? (
-                            <MetadataBadges metadata={doc.document_metadata} />
-                          ) : (
-                            "-"
-                          )}
-                        </TableCell>
-                        <TableCell className="text-card-foreground">
-                          {formatBytes(doc.text_length || 0)}
-                        </TableCell>
-                        <TableCell className="text-card-foreground">
-                          {doc.memory_unit_count}
-                        </TableCell>
-                      </TableRow>
-                    ))
+                          </TableCell>
+                          <TableCell className="text-card-foreground">
+                            <TagsAndMetadataCell
+                              tags={doc.tags ?? []}
+                              metadata={doc.document_metadata}
+                              selectedTags={selectedTags}
+                              onToggleTag={toggleTagFilter}
+                              harnessShownAsLogo={!!harnessLogo}
+                            />
+                          </TableCell>
+                          <TableCell className="text-card-foreground text-right tabular-nums whitespace-nowrap font-medium">
+                            {formatBytes(doc.text_length || 0)}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums font-semibold text-foreground">
+                            {doc.memory_unit_count}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
                   ) : pendingRows.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center">
+                      <TableCell colSpan={4} className="text-center">
                         {t("clickLoadDocumentsToView")}
                       </TableCell>
                     </TableRow>
@@ -1356,7 +1716,7 @@ export function DocumentsView() {
 
             {/* Pagination Controls */}
             {totalPages > 1 && (
-              <div className="flex items-center justify-between mt-3 pt-3 border-t px-5">
+              <div className="flex items-center justify-between mt-3 pt-3 border-t">
                 <div className="text-xs text-muted-foreground">
                   {offset + 1}-{Math.min(offset + ITEMS_PER_PAGE, total)} of {total}
                 </div>
@@ -1408,8 +1768,16 @@ export function DocumentsView() {
       ) : (
         <div className="flex items-center justify-center py-20">
           <div className="text-center">
-            <div className="text-4xl mb-2">📄</div>
-            <div className="text-sm text-muted-foreground">{t("noDocumentsFound")}</div>
+            <FileText className="w-10 h-10 mx-auto mb-3 text-muted-foreground/50" />
+            <div className="text-sm text-muted-foreground">
+              {hasActiveFilters ? t("noDocumentsMatchSearch") : t("noDocumentsFound")}
+            </div>
+            {hasActiveFilters && (
+              <Button variant="outline" size="sm" onClick={clearFilters} className="mt-3 gap-1">
+                <X className="h-3.5 w-3.5" />
+                {t("clearFilters")}
+              </Button>
+            )}
           </div>
         </div>
       )}
@@ -1419,6 +1787,7 @@ export function DocumentsView() {
         <DialogContent className="w-[95vw] max-w-[95vw] h-[92vh] sm:max-w-[95vw] flex flex-col overflow-hidden">
           <DialogHeader className="pr-10">
             <DialogTitle className="flex items-center gap-2">
+              <HarnessLogo harness={selectedHarness} size={18} titlePrefix={tCommon("harness")} />
               <span className="truncate font-mono text-sm">
                 {selectedDocument?.id ?? "Document"}
               </span>
@@ -1428,7 +1797,7 @@ export function DocumentsView() {
           {loadingDocument ? (
             <div className="flex items-center justify-center flex-1">
               <div className="text-center">
-                <div className="text-4xl mb-2">⏳</div>
+                <Spinner size="xl" variant="jump" className="mx-auto mb-2" />
                 <div className="text-sm text-muted-foreground">{t("loadingDocument")}</div>
               </div>
             </div>
@@ -1586,7 +1955,7 @@ export function DocumentsView() {
                                   className="h-7 w-7 p-0"
                                 >
                                   {savingTags ? (
-                                    <span className="animate-spin text-xs">⏳</span>
+                                    <Spinner size="xs" />
                                   ) : (
                                     <Check className="h-3 w-3" />
                                   )}
@@ -1606,12 +1975,7 @@ export function DocumentsView() {
                                 {selectedDocument.tags && selectedDocument.tags.length > 0 ? (
                                   <div className="flex flex-wrap gap-1.5">
                                     {selectedDocument.tags.map((tag: string, i: number) => (
-                                      <span
-                                        key={i}
-                                        className="text-xs px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 font-medium"
-                                      >
-                                        {tag}
-                                      </span>
+                                      <TagChip key={i} tag={tag} />
                                     ))}
                                   </div>
                                 ) : (
@@ -1629,6 +1993,21 @@ export function DocumentsView() {
                             )
                           }
                         />
+                        {/* An unknown harness still gets its name spelled out
+                            here — only the logo is registry-gated. */}
+                        {selectedHarness && (
+                          <MetadataRow
+                            label={tCommon("harness")}
+                            value={
+                              <span className="inline-flex items-center gap-1.5">
+                                <HarnessLogo harness={selectedHarness} />
+                                <span className="text-sm">
+                                  {selectedHarnessLogo?.label ?? selectedHarness}
+                                </span>
+                              </span>
+                            }
+                          />
+                        )}
                         {selectedDocument.retain_params?.context && (
                           <MetadataRow
                             label="Context"
@@ -1646,7 +2025,7 @@ export function DocumentsView() {
                         {selectedDocument.retain_params?.metadata &&
                           Object.keys(selectedDocument.retain_params.metadata).length > 0 && (
                             <MetadataRow
-                              label="Metadata"
+                              label={t("labelMetadata")}
                               value={
                                 <MetadataBadges
                                   metadata={selectedDocument.retain_params.metadata}
@@ -1697,7 +2076,7 @@ export function DocumentsView() {
                                 className="h-7 px-3 gap-1 text-xs"
                               >
                                 {savingContent ? (
-                                  <span className="animate-spin">⏳</span>
+                                  <Spinner size="xs" />
                                 ) : (
                                   <Check className="h-3 w-3" />
                                 )}
@@ -1765,7 +2144,7 @@ export function DocumentsView() {
                   {loadingChunks ? (
                     <div className="flex items-center justify-center py-20">
                       <div className="text-center">
-                        <div className="text-4xl mb-2">⏳</div>
+                        <Spinner size="xl" variant="jump" className="mx-auto mb-2" />
                         <div className="text-sm text-muted-foreground">{t("loadingChunks")}</div>
                       </div>
                     </div>
@@ -1778,7 +2157,7 @@ export function DocumentsView() {
                   ) : chunksLoaded ? (
                     <div className="flex items-center justify-center py-20">
                       <div className="text-center">
-                        <div className="text-4xl mb-2">📄</div>
+                        <FileText className="w-10 h-10 mx-auto mb-3 text-muted-foreground/50" />
                         <div className="text-sm text-muted-foreground">{t("noChunksFound")}</div>
                       </div>
                     </div>

@@ -2,17 +2,22 @@
 
 import json
 from datetime import datetime, timezone
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from hindsight_api.engine.memory_engine import DirectivePage, MentalModelPage
 from hindsight_api.mcp_tools import (
+    KNOWLEDGE_ROOT_PARENT,
     MCPToolsConfig,
+    _knowledge_tree_json,
     _validate_mental_model_inputs,
     build_content_dict,
     parse_timestamp,
     register_mcp_tools,
 )
+from hindsight_api.models import RequestContext
 
 
 class TestParseTimestamp:
@@ -76,7 +81,9 @@ class TestBuildContentDict:
 # =========================================================================
 
 
-_MENTAL_MODEL_METADATA_FIELDS = frozenset({"id", "bank_id", "name", "tags", "last_refreshed_at", "created_at"})
+_MENTAL_MODEL_METADATA_FIELDS = frozenset(
+    {"id", "bank_id", "name", "tags", "last_refreshed_at", "last_memory_seen_at", "created_at"}
+)
 
 _FULL_MENTAL_MODELS = [
     {
@@ -89,6 +96,7 @@ _FULL_MENTAL_MODELS = [
         "max_tokens": 2048,
         "trigger": {"interval": "daily"},
         "last_refreshed_at": "2026-01-01T00:00:00",
+        "last_memory_seen_at": "2026-01-01T00:00:00",
         "created_at": "2026-01-01T00:00:00",
         "reflect_response": {
             "text": "Prefers Python",
@@ -105,6 +113,7 @@ _FULL_MENTAL_MODELS = [
         "max_tokens": 2048,
         "trigger": None,
         "last_refreshed_at": "2026-01-01T00:00:00",
+        "last_memory_seen_at": "2026-01-01T00:00:00",
         "created_at": "2026-01-01T00:00:00",
         "reflect_response": {"text": "Ship v2", "based_on": {}},
     },
@@ -120,6 +129,43 @@ def _apply_detail(model: dict, detail: str) -> dict:
     return model
 
 
+# Knowledge-base fixtures: a root folder with one page under it, shaped like the
+# dicts MemoryEngine._row_to_knowledge_node returns.
+_KNOWLEDGE_FOLDER: dict[str, Any] = {
+    "id": "kf-1",
+    "kind": "folder",
+    "name": "Runbooks",
+    "parent_id": None,
+    "mental_model_id": None,
+    "managed": False,
+    "updated_at": "2026-01-01T00:00:00+00:00",
+}
+
+_KNOWLEDGE_PAGE_NODE: dict[str, Any] = {
+    "id": "kp-1",
+    "kind": "page",
+    "name": "Deploys",
+    "parent_id": "kf-1",
+    "mental_model_id": "mm-page",
+    "managed": False,
+    "tags": ["ops"],
+    "source_query": "How is the service deployed?",
+    "last_refreshed_at": "2026-01-02T00:00:00+00:00",
+    "trigger": {"refresh_after_consolidation": True},
+}
+
+_KNOWLEDGE_NODES: list[dict[str, Any]] = [
+    _KNOWLEDGE_FOLDER,
+    {**_KNOWLEDGE_PAGE_NODE, "is_stale": False},
+]
+
+_KNOWLEDGE_PAGE: dict[str, Any] = {
+    **_KNOWLEDGE_PAGE_NODE,
+    "tags": ["type:runbook", "ops"],
+    "content": "Run `make deploy`.",
+}
+
+
 @pytest.fixture
 def mock_memory():
     """Create a mock MemoryEngine with all MCP tool methods."""
@@ -128,7 +174,8 @@ def mock_memory():
     # Mental model methods — simulate engine detail filtering
     async def _list_mental_models(**kwargs):
         detail = kwargs.get("detail", "full")
-        return [_apply_detail(m, detail) for m in _FULL_MENTAL_MODELS]
+        items = [_apply_detail(m, detail) for m in _FULL_MENTAL_MODELS]
+        return MentalModelPage(items=items, total=len(items))
 
     async def _get_mental_model(**kwargs):
         detail = kwargs.get("detail", "full")
@@ -166,7 +213,9 @@ def mock_memory():
 
     # Directive methods
     memory.list_directives = AsyncMock(
-        return_value=[{"id": "dir-1", "name": "Be concise", "content": "Keep responses short"}]
+        return_value=DirectivePage(
+            items=[{"id": "dir-1", "name": "Be concise", "content": "Keep responses short"}], total=1
+        )
     )
     memory.create_directive = AsyncMock(return_value={"id": "dir-new", "name": "Test", "content": "Test content"})
     memory.delete_directive = AsyncMock(return_value=True)
@@ -188,15 +237,50 @@ def mock_memory():
 
     # Tags & bank methods
     memory.list_tags = AsyncMock(return_value={"items": ["tag1", "tag2"], "total": 2})
+    memory._ensure_bank_exists = AsyncMock(return_value=True)
     memory.get_bank_profile = AsyncMock(return_value={"id": "test-bank", "name": "Test Bank", "mission": "Testing"})
     memory.get_bank_stats = AsyncMock(return_value={"nodes": 100, "links": 50})
-    memory.update_bank = AsyncMock(return_value={"id": "test-bank", "name": "Updated"})
     memory.delete_bank = AsyncMock(return_value={"deleted_memories": 10, "deleted_entities": 5})
 
-    # Config resolver (used by update_bank MCP tool for config fields)
+    # Only recall/reflect tools read from the resolver; update_bank now owns both
+    # the profile and the config write, so its assertions belong on that mock.
     memory._config_resolver = MagicMock()
-    memory._config_resolver.update_bank_config = AsyncMock()
+
+    async def _update_bank(
+        bank_id: str,
+        *,
+        name: str | None = None,
+        mission: str | None = None,
+        config_updates: dict[str, Any] | None = None,
+        create_if_missing: bool = True,
+        request_context: RequestContext,
+    ) -> dict[str, Any]:
+        return {"id": bank_id, "name": name or "Updated", "mission": mission or ""}
+
+    memory.update_bank = AsyncMock(side_effect=_update_bank)
     memory.list_banks = AsyncMock(return_value=[])
+
+    # Knowledge base methods
+    memory.list_knowledge_nodes = AsyncMock(return_value=list(_KNOWLEDGE_NODES))
+    memory.get_knowledge_page = AsyncMock(return_value=dict(_KNOWLEDGE_PAGE))
+    memory.search_knowledge_pages = AsyncMock(
+        return_value=[
+            {
+                "id": "kp-1",
+                "name": "Deploys",
+                "mental_model_id": "mm-page",
+                "snippet": "How the service is deployed",
+                "score": 0.9,
+                "updated_at": "2026-01-02T00:00:00+00:00",
+            }
+        ]
+    )
+    memory.create_knowledge_folder = AsyncMock(return_value=dict(_KNOWLEDGE_FOLDER))
+    memory.create_knowledge_page = AsyncMock(return_value=dict(_KNOWLEDGE_PAGE_NODE))
+    memory.rename_knowledge_node = AsyncMock(return_value=dict(_KNOWLEDGE_PAGE_NODE))
+    memory.move_knowledge_node = AsyncMock(return_value=dict(_KNOWLEDGE_PAGE_NODE))
+    memory.update_knowledge_page = AsyncMock(return_value=dict(_KNOWLEDGE_PAGE_NODE))
+    memory.delete_knowledge_node = AsyncMock(return_value=True)
 
     return memory
 
@@ -317,13 +401,13 @@ class TestMentalModelToolRegistration:
         memory.list_banks = AsyncMock(return_value=[])
         memory.get_bank_profile = AsyncMock(return_value={})
         memory.update_bank = AsyncMock()
-        memory.list_mental_models = AsyncMock(return_value=[])
+        memory.list_mental_models = AsyncMock(return_value=MentalModelPage(items=[], total=0))
         memory.get_mental_model = AsyncMock()
         memory.create_mental_model = AsyncMock()
         memory.submit_async_refresh_mental_model = AsyncMock()
         memory.update_mental_model = AsyncMock()
         memory.delete_mental_model = AsyncMock()
-        memory.list_directives = AsyncMock(return_value=[])
+        memory.list_directives = AsyncMock(return_value=DirectivePage(items=[], total=0))
         memory.create_directive = AsyncMock()
         memory.delete_directive = AsyncMock()
         memory.list_memory_units = AsyncMock(return_value={})
@@ -364,7 +448,10 @@ class TestMentalModelToolRegistration:
         assert "clear_mental_model" in tools
         assert "update_memory" in tools
         assert "invalidate_memory" in tools
-        assert len(tools) == 32
+        assert "get_knowledge_base_tree" in tools
+        assert "create_knowledge_page" in tools
+        assert "delete_knowledge_node" in tools
+        assert len(tools) == 39
 
     def test_all_tools_have_nonempty_descriptions(self):
         """Every registered tool must expose a non-empty description.
@@ -387,13 +474,13 @@ class TestMentalModelToolRegistration:
         memory.list_banks = AsyncMock(return_value=[])
         memory.get_bank_profile = AsyncMock(return_value={})
         memory.update_bank = AsyncMock()
-        memory.list_mental_models = AsyncMock(return_value=[])
+        memory.list_mental_models = AsyncMock(return_value=MentalModelPage(items=[], total=0))
         memory.get_mental_model = AsyncMock()
         memory.create_mental_model = AsyncMock()
         memory.submit_async_refresh_mental_model = AsyncMock()
         memory.update_mental_model = AsyncMock()
         memory.delete_mental_model = AsyncMock()
-        memory.list_directives = AsyncMock(return_value=[])
+        memory.list_directives = AsyncMock(return_value=DirectivePage(items=[], total=0))
         memory.create_directive = AsyncMock()
         memory.delete_directive = AsyncMock()
         memory.list_memory_units = AsyncMock(return_value={})
@@ -712,6 +799,38 @@ class TestCreateMentalModel:
         assert mock_memory.create_mental_model.call_args.kwargs["bank_id"] == "other-bank"
         assert mock_memory.submit_async_refresh_mental_model.call_args.kwargs["bank_id"] == "other-bank"
 
+    async def test_create_with_tags_match_persisted_in_trigger(self, mcp_server_with_mental_models, mock_memory):
+        """tags_match must be written into the trigger so the refresh path can read it (issue #2808)."""
+        await _tools(mcp_server_with_mental_models)["create_mental_model"].fn(
+            name="Current projects",
+            source_query="Which projects is the user working on?",
+            tags=["projects", "mental-model"],
+            tags_match="any",
+        )
+        trigger = mock_memory.create_mental_model.call_args.kwargs["trigger"]
+        assert trigger["tags_match"] == "any"
+
+    async def test_create_without_tags_match_omits_key(self, mcp_server_with_mental_models, mock_memory):
+        """Omitting tags_match must NOT write the key, preserving the engine's all_strict default."""
+        await _tools(mcp_server_with_mental_models)["create_mental_model"].fn(name="Test", source_query="query")
+        trigger = mock_memory.create_mental_model.call_args.kwargs["trigger"]
+        assert "tags_match" not in trigger
+
+    async def test_create_invalid_tags_match_returns_error(self, mcp_server_with_mental_models, mock_memory):
+        """An unknown tags_match value is rejected before touching the engine."""
+        result = await _tools(mcp_server_with_mental_models)["create_mental_model"].fn(
+            name="Test", source_query="query", tags_match="most"
+        )
+        assert "tags_match" in result
+        mock_memory.create_mental_model.assert_not_called()
+
+    async def test_create_tags_match_single_bank(self, mcp_server_single_bank, mock_memory):
+        await _tools(mcp_server_single_bank)["create_mental_model"].fn(
+            name="Test", source_query="query", tags=["a", "b"], tags_match="all"
+        )
+        trigger = mock_memory.create_mental_model.call_args.kwargs["trigger"]
+        assert trigger["tags_match"] == "all"
+
     async def test_create_single_bank(self, mcp_server_single_bank, mock_memory):
         result = await _tools(mcp_server_single_bank)["create_mental_model"].fn(name="Test", source_query="query")
         assert isinstance(result, dict)
@@ -1014,6 +1133,25 @@ class TestRetainNewParams:
         call_args = mock_memory.submit_async_retain.call_args
         contents = call_args.kwargs["contents"]
         assert contents[0]["document_id"] == "doc-1"
+
+    async def test_retain_passes_strategy_to_the_worker(self, mock_memory):
+        """The strategy must travel as the submit argument, not inside the content item.
+
+        ``submit_async_retain`` only puts a strategy into the task payload when it
+        is passed as the keyword; a strategy left inside the content dict never
+        reaches the worker, so every strategy override silently falls back to the
+        bank configuration.
+        """
+        mcp = _make_mcp_server(mock_memory, {"retain"}, include_bank_id=True)
+        await _tools(mcp)["retain"].fn(content="test", strategy="documents")
+        call_args = mock_memory.submit_async_retain.call_args
+        assert call_args.kwargs["strategy"] == "documents"
+
+    async def test_retain_passes_strategy_single_bank(self, mock_memory):
+        mcp = _make_mcp_server(mock_memory, {"retain"}, include_bank_id=False)
+        await _tools(mcp)["retain"].fn(content="test", strategy="documents")
+        call_args = mock_memory.submit_async_retain.call_args
+        assert call_args.kwargs["strategy"] == "documents"
 
     async def test_retain_without_new_params_backward_compat(self, mock_memory):
         """Existing behavior preserved when new params not provided."""
@@ -1511,6 +1649,38 @@ class TestTagsAndBankTools:
         mcp = _make_mcp_server(mock_memory, {"get_bank"}, include_bank_id=True)
         result = await _tools(mcp)["get_bank"].fn()
         assert '"test-bank"' in result or "test-bank" in result
+        assert mock_memory.get_bank_profile.call_args.kwargs["create_if_missing"] is False
+
+    async def test_get_bank_missing_does_not_create(self, mock_memory):
+        mock_memory.get_bank_profile.return_value = None
+        mcp = _make_mcp_server(mock_memory, {"get_bank"}, include_bank_id=True)
+        result = await _tools(mcp)["get_bank"].fn(bank_id="missing-bank")
+        assert json.loads(result)["error"] == "Bank 'missing-bank' not found"
+        assert mock_memory.get_bank_profile.call_args.kwargs["create_if_missing"] is False
+
+    async def test_create_bank_uses_public_profile_api(self, mock_memory):
+        mcp = _make_mcp_server(mock_memory, {"create_bank"}, include_bank_id=True)
+        result = await _tools(mcp)["create_bank"].fn(bank_id="new-bank")
+        assert '"test-bank"' in result or "test-bank" in result
+        mock_memory.get_bank_profile.assert_awaited_once()
+        assert mock_memory.get_bank_profile.call_args.args[0] == "new-bank"
+        mock_memory.update_bank.assert_not_awaited()
+        mock_memory._ensure_bank_exists.assert_not_awaited()
+
+    async def test_create_bank_with_fields_uses_public_update_api(self, mock_memory):
+        mcp = _make_mcp_server(mock_memory, {"create_bank"}, include_bank_id=True)
+        result = await _tools(mcp)["create_bank"].fn(
+            bank_id="new-bank",
+            name="New Bank",
+            mission="Help the user",
+        )
+        assert json.loads(result)["name"] == "New Bank"
+        mock_memory.update_bank.assert_awaited_once()
+        assert mock_memory.update_bank.call_args.args[0] == "new-bank"
+        assert mock_memory.update_bank.call_args.kwargs["name"] == "New Bank"
+        assert mock_memory.update_bank.call_args.kwargs["mission"] == "Help the user"
+        mock_memory.get_bank_profile.assert_not_awaited()
+        mock_memory._ensure_bank_exists.assert_not_awaited()
 
     async def test_get_bank_stats(self, mock_memory):
         mcp = _make_mcp_server(mock_memory, {"get_bank_stats"}, include_bank_id=True)
@@ -1520,14 +1690,13 @@ class TestTagsAndBankTools:
     async def test_update_bank(self, mock_memory):
         mcp = _make_mcp_server(mock_memory, {"update_bank"}, include_bank_id=True)
         result = await _tools(mcp)["update_bank"].fn(name="New Name", mission="New Mission")
-        # name is updated via engine
-        call_kwargs = mock_memory.update_bank.call_args.kwargs
-        assert call_kwargs["name"] == "New Name"
-        # mission is routed to config resolver as reflect_mission
-        config_call = mock_memory._config_resolver.update_bank_config.call_args
-        assert config_call.args[1] == {"reflect_mission": "New Mission"}
+        # name and config are applied by a single engine call
+        call = mock_memory.update_bank.call_args
+        assert call.kwargs["name"] == "New Name"
+        # mission is routed into config_updates as reflect_mission
+        assert call.kwargs["config_updates"] == {"reflect_mission": "New Mission"}
         # bank_id is the first positional arg
-        assert config_call.args[0] == "test-bank"
+        assert call.args[0] == "test-bank"
 
     async def test_delete_bank(self, mock_memory):
         mcp = _make_mcp_server(mock_memory, {"delete_bank"}, include_bank_id=True)
@@ -1556,6 +1725,14 @@ class TestTagsAndBankTools:
         mcp = _make_mcp_server(mock_memory, {"get_bank"}, include_bank_id=False)
         result = await _tools(mcp)["get_bank"].fn()
         assert isinstance(result, dict)
+        assert mock_memory.get_bank_profile.call_args.kwargs["create_if_missing"] is False
+
+    async def test_get_bank_single_bank_missing_does_not_create(self, mock_memory):
+        mock_memory.get_bank_profile.return_value = None
+        mcp = _make_mcp_server(mock_memory, {"get_bank"}, include_bank_id=False)
+        result = await _tools(mcp)["get_bank"].fn()
+        assert result["error"] == "Bank 'test-bank' not found"
+        assert mock_memory.get_bank_profile.call_args.kwargs["create_if_missing"] is False
 
     async def test_delete_bank_single_bank(self, mock_memory):
         mcp = _make_mcp_server(mock_memory, {"delete_bank"}, include_bank_id=False)
@@ -1644,27 +1821,26 @@ class TestUpdateBankVariants:
         assert "error" in result
 
     async def test_update_bank_config_updates_dict(self, mock_memory):
-        """config_updates dict is passed directly to config resolver."""
+        """Config updates use the engine's bank-creating config path."""
         mcp = _make_mcp_server(mock_memory, {"update_bank"}, include_bank_id=True)
         await _tools(mcp)["update_bank"].fn(config_updates={"reflect_mission": "Guide reflect output"})
-        config_call = mock_memory._config_resolver.update_bank_config.call_args
-        assert config_call.args[1] == {"reflect_mission": "Guide reflect output"}
-        # name should NOT be updated when not provided
-        mock_memory.update_bank.assert_not_called()
+        mock_memory.update_bank.assert_awaited_once()
+        assert mock_memory.update_bank.call_args.args[0] == "test-bank"
+        assert mock_memory.update_bank.call_args.kwargs["name"] is None
+        assert mock_memory.update_bank.call_args.kwargs["config_updates"] == {"reflect_mission": "Guide reflect output"}
+        mock_memory.get_bank_profile.assert_not_called()
 
     async def test_update_bank_mission_maps_to_reflect_mission(self, mock_memory):
         """Deprecated mission param is mapped to reflect_mission in config."""
         mcp = _make_mcp_server(mock_memory, {"update_bank"}, include_bank_id=True)
         await _tools(mcp)["update_bank"].fn(mission="My mission")
-        config_call = mock_memory._config_resolver.update_bank_config.call_args
-        assert config_call.args[1] == {"reflect_mission": "My mission"}
+        assert mock_memory.update_bank.call_args.kwargs["config_updates"] == {"reflect_mission": "My mission"}
 
     async def test_update_bank_config_reflect_mission_takes_precedence_over_mission(self, mock_memory):
         """When both mission and config_updates.reflect_mission are provided, config wins."""
         mcp = _make_mcp_server(mock_memory, {"update_bank"}, include_bank_id=True)
         await _tools(mcp)["update_bank"].fn(mission="old", config_updates={"reflect_mission": "new"})
-        config_call = mock_memory._config_resolver.update_bank_config.call_args
-        assert config_call.args[1]["reflect_mission"] == "new"
+        assert mock_memory.update_bank.call_args.kwargs["config_updates"]["reflect_mission"] == "new"
 
     async def test_update_bank_multiple_config_fields(self, mock_memory):
         """Multiple config fields can be set in a single config_updates dict."""
@@ -1683,8 +1859,7 @@ class TestUpdateBankVariants:
                 "retain_structured_chunk_size": 5000,
             }
         )
-        config_call = mock_memory._config_resolver.update_bank_config.call_args
-        updates = config_call.args[1]
+        updates = mock_memory.update_bank.call_args.kwargs["config_updates"]
         assert updates["retain_mission"] == "Extract technical decisions"
         assert updates["disposition_skepticism"] == 5
         assert updates["disposition_literalism"] == 1
@@ -1703,17 +1878,18 @@ class TestUpdateBankVariants:
             name="My Bank",
             config_updates={"reflect_mission": "Reflect guide", "retain_mission": "Retain guide"},
         )
+        mock_memory.update_bank.assert_awaited_once()
         assert mock_memory.update_bank.call_args.kwargs["name"] == "My Bank"
-        updates = mock_memory._config_resolver.update_bank_config.call_args.args[1]
+        updates = mock_memory.update_bank.call_args.kwargs["config_updates"]
         assert updates["reflect_mission"] == "Reflect guide"
         assert updates["retain_mission"] == "Retain guide"
 
     async def test_update_bank_no_config_call_when_only_name(self, mock_memory):
-        """When only name is provided, config resolver should not be called."""
+        """When only name is provided, no config update is requested."""
         mcp = _make_mcp_server(mock_memory, {"update_bank"}, include_bank_id=True)
         await _tools(mcp)["update_bank"].fn(name="Just Name")
         mock_memory.update_bank.assert_called_once()
-        mock_memory._config_resolver.update_bank_config.assert_not_called()
+        assert mock_memory.update_bank.call_args.kwargs["config_updates"] is None
 
     async def test_update_bank_config_updates_single_bank(self, mock_memory):
         """config_updates works in single-bank mode too."""
@@ -1722,8 +1898,7 @@ class TestUpdateBankVariants:
             config_updates={"retain_mission": "Extract everything", "disposition_empathy": 5}
         )
         assert isinstance(result, dict)
-        config_call = mock_memory._config_resolver.update_bank_config.call_args
-        updates = config_call.args[1]
+        updates = mock_memory.update_bank.call_args.kwargs["config_updates"]
         assert updates["retain_mission"] == "Extract everything"
         assert updates["disposition_empathy"] == 5
 
@@ -1731,12 +1906,11 @@ class TestUpdateBankVariants:
         """bank_id override routes config update to the correct bank."""
         mcp = _make_mcp_server(mock_memory, {"update_bank"}, include_bank_id=True)
         await _tools(mcp)["update_bank"].fn(config_updates={"reflect_mission": "Test"}, bank_id="other-bank")
-        config_call = mock_memory._config_resolver.update_bank_config.call_args
-        assert config_call.args[0] == "other-bank"
+        assert mock_memory.update_bank.call_args.args[0] == "other-bank"
 
-    async def test_update_bank_config_resolver_validation_error(self, mock_memory):
-        """ValueError from config resolver (e.g. invalid field) is returned as error."""
-        mock_memory._config_resolver.update_bank_config.side_effect = ValueError(
+    async def test_update_bank_config_validation_error(self, mock_memory):
+        """ValueError from config validation (e.g. invalid field) is returned as error."""
+        mock_memory.update_bank.side_effect = ValueError(
             "Cannot override static (server-level) fields: ['database_url']"
         )
         mcp = _make_mcp_server(mock_memory, {"update_bank"}, include_bank_id=True)
@@ -1754,7 +1928,7 @@ class TestUpdateBankVariants:
                 "entity_labels": ["PERSON", "ORG"],
             }
         )
-        updates = mock_memory._config_resolver.update_bank_config.call_args.args[1]
+        updates = mock_memory.update_bank.call_args.kwargs["config_updates"]
         assert updates["recall_budget_fixed_low"] == 100
         assert updates["consolidation_llm_batch_size"] == 8
         assert updates["entity_labels"] == ["PERSON", "ORG"]
@@ -1789,7 +1963,7 @@ class TestEmptyListReturns:
         assert '"items": []' in result or "[]" in result
 
     async def test_list_directives_empty(self, mock_memory):
-        mock_memory.list_directives.return_value = []
+        mock_memory.list_directives.return_value = DirectivePage(items=[], total=0)
         mcp = _make_mcp_server(mock_memory, {"list_directives"}, include_bank_id=True)
         result = await _tools(mcp)["list_directives"].fn()
         assert "[]" in result
@@ -1799,6 +1973,229 @@ class TestEmptyListReturns:
         mcp = _make_mcp_server(mock_memory, {"list_tags"}, include_bank_id=True)
         result = await _tools(mcp)["list_tags"].fn()
         assert '"items": []' in result or "[]" in result
+
+
+# =========================================================================
+# Knowledge Base Tool Tests
+# =========================================================================
+
+_KB_TOOLS = {
+    "get_knowledge_base_tree",
+    "search_knowledge_base",
+    "get_knowledge_page",
+    "create_knowledge_folder",
+    "create_knowledge_page",
+    "update_knowledge_node",
+    "delete_knowledge_node",
+}
+
+
+class TestKnowledgeTreeProjection:
+    """The flat node list nests into roots, with pages projected from their model."""
+
+    def test_nests_pages_under_their_folder(self):
+        roots = _knowledge_tree_json(_KNOWLEDGE_NODES)
+        assert [r["id"] for r in roots] == ["kf-1"]
+        assert [c["id"] for c in roots[0]["children"]] == ["kp-1"]
+
+    def test_page_carries_mental_model_metadata(self):
+        page = _knowledge_tree_json(_KNOWLEDGE_NODES)[0]["children"][0]
+        assert page["description"] == "How is the service deployed?"
+        assert page["tags"] == ["ops"]
+        assert page["timestamp"] == "2026-01-02T00:00:00+00:00"
+        assert page["is_stale"] is False
+        assert page["trigger"] == {"refresh_after_consolidation": True}
+
+    def test_orphaned_node_becomes_a_root(self):
+        # A node whose parent is not in the list (e.g. a partial read) must still
+        # surface rather than vanish from the tree.
+        roots = _knowledge_tree_json([{**_KNOWLEDGE_PAGE_NODE, "parent_id": "kf-missing"}])
+        assert [r["id"] for r in roots] == ["kp-1"]
+
+
+@pytest.mark.asyncio
+class TestKnowledgeBaseTools:
+    async def test_tools_registered(self, mock_memory):
+        mcp = _make_mcp_server(mock_memory, _KB_TOOLS, include_bank_id=True)
+        assert _KB_TOOLS == set(_tools(mcp).keys())
+
+    async def test_tools_registered_single_bank(self, mock_memory):
+        mcp = _make_mcp_server(mock_memory, _KB_TOOLS, include_bank_id=False)
+        assert _KB_TOOLS == set(_tools(mcp).keys())
+
+    async def test_get_tree(self, mock_memory):
+        mcp = _make_mcp_server(mock_memory, {"get_knowledge_base_tree"}, include_bank_id=True)
+        result = json.loads(await _tools(mcp)["get_knowledge_base_tree"].fn())
+        assert [r["id"] for r in result["roots"]] == ["kf-1"]
+        assert mock_memory.list_knowledge_nodes.call_args.kwargs["with_staleness"] is True
+
+    async def test_get_tree_single_bank(self, mock_memory):
+        mcp = _make_mcp_server(mock_memory, {"get_knowledge_base_tree"}, include_bank_id=False)
+        result = await _tools(mcp)["get_knowledge_base_tree"].fn()
+        assert isinstance(result, dict)
+        assert result["roots"][0]["kind"] == "folder"
+
+    async def test_search(self, mock_memory):
+        mcp = _make_mcp_server(mock_memory, {"search_knowledge_base"}, include_bank_id=True)
+        result = json.loads(await _tools(mcp)["search_knowledge_base"].fn(query="deploy", limit=5))
+        assert result["total"] == 1
+        assert result["results"][0]["id"] == "kp-1"
+        call_kwargs = mock_memory.search_knowledge_pages.call_args.kwargs
+        assert call_kwargs["query"] == "deploy"
+        assert call_kwargs["limit"] == 5
+
+    async def test_search_clamps_limit(self, mock_memory):
+        mcp = _make_mcp_server(mock_memory, {"search_knowledge_base"}, include_bank_id=True)
+        await _tools(mcp)["search_knowledge_base"].fn(query="deploy", limit=500)
+        assert mock_memory.search_knowledge_pages.call_args.kwargs["limit"] == 50
+
+    async def test_get_page_renders_markdown(self, mock_memory):
+        mcp = _make_mcp_server(mock_memory, {"get_knowledge_page"}, include_bank_id=True)
+        result = json.loads(await _tools(mcp)["get_knowledge_page"].fn(page_id="kp-1"))
+        # The `type:` tag becomes the page type and drops out of the displayed tags.
+        assert result["type"] == "runbook"
+        assert result["tags"] == ["ops"]
+        assert result["markdown"].startswith("---\n")
+        assert "Run `make deploy`." in result["markdown"]
+
+    async def test_get_page_not_found(self, mock_memory):
+        mock_memory.get_knowledge_page.return_value = None
+        mcp = _make_mcp_server(mock_memory, {"get_knowledge_page"}, include_bank_id=True)
+        result = await _tools(mcp)["get_knowledge_page"].fn(page_id="kp-missing")
+        assert "not found" in result
+
+    async def test_create_folder(self, mock_memory):
+        mcp = _make_mcp_server(mock_memory, {"create_knowledge_folder"}, include_bank_id=True)
+        result = json.loads(await _tools(mcp)["create_knowledge_folder"].fn(name="Runbooks"))
+        assert result["id"] == "kf-1"
+        assert result["children"] == []
+        assert mock_memory.create_knowledge_folder.call_args.kwargs["parent_id"] is None
+
+    async def test_create_folder_rejects_bad_parent(self, mock_memory):
+        mock_memory.create_knowledge_folder.side_effect = ValueError("Parent folder 'kf-x' not found")
+        mcp = _make_mcp_server(mock_memory, {"create_knowledge_folder"}, include_bank_id=True)
+        result = await _tools(mcp)["create_knowledge_folder"].fn(name="Runbooks", parent_id="kf-x")
+        assert "not found" in result
+
+    async def test_create_page_schedules_refresh(self, mock_memory):
+        mcp = _make_mcp_server(mock_memory, {"create_knowledge_page"}, include_bank_id=True)
+        result = json.loads(
+            await _tools(mcp)["create_knowledge_page"].fn(name="Deploys", source_query="How is it deployed?")
+        )
+        assert result["page_id"] == "kp-1"
+        assert result["operation_id"] == "op-123"
+        create_kwargs = mock_memory.create_knowledge_page.call_args.kwargs
+        # An unstated refresh setting must not overwrite the engine's page defaults.
+        assert create_kwargs["trigger"] is None
+        assert mock_memory.submit_async_refresh_mental_model.call_args.kwargs["mental_model_id"] == "mm-page"
+
+    async def test_create_page_with_refresh_flag(self, mock_memory):
+        mcp = _make_mcp_server(mock_memory, {"create_knowledge_page"}, include_bank_id=True)
+        await _tools(mcp)["create_knowledge_page"].fn(
+            name="Deploys", source_query="q", tags=["ops"], max_tokens=512, refresh_after_consolidation=False
+        )
+        create_kwargs = mock_memory.create_knowledge_page.call_args.kwargs
+        assert create_kwargs["trigger"] == {"refresh_after_consolidation": False}
+        assert create_kwargs["tags"] == ["ops"]
+        assert create_kwargs["max_tokens"] == 512
+
+    async def test_create_page_duplicate_name(self, mock_memory):
+        mock_memory.create_knowledge_page.return_value = None
+        mcp = _make_mcp_server(mock_memory, {"create_knowledge_page"}, include_bank_id=True)
+        result = await _tools(mcp)["create_knowledge_page"].fn(name="Deploys", source_query="q")
+        assert "already exists" in result
+        mock_memory.submit_async_refresh_mental_model.assert_not_called()
+
+    async def test_update_rename(self, mock_memory):
+        mcp = _make_mcp_server(mock_memory, {"update_knowledge_node"}, include_bank_id=True)
+        result = json.loads(await _tools(mcp)["update_knowledge_node"].fn(node_id="kp-1", name="Deployments"))
+        assert result["id"] == "kp-1"
+        assert mock_memory.rename_knowledge_node.call_args.kwargs["name"] == "Deployments"
+        mock_memory.update_knowledge_page.assert_not_called()
+        mock_memory.move_knowledge_node.assert_not_called()
+
+    async def test_update_move_to_folder(self, mock_memory):
+        mcp = _make_mcp_server(mock_memory, {"update_knowledge_node"}, include_bank_id=True)
+        await _tools(mcp)["update_knowledge_node"].fn(node_id="kp-1", parent_id="kf-2")
+        assert mock_memory.move_knowledge_node.call_args.kwargs["new_parent_id"] == "kf-2"
+
+    async def test_update_move_to_root(self, mock_memory):
+        mcp = _make_mcp_server(mock_memory, {"update_knowledge_node"}, include_bank_id=True)
+        await _tools(mcp)["update_knowledge_node"].fn(node_id="kp-1", parent_id=KNOWLEDGE_ROOT_PARENT)
+        assert mock_memory.move_knowledge_node.call_args.kwargs["new_parent_id"] is None
+
+    async def test_update_source_query_triggers_refresh(self, mock_memory):
+        mcp = _make_mcp_server(mock_memory, {"update_knowledge_node"}, include_bank_id=True)
+        await _tools(mcp)["update_knowledge_node"].fn(node_id="kp-1", source_query="new question?")
+        assert mock_memory.update_knowledge_page.call_args.kwargs["source_query"] == "new question?"
+        assert mock_memory.submit_async_refresh_mental_model.call_args.kwargs["mental_model_id"] == "mm-page"
+
+    async def test_update_tags_only_does_not_refresh(self, mock_memory):
+        mcp = _make_mcp_server(mock_memory, {"update_knowledge_node"}, include_bank_id=True)
+        await _tools(mcp)["update_knowledge_node"].fn(node_id="kp-1", tags=[])
+        assert mock_memory.update_knowledge_page.call_args.kwargs["tags"] == []
+        mock_memory.submit_async_refresh_mental_model.assert_not_called()
+
+    async def test_update_requires_a_field(self, mock_memory):
+        mcp = _make_mcp_server(mock_memory, {"update_knowledge_node"}, include_bank_id=True)
+        result = await _tools(mcp)["update_knowledge_node"].fn(node_id="kp-1")
+        assert "Provide name" in result
+        mock_memory.rename_knowledge_node.assert_not_called()
+        mock_memory.update_knowledge_page.assert_not_called()
+
+    async def test_update_not_found(self, mock_memory):
+        mock_memory.rename_knowledge_node.return_value = None
+        mcp = _make_mcp_server(mock_memory, {"update_knowledge_node"}, include_bank_id=True)
+        result = await _tools(mcp)["update_knowledge_node"].fn(node_id="kp-missing", name="x")
+        assert "not found" in result
+
+    async def test_delete_node(self, mock_memory):
+        mcp = _make_mcp_server(mock_memory, {"delete_knowledge_node"}, include_bank_id=True)
+        result = json.loads(await _tools(mcp)["delete_knowledge_node"].fn(node_id="kp-1"))
+        assert result == {"status": "deleted", "node_id": "kp-1"}
+
+    async def test_delete_node_not_found(self, mock_memory):
+        mock_memory.delete_knowledge_node.return_value = False
+        mcp = _make_mcp_server(mock_memory, {"delete_knowledge_node"}, include_bank_id=True)
+        result = await _tools(mcp)["delete_knowledge_node"].fn(node_id="kp-missing")
+        assert "not found" in result
+
+    async def test_no_bank_configured(self, mock_memory):
+        from fastmcp import FastMCP
+
+        mcp = FastMCP("test")
+        register_mcp_tools(
+            mcp,
+            mock_memory,
+            MCPToolsConfig(bank_id_resolver=lambda: None, include_bank_id_param=True, tools=_KB_TOOLS),
+        )
+        result = await _tools(mcp)["get_knowledge_base_tree"].fn()
+        assert "No bank_id configured" in result
+
+    async def test_request_context_is_propagated(self, mock_memory):
+        from fastmcp import FastMCP
+
+        mcp = FastMCP("test")
+        register_mcp_tools(
+            mcp,
+            mock_memory,
+            MCPToolsConfig(
+                bank_id_resolver=lambda: "test-bank",
+                api_key_resolver=lambda: "secret",
+                include_bank_id_param=True,
+                tools={"get_knowledge_base_tree"},
+            ),
+        )
+        await _tools(mcp)["get_knowledge_base_tree"].fn()
+        assert mock_memory.list_knowledge_nodes.call_args.kwargs["request_context"].api_key == "secret"
+
+    async def test_read_only_annotations(self, mock_memory):
+        mcp = _make_mcp_server(mock_memory, _KB_TOOLS)
+        tools = _tools(mcp)
+        for name in ("get_knowledge_base_tree", "search_knowledge_base", "get_knowledge_page"):
+            assert tools[name].annotations.readOnlyHint is True, name
+        assert tools["delete_knowledge_node"].annotations.destructiveHint is True
+        assert tools["create_knowledge_page"].annotations.destructiveHint is False
 
 
 # =========================================================================

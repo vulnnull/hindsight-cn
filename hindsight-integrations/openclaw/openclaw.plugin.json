@@ -237,6 +237,11 @@
         "description": "Memory types to recall. Defaults to ['observation'] — surfaces only the consolidated, deduplicated view; raw world/experience facts can drive the same answer multiple times when many memories say the same thing.",
         "default": ["observation"]
       },
+      "preferObservations": {
+        "type": "boolean",
+        "description": "When true, recall drops raw facts already consolidated into an observation while keeping unconsolidated ones. Pair with recallTypes including raw types (e.g. ['observation', 'world', 'experience']) to surface just-retained facts before consolidation, without duplicating already-consolidated content. Default: false.",
+        "default": false
+      },
       "recallRoles": {
         "type": "array",
         "items": {
@@ -277,8 +282,8 @@
       "recallInjectionPosition": {
         "type": "string",
         "enum": ["prepend", "append", "user"],
-        "description": "Where to inject recalled memories. 'prepend' = start of system prompt (default), 'append' = end of system prompt (preserves prompt cache), 'user' = before user message.",
-        "default": "prepend"
+        "description": "Where to inject recalled memories. 'user' = before the user message (default, preserves system prompt cache), 'prepend' = start of system prompt, 'append' = end of system prompt.",
+        "default": "user"
       },
       "debug": {
         "type": "boolean",
@@ -303,7 +308,7 @@
       },
       "retainQueuePath": {
         "type": "string",
-        "description": "Path to JSONL file for buffering failed retains (external API mode only). Default: ~/.openclaw/data/hindsight-retain-queue.jsonl"
+        "description": "Path to JSONL file for buffering failed retains. Default: ~/.openclaw/data/hindsight-retain-queue.jsonl"
       },
       "retainQueueMaxAgeMs": {
         "type": "number",
@@ -338,6 +343,10 @@
         "type": "boolean",
         "description": "Register agent_knowledge_* tools for explicit lookup, reflection, ingest, and knowledge-page management. Set automatically by the self-driving-agents CLI.",
         "default": false
+      },
+      "senderPrefixPattern": {
+        "type": "string",
+        "description": "Regex matching a human display-name prefix some channels prepend to user text (e.g. 'Alice: today weather?'). Supply the name part only — 'Alice|Bob' or '[A-Za-z ]{1,20}' — the ':' separator and anchoring are added by the plugin. When set, the prefix is stripped from both recall queries and retained transcripts. Unset strips nothing; an invalid regex is ignored."
       }
     },
     "additionalProperties": false
@@ -501,6 +510,10 @@
       "label": "Recall Types",
       "placeholder": "['observation'] (default)"
     },
+    "preferObservations": {
+      "label": "Prefer Observations",
+      "placeholder": "false (default)"
+    },
     "recallRoles": {
       "label": "Recall Roles",
       "placeholder": "e.g. ['user', 'assistant']"
@@ -570,6 +583,10 @@
     "skipStatelessSessions": {
       "label": "Skip Stateless Sessions",
       "placeholder": "true (default)"
+    },
+    "senderPrefixPattern": {
+      "label": "Sender Prefix Pattern",
+      "placeholder": "e.g. Alice|Bob (strips 'Alice: ' from recall and retain)"
     }
   }
 }

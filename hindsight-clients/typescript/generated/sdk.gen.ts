@@ -32,6 +32,12 @@ import type {
   CreateDirectiveData,
   CreateDirectiveErrors,
   CreateDirectiveResponses,
+  CreateKnowledgeFolderData,
+  CreateKnowledgeFolderErrors,
+  CreateKnowledgeFolderResponses,
+  CreateKnowledgePageData,
+  CreateKnowledgePageErrors,
+  CreateKnowledgePageResponses,
   CreateMentalModelData,
   CreateMentalModelErrors,
   CreateMentalModelResponses,
@@ -50,21 +56,39 @@ import type {
   DeleteDocumentData,
   DeleteDocumentErrors,
   DeleteDocumentResponses,
+  DeleteKnowledgeNodeData,
+  DeleteKnowledgeNodeErrors,
+  DeleteKnowledgeNodeResponses,
   DeleteMentalModelData,
   DeleteMentalModelErrors,
   DeleteMentalModelResponses,
+  DeleteOperationData,
+  DeleteOperationErrors,
+  DeleteOperationResponses,
   DeleteWebhookData,
   DeleteWebhookErrors,
   DeleteWebhookResponses,
+  DownloadFileData,
+  DownloadFileErrors,
+  DownloadFileResponses,
   DryRunExtractMemoriesData,
   DryRunExtractMemoriesErrors,
   DryRunExtractMemoriesResponses,
+  DryRunRefreshMentalModelData,
+  DryRunRefreshMentalModelErrors,
+  DryRunRefreshMentalModelResponses,
   ExportBankTemplateData,
   ExportBankTemplateErrors,
   ExportBankTemplateResponses,
   ExportDocumentsData,
   ExportDocumentsErrors,
   ExportDocumentsResponses,
+  ExportDocumentsSyncRemovedData,
+  ExportDocumentsSyncRemovedErrors,
+  ExportDocumentsSyncRemovedResponses,
+  ExportKnowledgeBaseData,
+  ExportKnowledgeBaseErrors,
+  ExportKnowledgeBaseResponses,
   FileRetainData,
   FileRetainErrors,
   FileRetainResponses,
@@ -97,6 +121,14 @@ import type {
   GetGraphData,
   GetGraphErrors,
   GetGraphResponses,
+  GetKnowledgeBaseTreeData,
+  GetKnowledgeBaseTreeErrors,
+  GetKnowledgeBaseTreeResponses,
+  GetKnowledgePageData,
+  GetKnowledgePageErrors,
+  GetKnowledgePageResponses,
+  GetLivenessData,
+  GetLivenessResponses,
   GetMemoriesTimeseriesData,
   GetMemoriesTimeseriesErrors,
   GetMemoriesTimeseriesResponses,
@@ -115,6 +147,8 @@ import type {
   GetOperationStatusData,
   GetOperationStatusErrors,
   GetOperationStatusResponses,
+  GetReadinessData,
+  GetReadinessResponses,
   GetVersionData,
   GetVersionResponses,
   HealthEndpointHealthGetData,
@@ -199,6 +233,9 @@ import type {
   RetryOperationData,
   RetryOperationErrors,
   RetryOperationResponses,
+  SearchKnowledgeBaseData,
+  SearchKnowledgeBaseErrors,
+  SearchKnowledgeBaseResponses,
   TestBankLlmData,
   TestBankLlmErrors,
   TestBankLlmResponses,
@@ -220,6 +257,9 @@ import type {
   UpdateDocumentData,
   UpdateDocumentErrors,
   UpdateDocumentResponses,
+  UpdateKnowledgeNodeData,
+  UpdateKnowledgeNodeErrors,
+  UpdateKnowledgeNodeResponses,
   UpdateMemoryData,
   UpdateMemoryErrors,
   UpdateMemoryResponses,
@@ -234,7 +274,8 @@ import type {
 export type Options<
   TData extends TDataShape = TDataShape,
   ThrowOnError extends boolean = boolean,
-> = Options2<TData, ThrowOnError> & {
+  TResponse = unknown,
+> = Options2<TData, ThrowOnError, TResponse> & {
   /**
    * You can provide a client instance returned by `createClient()` instead of
    * individual options. This might be also useful if you want to implement a
@@ -251,13 +292,39 @@ export type Options<
 /**
  * Health check endpoint
  *
- * Checks the health of the API and database connection
+ * Readiness check: verifies the API can reach the database. Alias of /health/ready. Use /health/live for liveness probes — this one fails whenever the database is unreachable, which must gate traffic, not restart the process.
  */
 export const healthEndpointHealthGet = <ThrowOnError extends boolean = false>(
   options?: Options<HealthEndpointHealthGetData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<HealthEndpointHealthGetResponses, unknown, ThrowOnError>({
     url: "/health",
+    ...options,
+  });
+
+/**
+ * Readiness probe
+ *
+ * Returns 200 when the API can serve traffic (database reachable), 503 otherwise. Identical to /health, which stays supported as its alias.
+ */
+export const getReadiness = <ThrowOnError extends boolean = false>(
+  options?: Options<GetReadinessData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<GetReadinessResponses, unknown, ThrowOnError>({
+    url: "/health/ready",
+    ...options,
+  });
+
+/**
+ * Liveness probe
+ *
+ * Returns 200 whenever the process can serve a request. Performs no database access, so a slow or unreachable database never restarts the pod. Point livenessProbe here and readinessProbe at /health.
+ */
+export const getLiveness = <ThrowOnError extends boolean = false>(
+  options?: Options<GetLivenessData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<GetLivenessResponses, unknown, ThrowOnError>({
+    url: "/health/live",
     ...options,
   });
 
@@ -303,7 +370,7 @@ export const getGraph = <ThrowOnError extends boolean = false>(
 /**
  * List memory units
  *
- * List memory units with pagination and optional full-text search. Supports filtering by type. Results are sorted by most recent first (mentioned_at DESC, then created_at DESC).
+ * List memory units with pagination and optional full-text search. Supports filtering by type, source document, and linked entity ID. Results are sorted by most recent first (mentioned_at DESC, then created_at DESC).
  */
 export const listMemories = <ThrowOnError extends boolean = false>(
   options: Options<ListMemoriesData, ThrowOnError>
@@ -383,9 +450,12 @@ export const getObservationHistory = <ThrowOnError extends boolean = false>(
  *
  * Recall memory using semantic similarity and spreading activation.
  *
- * The type parameter is optional and must be one of:
+ * The `types` parameter is optional and may contain any of:
  * - `world`: General knowledge about people, places, events, and things that happen
  * - `experience`: Memories about experience, conversations, actions taken, and tasks performed
+ * - `observation`: Consolidated knowledge synthesized from facts
+ *
+ * If `types` is omitted, all fact types are recalled.
  */
 export const recallMemories = <ThrowOnError extends boolean = false>(
   options: Options<RecallMemoriesData, ThrowOnError>
@@ -424,9 +494,9 @@ export const reflect = <ThrowOnError extends boolean = false>(
   });
 
 /**
- * List all memory banks
+ * List memory banks
  *
- * Get a list of all agents with their profiles
+ * List banks with their profiles and summary stats, most recently written first (`last_write_at` descending), with pagination and optional search.
  */
 export const listBanks = <ThrowOnError extends boolean = false>(
   options?: Options<ListBanksData, ThrowOnError>
@@ -642,6 +712,27 @@ export const refreshMentalModel = <ThrowOnError extends boolean = false>(
   >({ url: "/v1/default/banks/{bank_id}/mental-models/{mental_model_id}/refresh", ...options });
 
 /**
+ * Dry-run mental model refresh (preview, no persistence)
+ *
+ * Preview what a refresh would do to this mental model WITHOUT changing it — no content, structured document, watermark, or last_refreshed_at is written. Returns the mode the refresh ran in and why (delta silently falls back to full when there is no baseline or the source query changed), the resolved tag scope and time window it read, how many facts retrieval returned versus how many the reflect agent actually used, the delta operations it emitted, and a unified diff from the stored content to the content it would write.
+ *
+ * This is the production refresh pipeline with two writes skipped — the content and the watermark — and nothing about it is configurable, so what it reports is what the next refresh will do. Because nothing is persisted, a delta dry run reads exactly the window the next real refresh would, and repeating it reads that same window again.
+ *
+ * It costs the same LLM tokens as a refresh and is validated the same way.
+ */
+export const dryRunRefreshMentalModel = <ThrowOnError extends boolean = false>(
+  options: Options<DryRunRefreshMentalModelData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    DryRunRefreshMentalModelResponses,
+    DryRunRefreshMentalModelErrors,
+    ThrowOnError
+  >({
+    url: "/v1/default/banks/{bank_id}/mental-models/{mental_model_id}/dry-run-refresh",
+    ...options,
+  });
+
+/**
  * Clear mental model content
  *
  * Clear a mental model's content so the next refresh performs a full re-synthesis. This is useful for delta-mode models that have accumulated drift over many incremental refreshes. After clearing, call the /refresh endpoint to trigger a clean full rebuild.
@@ -655,9 +746,141 @@ export const clearMentalModel = <ThrowOnError extends boolean = false>(
   });
 
 /**
+ * Get the knowledge-base tree
+ *
+ * Return the knowledge base as a nested tree of folders and pages.
+ */
+export const getKnowledgeBaseTree = <ThrowOnError extends boolean = false>(
+  options: Options<GetKnowledgeBaseTreeData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetKnowledgeBaseTreeResponses,
+    GetKnowledgeBaseTreeErrors,
+    ThrowOnError
+  >({ url: "/v1/default/banks/{bank_id}/knowledge-base/tree", ...options });
+
+/**
+ * Create a knowledge-base folder
+ *
+ * Create a folder, optionally nested under a parent folder.
+ */
+export const createKnowledgeFolder = <ThrowOnError extends boolean = false>(
+  options: Options<CreateKnowledgeFolderData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    CreateKnowledgeFolderResponses,
+    CreateKnowledgeFolderErrors,
+    ThrowOnError
+  >({
+    url: "/v1/default/banks/{bank_id}/knowledge-base/folders",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Create a knowledge-base page
+ *
+ * Create a page (a mental model + tree node). Content is generated asynchronously; use the returned operation_id to track completion.
+ */
+export const createKnowledgePage = <ThrowOnError extends boolean = false>(
+  options: Options<CreateKnowledgePageData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    CreateKnowledgePageResponses,
+    CreateKnowledgePageErrors,
+    ThrowOnError
+  >({
+    url: "/v1/default/banks/{bank_id}/knowledge-base/pages",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Export the knowledge base as a markdown bundle
+ *
+ * Return a portable markdown bundle: a nested index.md, one <id>.md per page, and history logs.
+ */
+export const exportKnowledgeBase = <ThrowOnError extends boolean = false>(
+  options: Options<ExportKnowledgeBaseData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    ExportKnowledgeBaseResponses,
+    ExportKnowledgeBaseErrors,
+    ThrowOnError
+  >({ url: "/v1/default/banks/{bank_id}/knowledge-base/export", ...options });
+
+/**
+ * Hybrid search over knowledge pages (BM25 + vector)
+ *
+ * Doc-level hybrid search across a bank's knowledge pages: a full-text (BM25) match and a vector-similarity match, Reciprocal-Rank-Fusion fused. No reranker — tuned for latency.
+ */
+export const searchKnowledgeBase = <ThrowOnError extends boolean = false>(
+  options: Options<SearchKnowledgeBaseData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    SearchKnowledgeBaseResponses,
+    SearchKnowledgeBaseErrors,
+    ThrowOnError
+  >({ url: "/v1/default/banks/{bank_id}/knowledge-base/search", ...options });
+
+/**
+ * Get a knowledge-base page
+ *
+ * Return a single page as a markdown document (frontmatter + markdown body).
+ */
+export const getKnowledgePage = <ThrowOnError extends boolean = false>(
+  options: Options<GetKnowledgePageData, ThrowOnError>
+) =>
+  (options.client ?? client).get<GetKnowledgePageResponses, GetKnowledgePageErrors, ThrowOnError>({
+    url: "/v1/default/banks/{bank_id}/knowledge-base/pages/{page_id}",
+    ...options,
+  });
+
+/**
+ * Delete a knowledge-base node
+ *
+ * Delete a folder or page and its whole subtree (pages' mental models are removed too).
+ */
+export const deleteKnowledgeNode = <ThrowOnError extends boolean = false>(
+  options: Options<DeleteKnowledgeNodeData, ThrowOnError>
+) =>
+  (options.client ?? client).delete<
+    DeleteKnowledgeNodeResponses,
+    DeleteKnowledgeNodeErrors,
+    ThrowOnError
+  >({ url: "/v1/default/banks/{bank_id}/knowledge-base/nodes/{node_id}", ...options });
+
+/**
+ * Rename/move a knowledge-base node or update a page's options
+ *
+ * Rename a node (set `name`), move it under another folder (set `parent_id`, null for the root), and/or update a page's options (`source_query`, `tags`, `max_tokens`, `trigger`). Changing `source_query` schedules an async refresh so the page rebuilds against the new question. `trigger` is applied as a patch: the fields you send are updated and the rest keep the page's current values.
+ */
+export const updateKnowledgeNode = <ThrowOnError extends boolean = false>(
+  options: Options<UpdateKnowledgeNodeData, ThrowOnError>
+) =>
+  (options.client ?? client).patch<
+    UpdateKnowledgeNodeResponses,
+    UpdateKnowledgeNodeErrors,
+    ThrowOnError
+  >({
+    url: "/v1/default/banks/{bank_id}/knowledge-base/nodes/{node_id}",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
  * List directives
  *
- * List hard rules that are injected into prompts.
+ * List directive definitions. Unlike reflect, an omitted tag filter returns all directives.
  */
 export const listDirectives = <ThrowOnError extends boolean = false>(
   options: Options<ListDirectivesData, ThrowOnError>
@@ -670,7 +893,7 @@ export const listDirectives = <ThrowOnError extends boolean = false>(
 /**
  * Create directive
  *
- * Create a hard rule that will be injected into prompts.
+ * Create a global or tag-scoped hard rule for reflect prompts.
  */
 export const createDirective = <ThrowOnError extends boolean = false>(
   options: Options<CreateDirectiveData, ThrowOnError>
@@ -730,7 +953,7 @@ export const updateDirective = <ThrowOnError extends boolean = false>(
 /**
  * List documents
  *
- * List documents with pagination and optional search. Documents are the source content from which memory units are extracted.
+ * List documents with pagination and optional search, most recently written first (`updated_at` descending). Documents are the source content from which memory units are extracted.
  */
 export const listDocuments = <ThrowOnError extends boolean = false>(
   options: Options<ListDocumentsData, ThrowOnError>
@@ -902,6 +1125,19 @@ export const retryOperation = <ThrowOnError extends boolean = false>(
   });
 
 /**
+ * Delete a terminal async operation
+ *
+ * Permanently remove a failed, cancelled, or completed async operation record
+ */
+export const deleteOperation = <ThrowOnError extends boolean = false>(
+  options: Options<DeleteOperationData, ThrowOnError>
+) =>
+  (options.client ?? client).delete<DeleteOperationResponses, DeleteOperationErrors, ThrowOnError>({
+    url: "/v1/default/banks/{bank_id}/operations/{operation_id}/delete",
+    ...options,
+  });
+
+/**
  * Get memory bank profile
  *
  * Get disposition traits and mission for a memory bank. Returns 404 if the bank does not exist.
@@ -1042,17 +1278,20 @@ export const exportBankTemplate = <ThrowOnError extends boolean = false>(
   >({ url: "/v1/default/banks/{bank_id}/export", ...options });
 
 /**
- * Export documents
+ * Export documents (removed — use POST .../document-transfer/export)
  *
- * Export documents (extracted facts, entity names, causal links, chunks) from a bank as a transfer ZIP archive. Embeddings and database ids are not included — importing re-embeds with the target bank's model and re-resolves entities. Consolidated observations are excluded unless include_observations=true. Pass document_id query params to export specific documents, or omit to export the whole bank.
+ * **Removed.** The synchronous whole-bank export loaded the entire bank into memory and held a database connection for the full request, which could exhaust memory and take down the shared API on large banks. Use the asynchronous POST /v1/default/banks/{bank_id}/document-transfer/export instead: it returns an operation_id, runs the export in the background, and exposes a download URL on completion.
+ *
+ * @deprecated
  */
-export const exportDocuments = <ThrowOnError extends boolean = false>(
-  options: Options<ExportDocumentsData, ThrowOnError>
+export const exportDocumentsSyncRemoved = <ThrowOnError extends boolean = false>(
+  options: Options<ExportDocumentsSyncRemovedData, ThrowOnError>
 ) =>
-  (options.client ?? client).get<ExportDocumentsResponses, ExportDocumentsErrors, ThrowOnError>({
-    url: "/v1/default/banks/{bank_id}/document-transfer",
-    ...options,
-  });
+  (options.client ?? client).get<
+    ExportDocumentsSyncRemovedResponses,
+    ExportDocumentsSyncRemovedErrors,
+    ThrowOnError
+  >({ url: "/v1/default/banks/{bank_id}/document-transfer", ...options });
 
 /**
  * Import documents (async)
@@ -1070,6 +1309,32 @@ export const importDocuments = <ThrowOnError extends boolean = false>(
       "Content-Type": null,
       ...options.headers,
     },
+  });
+
+/**
+ * Export documents (async)
+ *
+ * Submit an async export of a bank's documents (extracted facts, entity names, causal links, chunks) as a transfer ZIP archive. Embeddings and database ids are not included — importing re-embeds with the target bank's model and re-resolves entities. Runs as a background operation to avoid pinning the API on large banks. Returns an operation_id; poll GET /v1/default/banks/{bank_id}/operations/{operation_id}. On completion the operation's result_metadata carries download_url (fetch the ZIP from GET /v1/default/files/download/{key}), storage_key, byte_size, and filename. Pass document_id query params to export specific documents, or omit to export the whole bank; include_observations=true carries consolidated observations and include_knowledge_base=true carries Mental Models plus Knowledge Pages (all whole-bank export only).
+ */
+export const exportDocuments = <ThrowOnError extends boolean = false>(
+  options: Options<ExportDocumentsData, ThrowOnError>
+) =>
+  (options.client ?? client).post<ExportDocumentsResponses, ExportDocumentsErrors, ThrowOnError>({
+    url: "/v1/default/banks/{bank_id}/document-transfer/export",
+    ...options,
+  });
+
+/**
+ * Download a stored file (async export archive)
+ *
+ * Stream a file previously written to file storage — currently the transfer ZIP produced by an async document export. The key comes from the export operation's result_metadata (storage_key / download_url). Access is authorized against the bank the key belongs to.
+ */
+export const downloadFile = <ThrowOnError extends boolean = false>(
+  options: Options<DownloadFileData, ThrowOnError>
+) =>
+  (options.client ?? client).get<DownloadFileResponses, DownloadFileErrors, ThrowOnError>({
+    url: "/v1/default/files/download/{key}",
+    ...options,
   });
 
 /**
@@ -1170,7 +1435,7 @@ export const getBankConfig = <ThrowOnError extends boolean = false>(
 /**
  * Update bank configuration
  *
- * Update configuration overrides for a bank. Only hierarchical fields can be overridden (LLM settings, retention parameters, etc.). Keys can be provided in Python field format (llm_provider) or environment variable format (HINDSIGHT_API_LLM_PROVIDER).
+ * Update configuration overrides for a bank. Only hierarchical behavioral settings can be overridden (retention parameters, recall settings, etc.). Keys can be provided in Python field format (retain_extraction_mode) or environment variable format (HINDSIGHT_API_RETAIN_EXTRACTION_MODE).
  */
 export const updateBankConfig = <ThrowOnError extends boolean = false>(
   options: Options<UpdateBankConfigData, ThrowOnError>

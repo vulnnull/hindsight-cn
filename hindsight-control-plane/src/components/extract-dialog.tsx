@@ -15,7 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useBank } from "@/lib/bank-context";
-import { Loader2 } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import JsonView from "react18-json-view";
 import "react18-json-view/src/style.css";
 
@@ -111,7 +111,7 @@ export function ExtractDialog({
             {tCommon("close")}
           </Button>
           <Button onClick={run} disabled={loading || !content.trim() || !currentBank}>
-            {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+            {loading ? <Spinner size="sm" className="mr-2" /> : null}
             {t("dryRunExtractionRun")}
           </Button>
         </DialogFooter>

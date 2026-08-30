@@ -36,7 +36,7 @@ Unlike simple retrieval, reflect is an **agentic system** that:
 1. **Autonomously gathers evidence** — The agent decides what information it needs and calls appropriate tools
 2. **Uses hierarchical retrieval** — Checks mental models first, then observations, then raw facts
 3. **Applies disposition** — Shapes reasoning based on the bank's personality traits
-4. **Enforces directives** — Hard rules that must be followed in all responses
+4. **Enforces applicable directives** — Global rules and rules matching the reflect tag scope
 5. **Cites sources** — Returns which memories and observations were used
 
 ### The Agentic Loop
@@ -162,7 +162,11 @@ Different use cases benefit from different disposition configurations:
 
 ## Directives: Hard Rules
 
-While disposition traits *influence* reasoning style, **directives** are hard rules that the agent *must* follow. Directives are injected into the prompt and enforced in every response.
+While disposition traits *influence* reasoning style, **directives** are hard
+rules that the agent *must* follow when they apply to the current reflect scope.
+Untagged directives are global; tagged directives require matching reflect
+tags. See [Memory Banks: Directives](/developer/api/memory-banks#directives) for
+the full matching and default-behavior tables.
 
 ### When to Use Directives
 
@@ -172,6 +176,10 @@ Use directives for constraints that must never be violated:
 - **Privacy constraints**: "Never share personal data with third parties"
 - **Style requirements**: "Always respond in formal English"
 - **Domain guardrails**: "Always cite sources when making factual claims"
+
+### Directive Scope and Tags
+
+Directive `tags` scope when a directive applies, just like they scope memories. Untagged directives always apply; tagged directives apply only when the `reflect` request carries matching tags. A `reflect` with no tags therefore applies only the untagged directives. Set `apply_all_directives: true` on the request to enforce **every** active directive regardless of tags. See [Memory Banks: Directive Scope and Tags](/developer/api/memory-banks#directive-scope-and-tags).
 
 ### Directives vs Disposition
 

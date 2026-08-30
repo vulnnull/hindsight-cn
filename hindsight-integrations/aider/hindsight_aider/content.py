@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 
 def compose_recall_query(aider_args: list[str], default_query: str, max_chars: int = 800) -> str:
@@ -40,13 +40,3 @@ def format_transcript(session_text: str, max_chars: int = 200_000) -> str:
     if len(text) > max_chars:
         text = text[-max_chars:]
     return text
-
-
-def find_workdir(aider_args: list[str]) -> Optional[str]:
-    """Return an explicit working dir if Aider was pointed at one (``--cwd``)."""
-    for i, arg in enumerate(aider_args):
-        if arg == "--cwd" and i + 1 < len(aider_args):
-            return aider_args[i + 1]
-        if arg.startswith("--cwd="):
-            return arg[len("--cwd=") :]
-    return None

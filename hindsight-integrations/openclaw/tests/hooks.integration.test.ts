@@ -254,7 +254,7 @@ describe("before_prompt_build hook", () => {
     expect(result).toBeUndefined();
   });
 
-  it("returns { prependSystemContext } with <hindsight_memories> when recall returns results", async () => {
+  it("returns { prependContext } by default when recall returns results", async () => {
     if (!apiReachable) return;
     recallSpy.mockResolvedValue({
       results: [makeMemoryResult("User likes Python")],
@@ -267,20 +267,24 @@ describe("before_prompt_build hook", () => {
       "before_prompt_build",
       { rawMessage: "What programming language do I prefer?", prompt: "", messages: [] },
       { messageProvider: "telegram", senderId: "U003" }
-    )) as { prependSystemContext: string; prependContext?: string };
+    )) as { prependContext: string; prependSystemContext?: string; appendSystemContext?: string };
 
     expect(result).toBeDefined();
-    expect(result.prependContext).toBeUndefined();
-    expect(result.prependSystemContext).toContain("<hindsight_memories>");
-    expect(result.prependSystemContext).toContain("User likes Python");
-    expect(result.prependSystemContext).toContain("</hindsight_memories>");
+    expect(result.prependSystemContext).toBeUndefined();
+    expect(result.appendSystemContext).toBeUndefined();
+    expect(result.prependContext).toContain("<hindsight_memories>");
+    expect(result.prependContext).toContain("User likes Python");
+    expect(result.prependContext).toContain("</hindsight_memories>");
   });
 
-  it("injects all memory result fields in the prependSystemContext", async () => {
+  it("injects all memory result fields in the default prependContext", async () => {
     if (!apiReachable) return;
     const mem = makeMemoryResult("User prefers dark mode");
     mem.tags = ["preference"];
     mem.entities = ["dark_mode"];
+    mem.document_id = "openclaw:agent:main:tg:-1003825475854";
+    mem.occurred_start = "2026-01-14T09:00:00Z";
+    mem.occurred_end = "2026-01-14T11:00:00Z";
     recallSpy.mockResolvedValue({
       results: [mem],
       entities: null,
@@ -292,13 +296,17 @@ describe("before_prompt_build hook", () => {
       "before_prompt_build",
       { rawMessage: "Do I prefer dark or light mode?", prompt: "", messages: [] },
       { messageProvider: "telegram", senderId: "U004" }
-    )) as { prependSystemContext: string; prependContext?: string };
+    )) as { prependContext: string; prependSystemContext?: string };
 
     // formatMemories returns a bullet list, not JSON
-    expect(result.prependContext).toBeUndefined();
-    expect(result.prependSystemContext).toContain("- User prefers dark mode");
-    expect(result.prependSystemContext).toContain("<hindsight_memories>");
-    expect(result.prependSystemContext).toContain("</hindsight_memories>");
+    expect(result.prependSystemContext).toBeUndefined();
+    expect(result.prependContext).toContain("- User prefers dark mode");
+    expect(result.prependContext).toContain("<hindsight_memories>");
+    expect(result.prependContext).toContain("</hindsight_memories>");
+    expect(result.prependContext).toContain(
+      "[occurred: 2026-01-14T09:00:00Z → 2026-01-14T11:00:00Z]"
+    );
+    expect(result.prependContext).toContain("[doc:openclaw:agent:main:tg:-1003825475854]");
   });
 
   it("extracts the inner query from an envelope-formatted prompt when rawMessage is absent", async () => {
@@ -361,7 +369,7 @@ describe("before_prompt_build hook", () => {
     expect(options?.maxTokens).toBeGreaterThan(0);
   });
 
-  it("includes recalled memories in the prependSystemContext block", async () => {
+  it("includes recalled memories in the default prependContext block", async () => {
     if (!apiReachable) return;
     recallSpy.mockResolvedValue({
       results: [makeMemoryResult("User loves hiking")],
@@ -374,11 +382,11 @@ describe("before_prompt_build hook", () => {
       "before_prompt_build",
       { rawMessage: "What outdoor activities do I enjoy?", prompt: "", messages: [] },
       { messageProvider: "telegram", senderId: "U007" }
-    )) as { prependSystemContext: string; prependContext?: string };
+    )) as { prependContext: string; prependSystemContext?: string };
 
-    expect(result.prependContext).toBeUndefined();
-    expect(result.prependSystemContext).toContain("User loves hiking");
-    expect(result.prependSystemContext).toContain("<hindsight_memories>");
+    expect(result.prependSystemContext).toBeUndefined();
+    expect(result.prependContext).toContain("User loves hiking");
+    expect(result.prependContext).toContain("<hindsight_memories>");
   });
 
   it("uses identity cached in before_dispatch when later hooks lack sender metadata", async () => {

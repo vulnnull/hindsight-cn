@@ -12,8 +12,6 @@ from pathlib import Path
 from typing import Optional
 
 DEFAULT_TIMEOUT = 15  # seconds
-HEALTH_CHECK_RETRIES = 3
-HEALTH_CHECK_DELAY = 2  # seconds
 
 
 def _plugin_version() -> str:
@@ -72,26 +70,6 @@ class HindsightClient:
                 pass
             raise RuntimeError(f"HTTP {e.code} from {url}: {body_text}") from e
 
-    def health_check(self, timeout: int = 5) -> bool:
-        """Check if the Hindsight server is reachable.
-
-        Mirrors Openclaw's checkExternalApiHealth: retries up to 3 times
-        with 2s delay between attempts.
-        """
-        import time
-
-        for attempt in range(1, HEALTH_CHECK_RETRIES + 1):
-            try:
-                url = f"{self.api_url}/health"
-                req = urllib.request.Request(url, headers=self._headers(), method="GET")
-                with urllib.request.urlopen(req, timeout=timeout) as resp:
-                    if resp.status == 200:
-                        return True
-            except Exception:
-                pass
-            if attempt < HEALTH_CHECK_RETRIES:
-                time.sleep(HEALTH_CHECK_DELAY)
-        return False
 
     def recall(
         self,

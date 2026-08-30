@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { client } from "@/lib/api";
+import { resolveTemporalWindow } from "@/lib/temporal-window";
 import { useBank } from "@/lib/bank-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,7 +31,9 @@ import {
   ArrowDown,
   Tag,
   Calendar,
+  CalendarRange,
 } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import JsonView from "react18-json-view";
 import "react18-json-view/src/style.css";
 import { MemoryDetailPanel } from "./memory-detail-panel";
@@ -57,6 +60,8 @@ export function SearchDebugView() {
   const [queryDate, setQueryDate] = useState("");
   const [includeChunks, setIncludeChunks] = useState(false);
   const [includeEntities, setIncludeEntities] = useState(false);
+  const [windowStart, setWindowStart] = useState("");
+  const [windowEnd, setWindowEnd] = useState("");
   const [tags, setTags] = useState("");
   const [tagsMatch, setTagsMatch] = useState<TagsMatch>("any");
 
@@ -106,7 +111,16 @@ export function SearchDebugView() {
     setSelectedMemory(fullResult || traceResult);
   };
 
+  const temporalWindow = resolveTemporalWindow(windowStart, windowEnd);
+
   const runSearch = async () => {
+    // Guard here, not just on the button: Enter in the query box calls this
+    // directly, and searching anyway would silently drop the window the user
+    // set rather than telling them it is unusable.
+    if (temporalWindow.reversed) {
+      toast.error(t("temporalWindowReversed"));
+      return;
+    }
     if (!currentBank) {
       toast.error(t("errorSelectBank"));
       return;
@@ -143,6 +157,7 @@ export function SearchDebugView() {
           chunks: includeChunks ? { max_tokens: 8192 } : null,
         },
         ...(queryDate && { query_timestamp: queryDate }),
+        ...(temporalWindow.value && { temporal_window: temporalWindow.value }),
         ...(parsedTags.length > 0 && { tags: parsedTags, tags_match: tagsMatch }),
       };
 
@@ -190,7 +205,11 @@ export function SearchDebugView() {
                 onKeyDown={(e) => e.key === "Enter" && runSearch()}
               />
             </div>
-            <Button onClick={runSearch} disabled={loading || !query} className="h-12 px-8">
+            <Button
+              onClick={runSearch}
+              disabled={loading || !query || temporalWindow.reversed}
+              className="h-12 px-8"
+            >
               {loading ? t("searching") : t("recall")}
             </Button>
           </div>
@@ -287,6 +306,45 @@ export function SearchDebugView() {
               </SelectContent>
             </Select>
           </div>
+
+          {/* Temporal window */}
+          <div className="flex flex-wrap items-center gap-4 mt-4 pt-4 border-t">
+            <CalendarRange className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">{t("temporalWindowLabel")}</span>
+            <Input
+              type="datetime-local"
+              value={windowStart}
+              onChange={(e) => setWindowStart(e.target.value)}
+              aria-label={t("temporalWindowStart")}
+              className="h-8 w-56"
+            />
+            <span className="text-sm text-muted-foreground">{t("temporalWindowTo")}</span>
+            <Input
+              type="datetime-local"
+              value={windowEnd}
+              onChange={(e) => setWindowEnd(e.target.value)}
+              aria-label={t("temporalWindowEnd")}
+              className="h-8 w-56"
+            />
+            {(windowStart || windowEnd) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8"
+                onClick={() => {
+                  setWindowStart("");
+                  setWindowEnd("");
+                }}
+              >
+                {t("temporalWindowClear")}
+              </Button>
+            )}
+            <p
+              className={`w-full text-xs ${temporalWindow.reversed ? "text-destructive" : "text-muted-foreground"}`}
+            >
+              {temporalWindow.reversed ? t("temporalWindowReversed") : t("temporalWindowHint")}
+            </p>
+          </div>
         </CardContent>
       </Card>
 
@@ -294,7 +352,7 @@ export function SearchDebugView() {
       {loading && (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-16">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4" />
+            <Spinner size="lg" variant="jump" className="mb-4" />
             <p className="text-muted-foreground">{t("searchingMemories")}</p>
           </CardContent>
         </Card>

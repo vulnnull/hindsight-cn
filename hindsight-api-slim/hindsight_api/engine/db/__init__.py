@@ -67,16 +67,28 @@ def create_database_backend(backend_type: str) -> DatabaseBackend:
     return _get_backend_class(backend_type)()
 
 
+_OPS_CACHE: dict[str, DataAccessOps] = {}
+
+
 def create_data_access_ops(backend_type: str) -> DataAccessOps:
-    """Factory: create a DataAccessOps by backend name.
+    """Factory: the DataAccessOps for a backend name.
+
+    Returns a per-dialect SINGLETON: ``DataAccessOps`` is stateless (it only builds and runs SQL),
+    so one shared instance per dialect is correct — and it means the database backend and the
+    memories store hold the *same* ops object, so a test that patches a method on it (e.g.
+    ``enqueue_graph_maintenance``) observes every caller regardless of which layer issued it.
 
     Args:
         backend_type: One of "postgresql" or "oracle".
 
     Returns:
-        A DataAccessOps instance.
+        The shared DataAccessOps instance for that backend.
 
     Raises:
         ValueError: If backend_type is not recognized.
     """
-    return _get_ops_class(backend_type)()
+    ops = _OPS_CACHE.get(backend_type)
+    if ops is None:
+        ops = _get_ops_class(backend_type)()
+        _OPS_CACHE[backend_type] = ops
+    return ops

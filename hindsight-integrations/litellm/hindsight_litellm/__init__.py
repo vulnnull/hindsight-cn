@@ -1118,17 +1118,6 @@ def _store_conversation_sync(
             _pending_storage_errors.append(HindsightError(f"Background storage failed: {e}"))
 
 
-def _check_pending_storage_errors() -> None:
-    """Check for and raise any pending storage errors from background threads."""
-    global _pending_storage_errors
-    with _storage_error_lock:
-        if _pending_storage_errors:
-            # Get first error and clear the list
-            error = _pending_storage_errors[0]
-            _pending_storage_errors.clear()
-            raise error
-
-
 def get_pending_storage_errors() -> List[Exception]:
     """Get any pending storage errors without raising them.
 

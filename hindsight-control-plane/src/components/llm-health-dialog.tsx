@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { Loader2, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import { client } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
@@ -85,7 +86,7 @@ export function LlmHealthDialog({
         <div className="py-2 space-y-2">
           {testing && !result ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Spinner size="sm" />
               {t("testingLlm")}
             </div>
           ) : (
@@ -115,11 +116,7 @@ export function LlmHealthDialog({
 
         <DialogFooter>
           <Button variant="outline" size="sm" onClick={run} disabled={testing} className="gap-1.5">
-            {testing ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <RefreshCw className="w-3.5 h-3.5" />
-            )}
+            {testing ? <Spinner size="xs" /> : <RefreshCw className="w-3.5 h-3.5" />}
             {testing ? t("testingLlm") : t("llmRetest")}
           </Button>
         </DialogFooter>

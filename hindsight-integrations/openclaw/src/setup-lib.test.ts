@@ -8,7 +8,6 @@ import {
   applyApiMode,
   applyCloudMode,
   applyEmbeddedMode,
-  defaultApiKeyEnvVar,
   ensurePluginConfig,
   envSecretRef,
   isValidEnvVarName,
@@ -32,13 +31,6 @@ describe("isValidEnvVarName", () => {
     expect(isValidEnvVarName("")).toBe(false);
     expect(isValidEnvVarName(undefined)).toBe(false);
     expect(isValidEnvVarName("has-dash")).toBe(false);
-  });
-});
-
-describe("defaultApiKeyEnvVar", () => {
-  it("UPPERs and snake_cases the provider id", () => {
-    expect(defaultApiKeyEnvVar("openai")).toBe("OPENAI_API_KEY");
-    expect(defaultApiKeyEnvVar("claude-code")).toBe("CLAUDE_CODE_API_KEY");
   });
 });
 
@@ -357,6 +349,15 @@ describe("applyEmbeddedMode", () => {
     };
     applyEmbeddedMode(pc, { llmProvider: "claude-code" });
     expect(pc.llmProvider).toBe("claude-code");
+    expect(pc.llmApiKey).toBeUndefined();
+  });
+
+  it("omits llmApiKey for github-copilot", () => {
+    const pc: Record<string, unknown> = {
+      llmApiKey: { source: "env", provider: "default", id: "STALE" },
+    };
+    applyEmbeddedMode(pc, { llmProvider: "github-copilot" });
+    expect(pc.llmProvider).toBe("github-copilot");
     expect(pc.llmApiKey).toBeUndefined();
   });
 

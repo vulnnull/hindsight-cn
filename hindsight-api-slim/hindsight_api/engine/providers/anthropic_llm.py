@@ -12,12 +12,15 @@ import asyncio
 import json
 import logging
 import time
-from typing import Any
+from contextlib import AbstractAsyncContextManager, nullcontext
+from typing import Any, Callable
 
-from hindsight_api.engine.llm_interface import LLMInterface
+from hindsight_api.engine.llm_interface import LLM_TOOL_CHOICE_AUTO, LLMInterface, LLMToolChoice
 from hindsight_api.engine.llm_trace import LLMResponseUsage, stash_response_usage
+from hindsight_api.engine.providers.llm_debug import dump_request_on_4xx
 from hindsight_api.engine.response_models import LLMToolCall, LLMToolCallResult, TokenUsage
 from hindsight_api.metrics import get_metrics_collector
+from hindsight_api.worker.stage import set_stage
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +88,7 @@ class AnthropicLLM(LLMInterface):
         api_key: str,
         base_url: str,
         model: str,
-        reasoning_effort: str = "low",
+        reasoning_effort: str | None = None,
         timeout: float = 300.0,
         default_headers: dict[str, str] | None = None,
         extra_body: dict[str, Any] | None = None,
@@ -112,6 +115,7 @@ class AnthropicLLM(LLMInterface):
             **kwargs: Additional provider-specific parameters.
         """
         super().__init__(provider, api_key, base_url, model, reasoning_effort, **kwargs)
+        self._warn_reasoning_effort_unsupported()
 
         if not self.api_key:
             raise ValueError("API key is required for Anthropic provider")
@@ -172,6 +176,7 @@ class AnthropicLLM(LLMInterface):
         skip_validation: bool = False,
         strict_schema: bool = False,
         return_usage: bool = False,
+        attempt_context: Callable[[], AbstractAsyncContextManager[None]] | None = None,
     ) -> Any:
         """
         Make an LLM API call with retry logic.
@@ -262,7 +267,9 @@ class AnthropicLLM(LLMInterface):
 
         for attempt in range(max_retries + 1):
             try:
-                response = await self._client.messages.create(**call_params)
+                async with attempt_context() if attempt_context is not None else nullcontext():
+                    set_stage(f"llm.{self.provider}.{scope}.attempt={attempt + 1}/{max_retries + 1}")
+                    response = await self._client.messages.create(**call_params)
                 # Stash usage before parse/validate, which may raise locally
                 # even though the provider charged for these tokens (#2387).
                 stash_response_usage(_usage_from_anthropic_response(response))
@@ -385,6 +392,9 @@ class AnthropicLLM(LLMInterface):
                     logger.error(f"Anthropic auth error (HTTP {e.status_code}), not retrying: {str(e)}")
                     raise
 
+                # Diagnostic dump (opt-in) of the exact request behind any 4xx.
+                dump_request_on_4xx(scope=scope, provider=self.provider, model=self.model, err=e, request=call_params)
+
                 last_exception = e
                 if attempt < max_retries:
                     # Check if it's a rate limit or server error
@@ -419,7 +429,8 @@ class AnthropicLLM(LLMInterface):
         max_retries: int = 5,
         initial_backoff: float = 1.0,
         max_backoff: float = 30.0,
-        tool_choice: str | dict[str, Any] = "auto",
+        tool_choice: LLMToolChoice = LLM_TOOL_CHOICE_AUTO,
+        attempt_context: Callable[[], AbstractAsyncContextManager[None]] | None = None,
     ) -> LLMToolCallResult:
         """
         Make an LLM API call with tool/function calling support.
@@ -509,7 +520,9 @@ class AnthropicLLM(LLMInterface):
         last_exception = None
         for attempt in range(max_retries + 1):
             try:
-                response = await self._client.messages.create(**call_params)
+                async with attempt_context() if attempt_context is not None else nullcontext():
+                    set_stage(f"llm.{self.provider}.{scope}.attempt={attempt + 1}/{max_retries + 1}")
+                    response = await self._client.messages.create(**call_params)
                 stash_response_usage(_usage_from_anthropic_response(response))
 
                 # Extract content and tool calls
@@ -577,6 +590,8 @@ class AnthropicLLM(LLMInterface):
             except (APIConnectionError, APIStatusError) as e:
                 if isinstance(e, APIStatusError) and e.status_code in (401, 403):
                     raise
+                # Diagnostic dump (opt-in) of the exact request behind any 4xx.
+                dump_request_on_4xx(scope=scope, provider=self.provider, model=self.model, err=e, request=call_params)
                 last_exception = e
                 if attempt < max_retries:
                     await asyncio.sleep(min(initial_backoff * (2**attempt), max_backoff))
@@ -617,6 +632,12 @@ class AnthropicLLM(LLMInterface):
         an OpenAI ``response_format`` json_schema becomes a single forced
         tool_use tool when strict (native constrained decoding, issue #1002),
         else the schema is injected into the system prompt.
+
+        The system prompt carries the same cache_control marker as the sync
+        one-shot path (its sole breakpoint): every request in a retain batch
+        shares the fact-extraction system prompt, so the first item's cache
+        write serves the remaining items as best-effort reads — and the
+        cache-read discount stacks with the 50% batch discount.
         """
         system_prompt: str | None = None
         messages: list[dict[str, Any]] = []
@@ -653,7 +674,7 @@ class AnthropicLLM(LLMInterface):
                 system_prompt = (system_prompt + schema_msg) if system_prompt else schema_msg
 
         if system_prompt:
-            params["system"] = system_prompt
+            params["system"] = _cached_system_blocks(system_prompt)
 
         # Batch params ARE the raw Messages body, so operator-configured extra
         # body params merge directly (the sync path routes them through the
@@ -796,3 +817,6 @@ class AnthropicLLM(LLMInterface):
         """Clean up resources (close Anthropic client connections)."""
         if hasattr(self, "_client") and self._client:
             await self._client.close()
+
+    def supports_attempt_scoped_concurrency(self) -> bool:
+        return True

@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 
 from .daemon_embed_manager import DaemonEmbedManager
-from .profile_manager import ProfileManager, resolve_active_profile
+from .profile_manager import resolve_active_profile
 
 logger = logging.getLogger(__name__)
 
@@ -23,23 +23,6 @@ CLI_INSTALL_DIRS = [
     Path.home() / ".hindsight" / "bin",  # Alternative location
 ]
 CLI_INSTALLER_URL = "https://hindsight.vectorize.io/get-cli"
-
-
-def get_daemon_port(profile: str | None = None) -> int:
-    """Get daemon port for a profile.
-
-    Args:
-        profile: Profile name (None = resolve from priority).
-
-    Returns:
-        Port number for daemon.
-    """
-    if profile is None:
-        profile = resolve_active_profile()
-
-    pm = ProfileManager()
-    paths = pm.resolve_profile_paths(profile)
-    return paths.port
 
 
 def get_daemon_url(profile: str | None = None) -> str:

@@ -9,8 +9,6 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-import pytest
-
 from lib.config import DEFAULT_HINDSIGHT_API_URL
 from lib.daemon import get_api_url
 

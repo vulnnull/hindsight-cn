@@ -6,7 +6,13 @@ The metadata is exposed in the API for debugging purposes and may change without
 """
 
 from dataclasses import asdict, dataclass, field
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
+
+if TYPE_CHECKING:
+    # Type-only: importing it for real is a cycle. This module is pulled in very
+    # early by memory_engine, while mental_model_refresh reaches the search
+    # package, which imports back from memory_engine.
+    from .mental_model_refresh import RefreshFailureReason, RefreshOperationOutcome
 
 MAX_EXTRACTION_ERROR_SAMPLES = 5
 
@@ -19,10 +25,18 @@ class BatchRetainParentMetadata:
     total_tokens: int
     num_sub_batches: int
     is_parent: bool = True
+    # Set only when the whole batch targets a single document, so the operations
+    # list surfaces which document an in-flight retain is (re)writing. The
+    # documents UI cross-checks this to badge rows as "updating". Multi-document
+    # batches leave it None and are matched per single-document child instead.
+    document_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dict for JSON serialization."""
-        return asdict(self)
+        """Convert to dict for JSON serialization, omitting document_id when unset."""
+        data = asdict(self)
+        if data.get("document_id") is None:
+            data.pop("document_id", None)
+        return data
 
 
 @dataclass
@@ -33,10 +47,15 @@ class BatchRetainChildMetadata:
     parent_operation_id: str
     sub_batch_index: int
     total_sub_batches: int
+    # Set only when this child processes a single document (see the parent's note).
+    document_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dict for JSON serialization."""
-        return asdict(self)
+        """Convert to dict for JSON serialization, omitting document_id when unset."""
+        data = asdict(self)
+        if data.get("document_id") is None:
+            data.pop("document_id", None)
+        return data
 
 
 @dataclass
@@ -138,6 +157,70 @@ class RefreshMentalModelMetadata:
     """Metadata for mental model refresh operations."""
 
     mental_model_id: str
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dict for JSON serialization."""
+        return asdict(self)
+
+
+@dataclass
+class RefreshMentalModelOutcomeMetadata:
+    """Machine-readable outcome metadata for a completed refresh_mental_model operation.
+
+    Refresh parity with RetainOutcomeMetadata (#2605): lets a monitoring layer
+    distinguish "refreshed with real content" from "refreshed empty" by reading
+    result_metadata alone, without a follow-up content fetch.
+    """
+
+    content_len: int
+    populated_content: bool
+    based_on_counts: dict[str, int] = field(default_factory=dict)
+    # Delta operations the model emitted, as applied vs rejected. A refresh whose
+    # ops are routinely rejected still completes successfully with a plausible
+    # document, so the count is the only signal that some of this run's new facts
+    # never reached it. Both are 0 for a full-mode refresh, which emits no ops.
+    delta_ops_applied: int = 0
+    delta_ops_skipped: int = 0
+    # What the refresh did with the document (#3274). Without it the operation
+    # record — the only per-refresh row kept indefinitely — cannot tell a full
+    # rewrite from a delta edit from a run that changed nothing: all three write
+    # zero delta ops, and a preserved document reports the length of the content
+    # it preserved, so ``content_len``/``populated_content`` read identically.
+    # Absent (rather than null) on rows written by a build predating the field,
+    # so "not recorded" stays distinguishable from any recorded value.
+    outcome: "RefreshOperationOutcome | None" = None
+    # Why the refresh refused to write, on the failing outcomes only. Finer than
+    # ``outcome``: it is the same value persisted as ``reflect_response.refresh_skipped``.
+    failure_reason: "RefreshFailureReason | None" = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dict for JSON serialization, omitting unrecorded fields.
+
+        ``outcome``/``failure_reason`` are dropped when unset rather than written
+        as null: the metadata is merged into whatever the operation already
+        carries, and a null would overwrite a recorded value with "unknown".
+        """
+        data = asdict(self)
+        if data.get("outcome") is None:
+            data.pop("outcome", None)
+        if data.get("failure_reason") is None:
+            data.pop("failure_reason", None)
+        return data
+
+
+@dataclass
+class RefreshMentalModelFailureMetadata:
+    """Outcome metadata for a refresh that failed without writing content.
+
+    The success-path writer derives its fields from the stored document, which a
+    failed refresh never updates — so failures get their own, narrower record.
+    Before this existed the reason a refresh failed survived only as prose inside
+    ``error_message`` and in the model's ``reflect_response``, which the next
+    refresh overwrites (#3274).
+    """
+
+    outcome: "RefreshOperationOutcome"
+    failure_reason: "RefreshFailureReason"
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dict for JSON serialization."""

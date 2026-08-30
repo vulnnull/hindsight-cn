@@ -126,6 +126,7 @@ export interface PluginConfig {
   recallBudget?: "low" | "mid" | "high"; // Recall effort. Default: 'mid'
   recallMaxTokens?: number; // Max tokens for recall response. Default: 1024
   recallTypes?: Array<"world" | "experience" | "observation">; // Memory types to recall. Default: ['observation'] — surfaces only the consolidated, deduplicated view (raw world/experience facts can drive the same answer multiple times when many memories say the same thing).
+  preferObservations?: boolean; // When true, recall drops raw facts already consolidated into an observation while keeping unconsolidated ones. Pair with recallTypes including raw types to catch just-retained facts without duplicating consolidated content. Default: false.
   recallRoles?: Array<"user" | "assistant" | "system" | "tool">; // Roles to include when composing contextual recall query. Default: ['user', 'assistant']
   retainEveryNTurns?: number; // Retain every Nth turn (1 = every turn, default: 1). Values > 1 enable chunked retention.
   retainOverlapTurns?: number; // Extra prior turns included when chunked retention fires (default: 0). Window = retainEveryNTurns + retainOverlapTurns.
@@ -134,7 +135,7 @@ export interface PluginConfig {
   recallTimeoutMs?: number; // Timeout for auto-recall in milliseconds. Default: 10000
   recallMaxQueryChars?: number; // Max chars for composed recall query. Default: 800
   recallPromptPreamble?: string; // Prompt preamble placed above recalled memories. Default: built-in guidance text.
-  recallInjectionPosition?: "prepend" | "append" | "user"; // Where to inject recalled memories. 'prepend' = start of system prompt (default), 'append' = end of system prompt (preserves prompt cache), 'user' = before user message.
+  recallInjectionPosition?: "prepend" | "append" | "user"; // Where to inject recalled memories. 'user' = before user message (default, preserves system prompt cache), 'prepend' = start of system prompt, 'append' = end of system prompt.
   ignoreSessionPatterns?: string[]; // Session key glob patterns to skip entirely (no recall, no retain). E.g. ["agent:main:**", "agent:*:cron:**"]
   statelessSessionPatterns?: string[]; // Session key glob patterns for read-only sessions (recall allowed, retain skipped). E.g. ["agent:*:subagent:**"]
   skipStatelessSessions?: boolean; // When true (default), stateless sessions also skip recall. When false, they recall but never retain.
@@ -145,6 +146,15 @@ export interface PluginConfig {
   retainQueueMaxAgeMs?: number; // Max age in ms for queued items. -1 = keep forever (default: -1)
   retainQueueFlushIntervalMs?: number; // How often to attempt flushing the queue in ms. Default: 60000 (1 min)
   enableKnowledgeTools?: boolean; // Register agent_knowledge_* tools. Default: false. Set to true by the self-driving-agents CLI.
+  /**
+   * Regex source matching a human display-name prefix that some channels
+   * prepend to user text ("Alice: today weather?"). Supply the name part only
+   * (e.g. `Alice|Bob` or `[A-Za-z ]{1,20}`) — the `:` separator and anchoring
+   * are added by the plugin. When set, the prefix is removed from both recall
+   * queries and retained transcripts. Unset (default) strips nothing; an
+   * invalid regex is ignored. (#3070)
+   */
+  senderPrefixPattern?: string;
   /**
    * Emit per-hook latency lines (`before_prompt_build` recall RPC time,
    * `agent_end` retain RPC time, total hook time) at info level so users can
@@ -186,6 +196,8 @@ export interface RetainRequest {
   context?: string;
   metadata?: Record<string, unknown>;
   tags?: string[];
+  /** Stable identity reused when an asynchronous retain is retried. */
+  operationId?: string;
   /**
    * `'append'` concatenates this content to the existing document text
    * (Hindsight ≥ 0.5 only — older versions silently ignore the field and

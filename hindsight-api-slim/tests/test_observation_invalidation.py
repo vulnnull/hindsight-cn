@@ -10,65 +10,151 @@ These tests verify that:
 """
 
 import uuid
+from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from hindsight_api import RequestContext
-from hindsight_api.engine.memory_engine import MemoryEngine
+from hindsight_api.engine.db_utils import acquire_with_retry
+from hindsight_api.engine.memories import FactRecord, get_memories
+from hindsight_api.engine.memory_engine import MemoryEngine, fq_table
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-async def _insert_memory(conn, bank_id: str, text: str, fact_type: str = "experience") -> uuid.UUID:
-    """Insert a memory unit directly, bypassing LLM retain pipeline."""
-    mem_id = uuid.uuid4()
-    await conn.execute(
-        """
-        INSERT INTO memory_units (id, bank_id, text, fact_type, event_date, created_at, updated_at, consolidated_at)
-        VALUES ($1, $2, $3, $4, NOW(), NOW(), NOW(), NOW())
-        """,
-        mem_id,
-        bank_id,
-        text,
-        fact_type,
+async def _insert_memory(
+    memory: MemoryEngine,
+    conn,
+    bank_id: str,
+    text: str,
+    fact_type: str = "experience",
+    document_id: str | None = None,
+    chunk_id: str | None = None,
+) -> uuid.UUID:
+    """Seed one memory through the store, bypassing the LLM retain pipeline.
+
+    Uses insert_facts rather than an INSERT INTO memory_units so the fixture seeds wherever
+    memories actually live — a store that keeps them outside SQL never sees a raw row.
+    """
+    store = get_memories()
+    fact = SimpleNamespace(
+        fact_text=text,
+        embedding=memory.embeddings.encode([text])[0],
+        fact_type=fact_type,
+        tags=[],
+        context=None,
+        document_id=document_id,
+        chunk_id=chunk_id,
+        metadata=None,
+        observation_scopes=None,
+        entities=[],
+        causal_relations=[],
+        occurred_start=None,
+        occurred_end=None,
+        mentioned_at=None,
     )
-    return mem_id
+    unit_ids = await store.insert_facts(
+        conn=conn, ops=memory._backend.ops, bank_id=bank_id, facts=[fact], document_id=document_id
+    )
+    # The raw insert this replaces stamped consolidated_at; keep that so these fixtures are a
+    # consolidated baseline, not a backlog (several tests assert the reset back to NULL).
+    await store.mark_consolidated(
+        conn=conn, fq_table=fq_table, bank_id=bank_id, unit_ids=unit_ids, when=datetime.now(timezone.utc)
+    )
+    return uuid.UUID(unit_ids[0])
 
 
-async def _insert_observation(conn, bank_id: str, text: str, source_memory_ids: list[uuid.UUID]) -> uuid.UUID:
-    """Insert an observation unit directly."""
+async def _insert_observation(
+    memory: MemoryEngine, conn, bank_id: str, text: str, source_memory_ids: list[uuid.UUID]
+) -> uuid.UUID:
+    """Seed one observation wherever the configured store keeps observations.
+
+    Gated: the SQL store's upsert_observation is a no-op (the consolidator writes that row
+    inline), so SQL is seeded with the insert it would have written.
+    """
+    store = get_memories()
     obs_id = uuid.uuid4()
-    await conn.execute(
-        """
-        INSERT INTO memory_units (
-            id, bank_id, text, fact_type, event_date, source_memory_ids, proof_count, created_at, updated_at
-        ) VALUES ($1, $2, $3, 'observation', NOW(), $4, $5, NOW(), NOW())
-        """,
-        obs_id,
-        bank_id,
-        text,
-        source_memory_ids,
-        len(source_memory_ids),
-    )
+    if store.writes_memory_rows_in_sql:
+        await conn.execute(
+            """
+            INSERT INTO memory_units (
+                id, bank_id, text, fact_type, event_date, source_memory_ids, proof_count, created_at, updated_at
+            ) VALUES ($1, $2, $3, 'observation', NOW(), $4, $5, NOW(), NOW())
+            """,
+            obs_id,
+            bank_id,
+            text,
+            source_memory_ids,
+            len(source_memory_ids),
+        )
+    else:
+        now = datetime.now(timezone.utc)
+        await store.upsert_observation(
+            conn=conn,
+            bank_id=bank_id,
+            record=FactRecord(
+                unit_id=str(obs_id),
+                text=text,
+                embedding=memory.embeddings.encode([text])[0],
+                fact_type="observation",
+                proof_count=len(source_memory_ids),
+                source_memory_ids=[str(s) for s in source_memory_ids],
+                event_date=now,
+                created_at=now,
+            ),
+        )
     return obs_id
 
 
 async def _get_observation_ids(conn, bank_id: str) -> list[str]:
-    rows = await conn.fetch(
-        "SELECT id FROM memory_units WHERE bank_id = $1 AND fact_type = 'observation'",
-        bank_id,
+    """Ids of the bank's observations, read from whichever store holds them."""
+    store = get_memories()
+    if store.writes_memory_rows_in_sql:
+        rows = await conn.fetch(
+            "SELECT id FROM memory_units WHERE bank_id = $1 AND fact_type = 'observation'",
+            bank_id,
+        )
+        return [str(r["id"]) for r in rows]
+    page = await store.scan_memories(
+        conn=conn, fq_table=fq_table, bank_id=bank_id, fact_types=["observation"], limit=1_000_000
     )
-    return [str(r["id"]) for r in rows]
+    return [m.unit_id for m in page.memories]
 
 
-async def _get_consolidated_at(conn, memory_id: uuid.UUID):
-    return await conn.fetchval(
-        "SELECT consolidated_at FROM memory_units WHERE id = $1",
-        memory_id,
+async def _get_consolidated_at(conn, memory_id: uuid.UUID, bank_id: str | None = None):
+    """A memory's consolidated marker. ``bank_id`` is required for a bank-partitioned store."""
+    store = get_memories()
+    if store.writes_memory_rows_in_sql:
+        return await conn.fetchval(
+            "SELECT consolidated_at FROM memory_units WHERE id = $1",
+            memory_id,
+        )
+    found = (
+        await store.get_memories(conn=conn, fq_table=fq_table, bank_id=bank_id, unit_ids=[str(memory_id)])
+        if bank_id
+        else []
     )
+    return found[0].consolidated_at if found else None
+
+
+async def _get_memory(conn, bank_id: str, memory_id):
+    """One stored memory, read through the store — works for either backend."""
+    store = get_memories()
+    found = await store.get_memories(conn=conn, fq_table=fq_table, bank_id=bank_id, unit_ids=[str(memory_id)])
+    return found[0] if found else None
+
+
+async def _count_surviving(conn, bank_id: str, memory_ids: list) -> int:
+    """How many of these ids still exist, per the store that holds them."""
+    store = get_memories()
+    found = await store.get_memories(
+        conn=conn, fq_table=fq_table, bank_id=bank_id, unit_ids=[str(m) for m in memory_ids]
+    )
+    return len(found)
 
 
 async def _ensure_bank(memory: MemoryEngine, bank_id: str, request_context: RequestContext):
@@ -91,11 +177,11 @@ class TestDeleteMemoryUnitObservationCleanup:
 
         pool = await memory._get_pool()
         async with pool.acquire() as conn:
-            m1 = await _insert_memory(conn, bank_id, "Alice loves hiking.")
-            m2 = await _insert_memory(conn, bank_id, "Alice goes hiking every weekend.")
-            obs_id = await _insert_observation(conn, bank_id, "Alice enjoys hiking regularly.", [m1, m2])
+            m1 = await _insert_memory(memory, conn, bank_id, "Alice loves hiking.")
+            m2 = await _insert_memory(memory, conn, bank_id, "Alice goes hiking every weekend.")
+            obs_id = await _insert_observation(memory, conn, bank_id, "Alice enjoys hiking regularly.", [m1, m2])
 
-        await memory.delete_memory_unit(str(m1), request_context=request_context)
+        await memory.delete_memory_unit(str(m1), bank_id=bank_id, request_context=request_context)
 
         async with pool.acquire() as conn:
             obs_ids = await _get_observation_ids(conn, bank_id)
@@ -113,20 +199,20 @@ class TestDeleteMemoryUnitObservationCleanup:
 
         pool = await memory._get_pool()
         async with pool.acquire() as conn:
-            m1 = await _insert_memory(conn, bank_id, "Alice loves hiking.")
-            m2 = await _insert_memory(conn, bank_id, "Alice goes hiking every weekend.")
-            await _insert_observation(conn, bank_id, "Alice enjoys hiking regularly.", [m1, m2])
+            m1 = await _insert_memory(memory, conn, bank_id, "Alice loves hiking.")
+            m2 = await _insert_memory(memory, conn, bank_id, "Alice goes hiking every weekend.")
+            await _insert_observation(memory, conn, bank_id, "Alice enjoys hiking regularly.", [m1, m2])
 
             # Verify m2 starts with consolidated_at set
-            assert await _get_consolidated_at(conn, m2) is not None
+            assert await _get_consolidated_at(conn, m2, bank_id) is not None
 
         # Patch out consolidation so it doesn't re-set consolidated_at before we can check it
         with patch.object(memory, "submit_async_consolidation", new=AsyncMock()):
-            await memory.delete_memory_unit(str(m1), request_context=request_context)
+            await memory.delete_memory_unit(str(m1), bank_id=bank_id, request_context=request_context)
 
         async with pool.acquire() as conn:
             # m2 should have consolidated_at reset to NULL
-            consolidated_at = await _get_consolidated_at(conn, m2)
+            consolidated_at = await _get_consolidated_at(conn, m2, bank_id)
             assert consolidated_at is None, "Remaining source memory should be reset for re-consolidation"
 
         await memory.delete_bank(bank_id, request_context=request_context)
@@ -141,19 +227,19 @@ class TestDeleteMemoryUnitObservationCleanup:
 
         pool = await memory._get_pool()
         async with pool.acquire() as conn:
-            m1 = await _insert_memory(conn, bank_id, "Alice loves hiking.")
-            m2 = await _insert_memory(conn, bank_id, "Alice goes hiking every weekend.")
-            unrelated = await _insert_memory(conn, bank_id, "Bob likes cycling.")
-            obs_id = await _insert_observation(conn, bank_id, "Alice enjoys hiking regularly.", [m1, m2])
+            m1 = await _insert_memory(memory, conn, bank_id, "Alice loves hiking.")
+            m2 = await _insert_memory(memory, conn, bank_id, "Alice goes hiking every weekend.")
+            unrelated = await _insert_memory(memory, conn, bank_id, "Bob likes cycling.")
+            obs_id = await _insert_observation(memory, conn, bank_id, "Alice enjoys hiking regularly.", [m1, m2])
 
-        await memory.delete_memory_unit(str(unrelated), request_context=request_context)
+        await memory.delete_memory_unit(str(unrelated), bank_id=bank_id, request_context=request_context)
 
         async with pool.acquire() as conn:
             obs_ids = await _get_observation_ids(conn, bank_id)
             assert str(obs_id) in obs_ids, "Observation should remain untouched"
             # m1 and m2 should still be consolidated
-            assert await _get_consolidated_at(conn, m1) is not None
-            assert await _get_consolidated_at(conn, m2) is not None
+            assert await _get_consolidated_at(conn, m1, bank_id) is not None
+            assert await _get_consolidated_at(conn, m2, bank_id) is not None
 
         await memory.delete_bank(bank_id, request_context=request_context)
 
@@ -167,10 +253,10 @@ class TestDeleteMemoryUnitObservationCleanup:
 
         pool = await memory._get_pool()
         async with pool.acquire() as conn:
-            m1 = await _insert_memory(conn, bank_id, "Alice loves hiking.")
-            obs_id = await _insert_observation(conn, bank_id, "Alice enjoys hiking.", [m1])
+            m1 = await _insert_memory(memory, conn, bank_id, "Alice loves hiking.")
+            obs_id = await _insert_observation(memory, conn, bank_id, "Alice enjoys hiking.", [m1])
 
-        await memory.delete_memory_unit(str(m1), request_context=request_context)
+        await memory.delete_memory_unit(str(m1), bank_id=bank_id, request_context=request_context)
 
         async with pool.acquire() as conn:
             obs_ids = await _get_observation_ids(conn, bank_id)
@@ -188,15 +274,15 @@ class TestDeleteMemoryUnitObservationCleanup:
 
         pool = await memory._get_pool()
         async with pool.acquire() as conn:
-            m1 = await _insert_memory(conn, bank_id, "Alice loves hiking.")
-            obs_id = await _insert_observation(conn, bank_id, "Alice enjoys hiking.", [m1])
+            m1 = await _insert_memory(memory, conn, bank_id, "Alice loves hiking.")
+            obs_id = await _insert_observation(memory, conn, bank_id, "Alice enjoys hiking.", [m1])
 
         # Delete the observation directly (not the source memory)
-        await memory.delete_memory_unit(str(obs_id), request_context=request_context)
+        await memory.delete_memory_unit(str(obs_id), bank_id=bank_id, request_context=request_context)
 
         async with pool.acquire() as conn:
             # Source memory should still be consolidated (not reset)
-            assert await _get_consolidated_at(conn, m1) is not None
+            assert await _get_consolidated_at(conn, m1, bank_id) is not None
             obs_ids = await _get_observation_ids(conn, bank_id)
             assert str(obs_id) not in obs_ids
 
@@ -228,25 +314,16 @@ class TestDeleteDocumentObservationCleanup:
                 doc_id,
                 bank_id,
             )
-            m1 = uuid.uuid4()
-            m2 = uuid.uuid4()
-            for mem_id, text in [(m1, "Alice loves hiking."), (m2, "Alice goes hiking every weekend.")]:
-                await conn.execute(
-                    """
-                    INSERT INTO memory_units (id, bank_id, text, fact_type, event_date, document_id, created_at, updated_at, consolidated_at)
-                    VALUES ($1, $2, $3, 'experience', NOW(), $4, NOW(), NOW(), NOW())
-                    """,
-                    mem_id,
-                    bank_id,
-                    text,
-                    doc_id,
-                )
+            m1 = await _insert_memory(memory, conn, bank_id, "Alice loves hiking.", "experience", document_id=doc_id)
+            m2 = await _insert_memory(
+                memory, conn, bank_id, "Alice goes hiking every weekend.", "experience", document_id=doc_id
+            )
 
             # Standalone memory (not in document)
-            m3 = await _insert_memory(conn, bank_id, "Alice is an avid outdoor person.")
+            m3 = await _insert_memory(memory, conn, bank_id, "Alice is an avid outdoor person.")
 
             # Observation referencing both doc memories and the standalone memory
-            obs_id = await _insert_observation(conn, bank_id, "Alice enjoys outdoor activities.", [m1, m2, m3])
+            obs_id = await _insert_observation(memory, conn, bank_id, "Alice enjoys outdoor activities.", [m1, m2, m3])
 
         # Patch out consolidation so it doesn't re-set consolidated_at before we can check it
         with patch.object(memory, "submit_async_consolidation", new=AsyncMock()):
@@ -257,7 +334,7 @@ class TestDeleteDocumentObservationCleanup:
             assert str(obs_id) not in obs_ids, "Observation should have been deleted"
 
             # m3 (remaining source) should be reset for re-consolidation
-            consolidated_at = await _get_consolidated_at(conn, m3)
+            consolidated_at = await _get_consolidated_at(conn, m3, bank_id)
             assert consolidated_at is None, "Remaining source memory should be reset"
 
         await memory.delete_bank(bank_id, request_context=request_context)
@@ -306,22 +383,11 @@ class TestDocumentUpsertObservationCleanup:
                 doc_id,
                 bank_id,
             )
-            doc_mem_a = uuid.uuid4()
-            doc_mem_b = uuid.uuid4()
-            for mem_id, text in [(doc_mem_a, "Old fact A."), (doc_mem_b, "Old fact B.")]:
-                await conn.execute(
-                    """
-                    INSERT INTO memory_units (id, bank_id, text, fact_type, event_date, document_id,
-                                              created_at, updated_at, consolidated_at)
-                    VALUES ($1, $2, $3, 'experience', NOW(), $4, NOW(), NOW(), NOW())
-                    """,
-                    mem_id,
-                    bank_id,
-                    text,
-                    doc_id,
-                )
-            standalone_mem = await _insert_memory(conn, bank_id, "Standalone fact C.")
+            doc_mem_a = await _insert_memory(memory, conn, bank_id, "Old fact A.", "experience", document_id=doc_id)
+            doc_mem_b = await _insert_memory(memory, conn, bank_id, "Old fact B.", "experience", document_id=doc_id)
+            standalone_mem = await _insert_memory(memory, conn, bank_id, "Standalone fact C.")
             obs_id = await _insert_observation(
+                memory,
                 conn,
                 bank_id,
                 "Aggregated observation joining doc + standalone facts.",
@@ -360,15 +426,193 @@ class TestDocumentUpsertObservationCleanup:
             # The standalone memory survives (different document_id) and should
             # be reset for re-consolidation since one of its observations was
             # invalidated by the upsert.
-            consolidated_at = await _get_consolidated_at(conn, standalone_mem)
+            consolidated_at = await _get_consolidated_at(conn, standalone_mem, bank_id)
             assert consolidated_at is None, "Surviving co-source memory should be reset for re-consolidation"
 
             # The two doc-scoped memories are gone via FK cascade.
-            doc_mem_count = await conn.fetchval(
-                "SELECT COUNT(*) FROM memory_units WHERE id = ANY($1::uuid[])",
-                [doc_mem_a, doc_mem_b],
-            )
+            doc_mem_count = await _count_surviving(conn, bank_id, [doc_mem_a, doc_mem_b])
             assert doc_mem_count == 0
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+
+# ---------------------------------------------------------------------------
+# Tests: delta retain chunk delete (regression for orphan observations, #3294)
+# ---------------------------------------------------------------------------
+
+
+async def _seed_chunked_document(memory: MemoryEngine, conn, bank_id: str, chunk_texts: list[str]) -> tuple[str, list]:
+    """One document with ``len(chunk_texts)`` chunks, each owning one fact.
+
+    Returns the document id and, per chunk, the (chunk_id, fact_id) it owns.
+    """
+    doc_id = str(uuid.uuid4())
+    await conn.execute(
+        """
+        INSERT INTO documents (id, bank_id, original_text, content_hash, created_at, updated_at)
+        VALUES ($1, $2, $3, 'hash-old', NOW(), NOW())
+        """,
+        doc_id,
+        bank_id,
+        "\n\n".join(chunk_texts),
+    )
+    seeded = []
+    for idx, text in enumerate(chunk_texts):
+        chunk_id = f"{bank_id}_{doc_id}_{idx}"
+        await conn.execute(
+            """
+            INSERT INTO chunks (chunk_id, document_id, bank_id, chunk_index, chunk_text, content_hash)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            """,
+            chunk_id,
+            doc_id,
+            bank_id,
+            idx,
+            text,
+            f"chunk-hash-{idx}",
+        )
+        fact_id = await _insert_memory(memory, conn, bank_id, text, "experience", document_id=doc_id, chunk_id=chunk_id)
+        seeded.append((chunk_id, fact_id))
+    return doc_id, seeded
+
+
+class TestDeltaChunkDeleteObservationCleanup:
+    """Regression: delta retain drops facts by deleting their chunks, and that
+    cascade must invalidate the observations derived from them.
+
+    ``handle_document_tracking`` (full replace) sweeps observations before its
+    delete, but the delta path never calls it — it upserts the document row and
+    deletes the changed/removed chunks directly, cascading to memory_units. Every
+    delta re-ingest therefore used to leave the observations of the changed chunks
+    behind, valid and recallable, pointing at ids that no longer exist. Nothing
+    could reach them afterwards: consolidation batches are built from facts, so an
+    observation whose sources are all gone is never selected into a batch again.
+    """
+
+    @pytest.mark.asyncio
+    async def test_chunk_delete_removes_observations_from_outgoing_memories(
+        self, memory: MemoryEngine, request_context: RequestContext
+    ):
+        """The observation of a deleted chunk's fact goes with it; its surviving
+        co-source is requeued for re-consolidation."""
+        from hindsight_api.engine.retain.chunk_storage import delete_chunks_by_ids
+
+        bank_id = f"test-delta-obs-cleanup-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(memory, bank_id, request_context)
+        pool = await memory._get_pool()
+
+        async with pool.acquire() as conn:
+            _doc_id, seeded = await _seed_chunked_document(
+                memory, conn, bank_id, ["Alice works at Google.", "Bob works at Microsoft."]
+            )
+            (outgoing_chunk, outgoing_fact), (_kept_chunk, kept_fact) = seeded
+            standalone_fact = await _insert_memory(memory, conn, bank_id, "Carol works at Netflix.")
+            obs_id = await _insert_observation(
+                memory,
+                conn,
+                bank_id,
+                "The team is spread across Google, Microsoft and Netflix.",
+                [outgoing_fact, kept_fact, standalone_fact],
+            )
+
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                invalidated = await delete_chunks_by_ids(conn, [outgoing_chunk], bank_id, ops=memory._backend.ops)
+
+        assert invalidated == 1, "delete_chunks_by_ids should report the observation it invalidated"
+
+        async with pool.acquire() as conn:
+            assert str(obs_id) not in await _get_observation_ids(conn, bank_id), (
+                "Observation derived from the deleted chunk's fact should have been invalidated "
+                "(regression #3294: the delta path cascaded the fact away and left the orphan)"
+            )
+            assert await _count_surviving(conn, bank_id, [outgoing_fact]) == 0, "The chunk's fact is gone"
+            # Both surviving co-sources lost an observation, so both are due for re-consolidation.
+            for survivor in (kept_fact, standalone_fact):
+                assert await _get_consolidated_at(conn, survivor, bank_id) is None, (
+                    "Surviving co-source should be reset for re-consolidation"
+                )
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+    @pytest.mark.asyncio
+    async def test_chunk_delete_keeps_observations_of_unchanged_chunks(
+        self, memory: MemoryEngine, request_context: RequestContext
+    ):
+        """Precision: an observation sourced only from chunks that stay is untouched.
+
+        A sweep keyed on the document rather than on the deleted chunks would take
+        this one too — and needlessly requeue the whole document for consolidation
+        on every small edit, which is exactly the case delta retain exists for.
+        """
+        from hindsight_api.engine.retain.chunk_storage import delete_chunks_by_ids
+
+        bank_id = f"test-delta-obs-keep-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(memory, bank_id, request_context)
+        pool = await memory._get_pool()
+
+        async with pool.acquire() as conn:
+            _doc_id, seeded = await _seed_chunked_document(
+                memory, conn, bank_id, ["Alice works at Google.", "Bob works at Microsoft."]
+            )
+            (outgoing_chunk, _outgoing_fact), (_kept_chunk, kept_fact) = seeded
+            kept_obs = await _insert_observation(memory, conn, bank_id, "Bob is at Microsoft.", [kept_fact])
+
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                invalidated = await delete_chunks_by_ids(conn, [outgoing_chunk], bank_id, ops=memory._backend.ops)
+
+        assert invalidated == 0, "No observation of the surviving chunk should have been touched"
+
+        async with pool.acquire() as conn:
+            assert str(kept_obs) in await _get_observation_ids(conn, bank_id), (
+                "Observation of an unchanged chunk must survive the delta delete"
+            )
+            assert await _get_consolidated_at(conn, kept_fact, bank_id) is not None, (
+                "An untouched fact must not be requeued for consolidation"
+            )
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+    @pytest.mark.asyncio
+    async def test_chunk_delete_sweeps_every_deleted_chunk(self, memory: MemoryEngine, request_context: RequestContext):
+        """Multiple chunks in one call: each one's observations are swept.
+
+        The reporter's bank lost the observations of a whole document at once
+        (25 fully orphaned from a single replace), so the sweep must cover the
+        entire ``chunks_to_delete`` list, not just the first entry.
+        """
+        from hindsight_api.engine.retain.chunk_storage import delete_chunks_by_ids
+
+        bank_id = f"test-delta-obs-multi-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(memory, bank_id, request_context)
+        pool = await memory._get_pool()
+
+        async with pool.acquire() as conn:
+            _doc_id, seeded = await _seed_chunked_document(
+                memory,
+                conn,
+                bank_id,
+                ["Alice works at Google.", "Bob works at Microsoft.", "Dan works at Apple."],
+            )
+            observations = [
+                await _insert_observation(memory, conn, bank_id, f"Observation of chunk {i}.", [fact])
+                for i, (_chunk, fact) in enumerate(seeded)
+            ]
+
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                invalidated = await delete_chunks_by_ids(
+                    conn, [chunk for chunk, _fact in seeded], bank_id, ops=memory._backend.ops
+                )
+
+        assert invalidated == 3
+
+        async with pool.acquire() as conn:
+            remaining = await _get_observation_ids(conn, bank_id)
+            assert [o for o in observations if str(o) in remaining] == [], (
+                "Every deleted chunk's observations should be swept, not just the first chunk's"
+            )
 
         await memory.delete_bank(bank_id, request_context=request_context)
 
@@ -389,9 +633,9 @@ class TestDeleteBankByTypeObservationCleanup:
 
         pool = await memory._get_pool()
         async with pool.acquire() as conn:
-            exp1 = await _insert_memory(conn, bank_id, "Alice went hiking last week.", "experience")
-            world1 = await _insert_memory(conn, bank_id, "Alice is a hiker.", "world")
-            obs_id = await _insert_observation(conn, bank_id, "Alice is a regular hiker.", [exp1, world1])
+            exp1 = await _insert_memory(memory, conn, bank_id, "Alice went hiking last week.", "experience")
+            world1 = await _insert_memory(memory, conn, bank_id, "Alice is a hiker.", "world")
+            obs_id = await _insert_observation(memory, conn, bank_id, "Alice is a regular hiker.", [exp1, world1])
 
         # Patch out consolidation so it doesn't re-set consolidated_at before we can check it
         with patch.object(memory, "submit_async_consolidation", new=AsyncMock()):
@@ -402,7 +646,7 @@ class TestDeleteBankByTypeObservationCleanup:
             assert str(obs_id) not in obs_ids, "Observation should have been deleted"
 
             # world1 (remaining source) should be reset for re-consolidation
-            consolidated_at = await _get_consolidated_at(conn, world1)
+            consolidated_at = await _get_consolidated_at(conn, world1, bank_id)
             assert consolidated_at is None, "World memory should be reset for re-consolidation"
 
         await memory.delete_bank(bank_id, request_context=request_context)
@@ -417,8 +661,8 @@ class TestDeleteBankByTypeObservationCleanup:
 
         pool = await memory._get_pool()
         async with pool.acquire() as conn:
-            world1 = await _insert_memory(conn, bank_id, "Alice is a hiker.", "world")
-            obs_id = await _insert_observation(conn, bank_id, "Alice is a regular hiker.", [world1])
+            world1 = await _insert_memory(memory, conn, bank_id, "Alice is a hiker.", "world")
+            obs_id = await _insert_observation(memory, conn, bank_id, "Alice is a regular hiker.", [world1])
 
         # Deleting 'experience' type should not affect observations sourced only from 'world'
         await memory.delete_bank(bank_id, fact_type="experience", request_context=request_context)
@@ -446,9 +690,9 @@ class TestClearObservationsForMemory:
 
         pool = await memory._get_pool()
         async with pool.acquire() as conn:
-            m1 = await _insert_memory(conn, bank_id, "Alice loves hiking.")
-            m2 = await _insert_memory(conn, bank_id, "Alice hikes every weekend.")
-            obs_id = await _insert_observation(conn, bank_id, "Alice is an avid hiker.", [m1, m2])
+            m1 = await _insert_memory(memory, conn, bank_id, "Alice loves hiking.")
+            m2 = await _insert_memory(memory, conn, bank_id, "Alice hikes every weekend.")
+            obs_id = await _insert_observation(memory, conn, bank_id, "Alice is an avid hiker.", [m1, m2])
 
         # Patch out consolidation so it doesn't re-set consolidated_at before we can check it
         with patch.object(memory, "submit_async_consolidation", new=AsyncMock()):
@@ -461,8 +705,8 @@ class TestClearObservationsForMemory:
             assert str(obs_id) not in obs_ids, "Observation should be deleted"
 
             # Both m1 (target) and m2 (remaining source) should be reset
-            assert await _get_consolidated_at(conn, m1) is None, "Target memory should be reset"
-            assert await _get_consolidated_at(conn, m2) is None, "Remaining source should be reset"
+            assert await _get_consolidated_at(conn, m1, bank_id) is None, "Target memory should be reset"
+            assert await _get_consolidated_at(conn, m2, bank_id) is None, "Remaining source should be reset"
 
         await memory.delete_bank(bank_id, request_context=request_context)
 
@@ -474,7 +718,7 @@ class TestClearObservationsForMemory:
 
         pool = await memory._get_pool()
         async with pool.acquire() as conn:
-            m1 = await _insert_memory(conn, bank_id, "Alice loves hiking.")
+            m1 = await _insert_memory(memory, conn, bank_id, "Alice loves hiking.")
 
         result = await memory.clear_observations_for_memory(bank_id, str(m1), request_context=request_context)
 
@@ -482,7 +726,7 @@ class TestClearObservationsForMemory:
 
         async with pool.acquire() as conn:
             # Memory should still be consolidated (no observations were cleared)
-            assert await _get_consolidated_at(conn, m1) is not None
+            assert await _get_consolidated_at(conn, m1, bank_id) is not None
 
         await memory.delete_bank(bank_id, request_context=request_context)
 
@@ -496,12 +740,12 @@ class TestClearObservationsForMemory:
 
         pool = await memory._get_pool()
         async with pool.acquire() as conn:
-            m1 = await _insert_memory(conn, bank_id, "Alice loves hiking.")
-            m2 = await _insert_memory(conn, bank_id, "Alice hikes every weekend.")
-            m3 = await _insert_memory(conn, bank_id, "Alice climbed a mountain.")
+            m1 = await _insert_memory(memory, conn, bank_id, "Alice loves hiking.")
+            m2 = await _insert_memory(memory, conn, bank_id, "Alice hikes every weekend.")
+            m3 = await _insert_memory(memory, conn, bank_id, "Alice climbed a mountain.")
 
-            obs1_id = await _insert_observation(conn, bank_id, "Alice is an avid hiker.", [m1, m2])
-            obs2_id = await _insert_observation(conn, bank_id, "Alice is a mountaineer.", [m3])
+            obs1_id = await _insert_observation(memory, conn, bank_id, "Alice is an avid hiker.", [m1, m2])
+            obs2_id = await _insert_observation(memory, conn, bank_id, "Alice is a mountaineer.", [m3])
 
         result = await memory.clear_observations_for_memory(bank_id, str(m1), request_context=request_context)
 
@@ -513,7 +757,7 @@ class TestClearObservationsForMemory:
             assert str(obs2_id) in obs_ids, "obs2 (does not reference m1) should remain"
 
             # m3 should still be consolidated
-            assert await _get_consolidated_at(conn, m3) is not None
+            assert await _get_consolidated_at(conn, m3, bank_id) is not None
 
         await memory.delete_bank(bank_id, request_context=request_context)
 
@@ -527,11 +771,11 @@ class TestClearObservationsForMemory:
 
         pool = await memory._get_pool()
         async with pool.acquire() as conn:
-            m1 = await _insert_memory(conn, bank_id, "Alice loves hiking.")
-            m2 = await _insert_memory(conn, bank_id, "Alice hikes every weekend.")
+            m1 = await _insert_memory(memory, conn, bank_id, "Alice loves hiking.")
+            m2 = await _insert_memory(memory, conn, bank_id, "Alice hikes every weekend.")
 
-            obs1_id = await _insert_observation(conn, bank_id, "Alice hikes often.", [m1])
-            obs2_id = await _insert_observation(conn, bank_id, "Alice is outdoorsy.", [m1, m2])
+            obs1_id = await _insert_observation(memory, conn, bank_id, "Alice hikes often.", [m1])
+            obs2_id = await _insert_observation(memory, conn, bank_id, "Alice is outdoorsy.", [m1, m2])
 
         # Patch out consolidation so it doesn't re-set consolidated_at before we can check it
         with patch.object(memory, "submit_async_consolidation", new=AsyncMock()):
@@ -545,8 +789,8 @@ class TestClearObservationsForMemory:
             assert str(obs2_id) not in obs_ids
 
             # m1 and m2 should both be reset
-            assert await _get_consolidated_at(conn, m1) is None
-            assert await _get_consolidated_at(conn, m2) is None
+            assert await _get_consolidated_at(conn, m1, bank_id) is None
+            assert await _get_consolidated_at(conn, m2, bank_id) is None
 
         await memory.delete_bank(bank_id, request_context=request_context)
 
@@ -557,9 +801,13 @@ class TestClearObservationsForMemory:
 
 
 async def _insert_document_with_memories(
-    conn, bank_id: str, doc_id: str, memories: list[tuple[str, str]]
+    memory: MemoryEngine, conn, bank_id: str, doc_id: str, memories: list[tuple[str, str]]
 ) -> list[uuid.UUID]:
-    """Insert a document and attach memory units to it. Returns list of memory UUIDs."""
+    """Insert a document and attach memory units to it. Returns list of memory UUIDs.
+
+    The documents row stays SQL (it is Postgres bookkeeping for every store); the memories
+    go through the store, attached via document_id at insert time.
+    """
     await conn.execute(
         """
         INSERT INTO documents (id, bank_id, original_text, content_hash, created_at, updated_at)
@@ -570,19 +818,7 @@ async def _insert_document_with_memories(
     )
     mem_ids = []
     for text, fact_type in memories:
-        mem_id = uuid.uuid4()
-        await conn.execute(
-            """
-            INSERT INTO memory_units (id, bank_id, text, fact_type, event_date, document_id, created_at, updated_at, consolidated_at)
-            VALUES ($1, $2, $3, $4, NOW(), $5, NOW(), NOW(), NOW())
-            """,
-            mem_id,
-            bank_id,
-            text,
-            fact_type,
-            doc_id,
-        )
-        mem_ids.append(mem_id)
+        mem_ids.append(await _insert_memory(memory, conn, bank_id, text, fact_type, document_id=doc_id))
     return mem_ids
 
 
@@ -596,7 +832,7 @@ class TestUpdateDocumentTagsObservationCleanup:
         pool = await memory._get_pool()
         async with pool.acquire() as conn:
             doc_id = f"doc-{uuid.uuid4().hex[:8]}"
-            await _insert_document_with_memories(conn, bank_id, doc_id, [("Alice loves hiking.", "experience")])
+            await _insert_document_with_memories(memory, conn, bank_id, doc_id, [("Alice loves hiking.", "experience")])
 
         result = await memory.update_document(doc_id, bank_id, tags=["new-tag"], request_context=request_context)
 
@@ -628,7 +864,7 @@ class TestUpdateDocumentTagsObservationCleanup:
         async with pool.acquire() as conn:
             doc_id = f"doc-{uuid.uuid4().hex[:8]}"
             mem_ids = await _insert_document_with_memories(
-                conn, bank_id, doc_id, [("Alice loves hiking.", "experience"), ("Alice hikes weekly.", "world")]
+                memory, conn, bank_id, doc_id, [("Alice loves hiking.", "experience"), ("Alice hikes weekly.", "world")]
             )
 
         with patch.object(memory, "submit_async_consolidation", new=AsyncMock()):
@@ -636,8 +872,8 @@ class TestUpdateDocumentTagsObservationCleanup:
 
         async with pool.acquire() as conn:
             for mem_id in mem_ids:
-                tags = await conn.fetchval("SELECT tags FROM memory_units WHERE id = $1", mem_id)
-                assert list(tags) == ["new-tag"], f"Memory unit {mem_id} should have updated tags"
+                stored_mem = await _get_memory(conn, bank_id, mem_id)
+                assert list(stored_mem.tags) == ["new-tag"], f"Memory unit {mem_id} should have updated tags"
 
         await memory.delete_bank(bank_id, request_context=request_context)
 
@@ -651,9 +887,9 @@ class TestUpdateDocumentTagsObservationCleanup:
         async with pool.acquire() as conn:
             doc_id = f"doc-{uuid.uuid4().hex[:8]}"
             mem_ids = await _insert_document_with_memories(
-                conn, bank_id, doc_id, [("Alice loves hiking.", "experience")]
+                memory, conn, bank_id, doc_id, [("Alice loves hiking.", "experience")]
             )
-            obs_id = await _insert_observation(conn, bank_id, "Alice is a hiker.", mem_ids)
+            obs_id = await _insert_observation(memory, conn, bank_id, "Alice is a hiker.", mem_ids)
 
         with patch.object(memory, "submit_async_consolidation", new=AsyncMock()):
             await memory.update_document(doc_id, bank_id, tags=["new-tag"], request_context=request_context)
@@ -676,18 +912,18 @@ class TestUpdateDocumentTagsObservationCleanup:
         async with pool.acquire() as conn:
             doc_id = f"doc-{uuid.uuid4().hex[:8]}"
             mem_ids = await _insert_document_with_memories(
-                conn, bank_id, doc_id, [("Alice loves hiking.", "experience")]
+                memory, conn, bank_id, doc_id, [("Alice loves hiking.", "experience")]
             )
-            obs_id = await _insert_observation(conn, bank_id, "Alice is a hiker.", mem_ids)
+            await _insert_observation(memory, conn, bank_id, "Alice is a hiker.", mem_ids)
 
             # Verify memory starts consolidated
-            assert await _get_consolidated_at(conn, mem_ids[0]) is not None
+            assert await _get_consolidated_at(conn, mem_ids[0], bank_id) is not None
 
         with patch.object(memory, "submit_async_consolidation", new=AsyncMock()):
             await memory.update_document(doc_id, bank_id, tags=["new-tag"], request_context=request_context)
 
         async with pool.acquire() as conn:
-            consolidated_at = await _get_consolidated_at(conn, mem_ids[0])
+            consolidated_at = await _get_consolidated_at(conn, mem_ids[0], bank_id)
             assert consolidated_at is None, "Memory unit should be reset for re-consolidation"
 
         await memory.delete_bank(bank_id, request_context=request_context)
@@ -704,9 +940,9 @@ class TestUpdateDocumentTagsObservationCleanup:
         async with pool.acquire() as conn:
             doc_id = f"doc-{uuid.uuid4().hex[:8]}"
             mem_ids = await _insert_document_with_memories(
-                conn, bank_id, doc_id, [("Alice loves hiking.", "experience")]
+                memory, conn, bank_id, doc_id, [("Alice loves hiking.", "experience")]
             )
-            await _insert_observation(conn, bank_id, "Alice is a hiker.", mem_ids)
+            await _insert_observation(memory, conn, bank_id, "Alice is a hiker.", mem_ids)
 
         with patch.object(memory, "submit_async_consolidation", new=AsyncMock()) as mock_consolidate:
             await memory.update_document(doc_id, bank_id, tags=["new-tag"], request_context=request_context)
@@ -725,7 +961,7 @@ class TestUpdateDocumentTagsObservationCleanup:
         pool = await memory._get_pool()
         async with pool.acquire() as conn:
             doc_id = f"doc-{uuid.uuid4().hex[:8]}"
-            await _insert_document_with_memories(conn, bank_id, doc_id, [("Alice loves hiking.", "experience")])
+            await _insert_document_with_memories(memory, conn, bank_id, doc_id, [("Alice loves hiking.", "experience")])
             # No observations inserted
 
         with patch.object(memory, "submit_async_consolidation", new=AsyncMock()) as mock_consolidate:
@@ -746,16 +982,16 @@ class TestUpdateDocumentTagsObservationCleanup:
         async with pool.acquire() as conn:
             doc_id = f"doc-{uuid.uuid4().hex[:8]}"
             doc_mem_ids = await _insert_document_with_memories(
-                conn, bank_id, doc_id, [("Alice loves hiking.", "experience")]
+                memory, conn, bank_id, doc_id, [("Alice loves hiking.", "experience")]
             )
             # Unrelated memory from another document — co-sourced in the same observation
-            other_mem = await _insert_memory(conn, bank_id, "Alice also rock-climbs.")
+            other_mem = await _insert_memory(memory, conn, bank_id, "Alice also rock-climbs.")
             obs_id = await _insert_observation(
-                conn, bank_id, "Alice loves outdoor activities.", doc_mem_ids + [other_mem]
+                memory, conn, bank_id, "Alice loves outdoor activities.", doc_mem_ids + [other_mem]
             )
 
             # Verify other_mem starts consolidated
-            assert await _get_consolidated_at(conn, other_mem) is not None
+            assert await _get_consolidated_at(conn, other_mem, bank_id) is not None
 
         with patch.object(memory, "submit_async_consolidation", new=AsyncMock()):
             await memory.update_document(doc_id, bank_id, tags=["new-tag"], request_context=request_context)
@@ -765,7 +1001,7 @@ class TestUpdateDocumentTagsObservationCleanup:
             assert str(obs_id) not in obs_ids, "Observation should have been invalidated"
 
             # other_mem (co-source from another document) must also be reset
-            consolidated_at = await _get_consolidated_at(conn, other_mem)
+            consolidated_at = await _get_consolidated_at(conn, other_mem, bank_id)
             assert consolidated_at is None, "Co-source memory from other document should be reset"
 
         await memory.delete_bank(bank_id, request_context=request_context)
@@ -781,12 +1017,10 @@ class TestUpdateDocumentTagsObservationCleanup:
         pool = await memory._get_pool()
         async with pool.acquire() as conn:
             doc_id = f"doc-{uuid.uuid4().hex[:8]}"
-            mem_ids = await _insert_document_with_memories(
-                conn, bank_id, doc_id, [("Alice loves hiking.", "experience")]
-            )
+            await _insert_document_with_memories(memory, conn, bank_id, doc_id, [("Alice loves hiking.", "experience")])
             # Unrelated memory not in the document
-            unrelated = await _insert_memory(conn, bank_id, "Bob likes cycling.")
-            unrelated_obs_id = await _insert_observation(conn, bank_id, "Bob is a cyclist.", [unrelated])
+            unrelated = await _insert_memory(memory, conn, bank_id, "Bob likes cycling.")
+            unrelated_obs_id = await _insert_observation(memory, conn, bank_id, "Bob is a cyclist.", [unrelated])
 
         with patch.object(memory, "submit_async_consolidation", new=AsyncMock()):
             await memory.update_document(doc_id, bank_id, tags=["new-tag"], request_context=request_context)
@@ -820,27 +1054,27 @@ class TestConsolidationSourceMemoryFiltering:
         bank_id = f"test-race-create-filter-{uuid.uuid4().hex[:8]}"
         await _ensure_bank(memory, bank_id, request_context)
 
-        pool = await memory._get_pool()
-        async with pool.acquire() as conn:
-            live = await _insert_memory(conn, bank_id, "Alice loves hiking.")
-            dead = uuid.uuid4()  # never existed — stands in for a concurrently deleted source
+        # The helper now self-acquires a short-lived connection (the embed runs off-connection),
+        # so we pass the backend, not a conn.
+        backend = await memory._get_backend()
+        async with acquire_with_retry(backend) as conn:
+            live = await _insert_memory(memory, conn, bank_id, "Alice loves hiking.")
+        dead = uuid.uuid4()  # never existed — stands in for a concurrently deleted source
 
-            result = await _create_observation_directly(
-                conn=conn,
-                memory_engine=memory,
-                bank_id=bank_id,
-                source_memory_ids=[live, dead],
-                observation_text="Alice enjoys hiking regularly.",
-            )
+        result = await _create_observation_directly(
+            pool=backend,
+            memory_engine=memory,
+            bank_id=bank_id,
+            source_memory_ids=[live, dead],
+            observation_text="Alice enjoys hiking regularly.",
+        )
 
-            assert result["action"] == "created"
-            stored = await conn.fetchval(
-                "SELECT source_memory_ids FROM memory_units WHERE id = $1",
-                uuid.UUID(result["observation_id"]),
-            )
-            stored_set = {str(s) for s in stored}
-            assert str(live) in stored_set
-            assert str(dead) not in stored_set, "Deleted source must not appear in stored observation"
+        assert result["action"] == "created"
+        async with acquire_with_retry(backend) as conn:
+            stored = (await _get_memory(conn, bank_id, result["observation_id"])).source_memory_ids
+        stored_set = {str(s) for s in stored}
+        assert str(live) in stored_set
+        assert str(dead) not in stored_set, "Deleted source must not appear in stored observation"
 
         await memory.delete_bank(bank_id, request_context=request_context)
 
@@ -853,21 +1087,21 @@ class TestConsolidationSourceMemoryFiltering:
         bank_id = f"test-race-create-skip-{uuid.uuid4().hex[:8]}"
         await _ensure_bank(memory, bank_id, request_context)
 
-        pool = await memory._get_pool()
-        async with pool.acquire() as conn:
-            result = await _create_observation_directly(
-                conn=conn,
-                memory_engine=memory,
-                bank_id=bank_id,
-                source_memory_ids=[uuid.uuid4(), uuid.uuid4()],
-                observation_text="All sources gone.",
-            )
+        backend = await memory._get_backend()
+        result = await _create_observation_directly(
+            pool=backend,
+            memory_engine=memory,
+            bank_id=bank_id,
+            source_memory_ids=[uuid.uuid4(), uuid.uuid4()],
+            observation_text="All sources gone.",
+        )
 
-            assert result["action"] == "skipped"
-            assert result["reason"] == "sources_deleted"
+        assert result["action"] == "skipped"
+        assert result["reason"] == "sources_deleted"
 
+        async with acquire_with_retry(backend) as conn:
             obs_ids = await _get_observation_ids(conn, bank_id)
-            assert obs_ids == [], "No observation row should exist"
+        assert obs_ids == [], "No observation row should exist"
 
         await memory.delete_bank(bank_id, request_context=request_context)
 
@@ -881,33 +1115,99 @@ class TestConsolidationSourceMemoryFiltering:
         bank_id = f"test-race-update-skip-{uuid.uuid4().hex[:8]}"
         await _ensure_bank(memory, bank_id, request_context)
 
-        pool = await memory._get_pool()
-        async with pool.acquire() as conn:
-            original_source = await _insert_memory(conn, bank_id, "Alice hikes.")
-            obs_id = await _insert_observation(conn, bank_id, "Alice is a hiker.", [original_source])
-            original_text = "Alice is a hiker."
+        backend = await memory._get_backend()
+        async with acquire_with_retry(backend) as conn:
+            original_source = await _insert_memory(memory, conn, bank_id, "Alice hikes.")
+            obs_id = await _insert_observation(memory, conn, bank_id, "Alice is a hiker.", [original_source])
+        original_text = "Alice is a hiker."
 
-            observation_model = MemoryFact(
-                id=str(obs_id),
-                text=original_text,
-                fact_type="observation",
-                source_fact_ids=[str(original_source)],
-                tags=[],
-            )
+        observation_model = MemoryFact(
+            id=str(obs_id),
+            text=original_text,
+            fact_type="observation",
+            source_fact_ids=[str(original_source)],
+            tags=[],
+        )
 
-            await _execute_update_action(
-                conn=conn,
+        result = await _execute_update_action(
+            pool=backend,
+            memory_engine=memory,
+            bank_id=bank_id,
+            source_memory_ids=[uuid.uuid4(), uuid.uuid4()],  # all dead
+            observation_id=str(obs_id),
+            new_text="This update must not land.",
+            observations=[observation_model],
+        )
+        assert result is None, "a skipped update returns None so the caller runs no follow-on dedup"
+
+        async with acquire_with_retry(backend) as conn:
+            row = await _get_memory(conn, bank_id, obs_id)
+        assert row.text == original_text, "Observation text must not change"
+        stored_sources = {str(s) for s in row.source_memory_ids}
+        assert stored_sources == {str(original_source)}, "Dead sources must not be appended"
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+    @pytest.mark.asyncio
+    # Asserts the in-transaction `FOR SHARE` liveness skip — a Postgres row-locking mechanism. The
+    # store-owned path re-checks liveness through the store instead, so there is no lock to observe.
+    @pytest.mark.memory_backend_incompatible
+    async def test_update_observation_skipped_when_source_deleted_after_preflight(
+        self, memory: MemoryEngine, request_context: RequestContext
+    ):
+        # The preflight sees the source live, but it is deleted while the embedder runs
+        # off-connection. The authoritative in-txn FOR SHARE liveness guard (not the preflight) must
+        # then skip the update, so a dead source is never written back into the observation.
+        from hindsight_api.engine.consolidation.consolidator import _execute_update_action
+        from hindsight_api.engine.response_models import MemoryFact
+
+        bank_id = f"test-race-update-inflight-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(memory, bank_id, request_context)
+
+        backend = await memory._get_backend()
+        async with acquire_with_retry(backend) as conn:
+            source = await _insert_memory(memory, conn, bank_id, "Alice hikes.")
+            obs_id = await _insert_observation(memory, conn, bank_id, "Alice is a hiker.", [source])
+        original_text = "Alice is a hiker."
+
+        observation_model = MemoryFact(
+            id=str(obs_id),
+            text=original_text,
+            fact_type="observation",
+            source_fact_ids=[str(source)],
+            tags=[],
+        )
+
+        deleted = {"done": False}
+
+        async def _embed_spy(_embeddings, _texts):
+            # Delete the (preflight-live) source DURING the off-connection embed, so only the in-txn
+            # FOR SHARE guard can catch it.
+            if not deleted["done"]:
+                deleted["done"] = True
+                async with acquire_with_retry(backend) as c:
+                    await c.execute("DELETE FROM memory_units WHERE id = $1", source)
+            return [[0.1, 0.2, 0.3]]
+
+        with patch(
+            "hindsight_api.engine.retain.embedding_utils.generate_embeddings_batch",
+            new=_embed_spy,
+        ):
+            result = await _execute_update_action(
+                pool=backend,
                 memory_engine=memory,
                 bank_id=bank_id,
-                source_memory_ids=[uuid.uuid4(), uuid.uuid4()],  # all dead
+                source_memory_ids=[source],
                 observation_id=str(obs_id),
                 new_text="This update must not land.",
                 observations=[observation_model],
             )
 
-            row = await conn.fetchrow("SELECT text, source_memory_ids FROM memory_units WHERE id = $1", obs_id)
-            assert row["text"] == original_text, "Observation text must not change"
-            stored_sources = {str(s) for s in row["source_memory_ids"]}
-            assert stored_sources == {str(original_source)}, "Dead sources must not be appended"
+        assert result is None, "the in-txn FOR SHARE liveness skip returns None (no follow-on dedup)"
+        async with acquire_with_retry(backend) as conn:
+            row = await _get_memory(conn, bank_id, obs_id)
+        assert row.text == original_text, "observation text unchanged after the skipped update"
+        stored_sources = {str(s) for s in row.source_memory_ids}
+        assert stored_sources == {str(source)}, "no dead source appended"
 
         await memory.delete_bank(bank_id, request_context=request_context)

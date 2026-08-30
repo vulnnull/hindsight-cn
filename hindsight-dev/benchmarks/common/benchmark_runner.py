@@ -18,6 +18,7 @@ The framework supports two answer generation patterns:
 """
 
 import asyncio
+import io
 import json
 import logging
 import os
@@ -216,17 +217,9 @@ class LLMAnswerEvaluator:
         Uses HINDSIGHT_API_JUDGE_LLM_* env vars with fallback to HINDSIGHT_API_LLM_* for
         benchmark-specific LLM configuration (separate from the API config system).
         """
-        import os
+        from .llm_role_config import JUDGE_ROLE, build_role_llm_config
 
-        from hindsight_api.engine.llm_wrapper import LLMConfig
-
-        self.llm_config = LLMConfig(
-            provider=os.getenv("HINDSIGHT_API_JUDGE_LLM_PROVIDER", os.getenv("HINDSIGHT_API_LLM_PROVIDER", "openai")),
-            api_key=os.getenv("HINDSIGHT_API_JUDGE_LLM_API_KEY", os.getenv("HINDSIGHT_API_LLM_API_KEY", "")),
-            base_url=os.getenv("HINDSIGHT_API_JUDGE_LLM_BASE_URL", os.getenv("HINDSIGHT_API_LLM_BASE_URL", "")),
-            model=os.getenv("HINDSIGHT_API_JUDGE_LLM_MODEL", os.getenv("HINDSIGHT_API_LLM_MODEL", "gpt-4o-mini")),
-            reasoning_effort="high",
-        )
+        self.llm_config = build_role_llm_config(JUDGE_ROLE)
         self.client = self.llm_config._client
         self.model = self.llm_config.model
 
@@ -393,6 +386,9 @@ class BenchmarkRunner:
         self.answer_generator = answer_generator
         self.answer_evaluator = answer_evaluator
         self.template_path: Optional[str] = None
+        # When set, ingestion replays this exported bank archive instead of
+        # running fact extraction (see import_bank_archive).
+        self.bank_archive_path: Optional[str] = None
         self.memory = memory or MemoryEngine(
             db_url=os.getenv("HINDSIGHT_API_DATABASE_URL", "pg0"),
             memory_llm_provider=os.getenv("HINDSIGHT_API_LLM_PROVIDER", "groq"),
@@ -484,6 +480,52 @@ class BenchmarkRunner:
                 request_context=request_context,
             )
 
+    async def import_bank_archive(self, agent_id: str) -> int:
+        """Replay an exported archive into ``agent_id`` instead of extracting facts.
+
+        The archive already carries extracted facts, entity names, causal edges
+        and chunks, so this runs no LLM extraction at all. The one model cost is
+        re-embedding, which is unavoidable: embeddings are deliberately not
+        carried across so the target re-embeds with its own model.
+
+        Accepts either export shape. A whole-bank archive
+        (``hindsight-admin export-bank``) goes through ``import_bank``; a
+        document archive (the ``/document-transfer`` endpoint) through
+        ``import_documents``. Both are called directly rather than via the async
+        import endpoint so the benchmark needs no file storage or worker — it
+        wants the writes done before it starts asking questions.
+        """
+        import zipfile
+        from pathlib import Path
+
+        from hindsight_api.engine.transfer.importer import import_bank, import_documents
+
+        archive_bytes = Path(self.bank_archive_path).read_bytes()
+        with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+            is_bank_archive = "banks.json" in archive.namelist()
+
+        memory = self.memory
+        config = await memory._config_resolver.resolve_full_config(agent_id, RequestContext())
+        backend = await memory._get_backend()
+        common = dict(
+            backend=backend,
+            embeddings_model=memory.embeddings,
+            entity_resolver=memory.entity_resolver,
+            config=config,
+            format_date_fn=memory._format_readable_date,
+            archive_bytes=archive_bytes,
+        )
+
+        if is_bank_archive:
+            # import_bank restores a complete bank and refuses to merge into an
+            # existing one, so clear the target first (the caller already does
+            # this for the normal path via delete_bank).
+            await memory.delete_bank(agent_id, request_context=RequestContext())
+            result = await import_bank(**common, target_bank_id=agent_id)
+        else:
+            result = await import_documents(**common, bank_id=agent_id, on_conflict="replace")
+        return result.documents_imported
+
     async def ingest_conversation(
         self, item: Dict[str, Any], agent_id: str, wait_for_consolidation: bool = False
     ) -> int:
@@ -518,8 +560,13 @@ class BenchmarkRunner:
         """
         Get the count of memories pending consolidation.
 
+        Mirrors the consolidator's own candidate predicate (and the API's
+        pending_consolidation): memories stamped consolidation_failed_at are never
+        retried, so counting them here would keep _wait_for_consolidation spinning
+        until its timeout.
+
         Returns:
-            Number of memories not yet processed by the consolidation job
+            Number of memories still queued for the consolidation job
         """
         pool = await self.memory._get_pool()
         from hindsight_api.engine.memory_engine import fq_table
@@ -529,7 +576,10 @@ class BenchmarkRunner:
                 f"""
                 SELECT COUNT(*) as count
                 FROM {fq_table("memory_units")}
-                WHERE bank_id = $1 AND consolidated_at IS NULL AND fact_type IN ('experience', 'world')
+                WHERE bank_id = $1
+                  AND consolidated_at IS NULL
+                  AND consolidation_failed_at IS NULL
+                  AND fact_type IN ('experience', 'world')
                 """,
                 bank_id,
             )
@@ -855,28 +905,6 @@ class BenchmarkRunner:
             "detailed_results": judged_results,
         }
 
-    async def _agent_has_data(self, agent_id: str) -> bool:
-        """
-        Check if an agent has any indexed memory units.
-
-        Args:
-            agent_id: Agent ID to check
-
-        Returns:
-            True if agent has at least one memory unit, False otherwise
-        """
-        try:
-            # Use direct database access for local memory
-            pool = await self.memory._get_pool()
-            async with pool.acquire() as conn:
-                result = await conn.fetchrow(
-                    "SELECT COUNT(*) as count FROM memory_units WHERE bank_id = $1 LIMIT 1", agent_id
-                )
-                return result["count"] > 0
-        except Exception as e:
-            console.print(f"  [red]Warning: Error checking agent data: {e}[/red]")
-            return False
-
     async def process_single_item(
         self,
         item: Dict,
@@ -922,11 +950,19 @@ class BenchmarkRunner:
                 await self.apply_template(agent_id, self.template_path)
                 console.print("      [green]✓[/green] Template applied")
 
-            # Ingest conversation
             step += 1
-            console.print(f"  [{step}] Ingesting conversation (batch mode)...")
-            num_sessions = await self.ingest_conversation(item, agent_id, wait_for_consolidation=False)
-            console.print(f"      [green]✓[/green] Ingested {num_sessions} sessions")
+            if self.bank_archive_path:
+                # Replay a previously exported bank instead of extracting facts
+                # again: the archive already holds them, so this re-embeds and
+                # re-resolves entities without a single LLM extraction call.
+                console.print(f"  [{step}] Importing bank archive (no LLM extraction)...")
+                num_sessions = await self.import_bank_archive(agent_id)
+                console.print(f"      [green]✓[/green] Imported {num_sessions} documents")
+            else:
+                # Ingest conversation
+                console.print(f"  [{step}] Ingesting conversation (batch mode)...")
+                num_sessions = await self.ingest_conversation(item, agent_id, wait_for_consolidation=False)
+                console.print(f"      [green]✓[/green] Ingested {num_sessions} sessions")
         else:
             num_sessions = -1
 
@@ -981,6 +1017,7 @@ class BenchmarkRunner:
         merge_with_existing: bool = False,  # Whether to merge with existing results
         wait_consolidation: bool = False,  # Wait for consolidation to complete before evaluating QA
         template_path: Optional[str] = None,  # Path to a bank template manifest to apply before ingestion
+        bank_archive: Optional[str] = None,  # Exported bank/document ZIP to replay instead of extracting facts
     ) -> Dict[str, Any]:
         """
         Run the full benchmark evaluation.
@@ -1030,6 +1067,14 @@ class BenchmarkRunner:
         if template_path:
             self.template_path = template_path
             console.print(f"    Bank template: {template_path}")
+        if bank_archive:
+            self.bank_archive_path = bank_archive
+            console.print(f"    Bank archive: {bank_archive} (replaying facts, no extraction)")
+        from hindsight_api.engine.memories import get_memories
+
+        # Named in the header because a benchmark run is only comparable against
+        # another run of the same store.
+        console.print(f"    Memories store: {get_memories().name}")
         console.print("    [green]✓[/green] Memory system initialized")
 
         # Start a background worker poller when we need to wait for consolidation.

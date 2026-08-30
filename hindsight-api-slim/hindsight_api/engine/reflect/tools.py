@@ -23,6 +23,35 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+#: Retrieval plumbing that the reflect agent never reads, dropped from tool
+#: results before they reach the model.
+#:
+#: These are scoring and provenance internals, not evidence: the agent cites by
+#: ``id``, ``based_on`` persists only id/text/type/context, and the expand tool
+#: takes ``memory_ids`` and resolves chunks server-side -- so nothing downstream
+#: needs them, while on real banks they measure several times the size of the
+#: observation text they accompany.
+#:
+#: Identity, text, dates, tags and ``source_fact_ids`` are deliberately kept.
+#: So is ``entities``: it carries canonical entity *names* (not ids), which are
+#: semantically useful retrieval handles -- the canonical name can differ from
+#: the surface text ("Bob" in the text vs canonical "Robert Smith"). Reflect's
+#: recalls don't populate it today (``include_entities`` defaults to False), but
+#: trimming it would bake in dropping the names if that ever flips on.
+_UNREAD_RESULT_FIELDS = ("scores", "metadata", "chunk_id", "document_id")
+
+
+def _drop_unread_fields(d: dict[str, Any]) -> dict[str, Any]:
+    """Strip retrieval plumbing from one serialized tool result.
+
+    Mutates and returns ``d``, which is always a fresh ``model_dump()`` by the
+    time it gets here -- never a caller's dict.
+    """
+    for k in _UNREAD_RESULT_FIELDS:
+        d.pop(k, None)
+    return d
+
+
 def _prune_nulls(d: dict[str, Any]) -> dict[str, Any]:
     """Drop keys whose value is None or an empty collection (``""``, ``[]``, ``{}``).
 
@@ -67,6 +96,7 @@ async def tool_search_mental_models(
     tags_match: str = "any",
     tag_groups: "list | None" = None,
     exclude_ids: list[str] | None = None,
+    last_memory_write_at: datetime | None = None,
 ) -> dict[str, Any]:
     """
     Search user-curated mental models by semantic similarity.
@@ -81,13 +111,15 @@ async def tool_search_mental_models(
         query_embedding: Pre-computed embedding for semantic search
         max_results: Maximum number of mental models to return
         tags: Optional tags to filter mental models
-        tags_match: How to match tags - "any" (OR), "all" (AND)
+        tags_match: How to match tags - "any", "all", "any_strict", "all_strict", or "exact"
         exclude_ids: Optional list of mental model IDs to exclude (e.g., when refreshing a mental model)
+        last_memory_write_at: The bank's newest memory write, resolved once per reflect. Skips the
+            per-model staleness query for any model refreshed at or after it.
 
     Returns:
         Dict with matching mental models including content and freshness info
     """
-    from ..memory_engine import fq_table
+    from ..memory_engine import _mental_model_stale_scope_from_row, fq_table
     from ..search.tags import build_tag_groups_where_clause, build_tags_where_clause
 
     # Build filters dynamically
@@ -95,8 +127,10 @@ async def tool_search_mental_models(
     params: list[Any] = [bank_id, str(query_embedding), max_results]
     next_param = 4
 
-    # Use the centralized tag filtering logic
-    if tags:
+    # Exact matching treats absent or empty tags as the global scope. Do not
+    # skip the filter, or mental models would see every scope while the other
+    # reflect retrieval tools correctly see only untagged data.
+    if tags or tags_match == "exact":
         tag_clause, tag_params, next_param = build_tags_where_clause(tags, param_offset=next_param, match=tags_match)
         filters += f" {tag_clause}"
         params.extend(tag_params)
@@ -116,7 +150,7 @@ async def tool_search_mental_models(
         f"""
         SELECT
             id, name, content,
-            tags, created_at, last_refreshed_at, trigger,
+            tags, created_at, last_refreshed_at, last_memory_seen_at, trigger,
             1 - (embedding <=> $2::vector) as relevance
         FROM {fq_table("mental_models")}
         WHERE bank_id = $1 AND embedding IS NOT NULL {filters}
@@ -126,6 +160,19 @@ async def tool_search_mental_models(
         *params,
     )
 
+    # Per-MM staleness: new in-scope memories since last refresh (includes pending).
+    # Every model gets the exact, scoped answer — the agent trusts a model without a
+    # verifying recall() only on `is_stale is False`, so guessing conservatively here
+    # would buy LLM turns to save a query. One round-trip for the whole result set:
+    # the models the bank-wide watermark already proves current are answered without
+    # a query at all, the rest are asked together.
+    staleness = await memory_engine.compute_mental_models_are_stale(
+        conn,
+        bank_id,
+        {str(row["id"]): _mental_model_stale_scope_from_row(row, key=str(row["id"])) for row in rows},
+        watermark=last_memory_write_at,
+    )
+
     mental_models = []
 
     for row in rows:
@@ -133,8 +180,7 @@ async def tool_search_mental_models(
         if last_refreshed_at and last_refreshed_at.tzinfo is None:
             last_refreshed_at = last_refreshed_at.replace(tzinfo=timezone.utc)
 
-        # Per-MM staleness: new in-scope memories since last refresh (includes pending).
-        is_stale = await memory_engine.compute_mental_model_is_stale(conn, bank_id, row)
+        is_stale = staleness[str(row["id"])]
         staleness_reason = "new in-scope memories ingested since last refresh" if is_stale else None
 
         mental_models.append(
@@ -185,7 +231,7 @@ async def tool_search_observations(
         request_context: Request context for authentication
         max_tokens: Maximum tokens for results (default 5000)
         tags: Optional tags to filter observations
-        tags_match: How to match tags - "any" (OR), "all" (AND)
+        tags_match: How to match tags - "any", "all", "any_strict", "all_strict", or "exact"
         last_consolidated_at: When consolidation last ran (for staleness check)
         pending_consolidation: Number of memories waiting to be consolidated
         source_facts_max_tokens: Token budget for source facts (-1 = disabled, 0+ = enabled with limit)
@@ -214,6 +260,11 @@ async def tool_search_observations(
         tags_match=tags_match,
         tag_groups=tag_groups,
         include_source_facts=include_source_facts,
+        # Canonical entity names are semantic signal the surface text may lack
+        # ("Bob" in the text vs canonical "Robert Smith"): they populate each
+        # result's `entities` field, giving the agent resolved names to cite
+        # and to pivot follow-up queries on.
+        include_entities=True,
         created_after=created_after,
         created_before=created_before,
         _connection_budget=1,
@@ -232,8 +283,10 @@ async def tool_search_observations(
     return {
         "query": query,
         "count": len(result.results),
-        "observations": [_prune_nulls(m.model_dump()) for m in result.results],
-        "source_facts": {k: _prune_nulls(v.model_dump()) for k, v in (result.source_facts or {}).items()},
+        "observations": [_drop_unread_fields(_prune_nulls(m.model_dump())) for m in result.results],
+        "source_facts": {
+            k: _drop_unread_fields(_prune_nulls(v.model_dump())) for k, v in (result.source_facts or {}).items()
+        },
         "is_stale": is_stale,
         "freshness": freshness,
     }
@@ -268,7 +321,7 @@ async def tool_recall(
         request_context: Request context for authentication
         max_tokens: Maximum tokens for results (default 2048)
         tags: Filter by tags (includes untagged memories)
-        tags_match: How to match tags - "any" (OR), "all" (AND), or "exact"
+        tags_match: How to match tags - "any", "all", "any_strict", "all_strict", or "exact"
         connection_budget: Max DB connections for this recall (default 1 for internal ops)
         max_chunk_tokens: Maximum tokens for raw source chunk text (default 1000)
         fact_types: Optional filter for fact types to retrieve. Defaults to ["experience", "world"].
@@ -292,6 +345,9 @@ async def tool_recall(
         tag_groups=tag_groups,
         created_after=created_after,
         created_before=created_before,
+        # See tool_search_observations: resolved entity names on each result
+        # are worth the one extra lookup query.
+        include_entities=True,
         _connection_budget=connection_budget,
         _quiet=True,  # Suppress logging for internal operations
         include_chunks=include_chunks,
@@ -300,7 +356,11 @@ async def tool_recall(
 
     return {
         "query": query,
-        "memories": [_prune_nulls(m.model_dump()) for m in result.results],
+        "memories": [_drop_unread_fields(_prune_nulls(m.model_dump())) for m in result.results],
+        # ``chunks`` is deliberately not trimmed: ChunkInfo carries only
+        # chunk_text / chunk_index / truncated, so it holds none of the fields
+        # above and the call would be a no-op. Pinned by
+        # test_chunk_info_carries_no_unread_fields.
         "chunks": {k: _prune_nulls(v.model_dump()) for k, v in (result.chunks or {}).items()},
     }
 
@@ -343,16 +403,37 @@ async def tool_expand(
 
     valid_uuids = list(uuid_by_id.values())
 
-    # Batch fetch all memory units
-    memories = await conn.fetch(
-        f"""
-        SELECT id, text, chunk_id, document_id, fact_type, context
-        FROM {fq_table("memory_units")}
-        WHERE id = ANY($1) AND bank_id = $2
-        """,
-        valid_uuids,
-        bank_id,
-    )
+    # Batch fetch all memory units. A store that keeps memories outside SQL answers by id
+    # through the store; normalize its records to the same UUID-keyed dict shape the SQL rows
+    # have so the result-building below stays store-agnostic.
+    from ..memories import get_memories
+
+    _store = get_memories()
+    if _store.writes_memory_rows_in_sql_for(bank_id):
+        memories = await conn.fetch(
+            f"""
+            SELECT id, text, chunk_id, document_id, fact_type, context
+            FROM {fq_table("memory_units")}
+            WHERE id = ANY($1) AND bank_id = $2
+            """,
+            valid_uuids,
+            bank_id,
+        )
+    else:
+        stored = await _store.get_memories(
+            conn=conn, fq_table=fq_table, bank_id=bank_id, unit_ids=[str(u) for u in valid_uuids]
+        )
+        memories = [
+            {
+                "id": uuid.UUID(s.unit_id),
+                "text": s.text,
+                "chunk_id": s.chunk_id,
+                "document_id": s.document_id,
+                "fact_type": s.fact_type,
+                "context": s.context,
+            }
+            for s in stored
+        ]
     memory_map = {row["id"]: row for row in memories}
 
     # Collect chunk_ids and document_ids for batch fetching
@@ -360,9 +441,44 @@ async def tool_expand(
     doc_ids_from_chunks: set[str] = set()
     doc_ids_direct: set[str] = set()
 
-    # Batch fetch all chunks
+    # Batch fetch all chunks. A store that owns the document store leaves the `chunks` and
+    # `documents` tables empty, so the SQL below would return nothing and `expand` would answer
+    # without the chunk or document it was asked for — the memories read above was routed to the
+    # store but these two were not.
+    _docs_in_store = _store.owns_document_store_for(bank_id)
     chunk_map: dict[str, Any] = {}
-    if chunk_ids:
+    if chunk_ids and _docs_in_store:
+        # The store addresses a chunk by (document_id, index), and `chunk_id` is
+        # `{bank_id}_{document_id}_{index}` by construction — so the index is what remains once
+        # that known prefix is removed. Built from the ids in hand rather than by splitting on
+        # "_", which a bank or document id containing one would break.
+        # Deduped by chunk_id: co-located memories share one chunk, and the SQL branch collapses
+        # them through `= ANY($1)`. Without this the store is asked for the same chunk once per
+        # memory sitting in it.
+        refs: list[tuple[str, int]] = []
+        ref_owner: list[dict] = []
+        _seen_chunks: set[str] = set()
+        for m in memories:
+            cid, did = m["chunk_id"], m["document_id"]
+            if not cid or not did:
+                continue
+            if cid in _seen_chunks:
+                continue
+            suffix = cid.removeprefix(f"{bank_id}_{did}_")
+            if suffix == cid or not suffix.isdigit():
+                continue
+            _seen_chunks.add(cid)
+            refs.append((did, int(suffix)))
+            ref_owner.append({"chunk_id": cid, "document_id": did, "chunk_index": int(suffix)})
+        if refs:
+            texts = await _store.get_chunk_texts(bank_id=bank_id, refs=refs)
+            for owner, text in zip(ref_owner, texts):
+                if text is None:
+                    continue
+                chunk_map[owner["chunk_id"]] = {**owner, "chunk_text": text}
+        if depth == "document":
+            doc_ids_from_chunks = {c["document_id"] for c in chunk_map.values() if c["document_id"]}
+    elif chunk_ids:
         chunks = await conn.fetch(
             f"""
             SELECT chunk_id, chunk_text, chunk_index, document_id
@@ -384,7 +500,24 @@ async def tool_expand(
     # Batch fetch all documents
     doc_map: dict[str, Any] = {}
     all_doc_ids = list(doc_ids_from_chunks | doc_ids_direct)
-    if all_doc_ids:
+    if all_doc_ids and _docs_in_store:
+        # One read per document: the store addresses a document by id and has no batch form here.
+        # The set is the documents behind the memories being expanded, which is bounded by the
+        # caller's own memory_ids rather than by corpus size.
+        for did in all_doc_ids:
+            record = await _store.get_document_record(bank_id=bank_id, document_id=did, include_text=True)
+            if record is None:
+                continue
+            # The store has no `retain_params` column; it keeps the retain params inside the
+            # document record's metadata bag, under that key and serialised as JSON. So they are
+            # read back out of the bag rather than reconstructed — `_document_metadata_from_retain_params`
+            # already parses the JSON form, which is the same thing Postgres hands it from JSONB.
+            doc_map[did] = {
+                "id": did,
+                "original_text": record.get("original_text"),
+                "retain_params": (record.get("metadata") or {}).get("retain_params"),
+            }
+    elif all_doc_ids:
         docs = await conn.fetch(
             f"""
             SELECT id, original_text, retain_params

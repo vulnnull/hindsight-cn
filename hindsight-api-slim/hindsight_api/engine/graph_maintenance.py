@@ -1,52 +1,62 @@
 """Async graph maintenance after document/unit deletes.
 
-Three reconciliation passes run together on every worker invocation:
+Two queue-driven passes run together on every worker invocation:
 
 1. **Relink top-up.** Drain ``graph_maintenance_queue`` (units whose
    outgoing temporal/semantic links lost a neighbour to a delete). For
    each, count current outgoing links per type; if below cap, run the
-   same probes retain uses (:func:`fetch_temporal_neighbors`,
-   :func:`compute_semantic_links_ann`) and insert the missing links.
-   ``bulk_insert_links`` has ``ON CONFLICT DO NOTHING`` on the uniqueness
-   key, so we can re-probe freely and the DB de-dupes.
+   same probes retain uses and insert the missing links.
 
-2. **Orphan entity prune.** Delete ``entities`` rows in the bank that no
-   longer have any ``unit_entities`` references. FK ON DELETE CASCADE on
-   ``entity_cooccurrences`` then removes any cooccurrence row pointing
-   at the pruned entities.
+2. **Entity prune.** Drain ``entity_maintenance_queue`` (entities a delete
+   may have stranded). Per batch: delete the candidates no ``unit_entities``
+   row references any more — FK ON DELETE CASCADE on ``entity_cooccurrences``
+   takes their cooccurrence rows with them — then delete the cooccurrence rows
+   incident to the survivors that no current memory witnesses, the stale-count
+   case the cascade cannot see.
 
-3. **Stale cooccurrence prune.** Defensive sweep for cooccurrence rows
-   where both endpoints still exist but no current memory_unit references
-   both of them — the cooccurrence was real at the time it was recorded,
-   but every unit that witnessed it has since been deleted.
+Both passes are *queued work*, not sweeps. Pass 2 used to be two bank-wide
+statements re-evaluated on every invocation whether or not anything had
+changed, so its cost tracked the size of the bank instead of the size of the
+delete; on a multi-million-row bank neither statement could finish inside
+asyncpg's command timeout and the job failed on every run, forever (#3222).
+Both queues are now filled inside the deleting transaction, so each run only
+looks at what that delete actually touched.
 
-All three passes run on every invocation. The queue is the only source
-of work for pass 1; passes 2 and 3 are bank-wide sweeps backed by indexes
-on ``entities(bank_id)`` and ``unit_entities(entity_id)``, so they're
-cheap when there's nothing to do.
+Each pass is work the *memories store* owns, because each is a query over
+`memory_links`, `unit_entities` and `entities` — the slice the store carves
+out. This module orchestrates them (pass ordering, the time budget, the timing
+log) and asks the store to do the part that touches storage. A store whose
+links travel inside its memories has no `memory_links` to dangle and no join
+table to sweep, so both passes are no-ops for it.
 
 The worker dedupes on bank: a second job for the same bank is dropped
 while one is pending. Once processing starts, a new job becomes the
 *next* pending slot — so work enqueued during processing gets picked up
 by the follow-up run.
+
+That follow-up run is *deferred*, not parallel: ``claim_tasks`` will not claim a
+graph_maintenance row for a bank that already has one in flight (#3230). Two
+concurrent runs would do no extra work anyway — each drains the same two
+bank-scoped queues — while convoying on each other's row locks and holding a
+worker slot each.
 """
 
 from __future__ import annotations
 
 import logging
 import time
-import uuid as uuid_module
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from ..models import RequestContext
 from .db.base import DatabaseConnection
-from .retain.link_utils import (
-    MAX_TEMPORAL_LINKS_PER_UNIT,
-    _bulk_insert_links,
-    _normalize_datetime,
-    compute_semantic_links_ann,
-)
+
+# Re-exported for callers and tests that import the link caps from here; the caps
+# themselves live with the link builders the relink pass mirrors — the temporal one
+# with the retain-time builders, the semantic one with the store's relink pass — so
+# there is a single definition of each and the two cannot drift.
+from .memories.pg.graph import MAX_SEMANTIC_LINKS_PER_UNIT  # noqa: F401
+from .retain.link_utils import MAX_TEMPORAL_LINKS_PER_UNIT  # noqa: F401
 from .schema import fq_table
 
 if TYPE_CHECKING:
@@ -54,17 +64,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Mirrors the ``top_k`` default in ``compute_semantic_links_ann`` at retain
-# time. If you change one, change the other — otherwise victims would either
-# never reach the cap (probe returns less than the cap) or stay perpetually
-# under it (cap is higher than retain creates).
-MAX_SEMANTIC_LINKS_PER_UNIT = 50
-
-# Worker fetches this many rows per relink-loop iteration. Bounds
-# per-iteration probe/insert latency so a 10k-row backlog doesn't hold a
-# worker slot for minutes. Chosen so the typical iteration runs in well
-# under 1s.
-_DRAIN_BATCH_SIZE = 50
+# Wall-clock budget for one graph_maintenance run. Both passes commit per batch,
+# so hitting the budget is not a failure: it stops claiming new work, reports
+# what it did, and the follow-up run resumes from the queue rows still there.
+# A backlog (a bulk delete, say) then converges over several runs instead of
+# holding a worker slot for as long as it takes — the failure mode #3222
+# describes, where the whole run was cancelled and every batch's work was
+# retried from scratch.
+_JOB_TIME_BUDGET_SECONDS = 240.0
 
 
 @dataclass
@@ -73,81 +80,120 @@ class JobResult:
 
     relink_units_processed: int = 0
     relink_links_added: int = 0
+    entities_examined: int = 0
     orphan_entities_pruned: int = 0
     stale_cooccurrences_pruned: int = 0
+    # False when the time budget stopped a drain with work still queued. The
+    # caller re-submits so the backlog keeps draining without waiting for the
+    # next delete to trigger a run.
+    queues_drained: bool = True
 
-    def as_dict(self) -> dict[str, int]:
+    def as_dict(self) -> dict[str, int | bool]:
         return {
             "relink_units_processed": self.relink_units_processed,
             "relink_links_added": self.relink_links_added,
+            "entities_examined": self.entities_examined,
             "orphan_entities_pruned": self.orphan_entities_pruned,
             "stale_cooccurrences_pruned": self.stale_cooccurrences_pruned,
+            "queues_drained": self.queues_drained,
         }
 
 
 async def enqueue_relink_victims(
     conn: DatabaseConnection,
     bank_id: str,
-    deleted_unit_ids: list[str],
-    ops: Any,
+    affected_unit_ids: list[str],
+    include_affected_units: bool = False,
 ) -> int:
     """Enqueue surviving units whose outgoing temporal/semantic links pointed at
-    ``deleted_unit_ids`` for later link top-up.
+    ``affected_unit_ids`` for later link top-up.
 
-    Must run inside the same transaction that deletes the units, *before* the
-    cascade fires — once the rows are gone, the join that finds the victims
-    returns nothing.
+    Must run inside the same transaction that drops those links, *before* the
+    delete (or cascade) fires — once the rows are gone, the join that finds the
+    victims returns nothing.
+
+    ``include_affected_units`` covers the case where the affected units are NOT
+    being removed: an edit deletes every link incident to the edited unit but
+    leaves it live, so the unit needs its own outgoing adjacency rebuilt too.
+    Passing it for a unit that will be gone at commit is harmless but pointless
+    — the drain skips queue rows with no live unit — so callers should only set
+    it when the unit survives the transaction.
+
+    Delegated to the memories store: finding the victims is a `memory_links`
+    query, and a store whose links are inline has none, so it returns 0 and the
+    relink pass has nothing to do. The store resolves the dialect it needs from
+    ``conn``.
 
     Args:
-        conn: Database connection inside the active delete transaction.
-        bank_id: Bank owning the deleted units.
-        deleted_unit_ids: Memory_unit IDs about to be (or being) deleted.
-        ops: ``DataAccessOps`` instance, supplies the dialect-specific
-            bulk-insert path.
+        conn: Database connection inside the active transaction.
+        bank_id: Bank owning the affected units.
+        affected_unit_ids: Memory_unit IDs whose incident temporal/semantic
+            links are about to be (or are being) removed.
+        include_affected_units: Also enqueue ``affected_unit_ids`` themselves,
+            for callers that leave them live.
 
     Returns:
-        Number of distinct victim units enqueued (after dedup against rows
-        already in the queue).
+        Number of distinct victim units enqueued (0 for a store with no links).
     """
-    if not deleted_unit_ids:
+    if not affected_unit_ids:
         return 0
 
-    deleted_uuids = [uuid_module.UUID(uid) if isinstance(uid, str) else uid for uid in deleted_unit_ids]
-    deleted_str_set = {str(uid) for uid in deleted_uuids}
+    from .memories import get_memories
 
-    # Find units (other than the ones being deleted) that have an outgoing
-    # temporal/semantic link pointing at a doomed unit. Entity links are
-    # intentionally excluded — they're scheduled for removal and would only
-    # add noise to the recompute job.
-    victim_rows = await conn.fetch(
-        f"""
-        SELECT DISTINCT from_unit_id
-        FROM {fq_table("memory_links")}
-        WHERE to_unit_id = ANY($1::uuid[])
-          AND bank_id = $2
-          AND link_type IN ('temporal', 'semantic')
-        """,
-        deleted_uuids,
-        bank_id,
+    return await get_memories().enqueue_relink_victims(
+        conn=conn,
+        fq_table=fq_table,
+        bank_id=bank_id,
+        affected_unit_ids=affected_unit_ids,
+        include_affected_units=include_affected_units,
     )
 
-    victim_ids = [row["from_unit_id"] for row in victim_rows if str(row["from_unit_id"]) not in deleted_str_set]
 
-    if not victim_ids:
+async def enqueue_entity_prune_candidates(
+    conn: DatabaseConnection,
+    bank_id: str,
+    affected_unit_ids: list[str],
+) -> int:
+    """Enqueue the entities ``affected_unit_ids`` reference as prune candidates.
+
+    Must run inside the same transaction that removes those units (or replaces
+    their entity postings), *before* the delete or cascade fires: afterwards the
+    ``unit_entities`` rows naming the entities are gone, and an entity nothing
+    points at is an orphan nothing will ever look at again.
+
+    Pair this with :func:`enqueue_relink_victims` at every delete site. They
+    capture different things — that one records the *survivors* whose links now
+    dangle, this one the *entities* the doomed units were holding up — and
+    neither substitutes for the other. A site that deletes units without calling
+    this leaks orphan entities and stale cooccurrences until something else
+    happens to enqueue the same entity.
+
+    Over-enqueueing costs nothing: the drain re-checks each candidate and keeps
+    the ones still referenced.
+
+    Delegated to the memories store: a store that never wrote ``unit_entities``
+    has no postings to lose and returns 0.
+
+    Args:
+        conn: Database connection inside the active transaction.
+        bank_id: Bank owning the affected units.
+        affected_unit_ids: Memory_unit IDs whose entity postings are about to
+            be (or are being) removed.
+
+    Returns:
+        Number of candidate entities enqueued (0 for a store with no postings).
+    """
+    if not affected_unit_ids:
         return 0
 
-    await ops.enqueue_graph_maintenance(
-        conn,
-        fq_table("graph_maintenance_queue"),
-        bank_id,
-        victim_ids,
-    )
+    from .memories import get_memories
 
-    logger.debug(
-        f"[GRAPH_MAINT] Enqueued {len(victim_ids)} relink victims in "
-        f"bank={bank_id} (deleted {len(deleted_unit_ids)} units)"
+    return await get_memories().enqueue_entity_prune_candidates(
+        conn=conn,
+        fq_table=fq_table,
+        bank_id=bank_id,
+        affected_unit_ids=affected_unit_ids,
     )
-    return len(victim_ids)
 
 
 async def run_graph_maintenance_job(
@@ -155,203 +201,145 @@ async def run_graph_maintenance_job(
     bank_id: str,
     request_context: RequestContext,
     operation_id: str | None = None,
-) -> dict[str, int]:
-    """Run all maintenance passes for ``bank_id`` until the relink queue is
-    drained, then sweep entities and cooccurrences once.
+) -> dict[str, int | bool]:
+    """Drain both maintenance queues for ``bank_id``, within a time budget.
 
     Returns:
-        Per-pass counters from :class:`JobResult`.
+        Per-pass counters from :class:`JobResult`. ``queues_drained`` is False
+        when the budget ran out with work still queued — the caller re-submits.
     """
-    del request_context  # accepted for symmetry with other run_*_job helpers
+    from ..config import get_config
+    from .memories import get_memories
+
     backend = await memory_engine._get_backend()
-    ops = backend.ops
+    store = get_memories()
+    config = get_config()
 
     result = JobResult()
     job_start = time.time()
+    deadline = time.monotonic() + _JOB_TIME_BUDGET_SECONDS
 
     # --- Pass 1: relink ---
-    # Per-iteration loop: claim → top up → commit. We rely on submit-time
-    # dedup to keep at most one job per bank running, so no need for
-    # SKIP LOCKED.
-    iterations = 0
-    while True:
-        from .memory_engine import acquire_with_retry
+    # The store owns the whole drain loop: it is a claim → top-up → commit over
+    # its own link table, so how it batches and re-probes is its business — including
+    # the #3034 serialisation (the claim takes queue rows FOR UPDATE in (bank_id,
+    # unit_id) order against a concurrent re-enqueue), which lives in the store's
+    # claim (`ops.claim_graph_maintenance_batch`). A store with no links returns an
+    # empty dict and this is a no-op.
+    relink = await store.relink_pass(
+        backend=backend, fq_table=fq_table, bank_id=bank_id, config=config, deadline=deadline
+    )
+    result.relink_units_processed = relink.units_processed
+    result.relink_links_added = relink.links_added
 
-        async with acquire_with_retry(backend) as conn:
-            async with conn.transaction():
-                unit_ids = await ops.claim_graph_maintenance_batch(
-                    conn,
-                    fq_table("graph_maintenance_queue"),
-                    bank_id,
-                    _DRAIN_BATCH_SIZE,
-                )
-                if not unit_ids:
-                    break
-
-                result.relink_links_added += await _relink_batch(conn, bank_id, unit_ids, ops, backend)
-
-        result.relink_units_processed += len(unit_ids)
-        iterations += 1
-
-        if iterations > 10000:
-            # Defensive guard against runaway loops — at 50 units/iter that's
-            # 500k targets, far beyond any realistic single-bank backlog.
-            logger.error(
-                f"[GRAPH_MAINT] bank={bank_id} hit iteration cap ({iterations}); aborting relink ({result.as_dict()})"
-            )
-            break
-
-    # --- Pass 2 & 3: entity / cooccurrence sweeps ---
-    # Bank-wide single-statement deletes. Cheap when there's nothing to do.
-    from .memory_engine import acquire_with_retry
-
-    async with acquire_with_retry(backend) as conn:
-        async with conn.transaction():
-            result.orphan_entities_pruned = await ops.prune_orphan_entities(
-                conn,
-                fq_table("entities"),
-                fq_table("unit_entities"),
-                bank_id,
-            )
-            # The orphan prune above cascades cooccurrences via FK. The
-            # explicit cooccurrence pass below catches the *stale-count*
-            # case: both entities still exist but no current unit witnesses
-            # them together.
-            result.stale_cooccurrences_pruned = await ops.prune_stale_cooccurrences(
-                conn,
-                fq_table("entity_cooccurrences"),
-                fq_table("unit_entities"),
-                fq_table("entities"),
-                bank_id,
-            )
+    # --- Pass 2: entity prune ---
+    # Same shape as Pass 1 and owned by the store for the same reason: a
+    # claim → prune → commit loop over `entities` / `unit_entities` /
+    # `entity_cooccurrences`, including the ordered locking that keeps its
+    # deletes from cycling against retain's concurrent entity and cooccurrence
+    # upserts. A store that never wrote `unit_entities` returns an empty dict
+    # and this is a no-op. Runs after the relink pass so the remaining budget
+    # is whatever Pass 1 left.
+    prune = await store.entity_prune_pass(backend=backend, fq_table=fq_table, bank_id=bank_id, deadline=deadline)
+    result.entities_examined = prune.entities_examined
+    result.orphan_entities_pruned = prune.orphan_entities_pruned
+    result.stale_cooccurrences_pruned = prune.stale_cooccurrences_pruned
+    result.queues_drained = relink.queue_exhausted and prune.queue_exhausted
 
     elapsed = time.time() - job_start
+
+    # --- Hand-off: schedule a successor for any work this run leaves behind ---
+    #
+    # Submit-time dedup now treats a *running* graph-maintenance job as covering
+    # the bank (see _submit_async_operation's dedupe_by_bank_includes_processing).
+    # That is what stops one job being queued per triggering operation, but it
+    # means a submit made while this job runs is suppressed. So this job has to
+    # hand off to a successor for any work it leaves behind, or that work strands
+    # until some unrelated future trigger. Both hand-offs below pass
+    # dedupe_excludes_operation_id: the worker only marks the operation completed
+    # after this body returns, so the row is still 'processing' now and the
+    # widened predicate would otherwise dedup the hand-off against its own row and
+    # silently do nothing.
+    from .memory_engine import acquire_with_retry
+    from .task_backend import SyncTaskBackend
+
+    if not result.queues_drained:
+        # Backlog case: the time budget stopped a drain with work still queued, so
+        # more is provably left. Chain a follow-up so the backlog converges
+        # without waiting for the next delete to trigger a run — on a bank that
+        # has gone quiet that may be never. WARNING because a bank that keeps
+        # landing here is producing maintenance faster than one run absorbs it.
+        logger.warning(
+            f"[GRAPH_MAINT] bank={bank_id} hit the {_JOB_TIME_BUDGET_SECONDS:.0f}s budget with work still "
+            f"queued; committed {result.as_dict()} in {elapsed:.2f}s"
+        )
+        # A synchronous task backend (tests, embedded) runs the successor inline,
+        # which would recurse one job per budget window instead of scheduling.
+        # There the caller is already the drain loop and gets the remaining rows
+        # on its next call, so skip the hand-off.
+        if not isinstance(memory_engine._task_backend, SyncTaskBackend):
+            try:
+                await memory_engine.submit_async_graph_maintenance(
+                    bank_id=bank_id,
+                    request_context=request_context,
+                    dedupe_excludes_operation_id=operation_id,
+                )
+            except Exception:
+                # Never fail a completed maintenance run over the hand-off. The
+                # work is still queued and the next trigger picks it up; log
+                # loudly so a persistent failure here is visible, not silent.
+                logger.exception(f"[GRAPH_MAINT] bank={bank_id} follow-up submit failed")
+    else:
+        # Gap case: both queues drained within budget, but new rows can have
+        # landed in the gap between a pass's final claim and this job being marked
+        # completed. Their submits were deduped against this still-'processing'
+        # job, so nothing is scheduled to pick them up. Re-check both queues —
+        # reusing the portable existence check submit uses for its empty-queue
+        # short-circuit (no Postgres-only LIMIT, and covers the relink and
+        # entity-prune queues) — and hand off anything that landed.
+        #
+        # Gated on this run having made progress. A run that consumed nothing and
+        # still sees queued work would hand off to a successor that repeats the
+        # exact outcome — an endless per-bank chain. Requiring progress means the
+        # chain only continues while it is actually draining, so it terminates.
+        # (The backlog branch above is not gated this way: its contract is to
+        # always continue a budgeted backlog so a quiet bank is never stranded.)
+        #
+        # Not guarded against SyncTaskBackend, unlike the backlog branch: this
+        # branch cannot fire on one. A synchronous backend is single-threaded, so
+        # nothing enqueues concurrently and the queues are empty once the passes
+        # (which never enqueue for themselves) return — leaving no gap to close.
+        made_progress = result.relink_units_processed > 0 or result.entities_examined > 0
+        try:
+            backend_check = await memory_engine._get_backend()
+            async with acquire_with_retry(backend_check) as conn:
+                work_remains = bool(
+                    await conn.fetchval(
+                        f"""
+                        SELECT 1 WHERE
+                            EXISTS (SELECT 1 FROM {fq_table("graph_maintenance_queue")} WHERE bank_id = $1)
+                            OR EXISTS (SELECT 1 FROM {fq_table("entity_maintenance_queue")} WHERE bank_id = $1)
+                        """,
+                        bank_id,
+                    )
+                )
+            if work_remains and not made_progress:
+                logger.warning(
+                    f"[GRAPH_MAINT] bank={bank_id} queue still non-empty after a run that drained "
+                    f"nothing; not chaining a successor (it would repeat this outcome)"
+                )
+            elif work_remains:
+                logger.info(f"[GRAPH_MAINT] bank={bank_id} work arrived during the run; submitting a follow-up job")
+                await memory_engine.submit_async_graph_maintenance(
+                    bank_id=bank_id,
+                    request_context=request_context,
+                    dedupe_excludes_operation_id=operation_id,
+                )
+        except Exception:
+            # As above: the queued work survives, so log rather than fail the run.
+            logger.exception(f"[GRAPH_MAINT] bank={bank_id} follow-up submit failed")
+
     logger.info(
         f"[GRAPH_MAINT] bank={bank_id} done: {result.as_dict()}, elapsed={elapsed:.2f}s, operation_id={operation_id}"
     )
     return result.as_dict()
-
-
-async def _relink_batch(
-    conn: DatabaseConnection,
-    bank_id: str,
-    victim_ids: list[str],
-    ops: Any,
-    backend: Any,
-) -> int:
-    """Top up temporal/semantic links for a batch of victim units. Returns rows inserted."""
-    # Load each victim's metadata. Victims whose units were deleted between
-    # enqueue and now silently drop out — exactly the no-op behaviour we want
-    # for stale queue rows.
-    victim_uuids = [uuid_module.UUID(vid) for vid in victim_ids]
-    victim_rows = await conn.fetch(
-        f"""
-        SELECT id::text AS id, event_date, fact_type, embedding::text AS embedding
-        FROM {fq_table("memory_units")}
-        WHERE id = ANY($1::uuid[])
-          AND bank_id = $2
-          AND fact_type IN ('experience', 'world')
-        """,
-        victim_uuids,
-        bank_id,
-    )
-
-    if not victim_rows:
-        return 0
-
-    alive_uuids = [uuid_module.UUID(row["id"]) for row in victim_rows]
-
-    # Count current outgoing temporal/semantic links per victim so we only
-    # probe for the ones genuinely below cap. Saves the bulk of the work when
-    # most victims still have plenty of links.
-    count_rows = await conn.fetch(
-        f"""
-        SELECT from_unit_id, link_type, COUNT(*) AS cnt
-        FROM {fq_table("memory_links")}
-        WHERE from_unit_id = ANY($1::uuid[])
-          AND bank_id = $2
-          AND link_type IN ('temporal', 'semantic')
-        GROUP BY from_unit_id, link_type
-        """,
-        alive_uuids,
-        bank_id,
-    )
-    counts: dict[tuple[str, str], int] = {}
-    for row in count_rows:
-        counts[(str(row["from_unit_id"]), row["link_type"])] = int(row["cnt"])
-
-    # --- Temporal top-up ---
-    temporal_needs = [r for r in victim_rows if counts.get((r["id"], "temporal"), 0) < MAX_TEMPORAL_LINKS_PER_UNIT]
-    new_links: list[tuple] = []
-
-    if temporal_needs:
-        lateral_unit_ids = [uuid_module.UUID(r["id"]) for r in temporal_needs if r["event_date"] is not None]
-        lateral_event_dates = [
-            _normalize_datetime(r["event_date"]) for r in temporal_needs if r["event_date"] is not None
-        ]
-        lateral_fact_types = [r["fact_type"] for r in temporal_needs if r["event_date"] is not None]
-
-        if lateral_unit_ids:
-            rows = await ops.fetch_temporal_neighbors(
-                conn,
-                fq_table("memory_units"),
-                bank_id,
-                lateral_unit_ids,
-                lateral_event_dates,
-                lateral_fact_types,
-                MAX_TEMPORAL_LINKS_PER_UNIT,
-            )
-            for row in rows:
-                time_diff_h = float(row["time_diff_hours"])
-                # Mirror the 24h window enforced at retain time. The bidirectional
-                # index scan returns the K closest neighbours regardless of
-                # window, so we filter here.
-                if time_diff_h > 24:
-                    continue
-                weight = max(0.3, 1.0 - (time_diff_h / 24))
-                new_links.append((row["from_id"], str(row["id"]), "temporal", weight, None))
-
-    # --- Semantic top-up ---
-    # ANN must run on its own connection: it opens a nested transaction with
-    # SET LOCAL hnsw.ef_search + CREATE TEMP TABLE ON COMMIT DROP, and nesting
-    # that inside our current write transaction would commit our writes early.
-    semantic_needs = [
-        r
-        for r in victim_rows
-        if counts.get((r["id"], "semantic"), 0) < MAX_SEMANTIC_LINKS_PER_UNIT and r["embedding"] is not None
-    ]
-    if semantic_needs:
-        from .memory_engine import acquire_with_retry
-
-        seed_ids = [r["id"] for r in semantic_needs]
-        seed_embs = [r["embedding"] for r in semantic_needs]
-        seed_ftypes = [r["fact_type"] for r in semantic_needs]
-        async with acquire_with_retry(backend) as ann_conn:
-            try:
-                ann_links = await compute_semantic_links_ann(
-                    ann_conn,
-                    bank_id,
-                    seed_ids,
-                    seed_embs,
-                    fact_types=seed_ftypes,
-                )
-                # Strip self-links (rare but possible because the ANN probe
-                # has no exclude list — see the comment in compute_semantic_links_ann).
-                ann_links = [lnk for lnk in ann_links if lnk[0] != lnk[1]]
-                new_links.extend(ann_links)
-            except Exception as e:
-                # ANN uses PG-specific HNSW syntax; on dialects/configs where
-                # it isn't available we still want the temporal top-up to land.
-                logger.warning(f"[GRAPH_MAINT] Semantic top-up failed for bank={bank_id}: {type(e).__name__}: {e}")
-
-    if not new_links:
-        return 0
-
-    await _bulk_insert_links(
-        conn,
-        new_links,
-        bank_id=bank_id,
-        skip_exists_check=False,
-        ops=ops,
-    )
-    return len(new_links)

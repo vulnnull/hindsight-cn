@@ -2,17 +2,19 @@
 bank profile utilities for disposition and mission management.
 """
 
+import asyncio
 import json
 import logging
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TypedDict
 
 from pydantic import BaseModel, Field
 
-from ..._vector_index import index_using_clause, uses_per_bank_vector_indexes
+from ..._vector_index import index_using_clause, per_bank_indexes_are_eager, uses_per_bank_vector_indexes
 from ...config import get_config
-from ..db_utils import acquire_with_retry
+from ..db_utils import acquire_with_retry, retry_with_backoff
 from ..memory_engine import fq_table, get_current_schema
 from ..response_models import DispositionTraits
 
@@ -44,21 +46,40 @@ def _vector_index_clause() -> str | None:
     return index_using_clause(ext)
 
 
-async def create_bank_vector_indexes(conn, bank_id: str, internal_id: str, ops=None) -> None:
+async def create_bank_vector_indexes(conn, bank_id: str, internal_id: str, *, ops) -> None:
     """Create per-(bank, fact_type) partial vector indexes for a newly created bank.
+
+    Only does anything when the size threshold is off — the default — where a
+    bank is entitled to its indexes from the moment it exists and building them
+    here is instant, because the bank is empty. That is the behaviour that
+    predates the threshold, and keeping it means the default deployment never
+    submits a ``vector_index_maintenance`` operation and never pays a coverage
+    check on a write.
+
+    With ``HINDSIGHT_API_VECTOR_INDEX_MIN_ROWS`` set, a fresh bank has not earned
+    anything yet, so this is a no-op and the maintenance operation builds an
+    index CONCURRENTLY if and when the bank grows into one — which also keeps
+    CREATE INDEX's ShareLock on the shared memory_units table off the write path.
 
     Respects the HINDSIGHT_API_VECTOR_EXTENSION config to use the appropriate
     index type (HNSW for pgvector, DiskANN for pgvectorscale, vchordrq for vchord).
 
     AlloyDB ScaNN uses global vector indexes with filtered vector search; it
     cannot safely create per-bank indexes at bank-creation time because new
-    banks have no embedding rows.
+    banks have no embedding rows. On Oracle 23ai this is likewise a no-op —
+    Oracle uses a single global vector index created during migrations, and does
+    not support partial (WHERE-clause) vector indexes.
+
     bank_id is escaped for SQL literal safety (apostrophes doubled).
 
-    On Oracle 23ai, this is a no-op — Oracle uses a single global vector index
-    created during migrations. Partial indexes (WHERE clause) are not supported
-    for Oracle vector indexes.
+    ``ops`` is required rather than defaulting to None: it is only dereferenced
+    in the eager branch, so a caller that forgot it used to work fine until the
+    threshold happened to be off, and then failed on an AttributeError from
+    inside bank creation.
     """
+    if not per_bank_indexes_are_eager():
+        return
+
     index_clause = _vector_index_clause()
     if index_clause is None:
         logger.debug("Skipping per-bank vector indexes for configured backend")
@@ -188,8 +209,22 @@ async def get_or_create_bank_profile(pool, bank_id: str) -> BankProfileResult:
     or rolls back atomically with the caller's write), use
     ``get_or_create_bank_profile_on_conn`` instead.
     """
-    async with acquire_with_retry(pool) as conn:
-        return await get_or_create_bank_profile_on_conn(conn, bank_id, ops=pool.ops)
+
+    # Retried as a whole transaction. With the size threshold off (the default)
+    # a fresh bank builds its per-(bank, fact_type) partial vector indexes with a
+    # plain CREATE INDEX — it must, since this runs inside the bank-create tx and
+    # CONCURRENTLY cannot — and that CREATE takes a ShareLock on the shared
+    # memory_units table, which can deadlock with concurrent writers. Even with
+    # no DDL to issue, the lazy create can lose a deadlock (40P01 / ORA-00060) to
+    # a concurrent writer touching the same bank row. The body is idempotent
+    # (INSERT ... ON CONFLICT DO NOTHING + CREATE INDEX IF NOT EXISTS), so
+    # retrying the whole tx stays correct and cheap.
+    async def _create() -> BankProfileResult:
+        async with acquire_with_retry(pool) as conn:
+            async with conn.transaction():
+                return await get_or_create_bank_profile_on_conn(conn, bank_id, ops=pool.ops)
+
+    return await retry_with_backoff(_create)
 
 
 async def get_or_create_bank_profile_on_conn(conn, bank_id: str, *, ops) -> BankProfileResult:
@@ -230,9 +265,10 @@ async def get_or_create_bank_profile_on_conn(conn, bank_id: str, *, ops) -> Bank
             created=False,
         )
 
-    # Bank doesn't exist, create with defaults.
-    # Generate internal_id here so we control the value and can use it
-    # immediately for vector index creation without a RETURNING round-trip.
+    # Bank doesn't exist, create with defaults. internal_id is minted here rather
+    # than defaulted server-side so its value is known without a RETURNING
+    # round-trip: the index names derive from it, both for the eager create below
+    # and for the maintenance operation when a threshold is set.
     internal_id = uuid.uuid4()
     inserted = await conn.fetchval(
         f"""
@@ -250,7 +286,9 @@ async def get_or_create_bank_profile_on_conn(conn, bank_id: str, *, ops) -> Bank
 
     created = inserted is not None
     if created:
-        # Fresh insert — create per-bank vector indexes (instant on empty bank)
+        # Fresh insert — create per-bank vector indexes (instant on an empty
+        # bank). A no-op unless the size threshold is off; see
+        # create_bank_vector_indexes.
         await create_bank_vector_indexes(conn, bank_id, str(internal_id), ops=ops)
 
     return BankProfileResult(
@@ -401,19 +439,52 @@ Merged mission:"""
         return {"mission": merged}
 
 
-async def list_banks(pool) -> list:
+# Sort floor for banks that have never been written to and carry no created_at.
+_UNIX_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
+
+def _as_utc(ts: datetime | None) -> datetime | None:
+    """Normalize a DB timestamp to an aware UTC datetime so values stay comparable."""
+    if ts is None:
+        return None
+    return ts if ts.tzinfo is not None else ts.replace(tzinfo=UTC)
+
+
+async def list_banks(pool, *, search_query: str | None = None) -> list:
     """
-    List all banks in the system with summary stats.
+    List banks with summary stats, optionally narrowed by a search string.
+
+    ``last_document_at`` is document *ingestion* time (when a document first
+    landed), while ``last_write_at`` is the last time anything was written to
+    the bank — a document re-retained/appended to, or a fact stored. Appending
+    to a long-lived document does not move ``last_document_at``, which is why
+    the two differ and why UIs showing "last write" must use ``last_write_at``.
+
+    ``fact_count`` comes from the ``memory_units`` join, which is empty for a bank
+    whose memories live outside SQL. Those banks need :func:`apply_store_fact_counts`
+    to get a real count; callers run it on the page they actually return so the live
+    per-bank count query doesn't fire for every bank in the system.
 
     Args:
         pool: Database connection pool
+        search_query: Case-insensitive substring matched against bank ID and name
 
     Returns:
-        List of dicts with bank info and stats (document_count, fact_count, last_event_at)
+        List of dicts with bank info and stats (fact_count, last_document_at, last_write_at),
+        most recently written bank first.
     """
     banks_table = fq_table("banks")
     docs_table = fq_table("documents")
     mu_table = fq_table("memory_units")
+
+    # Spelled out as UPPER(...) LIKE UPPER(...) rather than ILIKE: the Oracle
+    # rewriter only recognizes ILIKE on an unqualified column, and these are
+    # alias-qualified.
+    where_clause = ""
+    params: list[str] = []
+    if search_query:
+        where_clause = "WHERE (UPPER(b.bank_id) LIKE UPPER($1) OR UPPER(COALESCE(b.name, '')) LIKE UPPER($2))"
+        params = [f"%{search_query}%", f"%{search_query}%"]
 
     async with acquire_with_retry(pool) as conn:
         rows = await conn.fetch(
@@ -422,41 +493,154 @@ async def list_banks(pool) -> list:
                 b.bank_id, b.name, b.disposition, b.mission,
                 b.created_at, b.updated_at,
                 COALESCE(m.fact_count, 0) AS fact_count,
-                d.last_document_at
+                d.last_document_at,
+                d.last_document_write_at,
+                m.last_fact_at
             FROM {banks_table} b
             LEFT JOIN (
-                SELECT bank_id, MAX(created_at) AS last_document_at
+                SELECT bank_id,
+                       MAX(created_at) AS last_document_at,
+                       MAX(updated_at) AS last_document_write_at
                 FROM {docs_table}
                 GROUP BY bank_id
             ) d ON d.bank_id = b.bank_id
             LEFT JOIN (
-                SELECT bank_id, COUNT(*) AS fact_count
+                SELECT bank_id,
+                       COUNT(*) AS fact_count,
+                       MAX(created_at) AS last_fact_at
                 FROM {mu_table}
                 GROUP BY bank_id
             ) m ON m.bank_id = b.bank_id
-            ORDER BY d.last_document_at DESC NULLS LAST, b.updated_at DESC
-            """
+            {where_clause}
+            ORDER BY b.bank_id
+            """,
+            *params,
         )
 
         result = []
+        # Banks are ordered by last write in Python rather than SQL: GREATEST() has
+        # different NULL semantics on PostgreSQL vs Oracle, and the bank list is small.
+        sort_keys: dict[str, datetime] = {}
+
         for row in rows:
             disposition_data = row["disposition"]
             if isinstance(disposition_data, str):
                 disposition_data = json.loads(disposition_data)
 
-            last_doc = row["last_document_at"]
+            last_doc = _as_utc(row["last_document_at"])
+            created_at = _as_utc(row["created_at"])
+            updated_at = _as_utc(row["updated_at"])
+            # Last write = newest of "a document was (re-)retained" and "a fact was stored".
+            # Appending to an existing document only bumps documents.updated_at, and facts
+            # written outside a retain (consolidation, curation, import) only bump memory_units.
+            write_times = [t for t in (_as_utc(row["last_document_write_at"]), _as_utc(row["last_fact_at"])) if t]
+            last_write = max(write_times) if write_times else None
 
+            sort_keys[row["bank_id"]] = last_write or created_at or _UNIX_EPOCH
             result.append(
                 {
                     "bank_id": row["bank_id"],
                     "name": row["name"],
                     "disposition": disposition_data,
                     "mission": row["mission"] or "",
-                    "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-                    "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+                    "created_at": created_at.isoformat() if created_at else None,
+                    "updated_at": updated_at.isoformat() if updated_at else None,
                     "fact_count": row["fact_count"],
                     "last_document_at": last_doc.isoformat() if last_doc else None,
+                    "last_write_at": last_write.isoformat() if last_write else None,
                 }
             )
 
-        return result
+    # Banks whose memories live outside SQL have no `documents` / `memory_units` rows for the joins
+    # above to take a MAX over, so their `last_write_at` came back NULL and they sorted as if never
+    # written. The store can answer it, and the Counters RPC is BATCHED — every such bank costs one
+    # call in total — so it is done BEFORE the sort. Doing it in the page-level overlay instead
+    # would fix the field but leave the order wrong, and inconsistent across pages, which is worse
+    # than uniformly wrong.
+    #
+    # Outside the connection block on purpose: these are network calls to another service and
+    # nothing below needs `conn`. Holding a pooled connection across them is what starves the pool
+    # under load, and the retain path enforces the same rule everywhere else.
+    await _apply_store_last_write(result, sort_keys)
+
+    result.sort(key=lambda bank: sort_keys[bank["bank_id"]], reverse=True)
+    return result
+
+
+async def _apply_store_last_write(banks: list[dict], sort_keys: "dict[str, datetime]") -> None:
+    """Fill `last_write_at` (and the sort key) from the store, for banks SQL cannot answer for.
+
+    One batched call for all of them. A bank the store has no time for is left exactly as it was —
+    absent means "unknown", never "the epoch", so an un-folded bank keeps whatever ordering it had
+    rather than being pushed to the bottom on a guess.
+    """
+    from ..memories import get_memories
+
+    store = get_memories()
+    external = [b for b in banks if not store.writes_memory_rows_in_sql_for(b["bank_id"])]
+    if not external:
+        return
+    ids = [b["bank_id"] for b in external]
+    # Asked for separately, because they are different questions: `last_document_at` is INGESTION
+    # time and must not move when an existing document is re-retained, while `last_write_at` must.
+    # Reporting one under both names looked harmless and is not — it makes a rewrite read as a new
+    # document.
+    #
+    # Gathered, not awaited in sequence: they are independent round trips to the same service, and
+    # `return_exceptions` keeps one failing from discarding the other's answer — a list that sorts
+    # correctly but shows no ingestion time is better than one that does neither.
+    # The try wraps the gather because building its arguments already calls into the store: a store
+    # that does not implement these raises AttributeError right here, before `return_exceptions` can
+    # see anything. They are optional — the interface defaults return `{}` — so a store without them
+    # must leave the list rendering, not break it.
+    try:
+        times_r, doc_times_r = await asyncio.gather(
+            store.last_write_at_many(bank_ids=ids),
+            store.last_document_at_many(bank_ids=ids),
+            return_exceptions=True,
+        )
+    except Exception as e:  # noqa: BLE001 - ordering is a nicety; the list itself must still render
+        logger.warning(f"Store cannot report write times for {len(external)} bank(s): {e}")
+        return
+    if isinstance(times_r, BaseException):
+        logger.warning(f"Could not read last_write_at from the store for {len(external)} bank(s): {times_r}")
+        times = {}
+    else:
+        times = times_r
+    if isinstance(doc_times_r, BaseException):
+        logger.warning(f"Could not read last_document_at from the store for {len(external)} bank(s): {doc_times_r}")
+        doc_times = {}
+    else:
+        doc_times = doc_times_r
+    if not times and not doc_times:
+        return
+    for bank in external:
+        doc_when = doc_times.get(bank["bank_id"])
+        if doc_when is not None:
+            bank["last_document_at"] = doc_when.isoformat()
+    for bank in external:
+        when = times.get(bank["bank_id"])
+        if when is None:
+            continue
+        bank["last_write_at"] = when.isoformat()
+        sort_keys[bank["bank_id"]] = when
+
+
+async def apply_store_fact_counts(pool, banks: list[dict]) -> None:
+    """Replace ``fact_count`` in-place for banks that keep their memories outside SQL.
+
+    Those banks leave the ``memory_units`` join empty, so the count has to come
+    from the store — one live count per bank, which is why this runs on a single
+    page of :func:`list_banks` rather than on every bank in the system.
+    """
+    from ..memories import get_memories
+
+    store = get_memories()
+    external = [bank for bank in banks if not store.writes_memory_rows_in_sql_for(bank["bank_id"])]
+    if not external:
+        return
+
+    async with acquire_with_retry(pool) as conn:
+        for bank in external:
+            counts = await store.count_memories(conn=conn, fq_table=fq_table, bank_id=bank["bank_id"])
+            bank["fact_count"] = sum(counts.values())

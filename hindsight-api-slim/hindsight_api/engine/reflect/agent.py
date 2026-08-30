@@ -10,19 +10,31 @@ Uses hierarchical retrieval:
 import asyncio
 import json
 import logging
-import re
 import time
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from ...config import get_config
+from ..llm_interface import LLM_TOOL_CHOICE_AUTO, LLMToolChoice
 from .models import DirectiveInfo, LLMCall, ReflectAgentResult, StructuredOutputResult, TokenUsageSummary, ToolCall
 from .prompts import (
+    _SPLIT_SYNTHESIS_WARN_CHUNKS,
+    CLAIMS_SYSTEM_PROMPT,
     _extract_directive_rules,
+    build_chunk_claims_prompt,
     build_final_prompt,
     build_final_system_prompt,
+    build_reduce_prompt,
     build_system_prompt_for_tools,
+    split_context_history,
 )
-from .tokenization import count_cl100k_tokens
+from .structured_doc import (
+    CanonicalDocument,
+    StructuredDocument,
+    document_from_sections,
+    render_document,
+    split_markdown,
+)
+from .tokenization import count_prompt_tokens
 from .tools_schema import get_reflect_tools
 
 
@@ -48,6 +60,34 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_ITERATIONS = 10
+
+
+class ReflectNoAnswerError(RuntimeError):
+    """The agent finished without producing an answer.
+
+    Reflect used to substitute a human-readable placeholder here ("No answer
+    provided.", or an iteration-limit sentence). Both are non-empty strings, so
+    every downstream emptiness check let them through and callers could not tell
+    a failed run from a real one -- a mental-model refresh persisted the
+    placeholder over a document built across months of refreshes and reported
+    ``completed`` with no error (#2959). A run that produced nothing is a
+    failure, so it raises like any other, and callers that write what reflect
+    returns simply never reach the write.
+    """
+
+
+class ReflectToolCallError(RuntimeError):
+    """The model never produced a tool call reflect could understand.
+
+    Reflect is driven entirely by structured tool calls (``recall``, ``expand``,
+    ``done`` ...). Some provider transports do not actually support function
+    calling and silently drop the tool definitions from the request (e.g. litellm's
+    Vertex AI gpt-oss MaaS path strips ``tools``/``tool_choice`` when the model is
+    flagged as not supporting them). The model then answers in free text that may
+    mimic a ``done`` payload. Rather than salvage that untooled text -- and risk
+    surfacing raw tool-call JSON as the answer -- we fail loudly so the caller can
+    switch to a tool-calling-capable model/transport.
+    """
 
 
 def _normalize_tool_name(name: str) -> str:
@@ -82,148 +122,12 @@ def _is_done_tool(name: str) -> bool:
     return _normalize_tool_name(name) == "done"
 
 
-# Pattern to match done() call as text - handles done({...}) with nested JSON
-_DONE_CALL_PATTERN = re.compile(r"done\s*\(\s*\{.*$", re.DOTALL)
-
-# Patterns for leaked structured output in the answer field
-_LEAKED_JSON_SUFFIX = re.compile(
-    r'\s*```(?:json)?\s*\{[^}]*(?:"(?:observation_ids|memory_ids|mental_model_ids)"|\})\s*```\s*$',
-    re.DOTALL | re.IGNORECASE,
-)
-_TRAILING_IDS_PATTERN = re.compile(
-    r"\s*(?:observation_ids|memory_ids|mental_model_ids)\s*[=:]\s*\[.*?\]\s*$", re.DOTALL | re.IGNORECASE
-)
-_JSON_CODE_FENCE_PATTERN = re.compile(r"^\s*```(?:json)?\s*(\{.*\})\s*```\s*$", re.DOTALL | re.IGNORECASE)
-
-_DONE_ARGUMENT_KEYS = frozenset(
-    {
-        "answer",
-        "directive_compliance",
-        "memory_ids",
-        "mental_model_ids",
-        "observation_ids",
-        "model_ids",
-    }
-)
-_DONE_ARGUMENT_MARKER_KEYS = _DONE_ARGUMENT_KEYS - {"answer"}
-_LEAKED_JSON_ID_KEYS = frozenset({"memory_ids", "mental_model_ids", "observation_ids", "model_ids"})
-
-
-def _unwrap_leaked_done_arguments(text: str) -> str | None:
-    """Return the answer when a done tool call was rendered as JSON text.
-
-    Some providers leak the done tool's argument object instead of surfacing it
-    as a native tool call, e.g. {"answer": "...", "memory_ids": [...]}. Only
-    unwrap objects that match the done argument shape so normal JSON answers
-    stay intact.
-    """
-    candidate = text.strip()
-    if not candidate:
-        return None
-
-    fenced = _JSON_CODE_FENCE_PATTERN.match(candidate)
-    if fenced:
-        candidate = fenced.group(1).strip()
-
-    try:
-        payload = json.loads(candidate)
-    except json.JSONDecodeError:
-        return None
-
-    if not isinstance(payload, dict):
-        return None
-    answer = payload.get("answer")
-    if not isinstance(answer, str) or not answer.strip():
-        return None
-
-    keys = set(payload)
-    if not keys.intersection(_DONE_ARGUMENT_MARKER_KEYS):
-        return None
-    if not keys.issubset(_DONE_ARGUMENT_KEYS):
-        return None
-
-    for key in ("memory_ids", "mental_model_ids", "observation_ids", "model_ids"):
-        value = payload.get(key)
-        if value is not None and not isinstance(value, list):
-            return None
-
-    return answer.strip()
-
-
-def _strip_trailing_id_json_object(text: str) -> str:
-    stripped = text.rstrip()
-    if not stripped.endswith("}"):
-        return text.strip()
-
-    start = stripped.rfind("{")
-    if start < 0:
-        return text.strip()
-
-    try:
-        payload = json.loads(stripped[start:])
-    except json.JSONDecodeError:
-        return text.strip()
-
-    if not isinstance(payload, dict) or not payload:
-        return text.strip()
-    keys = set(payload)
-    if not keys.issubset(_LEAKED_JSON_ID_KEYS):
-        return text.strip()
-
-    return stripped[:start].strip()
-
-
-def _clean_answer_text(text: str) -> str:
-    """Clean up answer text by removing any done() tool call syntax.
-
-    Some LLMs output the done() call as text instead of a proper tool call.
-    This strips out patterns like: done({"answer": "...", ...})
-    """
-    unwrapped = _unwrap_leaked_done_arguments(text)
-    if unwrapped is not None:
-        return unwrapped
-
-    # Remove done() call pattern from the end of the text
-    cleaned = _DONE_CALL_PATTERN.sub("", text).strip()
-    return cleaned if cleaned else text
-
-
-def _clean_done_answer(text: str) -> str:
-    """Clean up the answer field from a done() tool call.
-
-    Some LLMs leak structured output patterns into the answer text, such as:
-    - JSON code blocks with observation_ids/memory_ids at the end
-    - Raw JSON objects with these fields
-    - Plain text like "observation_ids: [...]"
-
-    This cleans those patterns while preserving the actual answer content.
-    """
-    if not text:
-        return text
-
-    unwrapped = _unwrap_leaked_done_arguments(text)
-    if unwrapped is not None:
-        return unwrapped
-
-    cleaned = text
-
-    # Remove leaked JSON in code blocks at the end
-    cleaned = _LEAKED_JSON_SUFFIX.sub("", cleaned).strip()
-
-    # Remove leaked raw JSON objects at the end
-    cleaned = _strip_trailing_id_json_object(cleaned)
-
-    # Remove trailing ID patterns
-    cleaned = _TRAILING_IDS_PATTERN.sub("", cleaned).strip()
-
-    return cleaned if cleaned else text
-
-
 async def _generate_structured_output(
     answer: str,
     response_schema: dict,
     llm_config: "LLMProvider",
     reflect_id: str,
+    max_tokens: int | None = None,
 ) -> StructuredOutputResult:
     """Generate structured output from an answer using the provided JSON schema.
 
@@ -232,6 +136,10 @@ async def _generate_structured_output(
         response_schema: JSON Schema for the expected output structure
         llm_config: LLM provider for making the extraction call
         reflect_id: Reflect ID for logging
+        max_tokens: Output-token budget for the extraction call, mirroring the
+            plain reflect calls (omitted when None); without it, reasoning /
+            preamble models can exhaust the provider default before emitting any
+            JSON (finish_reason=length, empty content -> issue #2431)
 
     Returns:
         A StructuredOutputResult carrying the structured output (None if
@@ -242,36 +150,51 @@ async def _generate_structured_output(
 
         from pydantic import create_model
 
-        def _json_schema_type_to_python(field_schema: dict) -> type:
-            """Map JSON schema type to Python type for better LLM guidance."""
+        def _python_type_for(field_schema: dict, name: str) -> TypingAny:
+            """Map a JSON-schema node to a Python type, recursing into nested
+            objects/arrays. Nested objects become real Pydantic models (with
+            declared properties) rather than a bare ``dict`` — a bare dict/list
+            serialises with ``additionalProperties``, which Gemini's structured
+            output rejects. Properly-typed nested models avoid that and also let
+            the provider grammar-enforce the shape."""
             json_type = field_schema.get("type", "string")
+            if json_type == "object":
+                nested_props = field_schema.get("properties")
+                if isinstance(nested_props, dict) and nested_props:
+                    return _model_for(field_schema, name)
+                return dict  # free-form object with no declared properties
             if json_type == "array":
+                items = field_schema.get("items")
+                if isinstance(items, dict):
+                    item_type = _python_type_for(items, f"{name}Item")
+                    return list[item_type]
                 return list
-            elif json_type == "object":
-                return dict
-            elif json_type == "integer":
+            if json_type == "integer":
                 return int
-            elif json_type == "number":
+            if json_type == "number":
                 return float
-            elif json_type == "boolean":
+            if json_type == "boolean":
                 return bool
-            else:
-                return str
+            return str
 
-        # Build fields from JSON schema properties
+        def _model_for(schema: dict, name: str) -> type:
+            props = schema.get("properties", {})
+            required = set(schema.get("required", []))
+            model_fields: dict[str, TypingAny] = {}
+            for fname, fschema in props.items():
+                ftype = _python_type_for(fschema if isinstance(fschema, dict) else {}, f"{name}_{fname}")
+                default = ... if fname in required else None
+                model_fields[fname] = (ftype, default)
+            return create_model(name, **model_fields)
+
         schema_props = response_schema.get("properties", {})
         required_fields = set(response_schema.get("required", []))
-        fields: dict[str, TypingAny] = {}
-        for field_name, field_schema in schema_props.items():
-            field_type = _json_schema_type_to_python(field_schema)
-            default = ... if field_name in required_fields else None
-            fields[field_name] = (field_type, default)
 
-        if not fields:
+        if not schema_props:
             logger.warning(f"[REFLECT {reflect_id}] No fields found in response_schema, skipping structured output")
             return StructuredOutputResult()
 
-        DynamicModel = create_model("StructuredResponse", **fields)
+        DynamicModel = _model_for(response_schema, "StructuredResponse")
 
         # Include the full schema in the prompt for better LLM guidance
         schema_str = json.dumps(response_schema, indent=2, ensure_ascii=False)
@@ -322,6 +245,8 @@ OUTPUT:"""
             ],
             response_format=DynamicModel,
             scope="reflect_structured",
+            strict_schema=get_config().llm_strict_schema_reflect,
+            max_completion_tokens=max_tokens,
             max_retries=1,
             initial_backoff=0.25,
             max_backoff=1.0,
@@ -359,21 +284,21 @@ OUTPUT:"""
 
 
 def _count_messages_tokens(messages: list[dict[str, Any]]) -> int:
-    """Estimate the token count of the messages list using cl100k_base encoding."""
+    """Estimate the token count of the messages list using the configured encoding."""
     total = 0
     for msg in messages:
         content = msg.get("content") or ""
         if isinstance(content, str):
-            total += count_cl100k_tokens(content)
+            total += count_prompt_tokens(content)
         elif isinstance(content, list):
             for part in content:
                 if isinstance(part, dict) and isinstance(part.get("text"), str):
-                    total += count_cl100k_tokens(part["text"])
+                    total += count_prompt_tokens(part["text"])
         # Tool call arguments and results also count
         for tc in msg.get("tool_calls") or []:
             if isinstance(tc, dict):
                 func = tc.get("function", {})
-                total += count_cl100k_tokens(func.get("arguments", ""))
+                total += count_prompt_tokens(func.get("arguments", ""))
     return total
 
 
@@ -413,7 +338,104 @@ def _all_mental_models_are_usable_and_fresh(tool_output: dict[str, Any]) -> bool
     return True
 
 
+# Detached cache-teardown tasks. asyncio holds only weak references to tasks, so
+# a fire-and-forget task can be garbage-collected mid-flight — keep a strong
+# reference here until it finishes.
+_cache_cleanup_tasks: set[asyncio.Task] = set()
+
+
+def _spawn_cache_cleanup(
+    provider_impl: Any,
+    session_id: str,
+    cache_tasks: list[asyncio.Task],
+    reflect_id: str,
+) -> None:
+    """Delete a reflect's ephemeral context caches in the background.
+
+    The per-reflect caches are dead the moment the reflect returns — nothing ever
+    reuses them — so the caller must not wait on teardown: draining the in-flight
+    create plus the delete round-trips would add latency to every single answer.
+    Detach it instead. The short cache TTL is the backstop if the process dies
+    before the task runs.
+    """
+
+    async def _cleanup() -> None:
+        try:
+            # Let any overlapped create land first, so its cache is registered in
+            # the session and actually gets deleted rather than lingering to TTL.
+            if cache_tasks:
+                await asyncio.gather(*cache_tasks, return_exceptions=True)
+            await provider_impl.delete_cache_session(session_id)
+        except Exception:
+            logger.debug("[REFLECT %s] cache session teardown failed (will age out on TTL)", reflect_id)
+
+    try:
+        task = asyncio.create_task(_cleanup())
+    except RuntimeError:
+        # No running loop to detach onto (not expected in the server); TTL cleans up.
+        return
+    _cache_cleanup_tasks.add(task)
+    task.add_done_callback(_cache_cleanup_tasks.discard)
+
+
 async def run_reflect_agent(
+    llm_config: "LLMProvider",
+    bank_id: str,
+    query: str,
+    bank_profile: dict[str, Any],
+    search_mental_models_fn: Callable[[str, int], Awaitable[dict[str, Any]]],
+    search_observations_fn: Callable[[str, int], Awaitable[dict[str, Any]]],
+    recall_fn: Callable[[str, int, int], Awaitable[dict[str, Any]]],
+    expand_fn: Callable[[list[str], str], Awaitable[dict[str, Any]]],
+    **kwargs: Any,
+) -> ReflectAgentResult:
+    """Public entrypoint: runs the agent loop and tears down any per-step context
+    caches it created.
+
+    The step-by-step caches (Gemini ``CachedContent``) are ephemeral — scoped to
+    exactly one reflect and never reused after it — so teardown is scheduled on
+    every exit path (answer, error, cancellation) but runs **detached**: the
+    caller gets its answer without waiting on the delete round-trips. The short
+    cache TTL is the backstop if the teardown never runs; the delete is
+    best-effort and never allowed to fail a reflect.
+    """
+    reflect_id = f"{bank_id[:8]}-{int(time.time() * 1000) % 100000}"
+    provider_impl = getattr(llm_config, "_provider_impl", None)
+    # Reflect step-by-step caching needs the provider to support it AND the
+    # dedicated reflect flag (on by default; distinct from the global prompt-cache
+    # switch so it can be turned off for reflect alone).
+    incremental_caching = (
+        provider_impl is not None
+        and provider_impl.supports_incremental_prompt_cache()
+        and get_config().reflect_prompt_cache_enabled
+    )
+    cache_session_id = f"reflect:{reflect_id}"
+    # In-flight cache-create tasks (scheduled to overlap tool execution). Awaited
+    # before teardown so every created cache is tracked and deleted — no orphans.
+    cache_tasks: list[asyncio.Task] = []
+    try:
+        return await _run_reflect_agent_inner(
+            llm_config,
+            bank_id,
+            query,
+            bank_profile,
+            search_mental_models_fn,
+            search_observations_fn,
+            recall_fn,
+            expand_fn,
+            reflect_id=reflect_id,
+            provider_impl=provider_impl,
+            incremental_caching=incremental_caching,
+            cache_session_id=cache_session_id,
+            cache_tasks=cache_tasks,
+            **kwargs,
+        )
+    finally:
+        if incremental_caching and provider_impl is not None:
+            _spawn_cache_cleanup(provider_impl, cache_session_id, cache_tasks, reflect_id)
+
+
+async def _run_reflect_agent_inner(
     llm_config: "LLMProvider",
     bank_id: str,
     query: str,
@@ -434,6 +456,14 @@ async def run_reflect_agent(
     max_context_tokens: int = 100_000,
     llm_output_language: str | None = None,
     cancel_check: Callable[[], None] | None = None,
+    store_document_text: bool = True,
+    answer_as_document: bool = False,
+    *,
+    reflect_id: str,
+    provider_impl: Any,
+    incremental_caching: bool,
+    cache_session_id: str,
+    cache_tasks: list[asyncio.Task],
 ) -> ReflectAgentResult:
     """
     Execute the reflect agent loop using native tool calling.
@@ -454,15 +484,26 @@ async def run_reflect_agent(
         expand_fn: Tool callback for expand (memory_ids, depth) -> result
         context: Optional additional context
         max_iterations: Maximum number of iterations before forcing response
-        max_tokens: Maximum tokens for the final response
+        max_tokens: Desired *visible* length of the final answer. Communicated to
+            the model as a soft directive and enforced by the post-hoc rewrite --
+            NOT passed as the provider's ``max_completion_tokens``, which on
+            thinking models is consumed by reasoning tokens and would truncate the
+            answer mid-word (#3365). The transport-level cost cap is a separate,
+            uncapped-by-default config (``reflect_max_completion_tokens``).
         response_schema: Optional JSON Schema for structured output in final response
         directives: Optional list of directive mental models to inject as hard rules
 
     Returns:
         ReflectAgentResult with final answer and metadata
     """
-    reflect_id = f"{bank_id[:8]}-{int(time.time() * 1000) % 100000}"
     start_time = time.time()
+
+    # Transport-level output cap for the synthesis calls. Decoupled from
+    # ``max_tokens`` (a page-length target enforced via prompt + rewrite): None by
+    # default so reasoning models run to a natural stop instead of truncating the
+    # visible page mid-word (#3365). An operator can set a hard cost ceiling via
+    # HINDSIGHT_API_REFLECT_MAX_COMPLETION_TOKENS.
+    synthesis_max_completion_tokens = get_config().reflect_max_completion_tokens
 
     # Build directives_applied for the trace
     directives_applied = _build_directives_applied(directives)
@@ -472,14 +513,15 @@ async def run_reflect_agent(
 
     # Get tools for this agent (with directive compliance field if directives exist).
     # The expand tool only reads back raw source text (chunks/documents), so it is
-    # useless and excluded when document text storage is disabled.
-    include_expand = get_config().store_document_text
+    # useless and excluded when document text storage is disabled (per bank).
+    include_expand = store_document_text
     tools = get_reflect_tools(
         directive_rules=directive_rules,
         include_mental_models=has_mental_models,
         include_observations=include_observations,
         include_recall=include_recall,
         include_expand=include_expand,
+        answer_as_document=answer_as_document,
     )
     # Build set of enabled tool names to guard against LLM hallucinating disabled tool calls
     enabled_tools: frozenset[str] = frozenset(t["function"]["name"] for t in tools if t.get("type") == "function")
@@ -492,36 +534,82 @@ async def run_reflect_agent(
         has_mental_models=has_mental_models,
         include_observations=include_observations,
         budget=budget,
+        answer_as_document=answer_as_document,
     )
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": query},
     ]
 
-    # Opt into context caching for the agentic tool loop. The system
-    # prompt and tool definitions are stable for the duration of this
-    # reflect call (and across reflects against the same bank), so
-    # caching them once and reusing across every iteration of the loop
-    # collapses the dominant input cost — the prefix repeated on every
-    # turn. ``get_or_create_cached_prefix`` returns None when caching is
-    # disabled, unsupported, or the prefix is too small; the
-    # ``call_with_tools`` invocation below transparently falls back to
-    # the uncached path in that case.
-    cached_prefix_name: str | None = None
-    provider_impl = getattr(llm_config, "_provider_impl", None)
-    if provider_impl is not None and provider_impl.supports_prompt_caching():
+    # Step-by-step context caching for the agentic tool loop.
+    #
+    # Caching only the static system+tools prefix wins little here: it's dwarfed
+    # by the tool results (recall/observations) that get re-sent on every turn.
+    # Instead we roll a cache forward one step at a time — after each turn the
+    # cache is extended to cover that turn's FULL input, so the next ``auto`` turn
+    # reuses the entire prior conversation at the cached rate and sends only its
+    # own new tool results as the delta. Each new tool payload is therefore billed
+    # at full price exactly once (the turn it's produced), then cached thereafter.
+    #
+    # The cache create for turn N+1 covers turn N's input, which is fully known the
+    # moment turn N's LLM call returns — so we kick it off as a background task that
+    # runs CONCURRENTLY with turn N's tool execution (``_schedule_cache``) and only
+    # await it (``_resolve_pending_cache``) right before the next ``auto`` call,
+    # hiding the create latency behind work we'd do anyway.
+    #
+    # ``rolling_cache_boundary`` is the number of leading ``messages`` baked into
+    # the adopted ``rolling_cache_name``. ``incremental_caching`` is False for
+    # providers/config without explicit caching, so every branch below is a no-op.
+    rolling_cache_name: str | None = None
+    rolling_cache_boundary = 0
+    pending_cache_task: asyncio.Task | None = None
+    pending_cache_boundary = 0
+
+    async def _resolve_pending_cache() -> None:
+        """Adopt the overlapped next-cache once it's ready as the rolling cache.
+
+        Best-effort: a failed/``None`` create just leaves the previous (smaller)
+        cache in place, so the next call sends a larger delta but stays correct.
+        """
+        nonlocal rolling_cache_name, rolling_cache_boundary, pending_cache_task
+        if pending_cache_task is None:
+            return
+        task = pending_cache_task
+        pending_cache_task = None
         try:
-            cached_prefix_name = await provider_impl.get_or_create_cached_prefix(
-                system_instruction=system_prompt,
-                tools=tools,
+            new_name = await task
+        except Exception:
+            new_name = None
+        if new_name is not None:
+            rolling_cache_name = new_name
+            rolling_cache_boundary = pending_cache_boundary
+
+    def _schedule_cache(upto: int) -> None:
+        """Start building the cache covering ``messages[:upto]`` in the background
+        so it overlaps the tool execution that follows this turn."""
+        nonlocal pending_cache_task, pending_cache_boundary
+        # ``messages[:upto]`` is snapshotted now, so appends during tool execution
+        # can't change what gets cached. ``ensure_future`` raises if the provider
+        # didn't return a coroutine (e.g. a test double) — caching is a soft
+        # optimisation and must never break a reflect, so swallow and skip.
+        try:
+            task = asyncio.ensure_future(
+                provider_impl.create_incremental_cache(
+                    session_id=cache_session_id, messages=messages[:upto], tools=tools
+                )
             )
         except Exception:
-            # Caching is a soft optimisation; never let a cache-side
-            # error block a reflect.
-            cached_prefix_name = None
+            return
+        pending_cache_boundary = upto
+        pending_cache_task = task
+        cache_tasks.append(task)
 
     # Tracking
     total_tools_called = 0
+    # Whether the model has ever produced a tool call reflect could understand.
+    # Stays False when a transport silently strips tool support (the model then
+    # only ever returns free text) -- that case fails via ReflectToolCallError.
+    saw_tool_call = False
     tool_trace: list[ToolCall] = []
     tool_trace_summary: list[dict[str, Any]] = []
     llm_trace: list[dict[str, Any]] = []
@@ -586,6 +674,116 @@ async def run_reflect_agent(
             f"total={elapsed_ms}ms"
         )
 
+    async def _tracked_llm_call(prompt: str, trace_scope: str, system_prompt: str, completion_cap: int | None) -> str:
+        """One tool-less LLM call with usage/trace accounting folded in."""
+        nonlocal total_input_tokens, total_output_tokens, total_cached_tokens, total_thoughts_tokens
+        llm_start = time.time()
+        response, usage = await llm_config.call(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ],
+            scope="reflect",
+            max_completion_tokens=completion_cap,
+            return_usage=True,
+        )
+        llm_duration = int((time.time() - llm_start) * 1000)
+        total_input_tokens += usage.input_tokens
+        total_output_tokens += usage.output_tokens
+        total_cached_tokens += getattr(usage, "cached_tokens", 0) or 0
+        total_thoughts_tokens += getattr(usage, "thoughts_tokens", 0) or 0
+        llm_trace.append(
+            {
+                "scope": trace_scope,
+                "duration_ms": llm_duration,
+                "input_tokens": usage.input_tokens,
+                "output_tokens": usage.output_tokens,
+            }
+        )
+        return response.strip()
+
+    async def _forced_final_synthesis(iterations_completed: int) -> ReflectAgentResult:
+        """Answer without tools from the accumulated tool results.
+
+        When the accumulated results fit the prompt budget this is one LLM call,
+        exactly as before. When they exceed it, they are SPLIT — not truncated:
+        each budget-sized chunk is compressed in parallel into dated, cited
+        claims, and one reduce call synthesizes the answer from every chunk's
+        claims. The old behavior dropped any over-budget block whole (plus all
+        older ones), which produced confident "no information" answers carrying
+        hundreds of citations the synthesis model never saw (#3122).
+        """
+        nonlocal total_input_tokens, total_output_tokens, total_cached_tokens, total_thoughts_tokens
+        final_system = build_final_system_prompt(bank_profile.get("mission"), llm_output_language, directives)
+        chunks = split_context_history(context_history, max_context_tokens)
+        # Every call below uses the transport-level cap, never the caller's
+        # max_tokens: that is a visible-length target carried as a prompt
+        # directive (#3365), and capping the transport with it would truncate
+        # thinking models mid-word — or, on the map calls, starve the evidence
+        # extraction.
+        if len(chunks) <= 1:
+            prompt = build_final_prompt(
+                query,
+                context_history,
+                bank_profile,
+                context,
+                max_context_tokens=max_context_tokens,
+                max_tokens=max_tokens,
+            )
+            answer = await _tracked_llm_call(prompt, "final", final_system, synthesis_max_completion_tokens)
+        else:
+            log = logger.warning if len(chunks) > _SPLIT_SYNTHESIS_WARN_CHUNKS else logger.info
+            log(
+                f"[REFLECT {reflect_id}] Retrieved data exceeds the context budget; "
+                f"split synthesis over {len(chunks)} chunks."
+            )
+            # Map: each chunk in parallel.
+            claim_sections = await asyncio.gather(
+                *(
+                    _tracked_llm_call(
+                        build_chunk_claims_prompt(query, chunk),
+                        f"final_map_{i}",
+                        CLAIMS_SYSTEM_PROMPT,
+                        synthesis_max_completion_tokens,
+                    )
+                    for i, chunk in enumerate(chunks, 1)
+                )
+            )
+            # Reduce: one synthesis call over every chunk's claims.
+            prompt = build_reduce_prompt(query, list(claim_sections), bank_profile, context, max_tokens=max_tokens)
+            answer = await _tracked_llm_call(prompt, "final", final_system, synthesis_max_completion_tokens)
+
+        if not (answer or "").strip():
+            # Tools were disabled for this call and the model still returned nothing.
+            # There is no answer to hand back, so the run failed -- see #2959 for why
+            # a placeholder here is worse than an exception.
+            raise ReflectNoAnswerError(
+                f"Reflect's final synthesis returned no text after {iterations_completed} iteration(s) "
+                f"over {len(chunks)} context chunk(s)."
+            )
+
+        structured_output = None
+        # ``answer`` is non-empty past the guard above, so only the schema gates this.
+        if response_schema:
+            struct = await _generate_structured_output(answer, response_schema, llm_config, reflect_id, max_tokens)
+            structured_output = struct.structured_output
+            total_input_tokens += struct.input_tokens
+            total_output_tokens += struct.output_tokens
+            total_cached_tokens += struct.cached_tokens
+            total_thoughts_tokens += struct.thoughts_tokens
+
+        _log_completion(answer, iterations_completed, forced=True)
+        return ReflectAgentResult(
+            text=answer,
+            structured_output=structured_output,
+            iterations=iterations_completed,
+            tools_called=total_tools_called,
+            tool_trace=tool_trace,
+            llm_trace=_get_llm_trace(),
+            usage=_get_usage(),
+            directives_applied=directives_applied,
+        )
+
     consecutive_errors = 0
     # When a forced ``search_mental_models`` returns fresh, usable models on a
     # low/mid-budget call, we stop forcing the lower retrieval layers from this
@@ -604,60 +802,7 @@ async def run_reflect_agent(
 
         if is_last:
             # Force text response on last iteration - no tools
-            prompt = build_final_prompt(
-                query, context_history, bank_profile, context, max_context_tokens=max_context_tokens
-            )
-            llm_start = time.time()
-            response, usage = await llm_config.call(
-                messages=[
-                    {
-                        "role": "system",
-                        "content": build_final_system_prompt(
-                            bank_profile.get("mission"), llm_output_language, directives
-                        ),
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                scope="reflect",
-                max_completion_tokens=max_tokens,
-                return_usage=True,
-            )
-            llm_duration = int((time.time() - llm_start) * 1000)
-            total_input_tokens += usage.input_tokens
-            total_output_tokens += usage.output_tokens
-            total_cached_tokens += getattr(usage, "cached_tokens", 0) or 0
-            total_thoughts_tokens += getattr(usage, "thoughts_tokens", 0) or 0
-            llm_trace.append(
-                {
-                    "scope": "final",
-                    "duration_ms": llm_duration,
-                    "input_tokens": usage.input_tokens,
-                    "output_tokens": usage.output_tokens,
-                }
-            )
-            answer = _clean_answer_text(response.strip())
-
-            # Generate structured output if schema provided
-            structured_output = None
-            if response_schema and answer:
-                struct = await _generate_structured_output(answer, response_schema, llm_config, reflect_id)
-                structured_output = struct.structured_output
-                total_input_tokens += struct.input_tokens
-                total_output_tokens += struct.output_tokens
-                total_cached_tokens += struct.cached_tokens
-                total_thoughts_tokens += struct.thoughts_tokens
-
-            _log_completion(answer, iteration + 1, forced=True)
-            return ReflectAgentResult(
-                text=answer,
-                structured_output=structured_output,
-                iterations=iteration + 1,
-                tools_called=total_tools_called,
-                tool_trace=tool_trace,
-                llm_trace=_get_llm_trace(),
-                usage=_get_usage(),
-                directives_applied=directives_applied,
-            )
+            return await _forced_final_synthesis(iteration + 1)
 
         # Proactive context-window guard: if accumulated messages would exceed the
         # configured token budget, bail out early and synthesize from what we have.
@@ -669,59 +814,7 @@ async def run_reflect_agent(
                 f"[REFLECT {reflect_id}] Context budget exceeded on iteration {iteration + 1}: "
                 f"~{estimated_tokens} tokens >= {max_context_tokens} limit. Forcing final synthesis."
             )
-            prompt = build_final_prompt(
-                query, context_history, bank_profile, context, max_context_tokens=max_context_tokens
-            )
-            llm_start = time.time()
-            response, usage = await llm_config.call(
-                messages=[
-                    {
-                        "role": "system",
-                        "content": build_final_system_prompt(
-                            bank_profile.get("mission"), llm_output_language, directives
-                        ),
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                scope="reflect",
-                max_completion_tokens=max_tokens,
-                return_usage=True,
-            )
-            llm_duration = int((time.time() - llm_start) * 1000)
-            total_input_tokens += usage.input_tokens
-            total_output_tokens += usage.output_tokens
-            total_cached_tokens += getattr(usage, "cached_tokens", 0) or 0
-            total_thoughts_tokens += getattr(usage, "thoughts_tokens", 0) or 0
-            llm_trace.append(
-                {
-                    "scope": "final",
-                    "duration_ms": llm_duration,
-                    "input_tokens": usage.input_tokens,
-                    "output_tokens": usage.output_tokens,
-                }
-            )
-            answer = _clean_answer_text(response.strip())
-
-            structured_output = None
-            if response_schema and answer:
-                struct = await _generate_structured_output(answer, response_schema, llm_config, reflect_id)
-                structured_output = struct.structured_output
-                total_input_tokens += struct.input_tokens
-                total_output_tokens += struct.output_tokens
-                total_cached_tokens += struct.cached_tokens
-                total_thoughts_tokens += struct.thoughts_tokens
-
-            _log_completion(answer, iteration + 1, forced=True)
-            return ReflectAgentResult(
-                text=answer,
-                structured_output=structured_output,
-                iterations=iteration + 1,
-                tools_called=total_tools_called,
-                tool_trace=tool_trace,
-                llm_trace=_get_llm_trace(),
-                usage=_get_usage(),
-                directives_applied=directives_applied,
-            )
+            return await _forced_final_synthesis(iteration + 1)
 
         # Call LLM with tools
         llm_start = time.time()
@@ -739,12 +832,35 @@ async def run_reflect_agent(
 
         if stop_forcing_from_iteration is not None and iteration >= stop_forcing_from_iteration:
             # A fresh mental model already short-circuited the forced path.
-            iter_tool_choice: str | dict = "auto"
+            iter_tool_choice = LLM_TOOL_CHOICE_AUTO
         elif iteration < len(forced_sequence):
-            iter_tool_choice = {"type": "function", "function": {"name": forced_sequence[iteration]}}
+            iter_tool_choice = LLMToolChoice.named(forced_sequence[iteration])
         else:
-            iter_tool_choice = "auto"
+            iter_tool_choice = LLM_TOOL_CHOICE_AUTO
 
+        # Will the NEXT turn be an ``auto`` turn (the only kind that references a
+        # cache)? The cache we schedule this turn covers this turn's input and is
+        # used by the next turn, so we only bother building it when the next turn
+        # can use it — skipping the wasted creates between two forced turns.
+        next_iter = iteration + 1
+        if stop_forcing_from_iteration is not None and next_iter >= stop_forcing_from_iteration:
+            next_is_auto = True
+        elif next_iter < len(forced_sequence):
+            next_is_auto = False
+        else:
+            next_is_auto = True
+
+        # Before an ``auto`` turn, adopt the cache that was being built in the
+        # background during the previous turn's tool execution. It covers that
+        # turn's full input, so THIS call reuses the entire prior conversation at
+        # the cached rate and sends only the turns appended since. Forced turns
+        # can't use a cache (Gemini rejects ``cached_content`` + ``tool_config``),
+        # but the cache still advances underneath them, so the first ``auto`` turn
+        # inherits a cache covering all the forced results.
+        if incremental_caching and iter_tool_choice is LLM_TOOL_CHOICE_AUTO:
+            await _resolve_pending_cache()
+
+        call_msg_count = len(messages)
         try:
             ct_kwargs: dict[str, Any] = dict(
                 messages=messages,
@@ -752,15 +868,9 @@ async def run_reflect_agent(
                 scope="reflect_tool_call",
                 tool_choice=iter_tool_choice,
             )
-            # Gemini rejects ``cached_content`` alongside a per-request
-            # ``tool_config`` (forced tool choice): "CachedContent can not be used
-            # with GenerateContent request setting system_instruction, tools or
-            # tool_config." The forced-sequence iterations set tool_config, so only
-            # the ``auto`` iterations can reference the cache; forced iterations send
-            # the prefix inline. The cache (tools + system prompt) is identical
-            # either way, so this just limits *which* iterations are billed cached.
-            if cached_prefix_name is not None and iter_tool_choice == "auto":
-                ct_kwargs["cached_prefix"] = cached_prefix_name
+            if incremental_caching and iter_tool_choice is LLM_TOOL_CHOICE_AUTO and rolling_cache_name is not None:
+                ct_kwargs["cached_prefix"] = rolling_cache_name
+                ct_kwargs["cached_prefix_message_count"] = rolling_cache_boundary
             result = await llm_config.call_with_tools(**ct_kwargs)
             llm_duration = int((time.time() - llm_start) * 1000)
             consecutive_errors = 0
@@ -795,192 +905,37 @@ async def run_reflect_agent(
             # For other errors: retry if no evidence yet (but cap consecutive errors to avoid long hangs)
             elif not has_gathered_evidence and iteration < max_iterations - 1 and consecutive_errors < 2:
                 continue
-            prompt = build_final_prompt(
-                query, context_history, bank_profile, context, max_context_tokens=max_context_tokens
-            )
-            llm_start = time.time()
-            response, usage = await llm_config.call(
-                messages=[
-                    {
-                        "role": "system",
-                        "content": build_final_system_prompt(
-                            bank_profile.get("mission"), llm_output_language, directives
-                        ),
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                scope="reflect",
-                max_completion_tokens=max_tokens,
-                return_usage=True,
-            )
-            llm_duration = int((time.time() - llm_start) * 1000)
-            total_input_tokens += usage.input_tokens
-            total_output_tokens += usage.output_tokens
-            total_cached_tokens += getattr(usage, "cached_tokens", 0) or 0
-            total_thoughts_tokens += getattr(usage, "thoughts_tokens", 0) or 0
-            llm_trace.append(
-                {
-                    "scope": "final",
-                    "duration_ms": llm_duration,
-                    "input_tokens": usage.input_tokens,
-                    "output_tokens": usage.output_tokens,
-                }
-            )
-            answer = _clean_answer_text(response.strip())
+            return await _forced_final_synthesis(iteration + 1)
 
-            # Generate structured output if schema provided
-            structured_output = None
-            if response_schema and answer:
-                struct = await _generate_structured_output(answer, response_schema, llm_config, reflect_id)
-                structured_output = struct.structured_output
-                total_input_tokens += struct.input_tokens
-                total_output_tokens += struct.output_tokens
-                total_cached_tokens += struct.cached_tokens
-                total_thoughts_tokens += struct.thoughts_tokens
-
-            _log_completion(answer, iteration + 1, forced=True)
-            return ReflectAgentResult(
-                text=answer,
-                structured_output=structured_output,
-                iterations=iteration + 1,
-                tools_called=total_tools_called,
-                tool_trace=tool_trace,
-                llm_trace=_get_llm_trace(),
-                usage=_get_usage(),
-                directives_applied=directives_applied,
-            )
-
-        # No tool calls - LLM wants to respond with text
+        # No tool calls this turn.
         if not result.tool_calls:
-            # When directives are present but no evidence has been gathered,
-            # the LLM tends to echo directive content verbatim as its answer.
-            # Fall through to the final-prompt path which doesn't include
-            # directives and handles "no data" gracefully.
-            has_gathered_evidence = (
-                bool(available_memory_ids) or bool(available_mental_model_ids) or bool(available_observation_ids)
-            )
-            directive_leak_risk = directives and not has_gathered_evidence
-            if result.content and not directive_leak_risk:
-                answer = _clean_answer_text(result.content.strip())
-
-                # The call_with_tools call above is intentionally uncapped so the
-                # LLM has headroom to emit tool-call JSON plus any intermediate
-                # reasoning. But when the LLM short-circuits and returns text
-                # directly, that text becomes the user-visible final answer and
-                # must respect max_tokens like the forced-final paths do. If it
-                # overshoots, run one extra capped call to rewrite it within
-                # the cap.
-                if max_tokens is not None and count_cl100k_tokens(answer) > max_tokens:
-                    rewrite_start = time.time()
-                    rewritten, rewrite_usage = await llm_config.call(
-                        messages=[
-                            {
-                                "role": "system",
-                                "content": (
-                                    "Rewrite the user's text so it fits within the requested token "
-                                    "budget. Preserve the key facts and structure; drop lower-priority "
-                                    "detail. Respond with the rewritten text only, no preamble."
-                                ),
-                            },
-                            {
-                                "role": "user",
-                                "content": f"Target budget: {max_tokens} tokens.\n\nText to rewrite:\n{answer}",
-                            },
-                        ],
-                        scope="reflect",
-                        max_completion_tokens=max_tokens,
-                        return_usage=True,
-                    )
-                    total_input_tokens += rewrite_usage.input_tokens
-                    total_output_tokens += rewrite_usage.output_tokens
-                    total_cached_tokens += getattr(rewrite_usage, "cached_tokens", 0) or 0
-                    total_thoughts_tokens += getattr(rewrite_usage, "thoughts_tokens", 0) or 0
-                    llm_trace.append(
-                        {
-                            "scope": "final_rewrite",
-                            "duration_ms": int((time.time() - rewrite_start) * 1000),
-                            "input_tokens": rewrite_usage.input_tokens,
-                            "output_tokens": rewrite_usage.output_tokens,
-                        }
-                    )
-                    answer = _clean_answer_text(rewritten.strip())
-
-                # Generate structured output if schema provided
-                structured_output = None
-                if response_schema and answer:
-                    struct = await _generate_structured_output(answer, response_schema, llm_config, reflect_id)
-                    structured_output = struct.structured_output
-                    total_input_tokens += struct.input_tokens
-                    total_output_tokens += struct.output_tokens
-                    total_cached_tokens += struct.cached_tokens
-                    total_thoughts_tokens += struct.thoughts_tokens
-
-                _log_completion(answer, iteration + 1)
-                return ReflectAgentResult(
-                    text=answer,
-                    structured_output=structured_output,
-                    iterations=iteration + 1,
-                    tools_called=total_tools_called,
-                    tool_trace=tool_trace,
-                    llm_trace=_get_llm_trace(),
-                    usage=_get_usage(),
-                    directives_applied=directives_applied,
+            # Reflect is driven by structured tool calls. A turn with no tool call
+            # means one of two things:
+            #   * the model already gathered evidence via earlier tool calls and is
+            #     now stopping -- fine, synthesize a clean final answer below;
+            #   * the transport can't produce tool calls at all, so it only ever
+            #     returns free text (e.g. litellm strips tools on the Vertex gpt-oss
+            #     MaaS path). In that case ``saw_tool_call`` is still False.
+            # We no longer salvage that free text as the answer -- it can be a raw
+            # done()-payload with sibling id fields leaking into user-visible text.
+            # Fail loudly instead so the caller picks a tool-calling-capable model.
+            if not saw_tool_call:
+                snippet = (result.content or "").strip()
+                if len(snippet) > 500:
+                    snippet = snippet[:500] + "..."
+                detail = f" Response: {snippet!r}" if snippet else " The model returned no content."
+                raise ReflectToolCallError(
+                    f"Reflect requires a tool-calling model, but {llm_config.provider}/{llm_config.model} "
+                    f"produced no usable tool call (the transport may not support function calling)." + detail
                 )
-            # Empty response, force final
-            prompt = build_final_prompt(
-                query, context_history, bank_profile, context, max_context_tokens=max_context_tokens
-            )
-            llm_start = time.time()
-            response, usage = await llm_config.call(
-                messages=[
-                    {
-                        "role": "system",
-                        "content": build_final_system_prompt(
-                            bank_profile.get("mission"), llm_output_language, directives
-                        ),
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                scope="reflect",
-                max_completion_tokens=max_tokens,
-                return_usage=True,
-            )
-            llm_duration = int((time.time() - llm_start) * 1000)
-            total_input_tokens += usage.input_tokens
-            total_output_tokens += usage.output_tokens
-            total_cached_tokens += getattr(usage, "cached_tokens", 0) or 0
-            total_thoughts_tokens += getattr(usage, "thoughts_tokens", 0) or 0
-            llm_trace.append(
-                {
-                    "scope": "final",
-                    "duration_ms": llm_duration,
-                    "input_tokens": usage.input_tokens,
-                    "output_tokens": usage.output_tokens,
-                }
-            )
-            answer = _clean_answer_text(response.strip())
+            # Model tool-called earlier and is now stopping: fall through to a clean
+            # forced final synthesis (tools disabled, prose expected).
+            return await _forced_final_synthesis(iteration + 1)
 
-            # Generate structured output if schema provided
-            structured_output = None
-            if response_schema and answer:
-                struct = await _generate_structured_output(answer, response_schema, llm_config, reflect_id)
-                structured_output = struct.structured_output
-                total_input_tokens += struct.input_tokens
-                total_output_tokens += struct.output_tokens
-                total_cached_tokens += struct.cached_tokens
-                total_thoughts_tokens += struct.thoughts_tokens
-
-            _log_completion(answer, iteration + 1, forced=True)
-            return ReflectAgentResult(
-                text=answer,
-                structured_output=structured_output,
-                iterations=iteration + 1,
-                tools_called=total_tools_called,
-                tool_trace=tool_trace,
-                llm_trace=_get_llm_trace(),
-                usage=_get_usage(),
-                directives_applied=directives_applied,
-            )
+        # The model produced at least one tool call reflect could parse: it can
+        # drive the loop, so a later text-only turn is a legitimate stop, not a
+        # broken transport.
+        saw_tool_call = True
 
         # Check for done tool call (handle various LLM output formats)
         done_call = next((tc for tc in result.tool_calls if _is_done_tool(tc.name)), None)
@@ -1001,7 +956,6 @@ async def run_reflect_agent(
                     {
                         "role": "tool",
                         "tool_call_id": done_call.id,
-                        "name": done_call.name,  # Required by Gemini
                         "content": json.dumps(
                             {
                                 "error": "You must search for information first. Use search_mental_models(), search_observations(), or recall() before providing your final answer."
@@ -1035,6 +989,7 @@ async def run_reflect_agent(
                     directives_applied=directives_applied,
                     llm_config=llm_config,
                     response_schema=response_schema,
+                    max_tokens=max_tokens,
                 )
 
         # Execute other tools in parallel (exclude done tool in all its format variants)
@@ -1066,7 +1021,6 @@ async def run_reflect_agent(
                     {
                         "role": "tool",
                         "tool_call_id": tc.id,
-                        "name": tc.name,
                         "content": json.dumps(
                             {
                                 "error": f"Tool '{_normalize_tool_name(tc.name)}' is not available. Use only the tools provided to you."
@@ -1077,6 +1031,16 @@ async def run_reflect_agent(
                 )
 
             other_tools = allowed_tools
+
+            # Kick off the next-turn cache (covering THIS call's input) so it
+            # builds concurrently with the tool execution below — hiding the
+            # create latency. Only schedule when the next turn is ``auto`` (the
+            # only kind that references it); the next turn's pre-call resolve then
+            # adopts it. Resolve any prior in-flight create first so we don't drop
+            # its handle.
+            if incremental_caching and next_is_auto:
+                await _resolve_pending_cache()
+                _schedule_cache(call_msg_count)
 
             # Execute tools in parallel
             tool_tasks = [
@@ -1160,7 +1124,6 @@ async def run_reflect_agent(
                     {
                         "role": "tool",
                         "tool_call_id": tc.id,
-                        "name": tc.name,  # Required by Gemini
                         "content": json.dumps(output, default=str, ensure_ascii=False),
                     }
                 )
@@ -1200,17 +1163,13 @@ async def run_reflect_agent(
                 # Keep context history for fallback final prompt
                 context_history.append({"tool": tc.name, "input": input_dict, "output": output})
 
-    # Should not reach here
-    answer = "I was unable to formulate a complete answer within the iteration limit."
-    _log_completion(answer, max_iterations, forced=True)
-    return ReflectAgentResult(
-        text=answer,
-        iterations=max_iterations,
-        tools_called=total_tools_called,
-        tool_trace=tool_trace,
-        llm_trace=_get_llm_trace(),
-        usage=_get_usage(),
-        directives_applied=directives_applied,
+    # Unreachable in practice: the last iteration returns the forced synthesis
+    # above, so the loop cannot fall out of the bottom. Kept as a hard failure
+    # rather than a fallback sentence -- if it ever does fire, the run produced
+    # no answer, and inventing one here is exactly the silent overwrite of #2959.
+    raise ReflectNoAnswerError(
+        f"Reflect exhausted its {max_iterations} iteration(s) without producing an answer "
+        f"({total_tools_called} tool call(s) made)."
     )
 
 
@@ -1229,6 +1188,32 @@ def _tool_call_to_dict(tc: "LLMToolCall") -> dict[str, Any]:
     return d
 
 
+def _document_from_rewrite(rewritten: str, previous_answer: str) -> CanonicalDocument:
+    """Read a shortened document back, falling back to the text if it is not JSON.
+
+    The rewrite is asked for as sections, but it is still model output on a path
+    where failing would throw away a whole reflect. A response that does not parse
+    is treated as the prose it looks like and split, which is lossless — so the
+    worst case is the old behaviour rather than a lost answer.
+    """
+    from hindsight_api.engine.llm_wrapper import parse_llm_json
+
+    text = rewritten.strip()
+    try:
+        payload = parse_llm_json(text)
+    except json.JSONDecodeError:
+        payload = None
+    if isinstance(payload, dict) and payload.get("sections"):
+        document = document_from_sections(payload)
+        rendered = render_document(document).strip()
+        if rendered:
+            return CanonicalDocument(markdown=rendered, structure=document)
+    if not text:
+        # An empty rewrite must not empty the answer; keep what was there.
+        return CanonicalDocument(markdown=previous_answer, structure=split_markdown(previous_answer))
+    return CanonicalDocument(markdown=text, structure=split_markdown(text))
+
+
 async def _process_done_tool(
     done_call: "LLMToolCall",
     available_memory_ids: set[str],
@@ -1244,15 +1229,96 @@ async def _process_done_tool(
     directives_applied: list[DirectiveInfo],
     llm_config: "LLMProvider | None" = None,
     response_schema: dict | None = None,
+    max_tokens: int | None = None,
 ) -> ReflectAgentResult:
     """Process the done tool call and return the result."""
     args = done_call.arguments
 
-    # Extract and clean the answer - some LLMs leak structured output into the answer text
-    raw_answer = args.get("answer", "").strip()
-    answer = _clean_done_answer(raw_answer) if raw_answer else ""
+    # ``done`` is a structured tool call: trust its ``answer`` field verbatim.
+    # Sibling id fields (memory_ids, ...) live in their own arguments and are
+    # validated separately below -- they can't bleed into a parsed answer string.
+    #
+    # In document mode the model states the document's structure instead, and the
+    # markdown is rendered from it. The rendered text still flows on as ``text``
+    # so every consumer (structured-output extraction, the length rewrite, the
+    # HTTP response) is unchanged -- what changes is that nobody has to read the
+    # model's markdown back to find out what it meant.
+    document: StructuredDocument | None = None
+    raw_document = args.get("document")
+    if isinstance(raw_document, dict):
+        document = document_from_sections(raw_document)
+        answer = render_document(document).strip()
+    else:
+        answer = args.get("answer", "").strip()
     if not answer:
-        answer = "No answer provided."
+        # The model called ``done`` with nothing in it -- typically its output was
+        # cut off mid-tool-call by the completion cap, so the answer field arrived
+        # empty even though the evidence was gathered. Fail instead of standing in
+        # a placeholder: it is non-empty, so every downstream emptiness guard reads
+        # it as a real answer and stores it over working content (#2959).
+        raise ReflectNoAnswerError(
+            f"Reflect's done tool returned no answer (iteration {iterations}, "
+            f"{total_tools_called} tool call(s) made). The model's output may have been "
+            "truncated before the answer field was written."
+        )
+
+    final_usage = usage
+    if llm_config and max_tokens is not None and count_prompt_tokens(answer) > max_tokens:
+        rewrite_start = time.time()
+        # In document mode the trim is asked for as a document too. Asking for
+        # prose here would put the model back in the business of writing the
+        # markdown that gets stored — on the one path where the answer is long
+        # enough that its structure matters most.
+        if document is not None:
+            rewrite_system = (
+                "Shorten the user's document so it fits within the requested token budget. "
+                "Preserve the key facts and the document's structure; drop lower-priority detail. "
+                'Respond ONLY with JSON: {"sections": [{"heading": "...", "level": 2, '
+                '"blocks": ["...", "..."]}]}. A heading carries no "#", and each block is one '
+                "paragraph, list, table or code fence."
+            )
+            rewrite_user = f"Target budget: {max_tokens} tokens.\n\nDocument to shorten:\n{answer}"
+        else:
+            # The token budget is enforced via the prompt, not a hard provider cap:
+            # on thinking models a hard cap is eaten by reasoning tokens and would
+            # truncate the rewrite mid-word (#3365). Cost is bounded by the separate
+            # reflect_max_completion_tokens config (uncapped by default).
+            rewrite_system = (
+                "Rewrite the user's text so it fits within the requested token budget. "
+                "Preserve the key facts and structure; drop lower-priority detail. "
+                "Respond with the rewritten text only, no preamble."
+            )
+            rewrite_user = f"Target budget: {max_tokens} tokens.\n\nText to rewrite:\n{answer}"
+
+        rewritten, rewrite_usage = await llm_config.call(
+            messages=[
+                {"role": "system", "content": rewrite_system},
+                {"role": "user", "content": rewrite_user},
+            ],
+            scope="reflect",
+            max_completion_tokens=get_config().reflect_max_completion_tokens,
+            return_usage=True,
+        )
+        if document is not None:
+            trimmed = _document_from_rewrite(rewritten, answer)
+            document, answer = trimmed.structure, trimmed.markdown
+        else:
+            answer = rewritten.strip()
+        final_usage = TokenUsageSummary(
+            input_tokens=usage.input_tokens + rewrite_usage.input_tokens,
+            output_tokens=usage.output_tokens + rewrite_usage.output_tokens,
+            total_tokens=usage.total_tokens + rewrite_usage.input_tokens + rewrite_usage.output_tokens,
+            cached_tokens=usage.cached_tokens + (getattr(rewrite_usage, "cached_tokens", 0) or 0),
+            thoughts_tokens=usage.thoughts_tokens + (getattr(rewrite_usage, "thoughts_tokens", 0) or 0),
+        )
+        llm_trace.append(
+            LLMCall(
+                scope="final_rewrite",
+                duration_ms=int((time.time() - rewrite_start) * 1000),
+                input_tokens=rewrite_usage.input_tokens,
+                output_tokens=rewrite_usage.output_tokens,
+            )
+        )
 
     # Validate IDs (only include IDs that were actually retrieved)
     used_memory_ids = [mid for mid in (args.get("memory_ids") or []) if mid in available_memory_ids]
@@ -1261,22 +1327,22 @@ async def _process_done_tool(
 
     # Generate structured output if schema provided
     structured_output = None
-    final_usage = usage
     if response_schema and llm_config and answer:
-        struct = await _generate_structured_output(answer, response_schema, llm_config, reflect_id)
+        struct = await _generate_structured_output(answer, response_schema, llm_config, reflect_id, max_tokens)
         structured_output = struct.structured_output
         # Add structured output tokens to usage
         final_usage = TokenUsageSummary(
-            input_tokens=usage.input_tokens + struct.input_tokens,
-            output_tokens=usage.output_tokens + struct.output_tokens,
-            total_tokens=usage.total_tokens + struct.input_tokens + struct.output_tokens,
-            cached_tokens=usage.cached_tokens + struct.cached_tokens,
-            thoughts_tokens=usage.thoughts_tokens + struct.thoughts_tokens,
+            input_tokens=final_usage.input_tokens + struct.input_tokens,
+            output_tokens=final_usage.output_tokens + struct.output_tokens,
+            total_tokens=final_usage.total_tokens + struct.input_tokens + struct.output_tokens,
+            cached_tokens=final_usage.cached_tokens + struct.cached_tokens,
+            thoughts_tokens=final_usage.thoughts_tokens + struct.thoughts_tokens,
         )
 
     log_completion(answer, iterations)
     return ReflectAgentResult(
         text=answer,
+        document=document,
         structured_output=structured_output,
         iterations=iterations,
         tools_called=total_tools_called,
@@ -1491,6 +1557,17 @@ def _summarize_input(tool_name: str, args: dict[str, Any]) -> str:
         depth = args.get("depth", "chunk")
         return f"(memory_ids=[{len(memory_ids)} ids], depth={depth})"
     elif tool_name == "done":
+        raw_document = args.get("document")
+        if isinstance(raw_document, dict):
+            sections = raw_document.get("sections") or []
+            blocks = sum(len(s.get("blocks") or []) for s in sections if isinstance(s, dict))
+            memory_ids = args.get("memory_ids", [])
+            mental_model_ids = args.get("mental_model_ids", [])
+            observation_ids = args.get("observation_ids", [])
+            return (
+                f"(document={len(sections)} sections/{blocks} blocks, mem={len(memory_ids)}, "
+                f"mm={len(mental_model_ids)}, obs={len(observation_ids)})"
+            )
         answer = args.get("answer", "")
         answer_preview = f"'{answer[:30]}...'" if len(answer) > 30 else f"'{answer}'"
         memory_ids = args.get("memory_ids", [])

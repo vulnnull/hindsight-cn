@@ -20,15 +20,19 @@ import json
 import logging
 import time
 import uuid
+from contextlib import AbstractAsyncContextManager, nullcontext
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 
-from hindsight_api.engine.llm_interface import LLMInterface
+from hindsight_api.engine.llm_interface import LLM_TOOL_CHOICE_AUTO, LLMInterface, LLMToolChoice, LLMToolChoiceMode
 from hindsight_api.engine.llm_trace import LLMResponseUsage, stash_response_usage
+from hindsight_api.engine.providers.llm_debug import dump_request_on_4xx
 from hindsight_api.engine.response_models import LLMToolCall, LLMToolCallResult, TokenUsage
+from hindsight_api.engine.structured_output import strict_json_schema
 from hindsight_api.metrics import get_metrics_collector
+from hindsight_api.worker.stage import set_stage
 
 from .codex_auth import (
     _CODEX_CLIENT_ID,
@@ -122,7 +126,8 @@ class CodexLLM(LLMInterface):
         api_key: str,  # Will be ignored, reads from the Codex auth.json (CODEX_HOME or ~/.codex)
         base_url: str,
         model: str,
-        reasoning_effort: str = "low",
+        reasoning_effort: str | None = None,
+        extra_body: dict[str, Any] | None = None,
         **kwargs: Any,
     ):
         """Initialize Codex LLM provider."""
@@ -170,9 +175,10 @@ class CodexLLM(LLMInterface):
         if self.model.startswith("openai/"):
             self.model = self.model[len("openai/") :]
 
-        # Map reasoning effort to Codex reasoning summary format
-        # Codex supports: "auto", "concise", "detailed"
+        # Reasoning summary controls presentation separately from the backend's
+        # reasoning effort, which is sent unchanged in each request payload.
         self.reasoning_summary = self._map_reasoning_effort(reasoning_effort)
+        self._extra_body = dict(extra_body or {})
 
         # HTTP client for SSE streaming
         self._client = httpx.AsyncClient(timeout=120.0)
@@ -323,12 +329,26 @@ class CodexLLM(LLMInterface):
             except CodexRefreshExpiredError:
                 raise
 
-    def _map_reasoning_effort(self, effort: str) -> str:
+    def _reasoning_payload(self, summary: str) -> dict[str, str]:
+        """Build the ``reasoning`` request object.
+
+        ``effort`` is present only when the operator configured one: an unset
+        HINDSIGHT_API_*_REASONING_EFFORT means the model runs at its own default
+        effort, and Hindsight does not pick one on the operator's behalf.
+        """
+        payload = {"summary": summary}
+        if self.reasoning_effort is not None:
+            payload["effort"] = self.reasoning_effort
+        return payload
+
+    def _map_reasoning_effort(self, effort: str | None) -> str:
         """
         Map standard reasoning effort to Codex reasoning summary format.
 
         Args:
-            effort: Standard effort level ("low", "medium", "high", "xhigh").
+            effort: Standard effort level ("low", "medium", "high", "xhigh"), or None
+                when unconfigured — the summary then stays "auto", the same neutral
+                presentation an unrecognised level gets.
 
         Returns:
             Codex reasoning summary: "concise", "detailed", or "auto".
@@ -339,33 +359,7 @@ class CodexLLM(LLMInterface):
             "high": "detailed",
             "xhigh": "detailed",
         }
-        return mapping.get(effort.lower(), "auto")
-
-    def _normalize_tool_choice(self, tool_choice: str | dict[str, Any]) -> str | dict[str, Any]:
-        """Normalize forced function tool choice for the Codex Responses API.
-
-        Older agent paths may still pass OpenAI chat-completions style named
-        tool choice payloads such as:
-
-            {"type": "function", "function": {"name": "recall"}}
-
-        Codex Responses expects the named function at the top level instead:
-
-            {"type": "function", "name": "recall"}
-        """
-        if not isinstance(tool_choice, dict):
-            return tool_choice
-        if str(tool_choice.get("type") or "").strip() != "function":
-            return tool_choice
-        function_payload = tool_choice.get("function")
-        if isinstance(function_payload, dict):
-            function_name = str(function_payload.get("name") or "").strip()
-            if function_name:
-                return {"type": "function", "name": function_name}
-        function_name = str(tool_choice.get("name") or "").strip()
-        if function_name:
-            return {"type": "function", "name": function_name}
-        return tool_choice
+        return mapping.get(effort.lower(), "auto") if effort else "auto"
 
     async def verify_connection(self) -> None:
         """Verify Codex connection by making a simple test call."""
@@ -400,6 +394,7 @@ class CodexLLM(LLMInterface):
         skip_validation: bool = False,
         strict_schema: bool = False,
         return_usage: bool = False,
+        attempt_context: Callable[[], AbstractAsyncContextManager[None]] | None = None,
     ) -> Any:
         """Make API call to Codex backend with SSE streaming.
 
@@ -447,7 +442,7 @@ class CodexLLM(LLMInterface):
         schema = None
         use_forced_tool = False
         if response_format is not None and hasattr(response_format, "model_json_schema"):
-            schema = response_format.model_json_schema()
+            schema = strict_json_schema(response_format) if strict_schema else response_format.model_json_schema()
             if strict_schema:
                 use_forced_tool = True
             else:
@@ -472,12 +467,13 @@ class CodexLLM(LLMInterface):
             "tools": [],
             "tool_choice": "auto",
             "parallel_tool_calls": True,
-            "reasoning": {"summary": reasoning_summary},
+            "reasoning": self._reasoning_payload(reasoning_summary),
             "store": False,  # Codex uses stateless mode
             "stream": True,  # SSE streaming
             "include": ["reasoning.encrypted_content"],
             "prompt_cache_key": str(uuid.uuid4()),
         }
+        payload.update(self._extra_body)
 
         if use_forced_tool and schema is not None:
             # Single function tool whose parameters ARE the response schema;
@@ -504,18 +500,20 @@ class CodexLLM(LLMInterface):
         attempt = 0
         while True:
             try:
-                response = await self._client.post(url, json=payload, headers=headers, timeout=120.0)
-                response.raise_for_status()
+                async with attempt_context() if attempt_context is not None else nullcontext():
+                    set_stage(f"llm.codex.{scope}.attempt={attempt + 1}/{max_retries + 1}")
+                    response = await self._client.post(url, json=payload, headers=headers, timeout=120.0)
+                    response.raise_for_status()
 
-                # Forced-tool path: read structured output from the function-call
-                # arguments (already a JSON string in a dedicated channel) rather
-                # than from free-form assistant text.
-                if use_forced_tool:
-                    text_content, tool_calls = await self._parse_sse_tool_stream(response)
-                    content = text_content or ""
-                else:
-                    tool_calls = []
-                    content = await self._parse_sse_stream(response)
+                    # Forced-tool path: read structured output from the function-call
+                    # arguments (already a JSON string in a dedicated channel) rather
+                    # than from free-form assistant text.
+                    if use_forced_tool:
+                        text_content, tool_calls = await self._parse_sse_tool_stream(response)
+                        content = text_content or ""
+                    else:
+                        tool_calls = []
+                        content = await self._parse_sse_stream(response)
 
                 # Codex SSE carries no usage block; stash the same char/4 estimate
                 # the success path traces so a later parse/validate failure records
@@ -597,7 +595,7 @@ class CodexLLM(LLMInterface):
 
                 # Record trace span
                 try:
-                    from hindsight_api.tracing import get_span_recorder
+                    from hindsight_api.tracing import _serialize_for_span, get_span_recorder
 
                     # Estimate tokens for tracing
                     estimated_input = sum(len(m.get("content", "")) for m in messages) // 4
@@ -608,15 +606,17 @@ class CodexLLM(LLMInterface):
                         model=self.model,
                         scope=scope,
                         messages=messages,
-                        response_content=result if isinstance(result, str) else result.model_dump_json(),
+                        response_content=_serialize_for_span(result),
                         input_tokens=estimated_input,
                         output_tokens=estimated_output,
                         duration=duration,
                         finish_reason=None,
                         error=None,
                     )
-                except Exception:
-                    pass  # logging failure must never affect the operation
+                except Exception as span_error:
+                    # Tracing must remain best-effort, but expose instrumentation
+                    # bugs that would otherwise silently erase spans (#3025).
+                    logger.debug("Codex span recording failed: %s", span_error, exc_info=True)
 
                 if return_usage:
                     # Codex doesn't provide token counts, estimate based on content
@@ -671,6 +671,9 @@ class CodexLLM(LLMInterface):
                         "Codex authentication failed. Your OAuth token may have expired.\n"
                         "Run 'codex auth login' to re-authenticate."
                     ) from e
+
+                # Diagnostic dump (opt-in) of the exact request behind any 4xx.
+                dump_request_on_4xx(scope=scope, provider=self.provider, model=self.model, err=e, request=payload)
 
                 # Log the actual error message from the API
                 error_detail = e.response.text[:500] if hasattr(e.response, "text") else str(e)
@@ -767,7 +770,8 @@ class CodexLLM(LLMInterface):
         max_retries: int = 5,
         initial_backoff: float = 1.0,
         max_backoff: float = 30.0,
-        tool_choice: str | dict[str, Any] = "auto",
+        tool_choice: LLMToolChoice = LLM_TOOL_CHOICE_AUTO,
+        attempt_context: Callable[[], AbstractAsyncContextManager[None]] | None = None,
     ) -> LLMToolCallResult:
         """
         Make API call with tool calling support.
@@ -784,7 +788,7 @@ class CodexLLM(LLMInterface):
             max_retries: Maximum retry attempts.
             initial_backoff: Initial backoff time in seconds.
             max_backoff: Maximum backoff time in seconds.
-            tool_choice: How to choose tools - "auto", "none", "required", or a specific function.
+            tool_choice: Canonical tool-selection policy.
 
         Returns:
             LLMToolCallResult with content and/or tool_calls.
@@ -846,14 +850,19 @@ class CodexLLM(LLMInterface):
             "instructions": system_instruction,
             "input": user_messages,
             "tools": codex_tools,
-            "tool_choice": self._normalize_tool_choice(tool_choice),
+            "tool_choice": (
+                {"type": "function", "name": tool_choice.selected_function_name}
+                if tool_choice.mode is LLMToolChoiceMode.NAMED
+                else tool_choice.mode.value
+            ),
             "parallel_tool_calls": True,
-            "reasoning": {"summary": reasoning_summary},
+            "reasoning": self._reasoning_payload(reasoning_summary),
             "store": False,
             "stream": True,
             "include": ["reasoning.encrypted_content"],
             "prompt_cache_key": str(uuid.uuid4()),
         }
+        payload.update(self._extra_body)
 
         headers = self._build_request_headers()
 
@@ -868,10 +877,28 @@ class CodexLLM(LLMInterface):
         # surfaces immediately to keep behavior identical for callers.
         attempted_refresh_after_auth_error = False
 
-        try:
-            response = await self._client.post(url, json=payload, headers=headers, timeout=120.0)
+        async def _request_attempt(attempt: int) -> tuple[str | None, list[LLMToolCall]]:
+            async with attempt_context() if attempt_context is not None else nullcontext():
+                set_stage(f"llm.codex.tools.attempt={attempt}/2")
+                response = await self._client.post(url, json=payload, headers=headers, timeout=120.0)
+                if response.status_code != 200:
+                    # 401/403 on the first attempt may still be recovered by the
+                    # reactive token refresh below — don't log those as errors yet.
+                    detail = f"Codex API error {response.status_code}: {response.text[:500]}"
+                    if response.status_code in (401, 403) and not attempted_refresh_after_auth_error:
+                        logger.warning(f"{detail} (will attempt token refresh)")
+                    else:
+                        logger.error(detail)
+                response.raise_for_status()
+                return await self._parse_sse_tool_stream(response)
 
-            if response.status_code in (401, 403) and not attempted_refresh_after_auth_error:
+        try:
+            try:
+                content, tool_calls = await _request_attempt(1)
+            except httpx.HTTPStatusError as auth_error:
+                response = auth_error.response
+                if response.status_code not in (401, 403) or attempted_refresh_after_auth_error:
+                    raise
                 attempted_refresh_after_auth_error = True
                 try:
                     await self._refresh_oauth_tokens(
@@ -880,7 +907,7 @@ class CodexLLM(LLMInterface):
                     )
                     headers["Authorization"] = f"Bearer {self.access_token}"
                     logger.info("Codex auth refreshed after auth error; retrying tool-call request once")
-                    response = await self._client.post(url, json=payload, headers=headers, timeout=120.0)
+                    content, tool_calls = await _request_attempt(2)
                 except CodexRefreshExpiredError as refresh_err:
                     logger.error(
                         "Codex refresh_token is permanently invalid; cannot recover from auth error in tool-call path"
@@ -893,16 +920,7 @@ class CodexLLM(LLMInterface):
                     logger.error(
                         f"Codex token refresh attempt failed in tool-call path: {type(refresh_err).__name__}: {refresh_err}"
                     )
-                    # Fall through to the normal error path below.
-
-            # Log response details on error
-            if response.status_code != 200:
-                logger.error(f"Codex API error {response.status_code}: {response.text[:500]}")
-
-            response.raise_for_status()
-
-            # Parse SSE for tool calls and content
-            content, tool_calls = await self._parse_sse_tool_stream(response)
+                    raise auth_error
 
             duration = time.time() - start_time
             metrics = get_metrics_collector()
@@ -952,6 +970,8 @@ class CodexLLM(LLMInterface):
             )
 
         except Exception as e:
+            # Diagnostic dump (opt-in) of the exact request behind any 4xx.
+            dump_request_on_4xx(scope=scope, provider=self.provider, model=self.model, err=e, request=payload)
             logger.error(f"Codex tool call error: {e}")
             raise
 
@@ -1021,3 +1041,6 @@ class CodexLLM(LLMInterface):
         """Clean up HTTP clients."""
         await self._client.aclose()
         self._auth_manager.close()
+
+    def supports_attempt_scoped_concurrency(self) -> bool:
+        return True

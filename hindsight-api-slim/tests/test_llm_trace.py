@@ -10,6 +10,7 @@ success/error paths, and the HTTP read API (list / stats / tokens).
 import asyncio
 import json
 import logging
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -22,6 +23,7 @@ from pydantic import BaseModel, ValidationError
 from hindsight_api import tracing
 from hindsight_api.api import create_app
 from hindsight_api.engine import llm_trace
+from hindsight_api.engine.db.base import DatabaseBackend
 from hindsight_api.engine.llm_trace import (
     LLMRequestRecord,
     LLMTraceContext,
@@ -92,6 +94,17 @@ def test_recorder_scope_allowlist():
     r = _recorder(enabled=True, allowed=["reflect"])
     assert r.is_enabled("reflect") is True
     assert r.is_enabled("retain_extract_facts") is False
+
+
+def test_recorder_disabled_on_oracle_backend(monkeypatch):
+    # llm_requests is a PostgreSQL-only table, so on Oracle the recorder must
+    # report disabled and write nothing — otherwise every LLM call fires an
+    # INSERT that fails with ORA-00903 and spams the error log.
+    monkeypatch.setattr("hindsight_api.engine.schema._is_oracle", lambda: True)
+    rec = _CapturingRecorder()
+    assert rec.is_enabled("memory") is False
+    rec.record_llm_call(provider="mock", model="mock", scope="memory", messages=[], duration=0.1)
+    assert rec.records == []
 
 
 # ── recorder: record_llm_call builds correct records ──────────────────────────
@@ -216,6 +229,9 @@ class _StashThenRaiseProvider:
     def __init__(self, usage: llm_trace.LLMResponseUsage | None, exc: Exception):
         self._usage = usage
         self._exc = exc
+
+    def supports_attempt_scoped_concurrency(self) -> bool:
+        return False
 
     async def call(self, **_kwargs):
         if self._usage is not None:
@@ -520,6 +536,24 @@ async def test_list_empty(trace_api_client, bank_id):
 
 
 @pytest.mark.asyncio
+async def test_llm_requests_read_returns_empty_on_oracle(trace_api_client, bank_id, monkeypatch):
+    # llm_requests is PostgreSQL-only, so the list and stats read paths must
+    # return an empty result on Oracle rather than querying a table that does
+    # not exist there (ORA-00942). The bank still resolves (no 404).
+    await trace_api_client.put(f"/v1/default/banks/{bank_id}", json={"name": "Trace Bank"})
+    monkeypatch.setattr("hindsight_api.engine.schema._is_oracle", lambda: True)
+
+    listing = await trace_api_client.get(f"/v1/default/banks/{bank_id}/llm-requests")
+    assert listing.status_code == 200
+    assert listing.json()["items"] == []
+    assert listing.json()["total"] == 0
+
+    stats = await trace_api_client.get(f"/v1/default/banks/{bank_id}/llm-requests/stats")
+    assert stats.status_code == 200
+    assert stats.json()["buckets"] == []
+
+
+@pytest.mark.asyncio
 async def test_retain_creates_trace_rows_with_tokens(trace_api_client, bank_id):
     await trace_api_client.put(f"/v1/default/banks/{bank_id}", json={"name": "Trace Bank"})
     response = await trace_api_client.post(
@@ -721,6 +755,21 @@ async def test_stats_endpoint_includes_tokens(trace_api_client, bank_id):
 
 @pytest.mark.asyncio
 async def test_disabled_writes_no_rows(memory):
+    # Recorders live in a process-global registry, and this test can only prove
+    # anything about the one it disables. A recorder leaked by an earlier test is
+    # still enabled and still writing to the shared table, so it records this
+    # bank's retain and the count below comes back non-zero — with nothing in the
+    # failure naming the real cause (#2229). Assert the registry is clean first,
+    # so a leak reports itself instead of arriving as `assert 4 == 0`.
+    from hindsight_api.engine.llm_trace import LLMTraceRecorder
+    from hindsight_api.tracing import get_span_recorder
+
+    registered = [r for r in get_span_recorder()._recorders if isinstance(r, LLMTraceRecorder)]
+    assert registered == [memory._llm_recorder], (
+        f"{len(registered)} LLM trace recorder(s) registered, expected only this engine's — "
+        "an earlier test leaked one into the global registry (#2229)"
+    )
+
     memory._llm_recorder._enabled = False
 
     app = create_app(memory, initialize_memory=False)
@@ -802,127 +851,92 @@ async def test_real_llm_retain_and_consolidation_traced(memory_real_llm):
         )
 
 
-# ── recorder: shutdown / pre-init race conditions ─────────────────────────────
+# ── recorder: lifecycle windows (pre-init / shutdown) ─────────────────────────
 
 
-class _UninitializedBackend:
-    """Mimics a DB backend before initialize() or after shutdown(): the object
-    exists but the internal asyncpg pool is None, so acquiring raises."""
+class _Backend(DatabaseBackend):
+    """Minimal DatabaseBackend whose readiness is set per-test.
 
-    _pool: object | None = None
+    A real subclass (not a duck type) because the recorder gates on the
+    ``DatabaseBackend.is_ready`` contract, not on an attribute name.
+    """
 
+    def __init__(self, is_ready: bool = True, error: Exception | None = None):
+        self._is_ready = is_ready
+        self._error = error or RuntimeError("boom")
+
+    @property
+    def is_ready(self) -> bool:
+        return self._is_ready
+
+    async def initialize(self, dsn: str, **kwargs) -> None: ...
+
+    async def shutdown(self) -> None:
+        self._is_ready = False
+
+    def get_pool(self):
+        raise self._error
+
+    @asynccontextmanager
     async def acquire(self):
-        raise RuntimeError("PostgreSQLBackend is not initialized. Call initialize() first.")
+        raise self._error
+        yield  # pragma: no cover
+
+    @asynccontextmanager
+    async def transaction(self):
+        raise self._error
+        yield  # pragma: no cover
 
 
-class _ClosingBackend:
-    """Mimics a backend whose pool is mid-shutdown: the pool object exists but
-    asyncpg raises InterfaceError('pool is closing') on acquire."""
-
-    _pool = object()  # not None, passes the getattr guard
-
-    async def acquire(self):
-        raise Exception("pool is closing")
-
-
-class _UnexpectedErrorBackend:
-    """Mimics a backend with an unexpected (non-shutdown) error."""
-
-    _pool = object()
-
-    async def acquire(self):
-        raise RuntimeError("connection refused: some other error")
-
-
-def _make_record(scope: str = "verification") -> LLMRequestRecord:
+def _lifecycle_record(scope: str = "verification") -> LLMRequestRecord:
+    now = datetime.now(timezone.utc)
     return LLMRequestRecord(
         provider="test",
         model="test-model",
         scope=scope,
         status="success",
-        started_at=datetime.now(timezone.utc),
-        ended_at=datetime.now(timezone.utc),
+        started_at=now,
+        ended_at=now,
     )
 
 
-@pytest.mark.asyncio
-async def test_safe_write_pool_none_skips_quietly(caplog):
-    """pool_getter returning None should skip at debug, never warn."""
-    recorder = LLMTraceRecorder(
-        pool_getter=lambda: None,
+def _lifecycle_recorder(backend) -> LLMTraceRecorder:
+    return LLMTraceRecorder(
+        pool_getter=lambda: backend,
         schema_getter=lambda: "public",
         enabled=True,
         allowed_scopes=[],
     )
-    with caplog.at_level(logging.DEBUG, logger="hindsight_api.engine.llm_trace"):
-        await recorder._safe_write(_make_record())
-    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
-    assert not warnings, f"expected no warning for pool=None, got: {[r.message for r in warnings]}"
+
+
+def _warnings(caplog) -> list[str]:
+    return [r.message for r in caplog.records if r.levelno >= logging.WARNING]
 
 
 @pytest.mark.asyncio
-async def test_safe_write_backend_pool_none_skips_quietly(caplog):
-    """Backend exists but its internal _pool is None (post-shutdown) — should
-    skip at debug via the getattr guard, never warn."""
-    recorder = LLMTraceRecorder(
-        pool_getter=lambda: _UninitializedBackend(),
-        schema_getter=lambda: "public",
-        enabled=True,
-        allowed_scopes=[],
-    )
+async def test_write_skipped_while_backend_not_ready(caplog):
+    """Pre-init and post-shutdown the backend reports not-ready; the write is
+    skipped without ever acquiring, so no error can be raised to warn about."""
+    backend = _Backend(is_ready=False, error=AssertionError("acquire must not be called"))
     with caplog.at_level(logging.DEBUG, logger="hindsight_api.engine.llm_trace"):
-        await recorder._safe_write(_make_record())
-    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
-    assert not warnings, f"expected no warning for backend._pool=None, got: {[r.message for r in warnings]}"
-    assert any("not initialized" in r.message or "pool not" in r.message for r in caplog.records)
+        await _lifecycle_recorder(backend)._safe_write(_lifecycle_record())
+    assert not _warnings(caplog)
 
 
 @pytest.mark.asyncio
-async def test_safe_write_pool_closing_downgrades_to_debug(caplog):
-    """asyncpg InterfaceError('pool is closing') during acquire should be
-    downgraded to debug, not warned."""
-    recorder = LLMTraceRecorder(
-        pool_getter=lambda: _ClosingBackend(),
-        schema_getter=lambda: "public",
-        enabled=True,
-        allowed_scopes=[],
-    )
+async def test_attach_memory_ids_skipped_while_backend_not_ready(caplog):
+    backend = _Backend(is_ready=False, error=AssertionError("acquire must not be called"))
     with caplog.at_level(logging.DEBUG, logger="hindsight_api.engine.llm_trace"):
-        await recorder._safe_write(_make_record())
-    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
-    assert not warnings, f"expected no warning for pool-is-closing, got: {[r.message for r in warnings]}"
-    assert any("shutdown race" in r.message for r in caplog.records)
-
-
-@pytest.mark.asyncio
-async def test_safe_write_unexpected_error_still_warns(caplog):
-    """Non-shutdown errors should still produce a WARNING."""
-    recorder = LLMTraceRecorder(
-        pool_getter=lambda: _UnexpectedErrorBackend(),
-        schema_getter=lambda: "public",
-        enabled=True,
-        allowed_scopes=[],
-    )
-    with caplog.at_level(logging.DEBUG, logger="hindsight_api.engine.llm_trace"):
-        await recorder._safe_write(_make_record())
-    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
-    assert len(warnings) == 1, f"expected exactly 1 warning for unexpected error, got: {[r.message for r in warnings]}"
-
-
-@pytest.mark.asyncio
-async def test_attach_memory_ids_pool_none_skips_quietly(caplog):
-    """_attach_memory_ids with _pool=None should skip at debug, never warn."""
-    recorder = LLMTraceRecorder(
-        pool_getter=lambda: _UninitializedBackend(),
-        schema_getter=lambda: "public",
-        enabled=True,
-        allowed_scopes=[],
-    )
-    with caplog.at_level(logging.DEBUG, logger="hindsight_api.engine.llm_trace"):
-        await recorder._attach_memory_ids(
-            bank_id="test-bank",
-            trace_id="test-trace",
-            patch={"memory_ids": ["m1"]},
+        await _lifecycle_recorder(backend)._attach_memory_ids(
+            bank_id="bank", trace_id="trace", patch={"memory_ids": ["m1"]}
         )
-    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
-    assert not warnings, f"expected no warning for attach with _pool=None, got: {[r.message for r in warnings]}"
+    assert not _warnings(caplog)
+
+
+@pytest.mark.asyncio
+async def test_write_failure_on_ready_backend_still_warns(caplog):
+    """A ready backend that fails is a real problem — it must stay a WARNING."""
+    recorder = _lifecycle_recorder(_Backend(is_ready=True, error=RuntimeError("connection refused")))
+    with caplog.at_level(logging.DEBUG, logger="hindsight_api.engine.llm_trace"):
+        await recorder._safe_write(_lifecycle_record())
+    assert len(_warnings(caplog)) == 1

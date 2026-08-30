@@ -14,10 +14,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from typing import IO
+from typing import IO
 
 logger = logging.getLogger(__name__)
 
@@ -42,37 +39,28 @@ class IdleTimeoutMiddleware:
         self.app = app
         self.idle_timeout = idle_timeout
         self.last_activity = time.time()
-        self._checker_task = None
 
     async def __call__(self, scope, receive, send):
-        # Update activity timestamp on each request
         self.last_activity = time.time()
         await self.app(scope, receive, send)
 
-    def start_idle_checker(self):
-        """Start the background task that checks for idle timeout."""
-        self._checker_task = asyncio.create_task(self._check_idle())
-
     async def _check_idle(self):
-        """Background task that exits the process after idle timeout."""
-        # If idle_timeout is 0, don't auto-exit
+        """Exit the daemon after the configured period without requests."""
         if self.idle_timeout <= 0:
             return
 
         while True:
-            await asyncio.sleep(30)  # Check every 30 seconds
+            await asyncio.sleep(30)
             idle_time = time.time() - self.last_activity
             if idle_time > self.idle_timeout:
                 logger.info(f"Idle timeout reached ({self.idle_timeout}s), shutting down daemon")
-                # Give a moment for any in-flight requests
                 await asyncio.sleep(1)
-                # Send SIGTERM to ourselves to trigger graceful shutdown
                 import signal
 
                 os.kill(os.getpid(), signal.SIGTERM)
 
 
-def _detach_popen_kwargs(log_handle: "IO[bytes]") -> dict:
+def _detach_popen_kwargs(log_handle: IO[bytes]) -> dict:
     """Cross-platform kwargs to spawn a subprocess detached from the caller.
 
     On POSIX, ``start_new_session=True`` calls ``setsid(2)`` so the child
@@ -169,17 +157,3 @@ def daemonize():
         subprocess.Popen(cmd, env=env, **_detach_popen_kwargs(log_handle))
 
     sys.exit(0)
-
-
-def check_daemon_running(port: int = DEFAULT_DAEMON_PORT) -> bool:
-    """Check if a daemon is running and responsive on the given port."""
-    import socket
-
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(1)
-        result = sock.connect_ex(("127.0.0.1", port))
-        sock.close()
-        return result == 0
-    except Exception:
-        return False

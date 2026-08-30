@@ -9,7 +9,10 @@ fn format_error_message(err: &anyhow::Error, api_url: &str) -> String {
     let err_str = err.to_string();
 
     // Connection refused
-    if err_str.contains("Connection refused") || err_str.contains("tcp connect error") || err_str.contains("error sending request") {
+    if err_str.contains("Connection refused")
+        || err_str.contains("tcp connect error")
+        || err_str.contains("error sending request")
+    {
         return format!(
             "{} {}\n\n{}\n  {}\n\n{}\n  • {}\n  • {}\n  • {}\n\n{}\n  {}",
             "✗".bright_red().bold(),
@@ -18,10 +21,29 @@ fn format_error_message(err: &anyhow::Error, api_url: &str) -> String {
             api_url.bright_white(),
             "Possible causes:".bright_yellow(),
             "The Hindsight API server is not running".bright_white(),
-            format!("The server is running on a different address than {}", api_url).bright_white(),
+            format!(
+                "The server is running on a different address than {}",
+                api_url
+            )
+            .bright_white(),
             "A firewall is blocking the connection".bright_white(),
             "Try:".bright_green(),
             "Start the Hindsight API server and ensure it's accessible".bright_white()
+        );
+    }
+
+    // Preserve validation details before looking for timeout keywords. A fast
+    // HTTP 400 may legitimately explain that a requested mode would time out;
+    // classifying that body as a transport timeout hides the server's fix.
+    if err_str.contains("400 Bad Request") || err_str.contains("(400)") {
+        return format!(
+            "{} {}\n\n{}\n  {}\n\n{}\n  {}",
+            "✗".bright_red().bold(),
+            "Request rejected (400)".bright_red().bold(),
+            "API URL:".bright_yellow(),
+            api_url.bright_white(),
+            "Server response:".bright_yellow(),
+            err_str.bright_white()
         );
     }
 
@@ -68,7 +90,8 @@ fn format_error_message(err: &anyhow::Error, api_url: &str) -> String {
                 "API URL:".bright_yellow(),
                 api_url.bright_white(),
                 "This feature has been disabled on the server.".bright_yellow(),
-                "To enable, set HINDSIGHT_API_ENABLE_BANK_CONFIG_API=true on the API server".bright_white(),
+                "To enable, set HINDSIGHT_API_ENABLE_BANK_CONFIG_API=true on the API server"
+                    .bright_white(),
                 "Note:".bright_cyan(),
                 "This allows per-bank LLM configuration overrides via API".bright_white()
             );
@@ -158,7 +181,11 @@ fn format_error_message(err: &anyhow::Error, api_url: &str) -> String {
         let response_hint = if err_str.contains("Response was:") {
             let parts: Vec<&str> = err_str.split("Response was:").collect();
             if parts.len() > 1 {
-                format!("\n{}\n{}", "Actual response:".bright_yellow(), parts[1].trim().bright_white())
+                format!(
+                    "\n{}\n{}",
+                    "Actual response:".bright_yellow(),
+                    parts[1].trim().bright_white()
+                )
             } else {
                 String::new()
             }
@@ -205,11 +232,32 @@ pub fn print_config_help() {
     println!("  {}", "hindsight configure".bright_white());
     println!();
     println!("  Or set it directly:");
-    println!("  {}", "hindsight configure --api-url http://your-api:8888".bright_white());
+    println!(
+        "  {}",
+        "hindsight configure --api-url http://your-api:8888".bright_white()
+    );
     println!();
     println!("  {}", "Configuration priority:".bright_yellow());
     println!("    1. Environment variable (HINDSIGHT_API_URL) - highest priority");
     println!("    2. Config file (~/.hindsight/config)");
     println!("    3. Default (http://localhost:8888)");
     println!();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_error_message;
+
+    #[test]
+    fn http_400_body_that_mentions_timeout_is_not_reported_as_a_timeout() {
+        let error = anyhow::anyhow!(
+            "API request failed (400 Bad Request): \
+             {{\"detail\":\"Batch operations will timeout in synchronous mode. Please set async=true.\"}}"
+        );
+
+        let message = format_error_message(&error, "http://localhost:8888");
+
+        assert!(message.contains("Batch operations will timeout in synchronous mode"));
+        assert!(!message.contains("Request timed out"));
+    }
 }

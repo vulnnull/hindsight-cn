@@ -89,9 +89,10 @@ Hindsight automatically identifies and tracks **entities** — the people, organ
 
 ### Entity Resolution
 
-The same entity mentioned different ways gets unified:
+The same entity mentioned different ways gets unified through **fuzzy name matching**, reinforced by co-occurrence and temporal proximity:
 - "Alice" + "Alice Chen" + "Alice C." → one person
-- "Bob" + "Robert Chen" → one person (nickname resolution)
+
+Because resolution keys off name similarity, close variants merge automatically. Names that do not resemble each other (a nickname and an unrelated formal name, for example) are not unified on the name alone, though shared co-occurring entities can still link them.
 
 **Why it matters:** You can ask "What do I know about Alice?" and get everything, even if she was mentioned as "Alice Chen" in some conversations.
 
@@ -211,6 +212,27 @@ For finer control, you can also change the **extraction mode**:
 | `custom` | When you want to write your own extraction rules entirely |
 
 Set `retain_mission` and `retain_extraction_mode` via the [bank config API](/developer/api/memory-banks#retain-configuration) or the [`HINDSIGHT_API_RETAIN_MISSION`](/developer/configuration#retain) environment variable.
+
+### When a mission excludes everything in a document
+
+A mission narrows what becomes a memory — and content that produces no facts produces no memories at all. The document itself is still stored, but `recall` and `reflect` search memories, so a document with zero memories cannot be found by either. Tightening a mission therefore trades away retrieval of the raw source, not just fact creation.
+
+This is a normal outcome, not an error: the retain succeeds and the operation is reported as completed. Two signals tell you it happened:
+
+| Where | What to look for |
+|-------|------------------|
+| [`retain.completed` webhook](/developer/api/webhooks#retaincompleted) | `data.memory_unit_count: 0` |
+| [Metrics](/developer/monitoring#retain-metrics) | `hindsight.retain.documents.total{outcome="no_facts"}` |
+
+You can also audit after the fact: `GET /documents` returns `memory_unit_count` per document, so filtering for `0` lists everything currently unreachable.
+
+Extraction is not fully deterministic — a borderline document can yield facts on one run and none on the next. Treat a zero as "this document needs another pass" rather than as a permanent verdict.
+
+To recover a document, widen the mission and reprocess it — the stored text is re-extracted, and no re-upload is needed:
+
+```
+POST /v1/default/banks/{bank_id}/documents/{document_id}/reprocess
+```
 
 ---
 

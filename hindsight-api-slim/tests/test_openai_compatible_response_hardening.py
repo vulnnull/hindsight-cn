@@ -1,3 +1,7 @@
+import asyncio
+from collections.abc import Mapping
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -7,7 +11,9 @@ from pydantic import BaseModel
 from hindsight_api.engine.providers.openai_compatible_llm import (
     OpenAICompatibleLLM,
     ProviderResponseError,
+    _rate_limit_retry_at,
 )
+from hindsight_api.worker.stage import StageHolder, bind_holder, set_stage
 
 
 class SimpleJsonResponse(BaseModel):
@@ -35,6 +41,41 @@ def _response(*, content: str | None = '{"ok": true}', choices=None, error=None)
     )
     response.choices = [choice]
     return response
+
+
+@pytest.mark.asyncio
+async def test_attempt_stage_is_published_only_after_permits_are_acquired():
+    llm = _llm()
+    holder = StageHolder()
+    waiting_for_permit = asyncio.Event()
+    release_permit = asyncio.Event()
+
+    @asynccontextmanager
+    async def blocked_attempt_context():
+        waiting_for_permit.set()
+        await release_permit.wait()
+        yield
+
+    async def create(**_kwargs):
+        assert holder.stage == "llm.openai.memory.attempt=1/1"
+        return _response(content="ok")
+
+    llm._client.chat.completions.create = AsyncMock(side_effect=create)
+
+    async def invoke():
+        bind_holder(holder)
+        set_stage("llm.openai.memory.queued")
+        return await llm.call(
+            messages=[{"role": "user", "content": "hello"}],
+            max_retries=0,
+            attempt_context=blocked_attempt_context,
+        )
+
+    task = asyncio.create_task(invoke())
+    await asyncio.wait_for(waiting_for_permit.wait(), timeout=1)
+    assert holder.stage == "llm.openai.memory.queued"
+    release_permit.set()
+    assert await task == "ok"
 
 
 @pytest.mark.asyncio
@@ -158,3 +199,39 @@ async def test_missing_choices_are_retryable_provider_response_errors():
     assert result.ok is True
     assert create.await_count == 2
     sleep_mock.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    ("headers", "message", "expected_seconds"),
+    [
+        # OpenAI's Go-style duration headers: a single component ("8.64s")
+        # and a compound one ("6m0s") that a naive parser reads as 0s.
+        ({"x-ratelimit-reset-tokens": "8.64s"}, "Rate limit reached", 8.64),
+        ({"x-ratelimit-reset-requests": "6m0s"}, "Rate limit reached", 360),
+        # Requests and tokens can reset at different times; wait for the max.
+        (
+            {"x-ratelimit-reset-requests": "6m0s", "x-ratelimit-reset-tokens": "233ms"},
+            "Rate limit reached",
+            360,
+        ),
+        # A full or nearly-full header budget must not mask a longer quota
+        # window reported in the response body.
+        ({"x-ratelimit-reset-tokens": "0s"}, "Rate limit reached; try again in 5 hours", 5 * 3600),
+        ({"x-ratelimit-reset-tokens": "233ms"}, "Rate limit reached; try again in 5 hours", 5 * 3600),
+        # Retry-After is an explicit server instruction and must not be
+        # extended by a conflicting free-text body hint.
+        (
+            {"retry-after": "1", "x-ratelimit-reset-tokens": "233ms"},
+            "Rate limit reached; try again in 5 hours",
+            1,
+        ),
+    ],
+)
+def test_rate_limit_retry_at_uses_latest_header_or_body_reset(
+    headers: Mapping[str, str], message: str, expected_seconds: float
+) -> None:
+    error = SimpleNamespace(body={"message": message}, response=SimpleNamespace(headers=headers))
+    retry_at = _rate_limit_retry_at(error)
+    assert retry_at is not None
+    wait = (retry_at - datetime.now(UTC)).total_seconds()
+    assert expected_seconds - 1 < wait <= expected_seconds + 1

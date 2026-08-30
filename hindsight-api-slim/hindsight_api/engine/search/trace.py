@@ -230,25 +230,3 @@ class SearchTrace(BaseModel):
             if visit.node_id == node_id:
                 return visit
         return None
-
-    def get_search_path_to_node(self, node_id: str) -> list[NodeVisit]:
-        """Get the path from entry point to a specific node."""
-        path = []
-        current_visit = self.get_visit_by_node_id(node_id)
-
-        while current_visit:
-            path.insert(0, current_visit)
-            if current_visit.parent_node_id:
-                current_visit = self.get_visit_by_node_id(current_visit.parent_node_id)
-            else:
-                break
-
-        return path
-
-    def get_nodes_by_link_type(self, link_type: Literal["temporal", "semantic", "entity"]) -> list[NodeVisit]:
-        """Get all nodes reached via a specific link type."""
-        return [v for v in self.visits if v.link_type == link_type]
-
-    def get_entry_point_nodes(self) -> list[NodeVisit]:
-        """Get all entry point visits."""
-        return [v for v in self.visits if v.is_entry_point]

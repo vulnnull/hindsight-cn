@@ -66,11 +66,6 @@ def color_end(text: str) -> str:
     return color(text, 1.0)
 
 
-def color_mid(text: str) -> str:
-    """Color text with gradient middle color."""
-    return color(text, 0.5)
-
-
 def dim(text: str) -> str:
     """Dim/gray text."""
     return f"\033[38;2;128;128;128m{text}\033[0m"

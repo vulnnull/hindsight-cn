@@ -49,6 +49,7 @@ export type SetupMode = "cloud" | "api" | "embedded";
 
 export const NO_KEY_PROVIDERS: ReadonlySet<string> = new Set([
   "claude-code",
+  "github-copilot",
   "openai-codex",
   "ollama",
 ]);
@@ -129,10 +130,6 @@ const ENV_VAR_RE = /^[A-Z][A-Z0-9_]*$/;
 
 export function isValidEnvVarName(value: string | undefined): boolean {
   return !!value && ENV_VAR_RE.test(value.trim());
-}
-
-export function defaultApiKeyEnvVar(provider: string): string {
-  return `${provider.toUpperCase().replace(/-/g, "_")}_API_KEY`;
 }
 
 /**

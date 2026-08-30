@@ -17,6 +17,20 @@ _MISSION_PRIORITY_NOTE = (
     "DECISION GUIDE, or OUTPUT FORMAT below, the MISSION takes priority."
 )
 
+# Default language rule — used only when HINDSIGHT_API_LLM_OUTPUT_LANGUAGE is
+# unset. Without it the whole prompt is English and multilingual models drift:
+# Chinese source facts intermittently produce English observations. Retain's
+# fact extraction carries the equivalent rule (see _BASE_FACT_EXTRACTION_PROMPT),
+# so this makes "preserve the source language" the pipeline-wide default. When an
+# output language IS configured, this section is omitted and
+# output_language_directive() takes over — the two must never both be present or
+# they contradict each other.
+_DEFAULT_LANGUAGE_RULE = """## LANGUAGE
+
+Write every observation in the language of its own source facts — never translate them. Per observation, not per batch: when one merges facts of several languages, the majority wins. Proper nouns, identifiers, and units stay verbatim.
+
+When an existing observation is written in a different language from the new facts updating it, do NOT edit its wording in place — that is what produces an English sentence with a Chinese detail bolted on. Discard the old phrasing and compose the merged observation from scratch in the new facts' language."""
+
 _PROCESSING_RULES = """## PROCESSING RULES
 
 1. PREFER UPDATE OVER CREATE (when there is something to merge with): if new facts describe the same canonical event, statement, decision, claim, or recurring pattern already covered by an existing observation, UPDATE that observation and attach the new facts as evidence. Do NOT create a near-duplicate sibling. One canonical observation with many source facts is always better than many siblings with one source fact each. Merge aggressively on: same named event, same diagnostic finding, same architectural decision, same recurring claim. **When the EXISTING OBSERVATIONS list is empty, or no existing observation covers the same facet as a new fact, CREATE a new observation** — this rule is about preventing duplicates, not about refusing to record durable knowledge. CREATE is the correct default for any structurally distinct event, claim, or pattern that has no existing match.
@@ -37,19 +51,36 @@ _PROCESSING_RULES = """## PROCESSING RULES
 
 9. KEEP DISTINCT TOPICS DISTINCT: do not merge observations about different people, entities, or unrelated topics. Merging is for the same canonical fact recurring — not for related-but-distinct claims."""
 
+# Field-by-field definitions of the input shape used by the cached system
+# prefix. The call site runs .format(), so these strings must contain no braces.
+_FACT_FIELDS = """One per line, formatted as `[uuid] fact text (temporal fields)`:
+- `[uuid]`: the fact's identifier — copy it verbatim into `source_fact_ids`
+- `occurred_start` / `occurred_end`: when the described event happened. This can be long before the fact was stated — a fact recorded today may describe a 2019 event.
+- `mentioned_at`: when the source material that states this fact was written. This is the fact's recency: how up to date the statement is, NOT when it was added to memory. A fact taken from an old document keeps its old `mentioned_at` even if it was only just processed."""
+
+_OBSERVATION_FIELDS = """- `id`: unique identifier — copy this exactly when issuing an UPDATE or DELETE
+- `text`: the observation content
+- `proof_count`: how many source facts this observation has already merged
+- `occurred_start` / `occurred_end`: the span of the events behind the observation — earliest start and latest end across its source facts
+- `mentioned_at`: the latest of the `mentioned_at` values of its source facts — the most recent point at which this observation was stated
+- `source_memories`: the supporting facts behind this observation. May be partial or absent for large observations — the count above remains the true total. Each entry carries the same `text` and temporal fields as a new fact, plus:
+  - `context`: optional surrounding context for that fact"""
+
 # Stable description of the input shape. For the cached split path this lives in
 # the system prefix (build_consolidation_system_prompt) so it is not re-sent on
 # every batch; the per-batch user message then carries only the actual data.
-_INPUT_FORMAT_NOTE = """## INPUT FORMAT
+_INPUT_FORMAT_NOTE = f"""## INPUT FORMAT
 
-Each request provides new facts and existing observations:
-- New facts: one per line, each prefixed with its `[uuid]`, followed by the fact text and optional temporal fields.
-- Existing observations: a JSON array pooled from recalls across the new facts. Each entry has:
-  - `id`: unique identifier — copy this exactly when issuing an UPDATE or DELETE
-  - `text`: the observation content
-  - `proof_count`: number of supporting memories
-  - `occurred_start` / `occurred_end`: temporal range of source facts
-  - `source_memories`: array of supporting facts with their text and dates"""
+Each request provides new facts and existing observations. Every temporal field is optional and is omitted when unknown.
+
+### New facts
+
+{_FACT_FIELDS}
+
+### Existing observations
+
+A JSON array pooled from recalls across the new facts. Each entry has:
+{_OBSERVATION_FIELDS}"""
 
 # Per-batch data section for the cached split path — the stable format
 # explanation above is omitted here (it lives in the cached prefix); only the
@@ -61,24 +92,6 @@ _SPLIT_INPUT_SECTION = """## INPUT
 {facts_text}
 
 ### Existing observations
-
-{observations_text}"""
-
-# Data section — format placeholders {facts_text} and {observations_text} are substituted at call time
-_INPUT_SECTION = """## INPUT
-
-### New facts
-
-{facts_text}
-
-### Existing observations
-
-JSON array, pooled from recalls across all new facts above. Each entry has:
-- `id`: unique identifier — copy this exactly when issuing an UPDATE or DELETE
-- `text`: the observation content
-- `proof_count`: number of supporting memories
-- `occurred_start` / `occurred_end`: temporal range of source facts
-- `source_memories`: array of supporting facts with their text and dates
 
 {observations_text}"""
 
@@ -142,39 +155,6 @@ Expected output (UPDATE for the state change; CREATE for the unrelated work-hour
 - Return `{{"creates": [], "updates": [], "deletes": []}}` if nothing durable is found."""
 
 
-def build_batch_consolidation_prompt(
-    observations_mission: str | None = None,
-    observation_capacity_note: str | None = None,
-    llm_output_language: str | None = None,
-) -> str:
-    """
-    Build the consolidation prompt for batch mode (multiple facts per LLM call).
-
-    The mission defines *what* to track (customisable per bank) and takes
-    priority over the built-in processing rules when the two conflict.
-    Processing rules, decision guide, and output format are always present.
-    When ``llm_output_language`` is set, observations are emitted in that
-    language.
-    """
-    mission = escape_for_prompt(observations_mission or _DEFAULT_MISSION)
-
-    capacity_section = ""
-    if observation_capacity_note:
-        capacity_section = f"\n\n## CAPACITY CONSTRAINT\n\n{escape_for_prompt(observation_capacity_note)}"
-
-    return (
-        "You are a memory consolidation system. Synthesize new facts into "
-        "observations, merging with existing observations when appropriate.\n\n"
-        f"## MISSION\n\n{mission}\n\n"
-        f"{_MISSION_PRIORITY_NOTE}"
-        f"{capacity_section}\n\n"
-        f"{_PROCESSING_RULES}\n\n"
-        f"{_INPUT_SECTION}\n\n"
-        f"{_DECISION_GUIDE}\n\n"
-        f"{_OUTPUT_SECTION}" + output_language_directive(llm_output_language)
-    )
-
-
 def build_consolidation_system_prompt(
     llm_output_language: str | None = None,
 ) -> str:
@@ -189,11 +169,17 @@ def build_consolidation_system_prompt(
     bank and a single CachedContent serves them all. Returns final text
     (brace-escaped examples already unescaped) for verbatim use as system message
     and cached prefix.
+
+    ``llm_output_language`` picks between two mutually exclusive language rules:
+    unset keeps each observation in the language of its own source facts (the
+    default), set forces every observation into that one configured language.
     """
+    language_section = "" if llm_output_language else f"{_DEFAULT_LANGUAGE_RULE}\n\n"
     template = (
         "You are a memory consolidation system. Synthesize new facts into "
         "observations, merging with existing observations when appropriate.\n\n"
         f"{_MISSION_PRIORITY_NOTE}\n\n"
+        f"{language_section}"
         f"{_PROCESSING_RULES}\n\n"
         f"{_INPUT_FORMAT_NOTE}\n\n"
         f"{_DECISION_GUIDE}\n\n"

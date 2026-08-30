@@ -4,15 +4,24 @@ Unit tests that verify the abstraction interfaces work correctly
 without requiring a live database connection.
 """
 
+import asyncio
+from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
+import asyncpg
 import pytest
 
 from hindsight_api.engine.db import DatabaseBackend, DatabaseConnection, create_database_backend
-from hindsight_api.engine.db.postgresql import PostgreSQLBackend
+from hindsight_api.engine.db.ops import UpdatedWindow
+from hindsight_api.engine.db import postgresql as pg_backend
+from hindsight_api.engine.db.postgresql import PostgreSQLBackend, apply_session_settings
 from hindsight_api.engine.db.result import DictResultRow as ResultRow
 from hindsight_api.engine.sql import SQLDialect, create_sql_dialect
 from hindsight_api.engine.sql.postgresql import PostgreSQLDialect
+
+# A recall with no created_after/created_before — the graph-expansion CTEs must
+# then render exactly as they did before the window existed.
+_UNBOUNDED_WINDOW = UpdatedWindow(after=None, before=None, first_param_index=4)
 
 # ---------------------------------------------------------------------------
 # ResultRow tests
@@ -175,9 +184,6 @@ class TestPostgreSQLDialect:
     def test_for_update_skip_locked(self, d):
         assert d.for_update_skip_locked() == "FOR UPDATE SKIP LOCKED"
 
-    def test_advisory_lock(self, d):
-        assert d.advisory_lock("$1") == "pg_try_advisory_lock($1)"
-
     def test_generate_uuid(self, d):
         assert d.generate_uuid() == "gen_random_uuid()"
 
@@ -280,6 +286,21 @@ class TestPostgreSQLDialect:
             bm25_min_score=2.5,
         )
         assert "> 2.5" in arm
+
+    def test_build_bm25_arm_pg_textsearch_scores_each_row(self, d):
+        arm = d.build_bm25_arm(
+            table="schema.memory_units",
+            cols="id, text",
+            fact_type="world",
+            bank_id_param="$2",
+            limit_param="$3",
+            text_param="$4",
+            text_search_extension="pg_textsearch",
+        )
+        expected_distance = "text <@> to_bm25query($4, 'idx_memory_units_text_search')"
+        assert f"-({expected_distance}) AS bm25_score" in arm
+        assert f"ORDER BY {expected_distance} ASC" in arm
+        assert "$4 <@>" not in arm
 
     def test_build_bm25_arm_pgroonga(self, d):
         arm = d.build_bm25_arm(
@@ -534,6 +555,15 @@ class TestOracleQueryRewriter:
         query, _, _ = _rewrite_pg_to_oracle("WHERE (trigger->>'refresh_after_consolidation')::boolean = true")
         assert "JSON_VALUE" in query
         assert "'true'" in query
+
+    def test_jsonb_has_key_rewrite_on_reserved_word_column(self):
+        """`trigger ? 'key'` must become JSON_EXISTS even though the reserved-word
+        column is quoted before the JSON operators are rewritten."""
+        from hindsight_api.engine.db.oracle import _rewrite_pg_to_oracle
+
+        query, _, _ = _rewrite_pg_to_oracle("WHERE trigger ? 'tag_groups'")
+        assert """JSON_EXISTS("trigger", '$.tag_groups')""" in query
+        assert "?" not in query
         assert "->>" not in query
 
     def test_for_no_key_update_rewrite(self):
@@ -568,6 +598,152 @@ class TestPostgreSQLBackendUnit:
         backend = PostgreSQLBackend()
         with pytest.raises(RuntimeError, match="not initialized"):
             backend.get_pool()
+
+    def test_is_ready_false_before_initialize(self):
+        assert PostgreSQLBackend().is_ready is False
+
+    @pytest.mark.asyncio
+    async def test_is_ready_false_for_whole_shutdown(self):
+        """is_ready must flip before the (awaited, non-instant) pool close, so
+        best-effort writers skip instead of racing a closing pool."""
+        backend = PostgreSQLBackend()
+        ready_during_close = None
+
+        class _SlowClosingPool:
+            async def close(self):
+                nonlocal ready_during_close
+                ready_during_close = backend.is_ready
+                await asyncio.sleep(0)
+
+        backend._pool = _SlowClosingPool()
+        assert backend.is_ready is True
+        await backend.shutdown()
+        assert ready_during_close is False
+        assert backend.is_ready is False
+
+    @pytest.mark.asyncio
+    async def test_init_callback_also_passed_as_setup(self):
+        # asyncpg runs RESET ALL when a connection is released back to the pool,
+        # which wipes the session GUCs the init callback SET. The same callback
+        # must also be wired as setup= so it re-applies on every acquire.
+        backend = PostgreSQLBackend()
+
+        async def cb(conn):
+            return None
+
+        with patch(
+            "hindsight_api.engine.db.postgresql.asyncpg.create_pool",
+            new=AsyncMock(return_value=object()),
+        ) as create_pool:
+            await backend.initialize("postgresql://localhost/test", init_callback=cb)
+
+        kwargs = create_pool.call_args.kwargs
+        assert kwargs["init"] is cb
+        assert kwargs["setup"] is cb
+
+
+class _RecordingConnection:
+    """Captures every statement, optionally failing the first (batched) one."""
+
+    def __init__(self, fail_batched: bool = False, reject: str | None = None) -> None:
+        self.calls: list[tuple[str, tuple]] = []
+        self._fail_batched = fail_batched
+        self._reject = reject
+
+    async def execute(self, query: str, *args) -> None:
+        self.calls.append((query, args))
+        if self._fail_batched and len(self.calls) == 1:
+            raise asyncpg.exceptions.UndefinedObjectError("unrecognized configuration parameter")
+        if self._reject is not None and self._reject in args:
+            raise asyncpg.exceptions.UndefinedObjectError("unrecognized configuration parameter")
+
+
+class TestApplySessionSettings:
+    """The pool's setup callback runs on every acquire — it must be one round trip (#3499)."""
+
+    @pytest.fixture(autouse=True)
+    def _forget_rejected_settings(self):
+        """The rejected-GUC memo is process-wide, so it must not leak between tests."""
+        pg_backend._unsupported_settings.clear()
+        yield
+        pg_backend._unsupported_settings.clear()
+
+    _SETTINGS = [
+        ("hnsw.ef_search", "200"),
+        ("statement_timeout", "600s"),
+        ("pg_trgm.similarity_threshold", "0.3"),
+    ]
+
+    @pytest.mark.asyncio
+    async def test_all_settings_applied_in_one_statement(self):
+        conn = _RecordingConnection()
+
+        await apply_session_settings(conn, self._SETTINGS)
+
+        assert len(conn.calls) == 1, f"expected one round trip, got {len(conn.calls)}: {conn.calls}"
+        query, args = conn.calls[0]
+        assert query.startswith("SELECT set_config(")
+        # Values are bound, not interpolated, and ordered name/value per setting.
+        assert args == ("hnsw.ef_search", "200", "statement_timeout", "600s", "pg_trgm.similarity_threshold", "0.3")
+        # `false` = session-scoped, so the GUC survives past the current transaction.
+        assert ", false)" in query
+
+    @pytest.mark.asyncio
+    async def test_no_statement_when_nothing_to_set(self):
+        conn = _RecordingConnection()
+        await apply_session_settings(conn, [])
+        assert conn.calls == []
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_individual_settings_when_batch_fails(self):
+        # An extension GUC the cluster doesn't know fails the whole batched
+        # statement; the rest must still be applied.
+        conn = _RecordingConnection(fail_batched=True, reject="pg_trgm.similarity_threshold")
+
+        await apply_session_settings(conn, self._SETTINGS)
+
+        applied = [args[0] for query, args in conn.calls[1:]]
+        assert applied == ["hnsw.ef_search", "statement_timeout", "pg_trgm.similarity_threshold"]
+        # The rejected one raised and was skipped rather than aborting setup.
+        assert len(conn.calls) == 1 + len(self._SETTINGS)
+
+    @pytest.mark.asyncio
+    async def test_a_setting_the_server_rejects_is_not_sent_again(self):
+        """Otherwise every acquire re-pays a failed batch plus one statement per setting.
+
+        Reached by any GUC the cluster does not define — pg_trgm when the extension is
+        absent, or hnsw.iterative_scan on a pgvector older than 0.8, which reserves the
+        "hnsw." prefix and so rejects it rather than accepting a placeholder.
+        """
+        conn = _RecordingConnection(fail_batched=True, reject="pg_trgm.similarity_threshold")
+        await apply_session_settings(conn, self._SETTINGS)
+
+        # Next acquire: one batched statement again, carrying only what the server took.
+        conn = _RecordingConnection()
+        await apply_session_settings(conn, self._SETTINGS)
+
+        assert len(conn.calls) == 1
+        _, args = conn.calls[0]
+        assert "pg_trgm.similarity_threshold" not in args
+        assert args == ("hnsw.ef_search", "200", "statement_timeout", "600s")
+
+    @pytest.mark.asyncio
+    async def test_a_transient_failure_does_not_disable_a_setting(self):
+        """Only "unrecognized configuration parameter" is permanent; anything else retries."""
+
+        class _FlakyConnection(_RecordingConnection):
+            async def execute(self, query: str, *args) -> None:
+                self.calls.append((query, args))
+                if len(self.calls) == 1:
+                    raise asyncpg.exceptions.UndefinedObjectError("unrecognized configuration parameter")
+                if "hnsw.ef_search" in args:
+                    raise asyncpg.exceptions.DeadlockDetectedError("transient")
+
+        await apply_session_settings(_FlakyConnection(), self._SETTINGS)
+
+        conn = _RecordingConnection()
+        await apply_session_settings(conn, self._SETTINGS)
+        assert "hnsw.ef_search" in conn.calls[0][1]
 
 
 # ---------------------------------------------------------------------------
@@ -612,7 +788,7 @@ def test_entity_expansion_filters_fact_type_before_per_entity_cap(
     from importlib import import_module
 
     ops = getattr(import_module(ops_module), ops_class)()
-    cte = ops.build_entity_expansion_cte("memory_units", "unit_entities", 7)
+    cte = ops.build_entity_expansion_cte("memory_units", "unit_entities", 7, _UNBOUNDED_WINDOW)
 
     lateral_start = cte.index("CROSS JOIN LATERAL")
     lateral_end = cte.index(") t", lateral_start)
@@ -620,6 +796,83 @@ def test_entity_expansion_filters_fact_type_before_per_entity_cap(
 
     assert "mu_target.fact_type = $2" in lateral_query
     assert lateral_query.index("mu_target.fact_type = $2") < lateral_query.index(limit_clause)
+
+
+@pytest.mark.parametrize(
+    "ops_module,ops_class,limit_clause",
+    [
+        ("hindsight_api.engine.db.ops_postgresql", "PostgreSQLOps", "LIMIT 7"),
+        ("hindsight_api.engine.db.ops_oracle", "OracleOps", "FETCH FIRST 7 ROWS ONLY"),
+    ],
+)
+def test_entity_expansion_applies_updated_window_before_per_entity_cap(
+    ops_module: str, ops_class: str, limit_clause: str
+) -> None:
+    """Recall's time window bounds the entity fan-out, not just the graph seeds.
+
+    Placement matters as much as presence: filtering after the cap would let
+    out-of-window neighbours eat an entity's bounded budget and starve the
+    in-window ones.
+    """
+    from importlib import import_module
+
+    from hindsight_api.engine.db.ops import UpdatedWindow
+
+    ops = getattr(import_module(ops_module), ops_class)()
+    window = UpdatedWindow(after=datetime(2026, 1, 1), before=datetime(2026, 2, 1), first_param_index=4)
+    cte = ops.build_entity_expansion_cte("memory_units", "unit_entities", 7, window)
+
+    lateral_start = cte.index("CROSS JOIN LATERAL")
+    lateral_query = cte[lateral_start : cte.index(") t", lateral_start)]
+
+    assert "mu_target.updated_at > $4" in lateral_query
+    assert "mu_target.updated_at < $5" in lateral_query
+    assert lateral_query.index("mu_target.updated_at > $4") < lateral_query.index(limit_clause)
+
+
+@pytest.mark.parametrize(
+    "ops_module,ops_class",
+    [
+        ("hindsight_api.engine.db.ops_postgresql", "PostgreSQLOps"),
+        ("hindsight_api.engine.db.ops_oracle", "OracleOps"),
+    ],
+)
+def test_semantic_causal_expansion_applies_updated_window(ops_module: str, ops_class: str) -> None:
+    """All three link-expansion arms honour the window — both semantic directions
+    (the kNN graph is not symmetric, so each is a separate scan) and causal."""
+    from importlib import import_module
+
+    from hindsight_api.engine.db.ops import UpdatedWindow
+
+    ops = getattr(import_module(ops_module), ops_class)()
+    window = UpdatedWindow(after=datetime(2026, 1, 1), before=None, first_param_index=4)
+    cte = ops.build_semantic_causal_cte("memory_links", "memory_units", window)
+
+    assert cte.count("mu.updated_at > $4") == 3
+    assert "updated_at <" not in cte
+
+
+@pytest.mark.parametrize(
+    "ops_module,ops_class",
+    [
+        ("hindsight_api.engine.db.ops_postgresql", "PostgreSQLOps"),
+        ("hindsight_api.engine.db.ops_oracle", "OracleOps"),
+    ],
+)
+def test_expansion_ctes_omit_window_when_unbounded(ops_module: str, ops_class: str) -> None:
+    """An unbounded recall must emit the pre-existing SQL verbatim — no dangling
+    placeholders, since every backend binds params positionally and Oracle rejects
+    a query that references a bind it was not given."""
+    from importlib import import_module
+
+    ops = getattr(import_module(ops_module), ops_class)()
+
+    entity_cte = ops.build_entity_expansion_cte("memory_units", "unit_entities", 7, _UNBOUNDED_WINDOW)
+    sem_causal_cte = ops.build_semantic_causal_cte("memory_links", "memory_units", _UNBOUNDED_WINDOW)
+
+    assert "updated_at" not in entity_cte
+    assert "updated_at" not in sem_causal_cte
+    assert "$4" not in entity_cte + sem_causal_cte
 
 
 # ---------------------------------------------------------------------------

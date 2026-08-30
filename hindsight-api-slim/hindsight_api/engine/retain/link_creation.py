@@ -5,9 +5,10 @@ Handles creation of temporal, semantic, and causal links between facts.
 """
 
 import logging
+from collections.abc import Sequence
 
 from . import link_utils
-from .types import ProcessedFact
+from .types import EmbeddingLike, ProcessedFact
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,8 @@ async def create_semantic_links_batch(
     conn,
     bank_id: str,
     unit_ids: list[str],
-    embeddings: list[list[float]],
+    embeddings: Sequence[EmbeddingLike],
+    threshold: float,
     pre_computed_ann_links: list[tuple] | None = None,
     ops=None,
 ) -> int:
@@ -52,6 +54,7 @@ async def create_semantic_links_batch(
         bank_id: Bank identifier
         unit_ids: List of unit IDs to create links for
         embeddings: List of embedding vectors (same length as unit_ids)
+        threshold: Minimum cosine similarity for semantic links
         pre_computed_ann_links: Pre-computed ANN results from Phase 1
 
     Returns:
@@ -64,7 +67,14 @@ async def create_semantic_links_batch(
         raise ValueError(f"Mismatch between unit_ids ({len(unit_ids)}) and embeddings ({len(embeddings)})")
 
     return await link_utils.create_semantic_links_batch(
-        conn, bank_id, unit_ids, embeddings, log_buffer=[], pre_computed_ann_links=pre_computed_ann_links, ops=ops
+        conn,
+        bank_id,
+        unit_ids,
+        embeddings,
+        threshold=threshold,
+        log_buffer=[],
+        pre_computed_ann_links=pre_computed_ann_links,
+        ops=ops,
     )
 
 

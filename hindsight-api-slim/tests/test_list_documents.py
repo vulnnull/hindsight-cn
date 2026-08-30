@@ -28,7 +28,7 @@ async def test_list_documents_offset_pagination(memory, request_context):
         for i in range(4):
             await _retain_doc(memory, bank_id, f"doc-{i:02d}", [], request_context)
 
-        # All documents, ordered by created_at DESC → doc-03, doc-02, doc-01, doc-00
+        # All documents, most recently written first → doc-03, doc-02, doc-01, doc-00
         all_docs = await memory.list_documents(bank_id=bank_id, limit=10, offset=0, request_context=request_context)
         assert all_docs["total"] == 4
         assert len(all_docs["items"]) == 4
@@ -164,6 +164,39 @@ async def test_list_documents_tags_and_search_query_combined(memory, request_con
         )
         ids = {d["id"] for d in result["items"]}
         assert ids == {"report-2024"}
+
+    finally:
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+
+@pytest.mark.asyncio
+async def test_list_documents_orders_by_last_write(memory, request_context):
+    """A re-retained old document sorts ahead of newer, untouched documents.
+
+    Ordering by created_at would bury a long-lived document that keeps receiving
+    appends behind every document created after it.
+    """
+    bank_id = f"test_list_docs_order_{datetime.now(timezone.utc).timestamp()}"
+
+    try:
+        await _retain_doc(memory, bank_id, "doc-old", [], request_context)
+        await _retain_doc(memory, bank_id, "doc-new", [], request_context)
+
+        # Baseline: newest-created first.
+        result = await memory.list_documents(bank_id=bank_id, request_context=request_context)
+        assert [d["id"] for d in result["items"]] == ["doc-new", "doc-old"]
+
+        # Write to the older document again — no new document, but it is now the
+        # most recently written one.
+        await memory.retain_batch_async(
+            bank_id=bank_id,
+            contents=[{"content": "xyzabc123 !@# $$$ doc-old revised"}],
+            document_id="doc-old",
+            request_context=request_context,
+        )
+
+        result = await memory.list_documents(bank_id=bank_id, request_context=request_context)
+        assert [d["id"] for d in result["items"]] == ["doc-old", "doc-new"]
 
     finally:
         await memory.delete_bank(bank_id, request_context=request_context)

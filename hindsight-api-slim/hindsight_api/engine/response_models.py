@@ -6,9 +6,12 @@ API response models should be kept separate and convert from these core models t
 API stability even if internal models change.
 """
 
+from datetime import datetime, timezone
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from .metadata_utils import as_string_metadata
 
 VALID_RECALL_FACT_TYPES = frozenset(["world", "experience", "observation"])
 
@@ -213,6 +216,43 @@ class MinScores(BaseModel):
     final: float | None = Field(default=None, description="Post-query: minimum final ranking score.")
 
 
+class TemporalWindow(BaseModel):
+    """A caller-supplied window for recall's temporal arm.
+
+    Supplying this **replaces the date extraction** recall would otherwise run
+    over the query text, so a caller that already knows the range it means does
+    not have to phrase it in English and hope the parser agrees.
+
+    It is **not a filter**. The temporal arm is one of four retrieval arms: it
+    surfaces memories whose own dates (``mentioned_at`` / ``occurred_start`` /
+    ``occurred_end``) fall inside the window so fusion can rank them higher.
+    The semantic, keyword and graph arms are unaffected, so results dated
+    outside the window are still returned. Narrowing results to a date range is
+    a different operation this does not provide.
+
+    Has no effect when the bank's ``enable_temporal_retrieval`` config is off:
+    that flag gates the arm itself, and stays the single switch for it.
+    """
+
+    start: datetime = Field(description="Start of the window (inclusive).")
+    end: datetime = Field(description="End of the window (inclusive).")
+
+    @field_validator("start", "end")
+    @classmethod
+    def ensure_tz_aware(cls, v: datetime) -> datetime:
+        # The arm coerces naive datetimes to UTC before querying; do it here
+        # instead so both bounds are unambiguous the moment the request parses.
+        if v.tzinfo is None:
+            return v.replace(tzinfo=timezone.utc)
+        return v
+
+    @model_validator(mode="after")
+    def validate_order(self) -> "TemporalWindow":
+        if self.end < self.start:
+            raise ValueError("temporal_window.end must not be earlier than temporal_window.start")
+        return self
+
+
 class MemoryFact(BaseModel):
     """
     A single memory fact returned by search or think operations.
@@ -260,6 +300,9 @@ class MemoryFact(BaseModel):
         Also coerces non-string dict values (e.g., integer IDs stored in JSONB)
         to strings, preventing ValidationError when consolidation encounters
         metadata like {"original_id": 348} instead of {"original_id": "348"}.
+        Null-valued keys are dropped rather than stringified to "None" (issue
+        #3209), so rows written before retain normalized its input stay
+        readable without a data migration.
         """
         if v is None:
             return None
@@ -268,7 +311,7 @@ class MemoryFact(BaseModel):
 
             v = json.loads(v)
         if isinstance(v, dict):
-            return {str(k): str(val) for k, val in v.items()}
+            return as_string_metadata(v)
         return v
 
     chunk_id: str | None = Field(
@@ -353,6 +396,14 @@ class RecallResult(BaseModel):
     source_facts: dict[str, MemoryFact] | None = Field(
         None, description="Source facts for observation-type results, keyed by fact ID"
     )
+    source_facts_truncated: bool | None = Field(
+        None,
+        description=(
+            "Whether the source_facts map was cut short by the token budget. When true, some IDs in "
+            "results[].source_fact_ids have no entry in source_facts — the budget ran out, the "
+            "references are not dangling. Only set when source facts were requested."
+        ),
+    )
 
 
 class ReflectResult(BaseModel):
@@ -398,6 +449,15 @@ class ReflectResult(BaseModel):
     )
 
     text: str = Field(description="The formulated answer text")
+    document: Any | None = Field(
+        default=None,
+        exclude=True,
+        description=(
+            "Internal: the structured document the agent emitted when the caller asked for one. "
+            "``text`` is its deterministic render. Excluded from the API response — callers read "
+            "the rendered text; the structure is persistence-side state."
+        ),
+    )
     based_on: dict[str, Any] = Field(
         description="Facts used to formulate the answer, organized by type (world, experience, observation, mental-models, directives)"
     )

@@ -72,6 +72,8 @@ Controls how aggressively facts are extracted:
 | `concise` *(default)* | Selective — only facts worth remembering long-term |
 | `verbose` | Captures more detail per fact; slower and uses more tokens |
 | `custom` | Write your own extraction rules via `retain_custom_instructions` |
+| `verbatim` | Stores each chunk's original text as one memory; the LLM extracts metadata such as entities and dates |
+| `chunks` | Stores each chunk as one memory without an LLM call; only caller-provided entities are available |
 
 ### retain_custom_instructions
 
@@ -162,6 +164,8 @@ Each entry in `entity_labels` is a **label group** — one classification dimens
   }
 }
 ```
+
+**How label entities resolve.** Regular entities resolve fuzzily so close name variants merge ("Alice" / "Alice Chen"). Label entities are different: their canonical names are user-defined, so two similar-looking values (`use:use-001` / `use:use-002`) must stay distinct. They therefore resolve by **exact match only** and are stored with `entity_kind = "label"`, which keeps them out of fuzzy name matching entirely — a free-text label group accumulating thousands of similar values doesn't slow down resolution of the bank's regular entities. The classification is fixed when the entity is first stored; removing a label group later doesn't reclassify its existing entities.
 
 ### entities_allow_free_form
 
@@ -301,7 +305,7 @@ An allowlist of MCP tool names that are enabled for this bank. When set, only th
 ["recall", "reflect"]
 ```
 
-Available tool names: `retain`, `recall`, `reflect`, `list_banks`, `create_bank`, `list_mental_models`, `get_mental_model`, `create_mental_model`, `update_mental_model`, `delete_mental_model`, `refresh_mental_model`, `list_directives`, `create_directive`, `delete_directive`, `list_memories`, `get_memory`, `list_documents`, `get_document`, `delete_document`, `list_operations`, `get_operation`, `cancel_operation`, `list_tags`, `get_bank`, `get_bank_stats`, `update_bank`, `delete_bank`, `clear_memories`.
+Available tool names: `retain`, `recall`, `reflect`, `list_banks`, `create_bank`, `list_mental_models`, `get_mental_model`, `create_mental_model`, `update_mental_model`, `delete_mental_model`, `refresh_mental_model`, `list_directives`, `create_directive`, `delete_directive`, `list_memories`, `get_memory`, `list_documents`, `get_document`, `delete_document`, `list_operations`, `get_operation`, `cancel_operation`, `list_tags`, `get_bank`, `get_bank_stats`, `update_bank`, `delete_bank`, `clear_memories`, `get_knowledge_base_tree`, `search_knowledge_base`, `get_knowledge_page`, `create_knowledge_folder`, `create_knowledge_page`, `update_knowledge_node`, `delete_knowledge_node`.
 
 ### llm_gemini_safety_settings
 
@@ -507,7 +511,7 @@ You can also update configuration directly from the Control Plane UI — navigat
 
 ## Directives
 
-Directives are hard rules that the agent must follow during [reflect](./reflect) operations. Unlike disposition traits which influence *how* the agent reasons, directives are explicit instructions that are *always* enforced.
+Directives are hard rules that the agent must follow during [reflect](./reflect) operations. Unlike disposition traits which influence *how* the agent reasons, directives are explicit instructions that are enforced whenever they are in scope (see [Directive Scope and Tags](#directive-scope-and-tags)).
 
 > **ℹ️ Info**
 >
@@ -520,6 +524,15 @@ Use directives for rules that must never be violated:
 - **Privacy rules**: "Never share personal data with third parties"
 - **Domain constraints**: "Prefer conservative investment recommendations"
 - **Behavioral guardrails**: "Always cite sources when making claims"
+
+### Directive Scope and Tags
+
+Directives can carry `tags`, and those tags scope **when** a directive is applied during `reflect` — mirroring how tags scope memories:
+
+- **Untagged directives always apply**, on every `reflect`.
+- **Tagged directives apply only when the `reflect` request includes matching tags** (using the request's `tags_match` mode). A `reflect` call with no tags applies only the untagged directives.
+
+To apply **every** active directive regardless of tags, set `apply_all_directives: true` on the `reflect` request. This ignores tag scope for directives (untagged and tagged alike are enforced) and is useful when an operator keeps tagged directives for organization but wants all of them enforced on an untagged reflection.
 
 ### Creating Directives
 
@@ -686,22 +699,35 @@ Move documents — and the facts already extracted from them — between banks *
 
 ### Export documents
 
-`GET /v1/default/banks/{bank_id}/document-transfer` — synchronous; streams a ZIP archive.
+`POST /v1/default/banks/{bank_id}/document-transfer/export` — runs as a **background operation** (a whole-bank export loads every unit and compresses a large archive, which on a big bank could exhaust memory and pin a connection). It returns `202` with an `operation_id`; poll the bank's operations endpoint, then download the archive from the `download_url` in `result_metadata`.
 
 ```bash
-# whole bank
-curl -H "Authorization: Bearer $API_KEY" \
-  "$HINDSIGHT_URL/v1/default/banks/my-bank/document-transfer" -o my-bank.zip
+# 1. Submit the export (whole bank; add ?document_id=… to scope it)
+curl -X POST -H "Authorization: Bearer $API_KEY" \
+  "$HINDSIGHT_URL/v1/default/banks/my-bank/document-transfer/export"
+# -> {"operation_id": "…", "status": "pending"}
 
-# specific documents, including consolidated observations
+# 2. Poll until completed
 curl -H "Authorization: Bearer $API_KEY" \
-  "$HINDSIGHT_URL/v1/default/banks/my-bank/document-transfer?document_id=doc-1&include_observations=true" -o subset.zip
+  "$HINDSIGHT_URL/v1/default/banks/my-bank/operations/$OPERATION_ID"
+# -> {"status":"completed","result_metadata":{
+#      "download_url":"/v1/default/files/download/banks/my-bank/exports/…/transfer.zip",
+#      "storage_key":"banks/my-bank/exports/…/transfer.zip","byte_size":12345,"filename":"my-bank-documents.zip"}}
+
+# 3. Download the archive
+curl -H "Authorization: Bearer $API_KEY" \
+  "$HINDSIGHT_URL$DOWNLOAD_URL" -o my-bank.zip
 ```
 
 | Query param | Description |
 |-------------|-------------|
 | `document_id` | Repeatable. Export only these documents; omit for the whole bank. |
 | `include_observations` | Also export consolidated observations (default `false`). Only valid for a **whole-bank** export — combining it with `document_id` returns `400`. |
+
+> **📝 The synchronous `GET …/document-transfer` was removed**
+>
+It loaded the entire bank into memory and held a database connection for the full request, which could take down the shared API on large banks. It now returns `410` pointing here. Use the async flow above. The download route (`GET /v1/default/files/download/{key}`) authorizes the caller against the bank the archive belongs to.
+The archive lives as long as its export **operation record** — indefinitely by default, or until the operation is pruned when `HINDSIGHT_API_OPERATION_RETENTION_DAYS` is set (the archive is deleted in step with the row). Deleting the operation removes the archive immediately.
 
 ### Import documents
 
@@ -740,7 +766,7 @@ Both endpoints are gated by server-level flags (default `true`). A disabled endp
 
 | Variable | Gates |
 |----------|-------|
-| `HINDSIGHT_API_ENABLE_DOCUMENT_EXPORT_API` | `GET …/document-transfer` |
+| `HINDSIGHT_API_ENABLE_DOCUMENT_EXPORT_API` | `POST …/document-transfer/export` and `GET …/files/download/{key}` |
 | `HINDSIGHT_API_ENABLE_DOCUMENT_IMPORT_API` | `POST …/document-transfer` |
 
 ## Migrating a bank to a new instance

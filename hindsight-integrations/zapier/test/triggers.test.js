@@ -16,13 +16,32 @@ describe("triggers.bankList", () => {
   it("maps banks to { bank_id, name } for the dropdown", async () => {
     nock("https://api.example.com")
       .get("/v1/default/banks")
-      .reply(200, { banks: [{ bank_id: "b1", name: "Bank One" }, { bank_id: "b2" }] });
+      .query({ limit: 100, offset: 0 })
+      .reply(200, {
+        banks: [{ bank_id: "b1", name: "Bank One" }, { bank_id: "b2" }],
+        total: 2,
+        limit: 100,
+        offset: 0,
+      });
 
     const banks = await appTester(App.triggers.bankList.operation.perform, { authData });
     banks.should.eql([
       { id: "b1", bank_id: "b1", name: "Bank One" },
       { id: "b2", bank_id: "b2", name: "b2" },
     ]);
+  });
+
+  it("requests the next page when Zapier asks for one", async () => {
+    nock("https://api.example.com")
+      .get("/v1/default/banks")
+      .query({ limit: 100, offset: 200 })
+      .reply(200, { banks: [{ bank_id: "b201" }], total: 201, limit: 100, offset: 200 });
+
+    const banks = await appTester(App.triggers.bankList.operation.perform, {
+      authData,
+      meta: { page: 2 },
+    });
+    banks.should.eql([{ id: "b201", bank_id: "b201", name: "b201" }]);
   });
 });
 
@@ -111,5 +130,17 @@ describe("triggers.retainCompleted (REST hook)", () => {
     });
     result.should.be.an.Array();
     result[0].event.should.eql("retain.completed");
+  });
+});
+
+describe("exposed triggers surface", () => {
+  it("exposes exactly the intended triggers", () => {
+    Object.keys(App.triggers)
+      .sort()
+      .should.eql(["bankList", "consolidationCompleted", "retainCompleted"]);
+  });
+
+  it("does NOT expose memoryDefenseTriggered (gated capability — can't pass Zapier's T001/S002)", () => {
+    App.triggers.should.not.have.property("memoryDefenseTriggered");
   });
 });

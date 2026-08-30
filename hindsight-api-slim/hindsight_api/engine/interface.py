@@ -6,6 +6,7 @@ authentication when a TenantExtension is configured.
 """
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -13,7 +14,24 @@ if TYPE_CHECKING:
     from hindsight_api.engine.memory_engine import BankLlmHealthInfo, Budget
     from hindsight_api.engine.response_models import RecallResult, ReflectResult
     from hindsight_api.engine.search.tags import TagsMatch
+    from hindsight_api.extensions import BankWriteOperation
     from hindsight_api.models import RequestContext
+
+
+@dataclass(frozen=True)
+class BankConfigState:
+    """Resolved bank configuration and its bank-level overrides."""
+
+    config: dict[str, Any]
+    overrides: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class BankTemplateImportWrite:
+    """One bank-write decision reserved for a specific imported resource."""
+
+    operation: "BankWriteOperation"
+    target: str | None = None
 
 
 class MemoryEngineInterface(ABC):
@@ -142,16 +160,22 @@ class MemoryEngineInterface(ABC):
     async def list_banks(
         self,
         *,
+        search_query: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
         request_context: "RequestContext",
-    ) -> list[dict[str, Any]]:
+    ) -> dict[str, Any]:
         """
-        List all memory banks.
+        List memory banks, one page at a time.
 
         Args:
+            search_query: Case-insensitive substring matched against bank ID and name.
+            limit: Maximum number of banks to return (0 returns none).
+            offset: Number of banks to skip.
             request_context: Request context for authentication.
 
         Returns:
-            List of bank info dicts.
+            Dict with ``banks`` (the page), ``total``, ``limit`` and ``offset``.
         """
         ...
 
@@ -178,6 +202,37 @@ class MemoryEngineInterface(ABC):
             or None when create_if_missing=False and the bank does not
             exist.
         """
+        ...
+
+    @abstractmethod
+    async def get_bank_config(
+        self,
+        bank_id: str,
+        *,
+        request_context: "RequestContext",
+    ) -> BankConfigState:
+        """Return resolved configuration after authenticating and authorizing the read."""
+        ...
+
+    @abstractmethod
+    async def update_bank_config(
+        self,
+        bank_id: str,
+        updates: dict[str, Any],
+        *,
+        request_context: "RequestContext",
+    ) -> BankConfigState:
+        """Create a bank if needed and persist validated configuration overrides."""
+        ...
+
+    @abstractmethod
+    async def reset_bank_config(
+        self,
+        bank_id: str,
+        *,
+        request_context: "RequestContext",
+    ) -> BankConfigState:
+        """Remove all bank configuration overrides after authorization."""
         ...
 
     @abstractmethod
@@ -273,8 +328,10 @@ class MemoryEngineInterface(ABC):
         self,
         bank_id: str,
         *,
-        fact_type: str | None = None,
+        fact_type: str | list[str] | None = None,
         search_query: str | None = None,
+        entity_id: str | None = None,
+        created_before: datetime | None = None,
         limit: int = 100,
         offset: int = 0,
         request_context: "RequestContext",
@@ -284,8 +341,11 @@ class MemoryEngineInterface(ABC):
 
         Args:
             bank_id: The memory bank ID.
-            fact_type: Filter by fact type.
+            fact_type: Filter by fact type. A list matches any of them; an empty
+                list is treated as no filter.
             search_query: Full-text search query.
+            entity_id: Filter to memory units linked to this entity ID.
+            created_before: Keep units with ``created_at`` before this instant.
             limit: Maximum results.
             offset: Pagination offset.
             request_context: Request context for authentication.
@@ -478,11 +538,15 @@ class MemoryEngineInterface(ABC):
         Get consolidation freshness for a bank.
 
         Cheap alternative to get_bank_stats when callers only need
-        last_consolidated_at / pending_consolidation / failed_consolidation.
+        last_consolidated_at / last_memory_write_at / pending_consolidation /
+        failed_consolidation.
 
         Returns:
-            Dict with last_consolidated_at (ISO-8601 string or None),
-            pending_consolidation (int), and failed_consolidation (int).
+            Dict with last_consolidated_at and last_memory_write_at (ISO-8601
+            strings or None), pending_consolidation (int), and
+            failed_consolidation (int). last_memory_write_at is the newest write
+            across the bank's memories — a mental model refreshed at or after it
+            cannot be stale, whatever its scope.
         """
         ...
 
@@ -566,12 +630,38 @@ class MemoryEngineInterface(ABC):
         ...
 
     @abstractmethod
+    async def delete_operation(
+        self,
+        bank_id: str,
+        operation_id: str,
+        *,
+        request_context: "RequestContext",
+    ) -> dict[str, Any]:
+        """
+        Delete a terminal async operation record.
+
+        Args:
+            bank_id: The memory bank ID.
+            operation_id: The operation ID to delete.
+            request_context: Request context for authentication.
+
+        Returns:
+            Dict with success status and message.
+
+        Raises:
+            ValueError: If operation not found.
+        """
+        ...
+
+    @abstractmethod
     async def update_bank(
         self,
         bank_id: str,
         *,
         name: str | None = None,
         mission: str | None = None,
+        config_updates: dict[str, Any] | None = None,
+        create_if_missing: bool = True,
         request_context: "RequestContext",
     ) -> dict[str, Any]:
         """
@@ -581,6 +671,9 @@ class MemoryEngineInterface(ABC):
             bank_id: The memory bank ID.
             name: New bank name (optional).
             mission: New mission text (optional, replaces existing).
+            config_updates: Bank configuration overrides to apply with the profile update.
+            create_if_missing: Create a missing bank when True; otherwise raise
+                a 404 operation error.
             request_context: Request context for authentication.
 
         Returns:

@@ -341,6 +341,47 @@ def test_daemon_child_env_var_set_in_daemon_env(temp_home, monkeypatch):
     assert env.get("_HINDSIGHT_DAEMON_CHILD") == "1"
 
 
+def test_daemon_preserves_uv_python_for_nested_uvx(temp_home, monkeypatch):
+    """The API uvx fallback inherits the interpreter selected by the integration."""
+    from unittest.mock import MagicMock, patch
+
+    from hindsight_embed.daemon_embed_manager import DaemonEmbedManager
+
+    monkeypatch.setenv("UV_PYTHON", "3.13")
+    manager = DaemonEmbedManager()
+    captured = {}
+    popen_called = [False]
+
+    def fake_find_api_command(api_version, env=None):
+        captured["find_env"] = env
+        return ["uvx", f"hindsight-api@{api_version}"]
+
+    def fake_popen(cmd, env, **kwargs):
+        captured["popen_env"] = env
+        popen_called[0] = True
+        proc = MagicMock()
+        proc.pid = 12345
+        return proc
+
+    def fake_is_running(profile=""):
+        return popen_called[0]
+
+    with (
+        patch("hindsight_embed.daemon_embed_manager.subprocess.Popen", side_effect=fake_popen),
+        patch("hindsight_embed.daemon_embed_manager.time.sleep"),
+        patch.object(manager, "_clear_port", return_value=True),
+        patch.object(manager, "_find_api_command", side_effect=fake_find_api_command),
+        patch.object(manager, "is_running", side_effect=fake_is_running),
+    ):
+        manager._start_daemon(
+            config={"llm_provider": "openai", "llm_api_key": "sk-x", "llm_model": "gpt-4o-mini"},
+            profile="",
+        )
+
+    assert captured["find_env"]["UV_PYTHON"] == "3.13"
+    assert captured["popen_env"]["UV_PYTHON"] == "3.13"
+
+
 def test_windows_popen_uses_detached_process_flags(temp_home, monkeypatch):
     """
     On Windows the daemon must be spawned with
@@ -553,7 +594,7 @@ def test_configure_from_env_accepts_providers_outside_interactive_menu(temp_home
     """Regression test for issue #1360.
 
     `_do_configure_from_env` previously rejected any provider not in the small
-    interactive-menu set (`PROVIDER_API_KEYS` — 5 entries) with "Unknown
+    interactive-menu set (`PROVIDER_API_KEYS`) with "Unknown
     provider". hindsight-api supports ~18 providers (anthropic, claude-code,
     bedrock, openrouter, ...), so the gate blocked valid CI configurations.
     Validation belongs in the daemon, not in the CLI's UX-only menu list.
@@ -573,6 +614,29 @@ def test_configure_from_env_accepts_providers_outside_interactive_menu(temp_home
 
     contents = (config_dir / "embed").read_text()
     assert "HINDSIGHT_API_LLM_PROVIDER=anthropic" in contents
+
+
+def test_configure_from_env_accepts_github_copilot_without_api_key(temp_home, monkeypatch):
+    """GitHub Copilot authenticates through Copilot CLI rather than an LLM API key."""
+    from hindsight_embed import cli
+
+    config_dir = temp_home / ".hindsight"
+    monkeypatch.setattr(cli, "CONFIG_DIR", config_dir)
+    monkeypatch.setattr(cli, "CONFIG_FILE", config_dir / "embed")
+
+    monkeypatch.setenv("HINDSIGHT_API_LLM_PROVIDER", "github-copilot")
+    monkeypatch.setenv("HINDSIGHT_API_LLM_MODEL", "gpt-5.6-terra")
+    monkeypatch.delenv("HINDSIGHT_API_LLM_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "unrelated-openai-key")
+
+    assert cli._has_non_interactive_env() is True
+    assert cli._do_configure_from_env() == 0
+
+    contents = (config_dir / "embed").read_text()
+    assert "HINDSIGHT_API_LLM_PROVIDER=github-copilot" in contents
+    assert "HINDSIGHT_API_LLM_MODEL=gpt-5.6-terra" in contents
+    active_lines = [line for line in contents.splitlines() if line and not line.startswith("#")]
+    assert not any(line.startswith("HINDSIGHT_API_LLM_API_KEY=") for line in active_lines)
 
 
 def _windows_scripts_dir(tmp_path: Path, *, with_pythonw: bool) -> Path:

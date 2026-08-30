@@ -206,6 +206,63 @@ describe("createKnowledgeTools", () => {
     expect(body.max_tokens).toBe(512);
   });
 
+  it("recall omits source chunks unless include_chunks is exactly true", async () => {
+    const tool = tools.find((t) => t.name === "agent_knowledge_recall")!;
+
+    // Omitted, false, and a truthy-string "false" must all leave chunks off.
+    for (const params of [
+      { query: "no chunks" },
+      { query: "no chunks", include_chunks: false },
+      { query: "no chunks", include_chunks: "false" },
+      // A chunk budget alone must not switch chunks on.
+      { query: "no chunks", max_chunk_tokens: 2048 },
+    ]) {
+      mockFetch.mockReset();
+      mockFetch.mockReturnValueOnce(mockResponse({ results: [{ text: "found" }] }));
+      await tool.execute(params);
+      const body = await getBody(mockFetch.mock.calls[0]);
+      expect(body.include?.chunks, JSON.stringify(params)).toBeUndefined();
+    }
+  });
+
+  it("recall include_chunks requests source chunks and returns them to the agent", async () => {
+    mockFetch.mockReturnValueOnce(
+      mockResponse({
+        results: [{ text: "found" }],
+        chunks: { c1: { chunk_text: "the fee is 4.375%", truncated: false } },
+      })
+    );
+
+    const tool = tools.find((t) => t.name === "agent_knowledge_recall")!;
+    const result = await tool.execute({ query: "exact wording", include_chunks: true });
+
+    const body = await getBody(mockFetch.mock.calls[0]);
+    expect(body.include.chunks).toEqual({ max_tokens: 8192 });
+    // The chunks must survive into the tool output, not just the request.
+    expect(JSON.parse(result.content[0].text).chunks.c1.chunk_text).toBe("the fee is 4.375%");
+  });
+
+  it("recall falls back to the client's chunk budget on unusable max_chunk_tokens", async () => {
+    const tool = tools.find((t) => t.name === "agent_knowledge_recall")!;
+
+    for (const [maxChunkTokens, expected] of [
+      [2048, 2048],
+      [0, 8192],
+      [-5, 8192],
+      ["not-a-number", 8192],
+    ] as const) {
+      mockFetch.mockReset();
+      mockFetch.mockReturnValueOnce(mockResponse({ results: [{ text: "found" }] }));
+      await tool.execute({
+        query: "exact wording",
+        include_chunks: true,
+        max_chunk_tokens: maxChunkTokens,
+      });
+      const body = await getBody(mockFetch.mock.calls[0]);
+      expect(body.include.chunks.max_tokens, String(maxChunkTokens)).toBe(expected);
+    }
+  });
+
   it("reflect sends POST with conservative defaults", async () => {
     mockFetch.mockReturnValueOnce(mockResponse({ text: "answer" }));
 

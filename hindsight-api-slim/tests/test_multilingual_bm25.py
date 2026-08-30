@@ -15,7 +15,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from hindsight_api.engine.consolidation.prompts import build_batch_consolidation_prompt
 from hindsight_api.engine.prompt_utils import output_language_directive
 from hindsight_api.engine.reflect.prompts import build_final_system_prompt
 from hindsight_api.engine.retain.fact_extraction import _build_extraction_prompt_and_schema
@@ -114,22 +113,54 @@ def test_retain_works_with_custom_mode():
 
 
 def test_consolidation_unset_does_not_inject_directive():
-    prompt = build_batch_consolidation_prompt(llm_output_language=None)
+    from hindsight_api.engine.consolidation.prompts import build_consolidation_system_prompt
+
+    prompt = build_consolidation_system_prompt(llm_output_language=None)
     assert "Respond exclusively in" not in prompt
 
 
+def test_consolidation_unset_requires_source_language():
+    """With no configured language, consolidation must still be told to keep each
+    observation in the language of its own source facts (#3166) — otherwise the
+    all-English prompt makes multilingual models drift to English."""
+    from hindsight_api.engine.consolidation.prompts import build_consolidation_system_prompt
+
+    prompt = build_consolidation_system_prompt(llm_output_language=None)
+    assert "## LANGUAGE" in prompt
+    assert "language of its own source facts" in prompt
+    # The three cases the rule has to settle, not just the happy path.
+    assert "Per observation, not per batch" in prompt
+    assert "compose the merged observation from scratch in the new facts' language" in prompt
+    assert "Proper nouns, identifiers, and units stay verbatim" in prompt
+
+
 def test_consolidation_injects_directive():
-    prompt = build_batch_consolidation_prompt(llm_output_language="Chinese")
+    from hindsight_api.engine.consolidation.prompts import build_consolidation_system_prompt
+
+    prompt = build_consolidation_system_prompt(llm_output_language="Chinese")
     assert "Respond exclusively in Chinese" in prompt
     assert "Translate any source content into Chinese" in prompt
 
 
+def test_consolidation_directive_replaces_source_language_rule():
+    """An explicit output language wins outright: the source-language default is
+    dropped rather than left to contradict "translate everything into X"."""
+    from hindsight_api.engine.consolidation.prompts import build_consolidation_system_prompt
+
+    prompt = build_consolidation_system_prompt(llm_output_language="Chinese")
+    assert "## LANGUAGE" not in prompt
+    assert "language of its own source facts" not in prompt
+
+
 def test_consolidation_directive_does_not_break_format_placeholders():
-    """The consolidation prompt is later passed through str.format(facts_text=..., observations_text=...).
-    The appended directive must not introduce stray { / } that would raise KeyError."""
-    prompt = build_batch_consolidation_prompt(llm_output_language="Japanese")
-    # str.format must succeed with the expected placeholders.
-    prompt.format(facts_text="X", observations_text="Y")
+    """build_consolidation_system_prompt appends the language directive and then runs
+    str.format() internally (the cached OUTPUT examples use doubled braces). A directive
+    that introduced a stray { / } would raise KeyError here — so a successful build with
+    a language set is the regression guard."""
+    from hindsight_api.engine.consolidation.prompts import build_consolidation_system_prompt
+
+    prompt = build_consolidation_system_prompt(llm_output_language="Japanese")
+    assert "Respond exclusively in Japanese" in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -202,7 +233,17 @@ def test_postgresql_extension_bm25_keeps_raw_query_text():
 
 
 @pytest.mark.asyncio
-async def test_combined_retrieval_uses_default_bm25_cap_for_legacy_config(monkeypatch):
+async def test_combined_retrieval_rejects_config_missing_bm25_cap(monkeypatch):
+    """A config object lacking the BM25 cap fields fails loudly instead of defaulting.
+
+    This used to read ``getattr(config, "bm25_max_query_terms", DEFAULT_...)`` and
+    silently fall back, on the theory that a config could predate the field. It
+    cannot: ``HindsightConfig`` is a dataclass that always defines both fields, so
+    only a stub like the one below can produce that state — and when one does reach
+    here it is a wrong-config bug, not a legacy config. Silently substituting a
+    global default for a resolved value is exactly what made #3584 undiagnosable.
+    """
+
     class FakeDialect:
         max_query_terms: int | None = None
 
@@ -232,14 +273,136 @@ async def test_combined_retrieval_uses_default_bm25_cap_for_legacy_config(monkey
     monkeypatch.setattr(retrieval_mod, "get_config", lambda: legacy_config)
     monkeypatch.setattr(retrieval_mod, "create_sql_dialect", lambda backend: fake_dialect)
 
-    result = await retrieval_mod.retrieve_semantic_bm25_combined(
-        FakeConn(),
-        "[0.0]",
-        "alpha beta",
-        "bank-1",
-        ["observation"],
-        5,
+    with pytest.raises(AttributeError, match="bm25_max_query_terms"):
+        await retrieval_mod.retrieve_semantic_bm25_combined_sql(
+            FakeConn(),
+            "[0.0]",
+            "alpha beta",
+            "bank-1",
+            ["observation"],
+            5,
+        )
+
+    # It raised while resolving the cap, so the dialect was never handed a bogus one.
+    assert fake_dialect.max_query_terms is None
+
+
+@pytest.mark.parametrize("selective", [True, False])
+@pytest.mark.asyncio
+async def test_selective_terms_flag_gates_the_pg_stats_lookup(monkeypatch, selective):
+    """A long native query consults pg_stats only when bm25_selective_terms is on;
+    opting out caps by position without the catalog read."""
+
+    class FakeDialect:
+        received_tokens: list[str] | None = None
+
+        def build_semantic_arm(self, **kwargs):
+            return "SELECT 'semantic' AS source"
+
+        def build_bm25_arm(self, **kwargs):
+            return "SELECT 'bm25' AS source"
+
+        def prepare_bm25_text(self, tokens, query_text, *, text_search_extension="native", max_query_terms=None):
+            self.received_tokens = list(tokens)
+            return " | ".join(tokens)
+
+    class FakeConn:
+        backend_type = "postgresql"
+
+        async def fetch(self, query, *params):
+            return []
+
+    selected: list[bool] = []
+
+    async def fake_select(conn, tokens, **kwargs):
+        selected.append(True)
+        return tokens[:5]
+
+    fake_dialect = FakeDialect()
+    config = SimpleNamespace(
+        semantic_min_similarity=0.0,
+        bm25_min_score=0.0,
+        text_search_extension="native",
+        text_search_extension_native_language="english",
+        bm25_max_query_terms=16,
+        bm25_selective_terms=selective,
+    )
+    monkeypatch.setattr(retrieval_mod, "get_config", lambda: config)
+    monkeypatch.setattr(retrieval_mod, "create_sql_dialect", lambda backend: fake_dialect)
+    monkeypatch.setattr(retrieval_mod, "get_current_schema", lambda: "public")
+    monkeypatch.setattr(retrieval_mod, "select_selective_bm25_tokens", fake_select)
+
+    long_query = " ".join(f"term{i}" for i in range(20))  # 20 tokens, over the cap
+    await retrieval_mod.retrieve_semantic_bm25_combined_sql(
+        FakeConn(), "[0.0]", long_query, "bank-1", ["observation"], 5
     )
 
-    assert result == {"observation": ([], [])}
-    assert fake_dialect.max_query_terms == 0
+    if selective:
+        assert selected == [True]
+        assert len(fake_dialect.received_tokens) == 5  # selection applied
+    else:
+        assert selected == []  # pg_stats never consulted
+        assert len(fake_dialect.received_tokens) == 20  # capping left to prepare_bm25_text
+
+
+@pytest.mark.asyncio
+async def test_combined_retrieval_reuses_raw_semantic_pool_for_graph_seeds(monkeypatch):
+    class FakeDialect:
+        def build_semantic_arm(self, **kwargs):
+            return "SELECT 'semantic' AS source"
+
+    class FakeConn:
+        backend_type = "postgresql"
+
+        async def fetch(self, query, *params):
+            return [
+                {"id": "best", "text": "best", "fact_type": "world", "source": "semantic", "similarity": 0.9},
+                {"id": "graph", "text": "graph", "fact_type": "world", "source": "semantic", "similarity": 0.6},
+                {"id": "weak", "text": "weak", "fact_type": "world", "source": "semantic", "similarity": 0.2},
+            ]
+
+    config = SimpleNamespace(semantic_min_similarity=0.1, bm25_min_score=0.0)
+    monkeypatch.setattr(retrieval_mod, "get_config", lambda: config)
+    monkeypatch.setattr(retrieval_mod, "create_sql_dialect", lambda backend: FakeDialect())
+
+    result = await retrieval_mod.retrieve_semantic_bm25_combined_sql(
+        FakeConn(),
+        "[0.0]",
+        "",
+        "bank-1",
+        ["world"],
+        1,
+        graph_seed_min_similarity=0.5,
+    )
+
+    assert [candidate.id for candidate in result["world"].semantic] == ["best"]
+    assert [candidate.id for candidate in result["world"].graph_seeds or []] == ["best", "graph"]
+
+
+@pytest.mark.asyncio
+async def test_combined_retrieval_keeps_graph_query_when_semantic_threshold_is_stricter(monkeypatch):
+    class FakeDialect:
+        def build_semantic_arm(self, **kwargs):
+            return "SELECT 'semantic' AS source"
+
+    class FakeConn:
+        backend_type = "postgresql"
+
+        async def fetch(self, query, *params):
+            return []
+
+    config = SimpleNamespace(semantic_min_similarity=0.7, bm25_min_score=0.0)
+    monkeypatch.setattr(retrieval_mod, "get_config", lambda: config)
+    monkeypatch.setattr(retrieval_mod, "create_sql_dialect", lambda backend: FakeDialect())
+
+    result = await retrieval_mod.retrieve_semantic_bm25_combined_sql(
+        FakeConn(),
+        "[0.0]",
+        "",
+        "bank-1",
+        ["world"],
+        10,
+        graph_seed_min_similarity=0.3,
+    )
+
+    assert result["world"].graph_seeds is None

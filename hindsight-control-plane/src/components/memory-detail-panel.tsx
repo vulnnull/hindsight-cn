@@ -4,23 +4,15 @@ import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { TagList } from "@/components/ui/tag-list";
-import {
-  Copy,
-  Check,
-  X,
-  Loader2,
-  Calendar,
-  History,
-  Activity,
-  RotateCcw,
-  Pencil,
-} from "lucide-react";
+import { Copy, Check, X, Calendar, History, Activity, RotateCcw, Pencil } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import { InvalidateMemoryDialog } from "./invalidate-memory-dialog";
 import { EditMemoryForm, type EditMemoryFields } from "./edit-memory-form";
 import { DocumentChunkModal } from "./document-chunk-modal";
 import { MemoryDetailModal } from "./memory-detail-modal";
 import { TraceDialog } from "./llm-requests-view";
 import { client, LLMRequestEntry } from "@/lib/api";
+import { EntityChip } from "@/components/ui/facet-chip";
 
 interface MemoryDetailPanelProps {
   memory: any;
@@ -284,6 +276,9 @@ export function MemoryDetailPanel({
         occurredEnd: fields.occurredEnd,
         factType: fields.factType,
         entities: fields.entities,
+        // A person editing the entity list here is naming the entity they mean, so the
+        // correction must not be re-resolved onto a similar existing one (#3479).
+        resolveEntities: false,
       });
       const refreshed = await client.getMemory(id, bankId);
       setFullMemory(refreshed);
@@ -322,7 +317,7 @@ export function MemoryDetailPanel({
 
           {loading ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              <Spinner size="md" variant="jump" />
               <span className="ml-2 text-muted-foreground">{t("loadingDetails")}</span>
             </div>
           ) : editingText ? (
@@ -478,14 +473,7 @@ export function MemoryDetailPanel({
                           typeof entity === "string"
                             ? entity
                             : entity?.name || JSON.stringify(entity);
-                        return (
-                          <span
-                            key={i}
-                            className="text-sm px-3 py-1.5 rounded-full bg-primary/10 text-primary font-medium"
-                          >
-                            {entityText}
-                          </span>
-                        );
+                        return <EntityChip key={i} entity={entityText} size="md" />;
                       })}
                     </div>
                   </div>
@@ -681,7 +669,7 @@ export function MemoryDetailPanel({
 
         {loading ? (
           <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            <Spinner size="md" variant="jump" />
             <span className="ml-2 text-sm text-muted-foreground">{t("loading")}</span>
           </div>
         ) : (

@@ -8,18 +8,6 @@ pub enum OutputFormat {
     Yaml,
 }
 
-impl OutputFormat {
-    /// Parse output format from string
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
-            "json" => Some(OutputFormat::Json),
-            "yaml" | "yml" => Some(OutputFormat::Yaml),
-            "pretty" | "text" => Some(OutputFormat::Pretty),
-            _ => None,
-        }
-    }
-}
-
 /// Format data as JSON string
 pub fn to_json<T: Serialize>(data: &T) -> Result<String> {
     Ok(serde_json::to_string_pretty(data)?)
@@ -59,35 +47,6 @@ mod tests {
     }
 
     #[test]
-    fn test_output_format_from_str_json() {
-        assert_eq!(OutputFormat::from_str("json"), Some(OutputFormat::Json));
-        assert_eq!(OutputFormat::from_str("JSON"), Some(OutputFormat::Json));
-        assert_eq!(OutputFormat::from_str("Json"), Some(OutputFormat::Json));
-    }
-
-    #[test]
-    fn test_output_format_from_str_yaml() {
-        assert_eq!(OutputFormat::from_str("yaml"), Some(OutputFormat::Yaml));
-        assert_eq!(OutputFormat::from_str("YAML"), Some(OutputFormat::Yaml));
-        assert_eq!(OutputFormat::from_str("yml"), Some(OutputFormat::Yaml));
-        assert_eq!(OutputFormat::from_str("YML"), Some(OutputFormat::Yaml));
-    }
-
-    #[test]
-    fn test_output_format_from_str_pretty() {
-        assert_eq!(OutputFormat::from_str("pretty"), Some(OutputFormat::Pretty));
-        assert_eq!(OutputFormat::from_str("PRETTY"), Some(OutputFormat::Pretty));
-        assert_eq!(OutputFormat::from_str("text"), Some(OutputFormat::Pretty));
-    }
-
-    #[test]
-    fn test_output_format_from_str_invalid() {
-        assert_eq!(OutputFormat::from_str("xml"), None);
-        assert_eq!(OutputFormat::from_str("csv"), None);
-        assert_eq!(OutputFormat::from_str(""), None);
-    }
-
-    #[test]
     fn test_to_json() {
         let data = TestData {
             name: "test".to_string(),
@@ -116,8 +75,16 @@ mod tests {
     #[test]
     fn test_to_json_array() {
         let data = vec![
-            TestData { name: "a".to_string(), count: 1, active: true },
-            TestData { name: "b".to_string(), count: 2, active: false },
+            TestData {
+                name: "a".to_string(),
+                count: 1,
+                active: true,
+            },
+            TestData {
+                name: "b".to_string(),
+                count: 2,
+                active: false,
+            },
         ];
         let json = to_json(&data).unwrap();
         assert!(json.contains("\"name\": \"a\""));
@@ -127,8 +94,16 @@ mod tests {
     #[test]
     fn test_to_yaml_array() {
         let data = vec![
-            TestData { name: "a".to_string(), count: 1, active: true },
-            TestData { name: "b".to_string(), count: 2, active: false },
+            TestData {
+                name: "a".to_string(),
+                count: 1,
+                active: true,
+            },
+            TestData {
+                name: "b".to_string(),
+                count: 2,
+                active: false,
+            },
         ];
         let yaml = to_yaml(&data).unwrap();
         assert!(yaml.contains("name: a"));

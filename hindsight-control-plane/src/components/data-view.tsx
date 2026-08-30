@@ -4,6 +4,12 @@ import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { client } from "@/lib/api";
 import { useBank } from "@/lib/bank-context";
+import {
+  AppliedMemoryFilters,
+  hasActiveMemoryFilters,
+  shouldShowEmptyBankState,
+} from "@/lib/memory-filters";
+import { EntityChip, TagChip } from "@/components/ui/facet-chip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -23,6 +29,7 @@ import {
   Search,
   Layers,
 } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Table,
   TableBody,
@@ -94,6 +101,13 @@ export function DataView({
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [tagFilters, setTagFilters] = useState<string[]>([]);
+  // The filters that actually produced the `data` currently on screen. This
+  // deliberately lags the live filter state: `searchQuery` only reaches the
+  // server on Enter, so deciding "is this bank empty?" from what the user has
+  // *typed* makes backspacing a zero-result search swap the results for the
+  // "no memories yet" screen — which unmounts the search box along with it
+  // (issue #3670).
+  const [appliedFilters, setAppliedFilters] = useState<AppliedMemoryFilters>({ q: "", tags: [] });
   // Observation scope filtering: the distinct scopes available, and the selected
   // one. `null` = all scopes; `[]` = the global (untagged) scope; otherwise an
   // exact tag set. Mutually exclusive with the free-form tag filter above.
@@ -167,6 +181,7 @@ export function DataView({
         chunk_id: chunkId,
       });
       setData(graphData);
+      setAppliedFilters({ q: q ?? "", tags: tags ?? [], tagsMatch });
 
       // Fetch consolidation status for observations
       if (factType === "observation") {
@@ -210,8 +225,9 @@ export function DataView({
     if (showInvalidated) return invalidatedRows;
     return data?.table_rows ?? [];
   }, [data, showInvalidated, invalidatedRows]);
-  const hasActiveMemoryFilters =
-    searchQuery.trim().length > 0 || tagFilters.length > 0 || selectedScope !== null;
+  // Read from the applied filters, not the live ones, so every "filtered vs.
+  // unfiltered" label describes the rows actually on screen.
+  const filtersActive = hasActiveMemoryFilters(appliedFilters);
 
   // Helper to get normalized link type
   const getLinkTypeCategory = (type: string | undefined): string => {
@@ -472,10 +488,10 @@ export function DataView({
     <div>
       {loading && !data ? (
         <div className="text-center py-12">
-          <RefreshCw className="w-8 h-8 mx-auto mb-3 text-muted-foreground animate-spin" />
+          <Spinner size="lg" variant="jump" className="mx-auto mb-3" />
           <p className="text-muted-foreground">{t("loadingMemories")}</p>
         </div>
-      ) : data && data.total_units === 0 && !hasActiveMemoryFilters ? (
+      ) : data && shouldShowEmptyBankState(data.total_units, appliedFilters) ? (
         <div className="text-center py-20">
           <FileText className="w-10 h-10 mx-auto mb-4 text-muted-foreground/50" />
           <h3 className="text-base font-medium text-foreground mb-1">{t("noMemoriesYet")}</h3>
@@ -502,18 +518,32 @@ export function DataView({
           {/* Always visible filters */}
           {!compactMode && (
             <div className="mb-4 space-y-2">
-              <div className="flex items-center gap-2">
+              <div className="flex items-start gap-2">
                 {/* Text search */}
                 <div className="relative max-w-xs flex-1">
                   {loading ? (
-                    <RefreshCw className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none animate-spin" />
+                    <Spinner
+                      size="sm"
+                      className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                    />
                   ) : (
                     <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
                   )}
                   <Input
                     type="text"
                     value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setSearchQuery(next);
+                      // Emptying the box is the one edit that doesn't need an
+                      // Enter to be unambiguous: re-run the query unfiltered so
+                      // the full list (and its total) comes straight back.
+                      if (next === "" && appliedFilters.q !== "" && currentBank) {
+                        setCurrentPage(1);
+                        const { tags, match } = resolveTagQuery();
+                        loadData(undefined, undefined, tags, match);
+                      }
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
                         e.preventDefault();
@@ -590,7 +620,7 @@ export function DataView({
                   </Button>
                 )}
                 <div className="text-sm text-muted-foreground">
-                  {hasActiveMemoryFilters ? (
+                  {filtersActive ? (
                     t("matchingMemories", { count: filteredTableRows.length })
                   ) : data.table_rows?.length < data.total_units ? (
                     <span>
@@ -930,12 +960,7 @@ export function DataView({
                                             .split(", ")
                                             .slice(0, 2)
                                             .map((entity: string, i: number) => (
-                                              <span
-                                                key={i}
-                                                className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium"
-                                              >
-                                                {entity}
-                                              </span>
+                                              <EntityChip key={i} entity={entity} size="xs" />
                                             ))}
                                           {row.entities.split(", ").length > 2 && (
                                             <span className="text-[10px] text-muted-foreground">
@@ -953,12 +978,7 @@ export function DataView({
                                           {(row.tags as string[])
                                             .slice(0, 2)
                                             .map((tag: string, i: number) => (
-                                              <span
-                                                key={i}
-                                                className="text-[10px] px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-700 border border-amber-500/20 font-medium font-mono"
-                                              >
-                                                #{tag}
-                                              </span>
+                                              <TagChip key={i} tag={tag} size="xs" />
                                             ))}
                                           {row.tags.length > 2 && (
                                             <span className="text-[10px] text-muted-foreground">
@@ -1046,7 +1066,7 @@ export function DataView({
                     })()
                   ) : (
                     <div className="text-center py-12 text-muted-foreground">
-                      {hasActiveMemoryFilters ? t("noMemoriesMatchFilter") : t("noMemoriesFound")}
+                      {filtersActive ? t("noMemoriesMatchFilter") : t("noMemoriesFound")}
                     </div>
                   )}
                 </div>
@@ -1066,7 +1086,7 @@ export function DataView({
       ) : (
         <div className="flex items-center justify-center py-20">
           <div className="text-center">
-            <div className="text-4xl mb-2">📊</div>
+            <ScatterChart className="w-10 h-10 mx-auto mb-3 text-muted-foreground/50" />
             <div className="text-sm text-muted-foreground">{t("noDataAvailable")}</div>
           </div>
         </div>
@@ -1084,10 +1104,13 @@ export function DataView({
   );
 }
 
-// Timeline View Component - Custom compact timeline with zoom and navigation
+// Timeline View Component - Custom compact timeline with zoom and navigation.
+// Exported for reuse (e.g. the per-entity timeline in entities-view). It renders
+// purely from `filteredRows`; `data`/`bankId` are accepted for backward-compat
+// with the memories view but unused here.
 type Granularity = "year" | "month" | "week" | "day";
 
-function TimelineView({
+export function TimelineView({
   data,
   filteredRows,
   bankId,
@@ -1416,12 +1439,7 @@ function TimelineView({
                             .split(", ")
                             .slice(0, 3)
                             .map((entity: string, i: number) => (
-                              <span
-                                key={i}
-                                className="text-[9px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium"
-                              >
-                                {entity}
-                              </span>
+                              <EntityChip key={i} entity={entity} size="xs" />
                             ))}
                           {item.entities.split(", ").length > 3 && (
                             <span className="text-[9px] text-muted-foreground">

@@ -5,6 +5,13 @@ build/
 dist/
 wheels/
 *.egg-info
+# Release builds stage the canonical root license in each package context.
+/hindsight-clients/python/LICENSE
+/hindsight-api-slim/LICENSE
+/hindsight-api/LICENSE
+/hindsight-all/LICENSE
+/hindsight-all-slim/LICENSE
+/hindsight-embed/LICENSE
 .mcp.json
 .playwright-mcp/
 .osgrep
@@ -13,6 +20,9 @@ wheels/
 
 # Node
 node_modules/
+# Without this, the pattern above matches directories only — a node_modules SYMLINK (what you get
+# pointing a scratch worktree at an installed one) is a file, slips past it, and can be committed.
+node_modules
 
 # Environment variables and local config
 .env
@@ -41,6 +51,7 @@ nltk_data/
 logs/
 
 .DS_Store
+.sesskey
 
 # Generated docs files
 hindsight-docs/static/llms-full.txt

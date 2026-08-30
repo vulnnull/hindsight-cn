@@ -22,7 +22,7 @@ class GraphRetrievalTimings:
     pattern_count: int = 0  # Number of patterns executed
     fusion: float = 0.0  # Time for RRF fusion
     fetch: float = 0.0  # Time to fetch memory unit details
-    seeds_time: float = 0.0  # Time to find semantic seeds (if fallback used)
+    seeds_time: float = 0.0  # Time spent selecting semantic graph seeds
     result_count: int = 0  # Number of results returned
     # Detailed per-hop timing: list of {hop, exec_time, uncached, load_time, edges_loaded, total_time}
     hop_details: list[dict] = field(default_factory=list)
@@ -49,6 +49,22 @@ class RetrievalResult:
     tags: list[str] | None = None  # Visibility scope tags
     metadata: dict[str, str] | None = None  # User-provided metadata
     proof_count: int | None = None  # Number of supporting memories (observations only)
+
+    # Entity postings the backend already resolved for this unit, if any.
+    # ``None`` means "this backend does not carry entity ids on the result" (the default
+    # store, which resolves them later via ``entity_map_for_units``); a list — possibly
+    # empty — means the backend already resolved the unit->entity posting inline, so
+    # recall can build the entity map directly instead of re-fetching the memories.
+    #
+    # CONTRACT: a backend that populates this for an OBSERVATION MUST include the
+    # entities it inherits from its source memories, not only any it carries directly.
+    # Recall builds the entity map straight from this list and does NOT resolve
+    # observation-from-source inheritance itself (the default store, which leaves this
+    # ``None``, resolves that inheritance inside ``entity_map_for_units`` instead). A
+    # backend that owns its index and resolves the inheritance at write time — so the
+    # stored record's entity ids are already the complete set — satisfies this; one that
+    # only stores direct postings must leave this ``None`` for observations.
+    entity_ids: list[str] | None = None
 
     # Retrieval-specific scores (only one will be set depending on retrieval method)
     similarity: float | None = None  # Semantic retrieval

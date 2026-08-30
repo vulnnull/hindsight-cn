@@ -143,17 +143,19 @@ Optional settings in `~/.openclaw/openclaw.json`:
 - `recallMaxTokens` - Max tokens for recall response (default: `1024`). Controls how much memory context is injected per turn.
 - `recallTopK` - Max number of memories to inject per turn (default: unlimited).
 - `recallTypes` - Memory types to recall (default: `["observation"]`). Options: `world`, `experience`, `observation`. Defaults to observations — the consolidated, deduplicated view — to avoid surfacing the same answer multiple times when many raw memories say the same thing.
+- `preferObservations` - When `true`, recall drops raw facts already consolidated into an observation while keeping unconsolidated ones (default: `false`). Pair it with a `recallTypes` that includes raw types (e.g. `["observation", "world", "experience"]`) to surface just-retained facts before consolidation catches up — for example after a `/reset` followed by "what did I just say?" — without duplicating already-consolidated content.
 - `recallContextTurns` - Number of prior user turns to include in the recall query (default: `1`).
 - `recallMaxQueryChars` - Max characters for the composed recall query (default: `800`).
 - `recallPromptPreamble` - Custom preamble text placed above recalled memories. Overrides the built-in guidance text.
-- `recallInjectionPosition` - Where to inject recalled memories: `"prepend"` (default), `"append"`, or `"user"`. Use `"append"` to preserve prompt caching with large static system prompts. Use `"user"` to inject before the user message instead of in the system prompt.
+- `recallInjectionPosition` - Where to inject recalled memories: `"user"` (default), `"prepend"`, or `"append"`. The default injects before the user message and preserves the system prompt cache. Use `"prepend"` or `"append"` when memories need system-level context.
 - `recallRoles` - Which message roles to include when composing the contextual recall query (default: `["user", "assistant"]`).
 - `retainEveryNTurns` - Retain every Nth turn (default: `1` = every turn). Values > 1 enable chunked retention.
+- `senderPrefixPattern` - Regex matching a human display-name prefix that some channels prepend to the user's text (e.g. `Alice: today weather?`). Supply the name part only — `Alice|Bob` or `[A-Za-z ]{1,20}` — the `:` separator and anchoring are added by the plugin. When set, the prefix is stripped from both the recall query and the retained transcript, so the sender's name no longer pollutes vector search or get extracted as a fact. Unset (default) strips nothing; an invalid regex is ignored.
 - `retainOverlapTurns` - Extra prior turns included when chunked retention fires (default: `0`).
 - `enableKnowledgeTools` - Register `agent_knowledge_*` tools for explicit agent-driven lookup, reflection, ingest, and knowledge-page management (default: `false`).
 - `debug` - Enable debug logging (default: `false`).
 
-When using `agent_knowledge_recall` manually, pass `max_tokens` to control how much memory text the recall response may contain. The tool has no `max_results` parameter — to cap the number of automatically injected memories, use `recallTopK` on auto-recall instead.
+When using `agent_knowledge_recall` manually, pass `max_tokens` to control how much memory text the recall response may contain. The tool has no `max_results` parameter — to cap the number of automatically injected memories, use `recallTopK` on auto-recall instead. When the answer needs verbatim wording or an exact number rather than an extracted fact, pass `include_chunks: true` to also get the raw source text those memories came from, and `max_chunk_tokens` to bound it (default `8192`).
 
 When using `agent_knowledge_reflect`, keep the default conservative settings unless you intentionally need a deeper synthesis: `budget` defaults to `low`, `max_tokens` defaults to `1024`, and `fact_types` defaults to `world`, `experience`, and `observation`. Reflect calls can be more expensive than recall because they retrieve memories and then call the configured Reflect LLM to generate an answer. For production banks, set a finite bank-level `reflect_source_facts_max_tokens` value (for example `4096` or `8192`) instead of leaving it unlimited, so ad-hoc reflection cannot pull an unbounded amount of source facts into the LLM context.
 
@@ -463,6 +465,20 @@ openclaw config get plugins.entries.hindsight-openclaw.config.llmProvider
 
 If you used `--ref-source env`, double-check that the referenced env var
 (e.g. `OPENAI_API_KEY`) is exported in the shell that runs `openclaw gateway`.
+
+## Limitations
+
+### `memory-wiki` bridge mode is not supported
+
+`hindsight-openclaw` does not export OpenClaw `publicArtifacts`, so OpenClaw's
+`memory-wiki` **bridge mode** (`vaultMode: "bridge"`) is not supported. With the
+Hindsight plugin active, `openclaw wiki bridge import` imports `0` artifacts and
+`openclaw wiki status` warns that the active memory plugin isn't exporting any
+public memory artifacts.
+
+This applies only to the wiki bridge. Hindsight's own memory works normally —
+retain / recall / reflect, shared banks, and the external-API setup above are all
+unaffected.
 
 ### Verify it's working
 

@@ -412,51 +412,6 @@ This is a complete, runnable application demonstrating Hindsight integration.
     return apps
 
 
-def update_sidebars(recipes: list[dict], apps: list[dict], sidebars_file: Path):
-    """Update sidebars.ts - keep it simple with just the index."""
-    content = sidebars_file.read_text()
-
-    # Simple sidebar with just the cookbook index
-    new_cookbook_sidebar = """cookbookSidebar: [
-    {
-      type: 'doc',
-      id: 'cookbook/index',
-      label: 'Cookbook',
-    },
-  ]"""
-
-    # Replace existing cookbookSidebar
-    start = content.find("cookbookSidebar:")
-    if start == -1:
-        raise ValueError("cookbookSidebar not found in sidebars.ts")
-
-    # Find the opening bracket
-    bracket_start = content.find("[", start)
-    if bracket_start == -1:
-        raise ValueError("Could not find opening bracket for cookbookSidebar")
-
-    # Find matching closing bracket by counting brackets
-    depth = 0
-    end = bracket_start
-    for i, char in enumerate(content[bracket_start:], bracket_start):
-        if char == "[":
-            depth += 1
-        elif char == "]":
-            depth -= 1
-            if depth == 0:
-                end = i + 1
-                break
-
-    # Include trailing comma if present
-    if end < len(content) and content[end] == ",":
-        end += 1
-
-    content = content[:start] + new_cookbook_sidebar + "," + content[end:]
-
-    sidebars_file.write_text(content)
-    print("\nUpdated sidebars.ts")
-
-
 def strip_local_md_links(content: str) -> str:
     """Replace relative .md links with plain text to avoid broken links in Docusaurus.
 

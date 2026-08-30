@@ -272,6 +272,47 @@ async def test_retry_rejects_non_retriable_statuses(api_client, memory, test_ban
 
 
 @pytest.mark.asyncio
+async def test_retry_rejects_batch_retain_parent(api_client, memory, test_bank_id):
+    """A failed batch_retain parent with no retryable work must not be revived into a re-stranded state.
+
+    The parent is a payload-less status aggregator, so retrying it only makes sense
+    when it still has failed/cancelled children to re-run (see the retry tests in
+    test_async_batch_retain.py). This parent has no children at all, so there is
+    nothing to re-queue — reviving it would strand it 'pending' forever (issue #2985).
+    The 409 should point the caller at resubmit + delete instead.
+    """
+    pool = memory._pool
+    await _ensure_bank(pool, test_bank_id)
+
+    op_id = uuid.uuid4()
+    await pool.execute(
+        """
+        INSERT INTO async_operations (operation_id, bank_id, operation_type, status, task_payload)
+        VALUES ($1, $2, 'batch_retain', 'failed', NULL)
+        """,
+        op_id,
+        test_bank_id,
+    )
+
+    response = await api_client.post(f"/v1/default/banks/{test_bank_id}/operations/{op_id}/retry")
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert "batch_retain parent" in detail
+    assert "delete" in detail.lower()
+
+    # Guard must not have mutated the row.
+    row = await pool.fetchrow(
+        "SELECT status FROM async_operations WHERE operation_id = $1",
+        op_id,
+    )
+    assert row["status"] == "failed"
+
+    # But it remains deletable as the sanctioned cleanup path.
+    response = await api_client.delete(f"/v1/default/banks/{test_bank_id}/operations/{op_id}/delete")
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_cancel_rejects_non_pending_operations(api_client, memory, test_bank_id):
     """DELETE /operations/{id} should only cancel pending operations."""
     pool = memory._pool
@@ -281,3 +322,59 @@ async def test_cancel_rejects_non_pending_operations(api_client, memory, test_ba
         op_id = await _insert_operation(pool, test_bank_id, status)
         response = await api_client.delete(f"/v1/default/banks/{test_bank_id}/operations/{op_id}")
         assert response.status_code == 409, f"Expected 409 for {status}, got {response.status_code}"
+
+
+@pytest.mark.asyncio
+async def test_delete_removes_terminal_operation(api_client, memory, test_bank_id):
+    """DELETE /operations/{id}/delete should remove a failed operation's row entirely."""
+    pool = memory._pool
+    await _ensure_bank(pool, test_bank_id)
+
+    op_id = await _insert_operation(pool, test_bank_id, "failed")
+
+    response = await api_client.delete(f"/v1/default/banks/{test_bank_id}/operations/{op_id}/delete")
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+
+    # get_operation_status returns a not_found dict (not HTTP 404)
+    response = await api_client.get(f"/v1/default/banks/{test_bank_id}/operations/{op_id}")
+    assert response.status_code == 200
+    assert response.json()["status"] == "not_found"
+
+    response = await api_client.get(
+        f"/v1/default/banks/{test_bank_id}/operations",
+        params={"status": "failed"},
+    )
+    assert response.status_code == 200
+    assert response.json()["operations"] == []
+
+
+@pytest.mark.asyncio
+async def test_delete_rejects_non_terminal_statuses(api_client, memory, test_bank_id):
+    """DELETE /operations/{id}/delete should reject pending and processing operations."""
+    pool = memory._pool
+    await _ensure_bank(pool, test_bank_id)
+
+    for status in ("pending", "processing"):
+        op_id = await _insert_operation(pool, test_bank_id, status)
+        response = await api_client.delete(f"/v1/default/banks/{test_bank_id}/operations/{op_id}/delete")
+        assert response.status_code == 409, f"Expected 409 for {status}, got {response.status_code}"
+
+
+@pytest.mark.asyncio
+async def test_delete_wrong_bank_returns_404(api_client, memory, test_bank_id):
+    """DELETE under a different valid bank must 404 and leave the row intact."""
+    pool = memory._pool
+    bank_a = test_bank_id
+    bank_b = f"{test_bank_id}_other"
+    await _ensure_bank(pool, bank_a)
+    await _ensure_bank(pool, bank_b)
+
+    op_id = await _insert_operation(pool, bank_a, "failed")
+
+    response = await api_client.delete(f"/v1/default/banks/{bank_b}/operations/{op_id}/delete")
+    assert response.status_code == 404
+
+    response = await api_client.get(f"/v1/default/banks/{bank_a}/operations/{op_id}")
+    assert response.status_code == 200
+    assert response.json()["status"] == "failed"

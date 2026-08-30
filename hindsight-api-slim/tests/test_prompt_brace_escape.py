@@ -4,6 +4,7 @@ User-supplied text (missions, custom instructions) may contain literal braces
 (e.g. JSON examples). These must survive ``str.format()`` without crashing.
 """
 
+import dataclasses
 import pytest
 
 from hindsight_api.engine.prompt_utils import escape_for_prompt
@@ -47,24 +48,30 @@ class TestEscapeForPrompt:
 
 
 class TestConsolidationBraceSafety:
+    """The per-batch consolidation input runs str.format() internally
+    (build_consolidation_input → template.format(facts_text=..., observations_text=...)),
+    so a mission or capacity note containing literal braces must be escaped or it
+    raises KeyError and crashes consolidation."""
+
     def test_mission_with_json_renders(self):
-        from hindsight_api.engine.consolidation.prompts import (
-            build_batch_consolidation_prompt,
-        )
+        from hindsight_api.engine.consolidation.prompts import build_consolidation_input
 
         mission = '{"dedup": true, "merge": true}'
-        prompt = build_batch_consolidation_prompt(observations_mission=mission)
-        rendered = prompt.format(facts_text="<facts>", observations_text="<obs>")
+        rendered = build_consolidation_input(
+            facts_text="<facts>", observations_text="<obs>", observations_mission=mission
+        )
         assert mission in rendered
 
     def test_capacity_note_with_braces_renders(self):
-        from hindsight_api.engine.consolidation.prompts import (
-            build_batch_consolidation_prompt,
-        )
+        from hindsight_api.engine.consolidation.prompts import build_consolidation_input
 
         note = "Use shape {limit, used}"
-        prompt = build_batch_consolidation_prompt(observations_mission="m", observation_capacity_note=note)
-        rendered = prompt.format(facts_text="<facts>", observations_text="<obs>")
+        rendered = build_consolidation_input(
+            facts_text="<facts>",
+            observations_text="<obs>",
+            observations_mission="m",
+            observation_capacity_note=note,
+        )
         assert "{limit, used}" in rendered
 
 
@@ -98,18 +105,21 @@ class TestReflectBraceSafety:
 
 class TestRetainBraceSafety:
     def _make_config(self, **overrides):
-        """Minimal config-like object for _build_extraction_prompt_and_schema."""
-        from types import SimpleNamespace
+        """A real config for _build_extraction_prompt_and_schema.
+
+        Not a stub: the retain path reads its config fields directly, so a partial
+        namespace raises AttributeError on the first field it does not define.
+        """
+        from hindsight_api.config import _get_raw_config
 
         defaults = {
             "retain_extraction_mode": "concise",
             "retain_extract_causal_links": False,
             "retain_mission": None,
             "retain_custom_instructions": None,
-            "retain_taxonomy": None,
         }
         defaults.update(overrides)
-        return SimpleNamespace(**defaults)
+        return dataclasses.replace(_get_raw_config(), **defaults)
 
     def test_retain_mission_with_json(self):
         from hindsight_api.engine.retain.fact_extraction import (

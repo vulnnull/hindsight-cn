@@ -9,6 +9,7 @@ BaseException'), which happened when last_error was only set in the
 BadRequestError handler and not for non-dict JSON responses.
 """
 
+import dataclasses
 import json
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -20,11 +21,13 @@ def test_output_retry_split_preserves_conversation_array_boundaries():
     """OutputTooLong retry splitting must keep conversation chunks valid JSON arrays."""
     from hindsight_api.engine.retain.fact_extraction import _split_chunk_for_output_retry
 
+    # Contents are padded so the array clears the minimum-split floor and the
+    # boundary-preserving branch (not the drop-when-too-small guard) is exercised.
     turns = [
-        {"role": "user", "content": "alpha"},
-        {"role": "assistant", "content": "bravo"},
-        {"role": "user", "content": "charlie"},
-        {"role": "assistant", "content": "delta"},
+        {"role": "user", "content": "alpha " * 40},
+        {"role": "assistant", "content": "bravo " * 40},
+        {"role": "user", "content": "charlie " * 40},
+        {"role": "assistant", "content": "delta " * 40},
     ]
 
     split = _split_chunk_for_output_retry(json.dumps(turns))
@@ -39,7 +42,9 @@ def test_output_retry_split_divides_single_oversized_turn_content():
     """A lone oversized conversation turn is split inside content and rewrapped."""
     from hindsight_api.engine.retain.fact_extraction import _split_chunk_for_output_retry
 
-    turn = {"role": "user", "content": "abcdefghijklmnopqrstuvwxyz", "name": "casey"}
+    # Content must exceed the minimum-split floor for the single-turn branch to
+    # divide it rather than drop the sub-chunk outright.
+    turn = {"role": "user", "content": "abcdefghijklmnopqrstuvwxyz" * 40, "name": "casey"}
 
     split = _split_chunk_for_output_retry(json.dumps([turn]))
 
@@ -60,6 +65,44 @@ def test_output_retry_split_returns_none_when_no_progress_possible():
 
     assert _split_chunk_for_output_retry("x") is None
     assert _split_chunk_for_output_retry(json.dumps([{"role": "user", "content": ""}])) is None
+
+
+def test_output_too_long_error_is_a_single_class_across_modules():
+    """Regression for #3172.
+
+    ``OutputTooLongError`` must be one class everywhere: the providers raise the
+    ``llm_interface`` definition, and ``fact_extraction`` / ``multi_llm`` catch
+    the name they import from ``llm_wrapper``. If ``llm_wrapper`` shadows it with
+    a second definition, ``except OutputTooLongError`` silently stops matching
+    what the providers raise and the #2579 auto-split becomes dead code.
+    """
+    from hindsight_api.engine import llm_interface, llm_wrapper, multi_llm
+    from hindsight_api.engine.providers import litellm_llm, openai_compatible_llm
+    from hindsight_api.engine.retain import fact_extraction
+
+    canonical = llm_interface.OutputTooLongError
+    assert llm_wrapper.OutputTooLongError is canonical
+    assert fact_extraction.OutputTooLongError is canonical
+    assert multi_llm.OutputTooLongError is canonical
+    assert litellm_llm.OutputTooLongError is canonical
+    assert openai_compatible_llm.OutputTooLongError is canonical
+
+
+def test_output_retry_split_drops_subchunk_below_minimum_floor():
+    """A chunk at/under the minimum-split floor is dropped, not recursively halved.
+
+    Without this floor a chunk that overflows the output cap at *every* size
+    (degenerate/looping model output) would recurse until it is a single
+    character, burning thousands of extraction calls (#3172).
+    """
+    from hindsight_api.engine.retain.fact_extraction import (
+        _MIN_SPLIT_CHUNK_CHARS,
+        _split_chunk_for_output_retry,
+    )
+
+    assert _split_chunk_for_output_retry("a" * _MIN_SPLIT_CHUNK_CHARS) is None
+    # Just over the floor still splits.
+    assert _split_chunk_for_output_retry("a. " * ((_MIN_SPLIT_CHUNK_CHARS // 3) + 5)) is not None
 
 
 @pytest.mark.asyncio
@@ -92,21 +135,23 @@ async def test_output_too_long_drops_unsplittable_subchunk_without_recursing():
 
 def _make_config(llm_max_retries: int = 3, retain_llm_max_retries: int | None = None):
     """Build a minimal HindsightConfig for fact extraction tests."""
-    from hindsight_api.config import HindsightConfig
+    from hindsight_api.config import _get_raw_config
 
-    cfg = MagicMock(spec=HindsightConfig)
-    cfg.retain_llm_max_retries = retain_llm_max_retries
-    cfg.llm_max_retries = llm_max_retries
-    cfg.retain_llm_initial_backoff = None
-    cfg.llm_initial_backoff = 0.0
-    cfg.retain_llm_max_backoff = None
-    cfg.llm_max_backoff = 0.0
-    cfg.retain_max_completion_tokens = 8192
-    cfg.retain_extraction_mode = "concise"
-    cfg.retain_extract_causal_links = False
-    cfg.retain_mission = None
-    cfg.llm_temperature_retain = 0.1
-    return cfg
+    return dataclasses.replace(
+        _get_raw_config(),
+        retain_llm_max_retries=retain_llm_max_retries,
+        llm_max_retries=llm_max_retries,
+        retain_llm_initial_backoff=None,
+        llm_initial_backoff=0.0,
+        retain_llm_max_backoff=None,
+        llm_max_backoff=0.0,
+        retain_max_completion_tokens=8192,
+        retain_extraction_mode="concise",
+        retain_extract_causal_links=False,
+        retain_mission=None,
+        llm_temperature_retain=0.1,
+        llm_strict_schema_retain=False,
+    )
 
 
 def _make_llm_config(mock_response):
@@ -115,6 +160,9 @@ def _make_llm_config(mock_response):
 
     llm = MagicMock(spec=LLMProvider)
     llm.provider = "mock"
+    # Set explicitly: ``model`` is an instance attribute, so ``spec=LLMProvider``
+    # does not provide it, and the extraction error paths name the model.
+    llm.model = "mock-model"
     token_usage = MagicMock()
     token_usage.__add__ = lambda self, other: self
     llm.call = AsyncMock(return_value=(mock_response, token_usage))
@@ -154,7 +202,8 @@ async def test_non_dict_json_all_retries_raises():
                 agent_name="test-agent",
             )
 
-    assert llm_config.call.call_count == 3
+    # Budget 3 => 3 retries after the initial request.
+    assert llm_config.call.call_count == 4
 
 
 @pytest.mark.asyncio
@@ -202,6 +251,213 @@ async def test_top_level_fact_list_is_accepted_without_retry():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("fact_fields", "expected_text"),
+    [
+        ({"text": "Alice visited Paris"}, "Alice visited Paris"),
+        ({"what": "Alice visited Paris"}, "Alice visited Paris"),
+    ],
+)
+async def test_fact_text_alias_is_recovered(fact_fields, expected_text):
+    """Recover schema-drifted ``text`` facts (the empty case is #3708 below)."""
+    from hindsight_api.engine.retain.fact_extraction import _extract_facts_from_chunk
+
+    config = _make_config(llm_max_retries=0, retain_llm_max_retries=None)
+    llm_config = _make_llm_config(
+        mock_response=[
+            {
+                **fact_fields,
+                "fact_type": "world",
+                "fact_kind": "conversation",
+            }
+        ]
+    )
+
+    with patch(
+        "hindsight_api.engine.retain.fact_extraction._build_extraction_prompt_and_schema",
+        return_value=("system prompt", MagicMock()),
+    ):
+        facts, _usage = await _extract_facts_from_chunk(
+            chunk="Alice visited Paris.",
+            chunk_index=0,
+            total_chunks=1,
+            event_date=datetime(2023, 1, 1, tzinfo=timezone.utc),
+            context="travel notes",
+            llm_config=llm_config,
+            config=config,
+            agent_name="test-agent",
+        )
+
+    assert len(facts) == 1
+    assert expected_text in facts[0].fact
+
+
+def _drifted_fact(index: int) -> dict:
+    """A well-formed JSON fact object that carries none of the text keys (#3708)."""
+    return {"when": f"202{index}", "who": "Alice", "why": "vacation", "fact_type": "world"}
+
+
+@pytest.mark.asyncio
+async def test_schema_drifted_facts_are_retried_then_raise():
+    """Issue #3708.
+
+    A model without strict-schema support can return well-formed JSON whose fact
+    objects have the wrong shape (no 'what'/'factual_core'/'text'). Every fact is
+    then dropped. That must (a) count as malformed so the re-prompt loop runs, and
+    (b) raise once the retries are exhausted rather than returning [] — otherwise
+    the retain commits the document with 0 memory units and reports `completed`.
+    """
+    from hindsight_api.engine.retain.fact_extraction import _extract_facts_from_chunk
+
+    config = _make_config(llm_max_retries=2, retain_llm_max_retries=None)
+    llm_config = _make_llm_config(mock_response={"facts": [_drifted_fact(3), _drifted_fact(4)]})
+
+    with patch(
+        "hindsight_api.engine.retain.fact_extraction._build_extraction_prompt_and_schema",
+        return_value=("system prompt", MagicMock()),
+    ):
+        with pytest.raises(RuntimeError, match="all 2 facts returned by the LLM were unusable"):
+            await _extract_facts_from_chunk(
+                chunk="Alice visited Paris in 2023.",
+                chunk_index=0,
+                total_chunks=1,
+                event_date=datetime(2023, 1, 1, tzinfo=timezone.utc),
+                context="travel notes",
+                llm_config=llm_config,
+                config=config,
+                agent_name="test-agent",
+            )
+
+    # Budget 2 => the initial request plus 2 re-prompts.
+    assert llm_config.call.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_schema_drifted_facts_do_not_discard_the_usable_ones():
+    """A partially drifted response keeps its valid facts and does not raise."""
+    from hindsight_api.engine.retain.fact_extraction import _extract_facts_from_chunk
+
+    config = _make_config(llm_max_retries=0, retain_llm_max_retries=None)
+    llm_config = _make_llm_config(
+        mock_response={
+            "facts": [
+                {"what": "Alice visited Paris", "when": "2023", "fact_type": "world"},
+                _drifted_fact(4),
+            ]
+        }
+    )
+
+    with patch(
+        "hindsight_api.engine.retain.fact_extraction._build_extraction_prompt_and_schema",
+        return_value=("system prompt", MagicMock()),
+    ):
+        facts, _usage = await _extract_facts_from_chunk(
+            chunk="Alice visited Paris in 2023.",
+            chunk_index=0,
+            total_chunks=1,
+            event_date=datetime(2023, 1, 1, tzinfo=timezone.utc),
+            context="travel notes",
+            llm_config=llm_config,
+            config=config,
+            agent_name="test-agent",
+        )
+
+    assert len(facts) == 1
+    assert "Alice visited Paris" in facts[0].fact
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("placeholder", ["", "N/A", None])
+async def test_placeholder_what_is_skipped_without_retry_or_raise(placeholder):
+    """A *present* but empty/"N/A" 'what' is the model saying "nothing here".
+
+    That is schema-conformant, so it must stay a quiet skip: no re-prompt (which
+    could not improve it) and no failure (#3708 must not turn "no facts in this
+    content" into a hard error).
+    """
+    from hindsight_api.engine.retain.fact_extraction import _extract_facts_from_chunk
+
+    config = _make_config(llm_max_retries=3, retain_llm_max_retries=None)
+    llm_config = _make_llm_config(mock_response={"facts": [{"what": placeholder, "fact_type": "world"}]})
+
+    with patch(
+        "hindsight_api.engine.retain.fact_extraction._build_extraction_prompt_and_schema",
+        return_value=("system prompt", MagicMock()),
+    ):
+        facts, _usage = await _extract_facts_from_chunk(
+            chunk="ok thanks",
+            chunk_index=0,
+            total_chunks=1,
+            event_date=datetime(2023, 1, 1, tzinfo=timezone.utc),
+            context="",
+            llm_config=llm_config,
+            config=config,
+            agent_name="test-agent",
+        )
+
+    assert facts == []
+    assert llm_config.call.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_empty_facts_list_is_not_treated_as_schema_drift():
+    """``{"facts": []}`` is a valid "nothing to extract" answer, not a failure."""
+    from hindsight_api.engine.retain.fact_extraction import _extract_facts_from_chunk
+
+    config = _make_config(llm_max_retries=3, retain_llm_max_retries=None)
+    llm_config = _make_llm_config(mock_response={"facts": []})
+
+    with patch(
+        "hindsight_api.engine.retain.fact_extraction._build_extraction_prompt_and_schema",
+        return_value=("system prompt", MagicMock()),
+    ):
+        facts, _usage = await _extract_facts_from_chunk(
+            chunk="ok thanks",
+            chunk_index=0,
+            total_chunks=1,
+            event_date=datetime(2023, 1, 1, tzinfo=timezone.utc),
+            context="",
+            llm_config=llm_config,
+            config=config,
+            agent_name="test-agent",
+        )
+
+    assert facts == []
+    assert llm_config.call.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_verbatim_mode_tolerates_facts_without_what():
+    """In verbatim mode 'what' is intentionally absent — text is backfilled from
+    the chunk later, so those facts must not be counted as schema drift."""
+    from hindsight_api.engine.retain.fact_extraction import _extract_facts_from_chunk
+
+    config = dataclasses.replace(
+        _make_config(llm_max_retries=3, retain_llm_max_retries=None),
+        retain_extraction_mode="verbatim",
+    )
+    llm_config = _make_llm_config(mock_response={"facts": [{"fact_type": "world", "entities": ["Alice"]}]})
+
+    with patch(
+        "hindsight_api.engine.retain.fact_extraction._build_extraction_prompt_and_schema",
+        return_value=("system prompt", MagicMock()),
+    ):
+        facts, _usage = await _extract_facts_from_chunk(
+            chunk="Alice visited Paris in 2023.",
+            chunk_index=0,
+            total_chunks=1,
+            event_date=datetime(2023, 1, 1, tzinfo=timezone.utc),
+            context="travel notes",
+            llm_config=llm_config,
+            config=config,
+            agent_name="test-agent",
+        )
+
+    assert len(facts) == 1
+    assert llm_config.call.call_count == 1
+
+
+@pytest.mark.asyncio
 async def test_non_dict_json_with_default_max_retries_raises():
     """
     Same scenario with the default llm_max_retries=10 (matching real default config):
@@ -228,7 +484,7 @@ async def test_non_dict_json_with_default_max_retries_raises():
                 agent_name="agent",
             )
 
-    assert llm_config.call.call_count == 10
+    assert llm_config.call.call_count == 11
 
 
 @pytest.mark.asyncio
@@ -259,8 +515,42 @@ async def test_retain_llm_max_retries_overrides_global():
                 agent_name="agent",
             )
 
-    # Verify it retried exactly retain_llm_max_retries times
-    assert llm_config.call.call_count == 5
+    # Verify it retried exactly retain_llm_max_retries times after the initial request
+    assert llm_config.call.call_count == 6
+
+
+@pytest.mark.asyncio
+async def test_zero_retry_budget_performs_single_chunk_extraction_call():
+    """
+    Direct _extract_facts_from_chunk with a retry budget of 0 (issue #2731):
+    the outer loop must still run once, and the RAW budget (0) must reach the
+    provider so it stays the single owner of transport retries.
+    """
+    from hindsight_api.engine.retain.fact_extraction import _extract_facts_from_chunk
+
+    config = _make_config(llm_max_retries=3, retain_llm_max_retries=0)
+    llm_config = _make_llm_config(
+        mock_response={"facts": [{"what": "Alice visited Paris", "when": "2023", "who": "Alice", "why": "vacation"}]}
+    )
+
+    with patch(
+        "hindsight_api.engine.retain.fact_extraction._build_extraction_prompt_and_schema",
+        return_value=("system prompt", MagicMock()),
+    ):
+        facts, _usage = await _extract_facts_from_chunk(
+            chunk="Alice visited Paris in 2023.",
+            chunk_index=0,
+            total_chunks=1,
+            event_date=datetime(2023, 1, 1, tzinfo=timezone.utc),
+            context="",
+            llm_config=llm_config,
+            config=config,
+            agent_name="test-agent",
+        )
+
+    assert llm_config.call.call_count == 1
+    assert llm_config.call.call_args.kwargs["max_retries"] == 0
+    assert len(facts) == 1
 
 
 @pytest.mark.asyncio
@@ -346,6 +636,7 @@ def _make_batch_temp_config(temperature):
     cfg.llm_temperature_retain = temperature
     cfg.retain_max_completion_tokens = None
     cfg.llm_strict_schema = False
+    cfg.llm_strict_schema_retain = False
     return cfg
 
 
@@ -376,3 +667,167 @@ def test_build_request_body_omits_temperature_when_none():
 
     body = _build_request_body(_make_batch_llm_config(), _make_batch_temp_config(None), "sys", "user", dict)
     assert "temperature" not in body
+
+
+def test_build_request_body_uses_retain_strict_schema_flag_for_schema_and_request():
+    """The batch retain path must use one resolved strict-schema flag consistently."""
+    from hindsight_api.engine.retain.fact_extraction import _build_request_body
+
+    config = _make_batch_temp_config(None)
+    config.llm_strict_schema = False
+    config.llm_strict_schema_retain = True
+    response_schema = MagicMock()
+    response_schema.model_json_schema.return_value = {"schema": "non-strict"}
+
+    with patch(
+        "hindsight_api.engine.retain.fact_extraction.strict_json_schema",
+        return_value={"schema": "strict"},
+    ) as strict_schema:
+        body = _build_request_body(_make_batch_llm_config(), config, "sys", "user", response_schema)
+
+    strict_schema.assert_called_once_with(response_schema)
+    assert body["response_format"]["json_schema"]["schema"] == {"schema": "strict"}
+    assert body["response_format"]["json_schema"]["strict"] is True
+
+
+def test_build_request_body_retain_strict_false_overrides_global_true():
+    """The retain opt-out must disable strict schema in the batch request body."""
+    from hindsight_api.engine.retain.fact_extraction import _build_request_body
+
+    config = _make_batch_temp_config(None)
+    config.llm_strict_schema = True
+    config.llm_strict_schema_retain = False
+    response_schema = MagicMock()
+    response_schema.model_json_schema.return_value = {"schema": "non-strict"}
+
+    with patch("hindsight_api.engine.retain.fact_extraction.strict_json_schema") as strict_schema:
+        body = _build_request_body(_make_batch_llm_config(), config, "sys", "user", response_schema)
+
+    strict_schema.assert_not_called()
+    assert body["response_format"]["json_schema"]["schema"] == {"schema": "non-strict"}
+    assert body["response_format"]["json_schema"]["strict"] is False
+
+
+# --- Retry budget semantics (issue #2731) -----------------------------------
+#
+# A retry BUDGET of N means N retries *after* the initial request — the meaning
+# every provider already implements (`for attempt in range(max_retries + 1)`) and
+# the meaning the OpenAI SDK documents for `max_retries=0` ("disable retries",
+# i.e. one request). The tests below drive the *public* extract_facts_from_text
+# entry point with the real HindsightConfig an operator gets from
+# HINDSIGHT_API_RETAIN_LLM_MAX_RETRIES, so they exercise the whole
+# env -> config -> chunk -> auto-split -> extraction -> provider chain rather
+# than a private helper.
+
+_VALID_EXTRACTION_RESPONSE = {
+    "facts": [{"what": "Alice visited Paris", "when": "2023", "who": "Alice", "why": "vacation"}]
+}
+
+
+def _make_recording_llm(mock_response):
+    """LLMProvider double returning ``mock_response`` and recording call kwargs."""
+    from hindsight_api.engine.llm_wrapper import LLMProvider
+    from hindsight_api.engine.response_models import TokenUsage
+
+    llm = MagicMock(spec=LLMProvider)
+    llm.provider = "mock"
+    llm.call = AsyncMock(return_value=(mock_response, TokenUsage()))
+    return llm
+
+
+@pytest.fixture
+def retain_config(monkeypatch):
+    """Factory for the real config an operator gets from the retry-budget env var.
+
+    Mirrors the reporter's setup: HINDSIGHT_API_RETAIN_LLM_MAX_RETRIES is the only
+    knob they touch. The global budget is pinned so the "unset" row provably
+    exercises the fallback.
+    """
+    from hindsight_api.config import _get_raw_config, clear_config_cache
+
+    def _build(retain_budget: str | None):
+        monkeypatch.setenv("HINDSIGHT_API_LLM_MAX_RETRIES", "3")
+        if retain_budget is None:
+            monkeypatch.delenv("HINDSIGHT_API_RETAIN_LLM_MAX_RETRIES", raising=False)
+        else:
+            monkeypatch.setenv("HINDSIGHT_API_RETAIN_LLM_MAX_RETRIES", retain_budget)
+        clear_config_cache()
+        return _get_raw_config()
+
+    yield _build
+    clear_config_cache()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "retain_budget, expected_forwarded_retries",
+    [
+        # The reported repro: a gateway owns transport retries, so the operator
+        # sets the budget to 0. This used to perform ZERO extraction requests and
+        # raise "Fact extraction failed after 0 attempts".
+        pytest.param("0", 0, id="zero_budget_gateway_owns_retries"),
+        pytest.param("1", 1, id="budget_one"),
+        pytest.param("3", 3, id="budget_three"),
+        pytest.param(None, 3, id="unset_falls_back_to_global"),
+    ],
+)
+async def test_retry_budget_always_performs_initial_extraction_request(
+    retain_config, retain_budget, expected_forwarded_retries
+):
+    """Any retry budget — including 0 — must still perform the initial request."""
+    from hindsight_api.engine.retain.fact_extraction import extract_facts_from_text
+
+    config = retain_config(retain_budget)
+    llm = _make_recording_llm(_VALID_EXTRACTION_RESPONSE)
+
+    facts, _chunks, _usage = await extract_facts_from_text(
+        text="Alice visited Paris in 2023.",
+        event_date=datetime(2023, 1, 1, tzinfo=timezone.utc),
+        llm_config=llm,
+        agent_name="test-agent",
+        config=config,
+        context="",
+    )
+
+    assert llm.call.call_count == 1
+    assert len(facts) == 1
+    assert "Alice visited Paris" in facts[0].fact
+    # The RAW budget reaches the provider — not the outer attempt count — so the
+    # provider stays the single retry owner (0 => gateway owns transport retries).
+    assert llm.call.call_args.kwargs["max_retries"] == expected_forwarded_retries
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "retain_budget, expected_calls",
+    [
+        # Budget 0 means "one request, no retry" — one attempt, then a real
+        # content error. Never zero attempts.
+        pytest.param("0", 1, id="zero_budget_one_attempt"),
+        pytest.param("1", 2, id="budget_one_retries_once"),
+        pytest.param("3", 4, id="budget_three_retries_thrice"),
+    ],
+)
+async def test_malformed_response_still_attempts_then_fails_loudly(retain_config, retain_budget, expected_calls):
+    """A malformed response must fail on content, never on a skipped request.
+
+    Guards the #1833 contract (raise, never silently return []) while proving the
+    zero budget spends its one attempt before failing.
+    """
+    from hindsight_api.engine.retain.fact_extraction import extract_facts_from_text
+
+    config = retain_config(retain_budget)
+    llm = _make_recording_llm(["not a dict"])
+
+    with pytest.raises(RuntimeError, match="non-dict JSON") as exc:
+        await extract_facts_from_text(
+            text="Alice visited Paris in 2023.",
+            event_date=datetime(2023, 1, 1, tzinfo=timezone.utc),
+            llm_config=llm,
+            agent_name="test-agent",
+            config=config,
+            context="",
+        )
+
+    assert llm.call.call_count == expected_calls
+    assert "after 0 attempts" not in str(exc.value)

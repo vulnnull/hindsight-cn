@@ -55,11 +55,6 @@ def snake_to_camel(name: str) -> str:
     return parts[0] + "".join(p.capitalize() for p in parts[1:])
 
 
-def camel_to_snake(name: str) -> str:
-    """Convert camelCase to snake_case."""
-    return re.sub(r"(?<=[a-z0-9])([A-Z])", r"_\1", name).lower()
-
-
 def load_openapi_operations(spec_path: Path) -> dict[str, list[str]]:
     """Return {operation_id: [property_names]} for operations with request bodies."""
     spec = json.loads(spec_path.read_text())
