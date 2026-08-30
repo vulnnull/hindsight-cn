@@ -9,7 +9,6 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
   sync:
@@ -33,11 +32,9 @@ jobs:
           echo "behind=$BEHIND" >> $GITHUB_OUTPUT
           echo "落后上游 $BEHIND 个提交"
 
-      - name: 合并上游变更
+      - name: 合并上游变更（智能解决冲突）
         if: steps.check.outputs.behind > 0
         id: merge
-        env:
-          CP_PREFIX: "hindsight-control-plane/"
         run: |
           git config user.name "hindsight-cn bot"
           git config user.email "bot@hindsight-cn.local"
@@ -45,39 +42,16 @@ jobs:
           # 保存合并前的 HEAD（用于恢复工作流文件）
           PRE_MERGE_HEAD=$(git rev-parse HEAD)
 
-          # 使用策略式合并：控制面板文件优先上游版本（i18n），其他保留本地版本
+          # 完整合并，让冲突暴露出来（不使用 -X ours，以便 zh-CN.json 等
+          # 能走脚本的智能合并：本地术语优先 + 吸收上游新增 key）
           set +e
-          git merge upstream/main --no-commit -X ours
+          git merge upstream/main --no-commit --no-edit
           MERGE_EXIT=$?
           set -e
 
           if [ $MERGE_EXIT -ne 0 ]; then
-            echo "存在树级冲突，逐文件解决..."
-
-            CONFLICTS=$(git diff --name-only --diff-filter=U 2>/dev/null || true)
-            CONFLICT_COUNT=$(echo "$CONFLICTS" | grep -c . 2>/dev/null || echo 0)
-            echo "冲突文件数：$CONFLICT_COUNT"
-
-            while IFS= read -r file; do
-              [ -z "$file" ] && continue
-
-              if [[ "$file" == "$CP_PREFIX"* ]]; then
-                echo "  [上游] $file"
-                if git show "upstream/main:$file" > /dev/null 2>&1; then
-                  git checkout --theirs -- "$file" 2>/dev/null || true
-                else
-                  git rm --force "$file" 2>/dev/null || true
-                fi
-              else
-                echo "  [本地] $file"
-                if [ -e "$file" ]; then
-                  git checkout --ours -- "$file" 2>/dev/null || true
-                else
-                  git rm --force "$file" 2>/dev/null || true
-                fi
-              fi
-              git add --force "$file" 2>/dev/null || true
-            done <<< "$CONFLICTS"
+            echo "存在冲突，运行智能冲突解决脚本..."
+            python3 scripts/auto-resolve-merge.py
           fi
 
           # 恢复 .github/workflows/ 到合并前的版本
