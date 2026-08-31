@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { INSTALLERS, MARKER, run, type InstallCtx } from "./installer";
+import { INSTALLERS, MARKER, parseJsonc, run, type InstallCtx } from "./installer";
 
 // Every test gets a FRESH temp dir as ctx.home (never the real $HOME) and a stubbed
 // claudeMcp so the real `claude` CLI is never executed. run() is always called with
@@ -463,9 +463,13 @@ describe("kilo installer", () => {
     writeFileSync(jsonc, '{\n  // my config\n  "$schema": "https://app.kilo.ai/config.json"\n}\n');
     run(["install", "kilo"], ctx);
     expect(existsSync(join(kiloDir(ctx), "kilo.json"))).toBe(false);
-    const cfg = readJson(jsonc);
+    const text = readFileSync(jsonc, "utf8");
+    const cfg = parseJsonc(text)!;
     expect(cfg.plugin).toEqual([entryOf(ctx)]);
-    expect(cfg.$schema).toBe("https://app.kilo.ai/config.json"); // comments dropped, DATA kept
+    expect(cfg.$schema).toBe("https://app.kilo.ai/config.json");
+    // The comment used to be dropped here: the read was JSONC-aware but the write re-serialized
+    // the parsed object, so a commented config came back stripped.
+    expect(text).toContain("// my config");
   });
 
   it("refuses to clobber a config it cannot parse", () => {
@@ -488,7 +492,124 @@ describe("kilo installer", () => {
 });
 
 describe("opencode installer", () => {
-  const cfgPath = (ctx: InstallCtx) => join(ctx.home, ".config", "opencode", "opencode.json");
+  const ocDir = (ctx: InstallCtx) => join(ctx.home, ".config", "opencode");
+  const cfgPath = (ctx: InstallCtx) => join(ocDir(ctx), "opencode.json");
+
+  // opencode loads `opencode.json` OR `opencode.jsonc` from ~/.config/opencode. Creating the
+  // .json variant next to an existing .jsonc leaves the user with two configs — their settings in
+  // one, our plugin entry in the other — so the install has to edit whichever already exists.
+  it("edits an existing opencode.jsonc instead of creating a competing opencode.json", () => {
+    const ctx = makeCtx();
+    const jsonc = join(ocDir(ctx), "opencode.jsonc");
+    mkdirSync(ocDir(ctx), { recursive: true });
+    writeFileSync(jsonc, '{\n  "$schema": "https://opencode.ai/config.json"\n}\n');
+    run(["install", "opencode"], ctx);
+    expect(existsSync(cfgPath(ctx))).toBe(false);
+    expect(readJson(jsonc).plugin).toEqual([ctx.pkgRoot]);
+  });
+
+  it("uninstall edits the same opencode.jsonc the install wrote to", () => {
+    const ctx = makeCtx();
+    const jsonc = join(ocDir(ctx), "opencode.jsonc");
+    mkdirSync(ocDir(ctx), { recursive: true });
+    writeFileSync(jsonc, "{}\n");
+    run(["install", "opencode"], ctx);
+    run(["uninstall", "opencode"], ctx);
+    expect(readJson(jsonc).plugin).toBeUndefined();
+    expect(existsSync(cfgPath(ctx))).toBe(false);
+  });
+
+  it("creates opencode.json when neither candidate exists", () => {
+    const ctx = makeCtx();
+    run(["install", "opencode"], ctx);
+    expect(existsSync(cfgPath(ctx))).toBe(true);
+    expect(existsSync(join(ocDir(ctx), "opencode.jsonc"))).toBe(false);
+  });
+
+  // The reported data loss: a commented config went through strict JSON.parse, which threw, and
+  // readJson's {} fallback meant the whole file was rewritten as just our plugin key. Every
+  // provider, agent override and MCP entry in it was gone.
+  it("keeps the rest of a commented config instead of replacing it with just our key", () => {
+    const ctx = makeCtx();
+    const jsonc = join(ocDir(ctx), "opencode.jsonc");
+    mkdirSync(ocDir(ctx), { recursive: true });
+    writeFileSync(
+      jsonc,
+      `{\n  // where memory lives\n  "share": "disabled",\n  "provider": {\n    "openai": { "name": "gw" },\n  },\n}\n`
+    );
+    run(["install", "opencode"], ctx);
+    const cfg = parseJsonc(readFileSync(jsonc, "utf8"))!;
+    expect(cfg.plugin).toEqual([ctx.pkgRoot]);
+    expect(cfg.share).toBe("disabled"); // survived — this is what used to be wiped
+    expect(cfg.provider).toEqual({ openai: { name: "gw" } });
+  });
+
+  // Reading the file correctly is only half of it: re-serializing the parsed object would drop
+  // every comment the user wrote, so a config that survived would still come back damaged.
+  it("leaves the user's comments and formatting in place", () => {
+    const ctx = makeCtx();
+    const jsonc = join(ocDir(ctx), "opencode.jsonc");
+    mkdirSync(ocDir(ctx), { recursive: true });
+    writeFileSync(
+      jsonc,
+      `{\n  /** Providers **/\n  "provider": {\n    // via the gateway\n    "openai": { "name": "gw" },\n  },\n}\n`
+    );
+    run(["install", "opencode"], ctx);
+    const text = readFileSync(jsonc, "utf8");
+    expect(text).toContain("/** Providers **/");
+    expect(text).toContain("// via the gateway");
+    expect(text).toContain('"openai": { "name": "gw" },');
+  });
+
+  it("uninstall drops the plugin key without reformatting the file", () => {
+    const ctx = makeCtx();
+    const jsonc = join(ocDir(ctx), "opencode.jsonc");
+    mkdirSync(ocDir(ctx), { recursive: true });
+    writeFileSync(jsonc, `{\n  /** mine **/\n  "share": "disabled",\n}\n`);
+    run(["install", "opencode"], ctx);
+    run(["uninstall", "opencode"], ctx);
+    const text = readFileSync(jsonc, "utf8");
+    expect(text).toContain("/** mine **/");
+    expect(parseJsonc(text)).toEqual({ share: "disabled" });
+  });
+
+  // Trailing commas are as common as comments in a hand-written config, and JSON.parse rejects
+  // both — so a .json file carrying them hit the very same wipe.
+  it("parses a trailing-comma opencode.json rather than clobbering it", () => {
+    const ctx = makeCtx();
+    mkdirSync(ocDir(ctx), { recursive: true });
+    writeFileSync(
+      cfgPath(ctx),
+      `{\n  "model": "openai/gpt-5",\n  "plugin": [\n    "other",\n  ],\n}\n`
+    );
+    run(["install", "opencode"], ctx);
+    // Read back with the JSONC parser: the trailing commas are PRESERVED by the write, so the
+    // result is still not strict JSON — which is the point.
+    const cfg = parseJsonc(readFileSync(cfgPath(ctx), "utf8"))!;
+    expect(cfg.model).toBe("openai/gpt-5");
+    expect(cfg.plugin).toEqual(["other", ctx.pkgRoot]);
+  });
+
+  it("refuses to clobber a config it cannot parse", () => {
+    const ctx = makeCtx();
+    mkdirSync(ocDir(ctx), { recursive: true });
+    const broken = '{ "provider": { unquoted } }';
+    writeFileSync(cfgPath(ctx), broken);
+    const logs: string[] = [];
+    ctx.log = (m) => logs.push(m);
+    run(["install", "opencode"], ctx);
+    expect(readFileSync(cfgPath(ctx), "utf8")).toBe(broken);
+    expect(logs.join("\n")).toContain("SKIPPED");
+  });
+
+  it("uninstall leaves an unparseable config untouched", () => {
+    const ctx = makeCtx();
+    mkdirSync(ocDir(ctx), { recursive: true });
+    const broken = '{ "provider": { unquoted } }';
+    writeFileSync(cfgPath(ctx), broken);
+    run(["uninstall", "opencode"], ctx);
+    expect(readFileSync(cfgPath(ctx), "utf8")).toBe(broken);
+  });
 
   it("install adds ctx.pkgRoot to the plugin array exactly once, even across reinstalls", () => {
     const ctx = makeCtx();
@@ -755,6 +876,42 @@ describe("MCP registrations name the calling harness", () => {
     expect(registrations.length).toBeGreaterThan(0);
     for (const text of registrations) expect(text).toContain(`HINDSIGHT_MCP_HARNESS`);
     for (const text of registrations) expect(text).toContain(harness);
+  });
+});
+
+/**
+ * A JSONC-configured host must survive the install with its comments intact.
+ *
+ * Swept over the family rather than asserted per harness: opencode and kilo each read with
+ * `parseJsonc` and then wrote with `writeJson`, which re-serializes and strips exactly what the
+ * JSONC-aware read preserved. The sibling that forgets is by construction the one nobody wrote a
+ * test for, so this drives the real install and checks the file that came out.
+ */
+describe("JSONC hosts keep their comments through an install", () => {
+  // Each entry is the config file the harness edits when it already exists, with the comment we
+  // expect to still be there afterwards. Hosts absent from this list are strict-JSON by design
+  // (claude-code's settings.json, cursor's hooks.json, …) or not JSON at all (grok/dsh: TOML/YAML).
+  const JSONC_HOSTS: { harness: string; relPath: string[] }[] = [
+    { harness: "opencode", relPath: [".config", "opencode", "opencode.jsonc"] },
+    { harness: "kilo", relPath: [".config", "kilo", "kilo.jsonc"] },
+  ];
+
+  it.each(JSONC_HOSTS)("$harness", ({ harness, relPath }) => {
+    const ctx = makeCtx();
+    const path = join(ctx.home, ...relPath);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `{\n  // keep me\n  "share": "disabled",\n}\n`);
+
+    expect(run(["install", harness], ctx)).toBe(0);
+    const afterInstall = readFileSync(path, "utf8");
+    expect(afterInstall).toContain("// keep me");
+    expect(parseJsonc(afterInstall)!.share).toBe("disabled");
+    expect(parseJsonc(afterInstall)!.plugin).toHaveLength(1);
+
+    expect(run(["uninstall", harness], ctx)).toBe(0);
+    const afterUninstall = readFileSync(path, "utf8");
+    expect(afterUninstall).toContain("// keep me");
+    expect(parseJsonc(afterUninstall)).toEqual({ share: "disabled" });
   });
 });
 

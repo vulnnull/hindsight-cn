@@ -38,6 +38,7 @@ import { homedir, tmpdir } from "node:os";
 import { isatty } from "node:tty";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { applyEdits, modify } from "jsonc-parser";
 import { HOOK_HARNESSES, type HookHarnessName } from "./harness/hook-lifecycle";
 import { importLocalHistory } from "./core/history";
 import { detectLlm, hasRustToolchain, hasUvx, type LlmChoice } from "./core/daemon";
@@ -96,7 +97,10 @@ function readJson(path: string): Record<string, any> {
 }
 
 /**
- * Parse a JSONC file (JSON with comments), as Kilo's `kilo.jsonc` may be.
+ * Parse a JSONC file (JSON with comments), as Kilo's `kilo.jsonc` and opencode's `opencode.jsonc`
+ * may be. Applied to `opencode.json` too: comments and trailing commas turn up in the wild under
+ * that name as well, and the host reads it either way — so what decides the parser here is the
+ * content the installer might meet, not the extension.
  *
  * Returns null — NOT {} — when the file exists but can't be parsed. readJson's {} fallback is safe
  * for a strict-JSON host (an unparseable file is a broken file), but here a config we merely failed
@@ -118,10 +122,46 @@ export function parseJsonc(text: string): Record<string, any> | null {
 
 function writeJson(path: string, value: unknown): void {
   mkdirSync(dirname(path), { recursive: true });
+  backupOnce(path);
+  writeFileSync(path, JSON.stringify(value, null, 2) + "\n");
+}
+
+/** The first time we touch an existing file, keep a copy of what the user had. */
+function backupOnce(path: string): void {
   if (existsSync(path) && !existsSync(`${path}.hindsight-backup`)) {
     copyFileSync(path, `${path}.hindsight-backup`);
   }
-  writeFileSync(path, JSON.stringify(value, null, 2) + "\n");
+}
+
+/**
+ * Set (or, with `undefined`, delete) ONE top-level key, leaving the rest of the file's text alone.
+ *
+ * `writeJson` round-trips through `JSON.stringify`, which can only emit strict JSON — so writing a
+ * JSONC host's config with it silently strips every comment and trailing comma the user wrote, and
+ * reflows their formatting. Parsing the file was only half the problem: even a config we read
+ * correctly came back stripped. `jsonc-parser` computes a minimal text edit instead, so everything
+ * we did not touch survives byte for byte.
+ *
+ * Limited to a single key on purpose. A whole-object write is what forces a re-serialize, and both
+ * callers only ever mutate `plugin`; a general "merge this object" helper could not preserve
+ * anything. Comments INSIDE the edited value are still lost — the array is re-emitted — but the
+ * rest of the document, which is all a user notices, is not.
+ */
+function writeJsonc(path: string, key: string, value: unknown): void {
+  const text = existsSync(path) ? readFileSync(path, "utf8") : "";
+  const edits = modify(text, [key], value, {
+    formattingOptions: {
+      tabSize: 2,
+      insertSpaces: true,
+      // Keep a CRLF file CRLF: rewriting every line ending would turn a one-line change into a
+      // whole-file diff for anyone on Windows.
+      eol: text.includes("\r\n") ? "\r\n" : "\n",
+    },
+  });
+  const next = applyEdits(text, edits);
+  mkdirSync(dirname(path), { recursive: true });
+  backupOnce(path);
+  writeFileSync(path, next.endsWith("\n") ? next : `${next}\n`);
 }
 
 /** Hook-array merge for claude/codex-style files: drop our old entries, append the new one. */
@@ -243,26 +283,51 @@ function runClinePlugin(args: string[]): boolean {
   }
 }
 
+/**
+ * opencode reads its global config from EITHER `opencode.json` or `opencode.jsonc` under
+ * `~/.config/opencode`; both names are documented. So the installer must edit the one that is
+ * already there: hardcoding `opencode.json` meant a user whose config is `opencode.jsonc` got a
+ * SECOND config file created next to their real one — their settings in the file they wrote, our
+ * plugin entry in a file they never made.
+ *
+ * `.jsonc` is probed first because that is the name that carries comments, and a machine holding
+ * both is far likelier to have the commented one as the real config.
+ */
+export const OPENCODE_CONFIG_CANDIDATES = ["opencode.jsonc", "opencode.json"];
+
+function opencodeConfigPath(c: InstallCtx): string {
+  const dir = join(c.home, ".config", "opencode");
+  const existing = OPENCODE_CONFIG_CANDIDATES.map((f) => join(dir, f)).find((p) => existsSync(p));
+  return existing ?? join(dir, "opencode.json");
+}
+
 const opencode: HarnessInstaller = {
   name: "opencode",
   detect: (c) => onPath("opencode") || existsSync(join(c.home, ".config", "opencode")),
   install(c) {
-    const path = join(c.home, ".config", "opencode", "opencode.json");
-    const cfg = readJson(path);
-    const plugins: string[] = Array.isArray(cfg.plugin) ? cfg.plugin : [];
-    cfg.plugin = [...plugins.filter((p) => !String(p).includes(MARKER)), c.pkgRoot];
-    writeJson(path, cfg);
+    const path = opencodeConfigPath(c);
+    let cfg: Record<string, any> = {};
+    if (existsSync(path)) {
+      const parsed = parseJsonc(readFileSync(path, "utf8"));
+      if (!parsed) {
+        c.log?.(`opencode: SKIPPED — could not parse ${path}; add the plugin entry manually`);
+        return;
+      }
+      cfg = parsed;
+    }
+    const plugins: unknown[] = Array.isArray(cfg.plugin) ? cfg.plugin : [];
+    // writeJsonc, not writeJson: this config routinely carries comments, and re-serializing the
+    // parsed object would strip every one of them even though the read succeeded.
+    writeJsonc(path, "plugin", [...plugins.filter((p) => !String(p).includes(MARKER)), c.pkgRoot]);
     c.log?.(`opencode: plugin registered in ${path}`);
   },
   uninstall(c) {
-    const path = join(c.home, ".config", "opencode", "opencode.json");
+    const path = opencodeConfigPath(c);
     if (!existsSync(path)) return;
-    const cfg = readJson(path);
-    if (Array.isArray(cfg.plugin)) {
-      cfg.plugin = cfg.plugin.filter((p: string) => !String(p).includes(MARKER));
-      if (!cfg.plugin.length) delete cfg.plugin;
-      writeJson(path, cfg);
-    }
+    const cfg = parseJsonc(readFileSync(path, "utf8"));
+    if (!cfg || !Array.isArray(cfg.plugin)) return;
+    const kept = cfg.plugin.filter((p: unknown) => !String(p).includes(MARKER));
+    writeJsonc(path, "plugin", kept.length ? kept : undefined);
     c.log?.("opencode: plugin entry removed");
   },
 };
@@ -348,8 +413,9 @@ const kilo: HarnessInstaller = {
     }
     const entry = pathToFileURL(join(c.dist, "kilo.js")).href;
     const plugins: unknown[] = Array.isArray(cfg.plugin) ? cfg.plugin : [];
-    cfg.plugin = [...plugins.filter((p) => !String(p).includes(MARKER)), entry];
-    writeJson(path, cfg);
+    // writeJsonc for the same reason the read uses parseJsonc: kilo.jsonc is a commented file, and
+    // re-serializing the parsed object would strip what we just took care to read.
+    writeJsonc(path, "plugin", [...plugins.filter((p) => !String(p).includes(MARKER)), entry]);
     c.log?.(`kilo: plugin registered in ${path}`);
   },
   uninstall(c) {
@@ -357,9 +423,8 @@ const kilo: HarnessInstaller = {
     if (!existsSync(path)) return;
     const cfg = parseJsonc(readFileSync(path, "utf8"));
     if (!cfg || !Array.isArray(cfg.plugin)) return;
-    cfg.plugin = cfg.plugin.filter((p: unknown) => !String(p).includes(MARKER));
-    if (!cfg.plugin.length) delete cfg.plugin;
-    writeJson(path, cfg);
+    const kept = cfg.plugin.filter((p: unknown) => !String(p).includes(MARKER));
+    writeJsonc(path, "plugin", kept.length ? kept : undefined);
     c.log?.("kilo: plugin entry removed");
   },
 };

@@ -1131,6 +1131,76 @@ class TestMentalModelHistory:
 
         await memory.delete_bank(bank_id, request_context=request_context)
 
+    async def test_history_runs_the_bank_read_validator(self, memory: MemoryEngine, request_context, monkeypatch):
+        """History is gated by validate_bank_read, like every other bank read.
+
+        It used to authenticate the tenant and stop there, so a caller holding a
+        valid token for another tenant could read a bank's whole revision history
+        one path segment away from the 403 that `get_mental_model` returns (#3831).
+        The operation is its own `GET_MENTAL_MODEL_HISTORY`, not the mental-model
+        get: an extension has to be able to allow reading a model's current content
+        while refusing the superseded snapshots behind it.
+        """
+        from hindsight_api.extensions import BankReadOperation
+        from hindsight_api.extensions.operation_validator import (
+            OperationValidationError,
+            OperationValidatorExtension,
+            ValidationResult,
+        )
+
+        seen: list[BankReadOperation] = []
+
+        class _Validator(OperationValidatorExtension):
+            def __init__(self, config, allow: bool):
+                super().__init__(config)
+                self.allow = allow
+
+            async def validate_retain(self, ctx):
+                return ValidationResult.accept()
+
+            async def validate_recall(self, ctx):
+                return ValidationResult.accept()
+
+            async def validate_reflect(self, ctx):
+                return ValidationResult.accept()
+
+            async def validate_bank_read(self, ctx):
+                seen.append(ctx.operation)
+                return ValidationResult.accept() if self.allow else ValidationResult.reject("not your bank")
+
+        bank_id = f"test-mm-history-acl-{uuid.uuid4().hex[:8]}"
+        await memory.get_bank_profile(bank_id, request_context=request_context)
+        mm = await memory.create_mental_model(
+            bank_id=bank_id,
+            name="Test Model",
+            source_query="What is the test?",
+            content="Original content",
+            request_context=request_context,
+        )
+        await memory.update_mental_model(
+            bank_id=bank_id,
+            mental_model_id=mm["id"],
+            content="Updated content",
+            request_context=request_context,
+        )
+
+        monkeypatch.setattr(memory, "_operation_validator", _Validator(config={}, allow=False))
+        with pytest.raises(OperationValidationError):
+            await memory.get_mental_model_history(bank_id, mm["id"], request_context=request_context)
+        # A model the caller may not read must not leak through the miss path either:
+        # the gate runs before the row lookup, so an unknown id is refused, not 404'd.
+        with pytest.raises(OperationValidationError):
+            await memory.get_mental_model_history(bank_id, "nonexistent-id", request_context=request_context)
+        assert seen == [BankReadOperation.GET_MENTAL_MODEL_HISTORY] * 2
+
+        seen.clear()
+        monkeypatch.setattr(memory, "_operation_validator", _Validator(config={}, allow=True))
+        history = await memory.get_mental_model_history(bank_id, mm["id"], request_context=request_context)
+        assert len(history) == 1
+        assert seen == [BankReadOperation.GET_MENTAL_MODEL_HISTORY]
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
 
 class TestMentalModelStaleness:
     """Tests for compute_mental_model_is_stale scope semantics.
@@ -2573,6 +2643,53 @@ class TestClearMentalModel:
         # Re-fetch to confirm persistence
         fetched = await memory.get_mental_model(bank_id, mm["id"], request_context=request_context)
         assert fetched["content"] == ""
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+    async def test_clear_rebuilds_embedding_from_the_name(self, memory: MemoryEngine, request_context, monkeypatch):
+        """Regression for #3926: clearing the content must not leave the vector
+        built from that content behind, or the model keeps ranking in semantic
+        recall on a body it no longer has."""
+        bank_id = f"test-mm-clear-embed-{uuid.uuid4().hex[:8]}"
+        await memory.get_bank_profile(bank_id, request_context=request_context)
+
+        mm = await memory.create_mental_model(
+            bank_id=bank_id,
+            name="Test Model",
+            source_query="What do we know?",
+            content="Some existing content",
+            request_context=request_context,
+        )
+
+        # No engine read exposes a model's embedding, and the stale column is the
+        # defect under test, so it has to be read directly.
+        async def stored_embedding() -> str:
+            async with memory._pool.acquire() as conn:
+                return await conn.fetchval(
+                    f"SELECT embedding::text FROM {fq_table('mental_models')} WHERE bank_id = $1 AND id = $2",
+                    bank_id,
+                    mm["id"],
+                )
+
+        before = await stored_embedding()
+
+        embedded: list[str] = []
+        original_generate = embedding_utils.generate_embeddings_batch
+
+        async def recording_generate(backend, texts, *args, **kwargs):
+            embedded.extend(texts)
+            return await original_generate(backend, texts, *args, **kwargs)
+
+        monkeypatch.setattr(embedding_utils, "generate_embeddings_batch", recording_generate)
+
+        cleared = await memory.clear_mental_model(
+            bank_id=bank_id,
+            mental_model_id=mm["id"],
+            request_context=request_context,
+        )
+        assert cleared is not None
+        assert embedded == ["Test Model "]
+        assert await stored_embedding() != before
 
         await memory.delete_bank(bank_id, request_context=request_context)
 

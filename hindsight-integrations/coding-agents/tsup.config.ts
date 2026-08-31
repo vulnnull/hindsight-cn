@@ -58,5 +58,13 @@ export default defineConfig({
   // hindsight-all (the local-daemon lifecycle manager) is inlined for the same reason: hooks are
   // wired by absolute path to ONE dist file and never load the package's node_modules. It has zero
   // dependencies of its own, so inlining costs almost nothing.
-  noExternal: [/^@modelcontextprotocol\/sdk/, /^zod/, /^@vectorize-io\/hindsight-all/],
+  // jsonc-parser likewise: installer.js is staged to ~/.hindsight/coding-agents as dist + skill +
+  // package.json — never node_modules — so an external import there is unresolvable, and re-running
+  // `install` from the staged copy (the upgrade path) dies with ERR_MODULE_NOT_FOUND.
+  noExternal: [
+    /^@modelcontextprotocol\/sdk/,
+    /^zod/,
+    /^@vectorize-io\/hindsight-all/,
+    /^jsonc-parser/,
+  ],
 });

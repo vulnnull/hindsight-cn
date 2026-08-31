@@ -324,6 +324,7 @@ async def retrieve_semantic_bm25_combined_sql(
                     text_search_extension=text_ext,
                     bm25_language=config.text_search_extension_native_language,
                     bm25_min_score=bm25_min,
+                    pg_search_function_schema=config.text_search_extension_pg_search_function_schema,
                     extra_where=updated_range_clause,
                 )
             )
@@ -888,6 +889,13 @@ async def retrieve_all_fact_types_parallel(
     # Step 2: Run every arm for every fact type through the store's single recall method.
     from ..memories import RecallArms, get_memories
 
+    # Time the store call itself. Without it `parallel_retrieval` is a black box: it reported 135ms
+    # while a bare store-level query measured 33ms, and there was no way to tell whether the
+    # difference was the store doing more work (this is 3 fact types x 4 arms in ONE call, not one
+    # query) or the host adding overhead around it. The nine per-arm rows below cannot answer that
+    # either -- a store-owned recall returns every arm from a single call, so their durations are
+    # literals.
+    _unified_start = time.time()
     unified = await get_memories().recall_unified(
         conn=pool,
         bank_id=bank_id,
@@ -908,6 +916,8 @@ async def retrieve_all_fact_types_parallel(
         enable_graph=enable_graph_retrieval,
     )
 
+    _unified_elapsed = time.time() - _unified_start
+
     results_by_fact_type: dict[str, ParallelRetrievalResult] = {}
     for ft in fact_types:
         arms = unified.get(ft) or RecallArms()
@@ -918,12 +928,17 @@ async def retrieve_all_fact_types_parallel(
             bm25=arms.bm25,
             graph=arms.graph,
             temporal=temporal_arm,
+            # A store-owned recall returns every arm from ONE call, so there is no per-arm
+            # split to report and these stay 0.0 -- they are "not measured", not "instant", and
+            # reading them as instant is what sent an investigation looking for the missing time
+            # outside the store. `store_recall` carries what IS measurable: the whole call.
             timings={
                 "semantic": 0.0,
                 "bm25": 0.0,
                 "graph": 0.0,
                 "temporal": 0.0,
                 "temporal_extraction": temporal_extraction_time,
+                "store_recall": _unified_elapsed,
             },
             temporal_constraint=temporal_constraint,
             graph_timings=[],

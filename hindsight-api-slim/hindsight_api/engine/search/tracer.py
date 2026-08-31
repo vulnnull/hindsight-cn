@@ -53,6 +53,12 @@ class SearchTracer:
         tags: list[str] | None = None,
         tags_match: str | None = None,
     ):
+        # `phases_only` keeps the timings and drops everything expensive. Phase metrics are a
+        # handful of floats; the rest of a trace is every candidate's text, the query embedding and
+        # the full visit list, which is why tracing is opt-in. Separating them lets the phase
+        # timings be ALWAYS on: without them a recall log accounts for 58% of its own duration and
+        # the reader goes hunting for the rest in the wrong layer.
+        self.phases_only = False
         """
         Initialize tracer.
 
@@ -100,6 +106,8 @@ class SearchTracer:
 
     def record_query_embedding(self, embedding: list[float]):
         """Record the query embedding."""
+        if self.phases_only:
+            return
         self.query_embedding = embedding
 
     def record_temporal_constraint(self, start: datetime | None, end: datetime | None):
@@ -117,6 +125,8 @@ class SearchTracer:
             similarity: Cosine similarity to query
             rank: Rank among entry points (1-based)
         """
+        if self.phases_only:
+            return
         # Clamp similarity to [0.0, 1.0] to handle floating-point precision
         similarity = min(1.0, max(0.0, similarity))
 
@@ -165,6 +175,12 @@ class SearchTracer:
         """
         self.current_step += 1
         self.nodes_visited_set.add(node_id)
+
+        # The counters above are cheap and feed the summary totals, so they stay. Everything below
+        # constructs per-node trace records and is skipped unless a trace was actually asked for --
+        # see the note in `add_retrieval_results`.
+        if self.phases_only:
+            return
 
         # Clamp values to handle floating-point precision issues
         # (sometimes normalization produces values like 1.0000005 instead of 1.0)
@@ -270,6 +286,14 @@ class SearchTracer:
             metadata: Optional metadata about this retrieval method
             fact_type: Fact type this retrieval was for (world, experience)
         """
+        # Builds one object per retrieval hit, and a recall's arms carry hundreds. Profiled under
+        # load this and `visit_node` were ~7% of the api process's loop thread, entirely for a
+        # trace nobody requested -- the tracer is constructed for EVERY recall now so the phase
+        # metrics have somewhere to live, so a method without this guard runs on every request.
+        # Its siblings (`record_query_embedding`, `add_entry_point`, `add_rrf_merged`, ...) all
+        # have it; these two were missed.
+        if self.phases_only:
+            return
         retrieval_results = []
         for rank, (doc_id, data) in enumerate(results, start=1):
             score = data.get(score_field)
@@ -305,6 +329,8 @@ class SearchTracer:
         Args:
             merged_results: List of (doc_id, data, rrf_meta) tuples from RRF merge
         """
+        if self.phases_only:
+            return
         self.rrf_merged = []
         for rank, (doc_id, data, rrf_meta) in enumerate(merged_results, start=1):
             source_ranks = rrf_meta.get("source_ranks")
@@ -328,6 +354,8 @@ class SearchTracer:
             reranked_results: List of result dicts after reranking
             rrf_merged: Original RRF merged results for comparison
         """
+        if self.phases_only:
+            return
         # Build map of node_id -> rrf_rank
         rrf_rank_map = {}
         for item in self.rrf_merged:
