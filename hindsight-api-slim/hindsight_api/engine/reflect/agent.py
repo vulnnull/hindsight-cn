@@ -13,8 +13,11 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
+from ...cancellation import OperationCancelledError
 from ...config import get_config
 from ..llm_interface import LLM_TOOL_CHOICE_AUTO, LLMToolChoice
+from ..llm_trace import LLMQueueWait, reset_queue_wait_sink, set_queue_wait_sink
+from ..llm_transport import describe_llm_error
 from .models import DirectiveInfo, LLMCall, ReflectAgentResult, StructuredOutputResult, TokenUsageSummary, ToolCall
 from .prompts import (
     _SPLIT_SYNTHESIS_WARN_CHUNKS,
@@ -88,6 +91,27 @@ class ReflectToolCallError(RuntimeError):
     mimic a ``done`` payload. Rather than salvage that untooled text -- and risk
     surfacing raw tool-call JSON as the answer -- we fail loudly so the caller can
     switch to a tool-calling-capable model/transport.
+    """
+
+
+class ReflectToolExecutionError(RuntimeError):
+    """A retrieval tool raised, so the run's evidence set is incomplete.
+
+    Reflect used to hand the exception text back to the model as a tool result and
+    let the loop continue. The model then answered from whatever it happened to
+    have -- often nothing -- and that answer was indistinguishable from a run over
+    a bank that genuinely holds nothing on the topic. A mental-model refresh wrote
+    it, replacing a document built across months with "I don't have information
+    about that" and recording the operation as ``completed`` (#2894).
+
+    A failed tool is an infrastructure failure (the database, the embedder, the
+    reranker), not something the model can fix by rephrasing, so the run fails
+    instead: callers that write what reflect returns never reach the write, and
+    the refresh preserves its document and its watermark.
+
+    This covers tools that *raised*. A tool that returns ``{"error": ...}`` for a
+    malformed or unavailable call is the model's mistake, is fixable by retrying
+    with different arguments, and is still fed back to it as before.
     """
 
 
@@ -664,7 +688,13 @@ async def _run_reflect_agent_inner(
             )
             or "none"
         )
-        llm_summary = ", ".join(f"{c['scope']}={c['duration_ms']}ms" for c in llm_trace) or "none"
+        llm_summary = (
+            ", ".join(
+                f"{c['scope']}={c['duration_ms']}ms" + (f"(q{c['queued_ms']}ms)" if c.get("queued_ms") else "")
+                for c in llm_trace
+            )
+            or "none"
+        )
         total_llm_ms = sum(c["duration_ms"] for c in llm_trace)
         total_tools_ms = sum(t["duration_ms"] for t in tool_trace_summary)
 
@@ -876,6 +906,11 @@ async def _run_reflect_agent_inner(
             await _resolve_pending_cache()
 
         call_msg_count = len(messages)
+        # Time spent waiting on LLM concurrency permits is collected separately so a
+        # long `agent_N` entry can be read as "the provider was slow" and nothing
+        # else -- see llm_trace.set_queue_wait_sink (#3881).
+        queue_wait = LLMQueueWait()
+        queue_token = set_queue_wait_sink(queue_wait)
         try:
             ct_kwargs: dict[str, Any] = dict(
                 messages=messages,
@@ -889,6 +924,7 @@ async def _run_reflect_agent_inner(
                 ct_kwargs["cached_prefix_message_count"] = rolling_cache_boundary
             result = await llm_config.call_with_tools(**ct_kwargs)
             llm_duration = int((time.time() - llm_start) * 1000)
+            queued_ms = int(queue_wait.seconds * 1000)
             consecutive_errors = 0
             total_input_tokens += result.input_tokens
             total_output_tokens += result.output_tokens
@@ -898,30 +934,49 @@ async def _run_reflect_agent_inner(
                 {
                     "scope": f"agent_{iteration + 1}",
                     "duration_ms": llm_duration,
+                    "queued_ms": queued_ms,
                     "input_tokens": result.input_tokens,
                     "output_tokens": result.output_tokens,
                 }
             )
 
+        except OperationCancelledError:
+            # A cancellation is not a provider failure: never retried, never
+            # synthesized around, and it must reach the HTTP layer as itself so a
+            # client disconnect stays a 499 (issue #2122).
+            raise
         except Exception as e:
             err_duration = int((time.time() - llm_start) * 1000)
+            queued_ms = int(queue_wait.seconds * 1000)
             consecutive_errors += 1
-            logger.warning(f"[REFLECT {reflect_id}] LLM error on iteration {iteration + 1}: {e} ({err_duration}ms)")
-            llm_trace.append({"scope": f"agent_{iteration + 1}_err", "duration_ms": err_duration})
-            has_gathered_evidence = (
-                bool(available_memory_ids) or bool(available_mental_model_ids) or bool(available_observation_ids)
+            logger.warning(
+                f"[REFLECT {reflect_id}] LLM error on iteration {iteration + 1}: {describe_llm_error(e)} "
+                f"({err_duration}ms, {queued_ms}ms queued)"
+            )
+            llm_trace.append(
+                {"scope": f"agent_{iteration + 1}_err", "duration_ms": err_duration, "queued_ms": queued_ms}
             )
             # Context overflow errors must never be retried — retrying would only make them worse.
-            # Skip straight to final synthesis with whatever evidence we have.
+            # Skip straight to final synthesis with whatever evidence we have: the
+            # prompt was too big for the model, which is a budgeting problem, not a
+            # broken dependency, and the evidence gathered so far is intact.
             if _is_context_overflow_error(e):
                 logger.warning(
                     f"[REFLECT {reflect_id}] Context window exceeded on iteration {iteration + 1}, "
                     "forcing final synthesis from gathered evidence."
                 )
-            # For other errors: retry if no evidence yet (but cap consecutive errors to avoid long hangs)
-            elif not has_gathered_evidence and iteration < max_iterations - 1 and consecutive_errors < 2:
+                return await _forced_final_synthesis(iteration + 1)
+            # Any other error: retry (capped, so a persistently failing provider does
+            # not hang the run), then give up. Synthesizing an answer here instead
+            # would be built on an evidence set the failed turn never finished
+            # gathering, and callers cannot tell that from a complete one (#2894).
+            # The provider's own retries (429/5xx) already ran inside the call.
+            if iteration < max_iterations - 1 and consecutive_errors < 2:
                 continue
-            return await _forced_final_synthesis(iteration + 1)
+            raise
+
+        finally:
+            reset_queue_wait_sink(queue_token)
 
         # No tool calls this turn.
         if not result.tool_calls:
@@ -1085,13 +1140,23 @@ async def _run_reflect_agent_inner(
 
             # Process results and add to messages
             for position, tc, result_data in zip(allowed_positions, other_tools, tool_results):
+                if isinstance(result_data, OperationCancelledError):
+                    # The client went away mid-tool (recall propagates this — see
+                    # issue #2122). Let it through untouched so the HTTP layer still
+                    # returns 499; wrapping it would report a cancellation as a 500.
+                    raise result_data
                 if isinstance(result_data, Exception):
-                    # Tool execution failed - send error back to LLM so it can try again
+                    # A tool that raised is an infrastructure failure, not something
+                    # the model can retry its way out of. Feeding it back as a tool
+                    # result let the loop answer from an evidence set it knows is
+                    # incomplete, and nothing downstream could tell that answer from
+                    # one over an empty bank -- see ReflectToolExecutionError (#2894).
                     logger.warning(f"[REFLECT {reflect_id}] Tool {tc.name} failed with exception: {result_data}")
-                    output = {"error": f"Tool execution failed: {result_data}"}
-                    duration_ms = 0
-                else:
-                    output, duration_ms = result_data
+                    raise ReflectToolExecutionError(
+                        f"Reflect tool '{_normalize_tool_name(tc.name)}' failed on iteration {iteration + 1}: "
+                        f"{result_data}"
+                    ) from result_data
+                output, duration_ms = result_data
 
                 # Normalize tool name for consistent tracking
                 normalized_tool_name = _normalize_tool_name(tc.name)
