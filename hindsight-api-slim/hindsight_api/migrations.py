@@ -33,6 +33,7 @@ from alembic.util.exc import CommandError
 from sqlalchemy import Connection, create_engine, text
 from sqlalchemy.pool import NullPool
 
+from ._free_threading import ENV_FREE_THREADING
 from ._pg_search import normalize_pg_search_tokenizer, pg_search_bm25_columns
 from ._text_search import mental_models_text_document
 from ._vector_index import (
@@ -302,7 +303,25 @@ def _run_in_migration_child(target: str, kwargs: dict) -> None:
     and show an operator nothing while it ran.
     """
     payload = json.dumps({"target": target, "kwargs": kwargs})
-    env = {**os.environ, ENV_MIGRATION_ISOLATION: "false", _CHILD_MARKER: "1"}
+    # The child imports psycopg2 deliberately — that is the entire reason it exists —
+    # so the free-threading guard has to be off inside it. Otherwise the guard the
+    # parent installs (strict by default on a free-threaded build, and inherited here)
+    # turns psycopg2's "the GIL has been enabled" warning into an exception and the
+    # migration fails.
+    #
+    # PYTHONWARNINGS is overwritten rather than merely cleared, for two reasons: the
+    # free-threaded CI job runs the suite with that warning promoted to an error and
+    # the child must not inherit it, and the warning is pure noise here — the child is
+    # SUPPOSED to take the GIL. Left visible it surfaces in the logs of a `-py3.14t`
+    # container as "the global interpreter lock (GIL) has been enabled", which reads
+    # like the image has silently lost its free-threading when it has not.
+    env = {
+        **os.environ,
+        ENV_MIGRATION_ISOLATION: "false",
+        ENV_FREE_THREADING: "off",
+        _CHILD_MARKER: "1",
+    }
+    env["PYTHONWARNINGS"] = "ignore:The global interpreter lock"
     logger.info("Running migrations in a subprocess (psycopg2 needs the GIL; see %s)", ENV_MIGRATION_ISOLATION)
     result = subprocess.run(
         [sys.executable, "-m", "hindsight_api.migrations"],
