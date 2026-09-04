@@ -15,6 +15,7 @@ from json_repair import repair_json
 from pydantic import BaseModel
 
 from .._cross_loop import CrossLoopSemaphore
+from .response_models import LLMCallResult
 
 # Vertex AI imports (conditional - for LLMProvider to pass credentials to GeminiLLM)
 try:
@@ -227,8 +228,8 @@ def sanitize_llm_value(value: Any) -> Any:
 
     ``sanitize_text`` guards a single field. This guards a whole response — the
     text a provider returned, the dict a structured call parsed, the pydantic
-    model it validated into, the ``(result, usage)`` tuple ``return_usage=True``
-    hands back — so that *every* LLM call is covered at one boundary instead of
+    model it validated into, the ``LLMCallResult`` ``call`` hands back — so that
+    *every* LLM call is covered at one boundary instead of
     each consumer remembering to scrub its own fields (see issue #3729).
 
     It matters beyond embeddings. A lone surrogate is legal in a Python ``str``
@@ -273,7 +274,8 @@ def sanitize_llm_value(value: Any) -> Any:
             cleaned_dict[cleaned_key] = cleaned_item
         return cleaned_dict if changed else value
 
-    # ``tuple`` is here for the ``return_usage=True`` shape, ``(result, TokenUsage)``.
+    # ``call`` returns an ``LLMCallResult`` now, handled by the BaseModel branch
+    # above; ``tuple`` stays because a parsed JSON payload can nest either.
     if isinstance(value, (list, tuple)):
         cleaned_items = [sanitize_llm_value(item) for item in value]
         if all(cleaned is original for cleaned, original in zip(cleaned_items, value)):
@@ -778,6 +780,7 @@ def create_llm_provider(
         "zai",
         "opencode-go",
         "atlas",
+        "meta",
     ):
         return OpenAICompatibleLLM(
             provider=provider,
@@ -975,6 +978,7 @@ class LLMProvider:
             "fireworks",
             "nous",
             "xai-oauth",
+            "meta",
         ]
         if self.provider not in valid_providers:
             raise ValueError(f"Invalid LLM provider: {self.provider}. Must be one of: {', '.join(valid_providers)}")
@@ -1003,6 +1007,8 @@ class LLMProvider:
                 self.base_url = "https://opencode.ai/zen/go/v1"
             elif self.provider == "atlas":
                 self.base_url = "https://api.atlascloud.ai/v1"
+            elif self.provider == "meta":
+                self.base_url = "https://api.meta.ai/v1"
             elif self.provider == "nous":
                 self.base_url = "https://inference-api.nousresearch.com/v1"
 
@@ -1135,6 +1141,21 @@ class LLMProvider:
         """Whether the underlying provider supports the OpenAI/Groq Batch API."""
         return await self._provider_impl.supports_batch_api()
 
+    def supports_vision(self) -> bool | None:
+        """Whether images may be sent to this LLM; ``None`` when unknowable.
+
+        ``HINDSIGHT_API_LLM_VISION`` wins over the provider's own answer in both
+        directions: it is the escape hatch for a vision model behind a gateway
+        the provider cannot identify, and the off switch for an operator whose
+        endpoint rejects image parts despite the model name.
+        """
+        from ..config import get_config
+
+        override = get_config().llm_vision
+        if override is not None:
+            return override
+        return self._provider_impl.supports_vision()
+
     async def batch_provider_impl(self, account_key: str | None = None) -> LLMInterface | None:
         """The implementation serving batch, or ``None`` when it cannot serve one.
 
@@ -1168,9 +1189,8 @@ class LLMProvider:
         max_backoff: float | None = None,
         skip_validation: bool = False,
         strict_schema: bool | None = None,
-        return_usage: bool = False,
         cached_prefix: str | None = None,
-    ) -> Any:
+    ) -> LLMCallResult:
         """
         Make an LLM API call with retry logic.
 
@@ -1192,11 +1212,8 @@ class LLMProvider:
                 inherits the server-level HINDSIGHT_API_LLM_STRICT_SCHEMA flag; an explicit
                 True or False wins over it, so a caller can force strict output on -- or off --
                 for its own scope. Providers without a strict mode ignore it.
-            return_usage: If True, return tuple (result, TokenUsage) instead of just result.
 
         Returns:
-            If return_usage=False: Parsed response if response_format is provided, otherwise text content.
-            If return_usage=True: Tuple of (result, TokenUsage) with token counts from the LLM call.
 
         Raises:
             OutputTooLongError: If output exceeds token limits.
@@ -1303,7 +1320,6 @@ class LLMProvider:
                         max_backoff=max_backoff,
                         skip_validation=skip_validation,
                         strict_schema=strict_schema,
-                        return_usage=return_usage,
                         **cache_kwarg,
                         **attempt_kwarg,
                     )
@@ -1777,7 +1793,7 @@ class ConfiguredLLMProvider:
 
     # ── overridden call methods ────────────────────────────────────────────────
 
-    async def call(self, messages: list[dict[str, Any]], **kwargs: Any) -> Any:
+    async def call(self, messages: list[dict[str, Any]], **kwargs: Any) -> LLMCallResult:
         from .providers.gemini_llm import _safety_settings_ctx
 
         token = _safety_settings_ctx.set(object.__getattribute__(self, "_gemini_safety_settings"))

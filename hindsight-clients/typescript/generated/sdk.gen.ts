@@ -95,6 +95,9 @@ import type {
   GetAgentStatsData,
   GetAgentStatsErrors,
   GetAgentStatsResponses,
+  GetBankAttachmentData,
+  GetBankAttachmentErrors,
+  GetBankAttachmentResponses,
   GetBankConfigData,
   GetBankConfigErrors,
   GetBankConfigResponses,
@@ -1325,6 +1328,20 @@ export const exportDocuments = <ThrowOnError extends boolean = false>(
   });
 
 /**
+ * Fetch an attachment retained inline with a document
+ *
+ * Serve the bytes of an attachment retained as inline content. The id is the one inside a placeholder token, and is returned on `attachments[].url` by recall and by the document/chunk/memory reads — so an agent can show or reason over the original behind an attachment-derived fact.
+ *
+ * Bytes are served with the Content-Type the caller declared at retain. Access is authorized against the bank; a missing attachment and an invisible bank both return 404, so the endpoint cannot be used to probe what a bank holds.
+ */
+export const getBankAttachment = <ThrowOnError extends boolean = false>(
+  options: Options<GetBankAttachmentData, ThrowOnError>
+) =>
+  (options.client ?? client).get<GetBankAttachmentResponses, GetBankAttachmentErrors, ThrowOnError>(
+    { url: "/v1/default/banks/{bank_id}/attachments/{attachment_id}", ...options }
+  );
+
+/**
  * Download a stored file (async export archive)
  *
  * Stream a file previously written to file storage — currently the transfer ZIP produced by an async document export. The key comes from the export operation's result_metadata (storage_key / download_url). Access is authorized against the bank the key belongs to.
@@ -1367,7 +1384,7 @@ export const clearObservations = <ThrowOnError extends boolean = false>(
 /**
  * List observation scopes
  *
- * Enumerate the distinct scopes across a bank's observations. Each observation lives under a scope: the exact set of tags it was consolidated with. Returns every distinct scope (tag order normalized) with the number of observations in it; the empty tag list is the global/untagged scope. Use a returned scope with the graph endpoint (tags=<scope> & tags_match=exact) to filter observations to exactly that scope.
+ * Enumerate the distinct scopes across a bank's observations. Each observation lives under a scope: the exact set of tags it was consolidated with. Returns every distinct scope (tag order normalized) with the number of observations in it; the empty tag list is the global/untagged scope. Use a returned scope with the graph endpoint (tags=<scope> & tags_match=exact) to filter observations to exactly that scope. Paged: `total` reports every distinct scope in the bank.
  */
 export const listObservationScopes = <ThrowOnError extends boolean = false>(
   options: Options<ListObservationScopesData, ThrowOnError>
@@ -1475,7 +1492,7 @@ export const triggerConsolidation = <ThrowOnError extends boolean = false>(
 /**
  * List webhooks
  *
- * List all webhooks registered for a bank.
+ * List the webhooks registered for a bank, oldest first. Paged: `total` reports every webhook on the bank.
  */
 export const listWebhooks = <ThrowOnError extends boolean = false>(
   options: Options<ListWebhooksData, ThrowOnError>

@@ -14,7 +14,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ...extensions.memory_defense import (
     DefenseAction,
@@ -27,6 +27,9 @@ from ...metrics import get_metrics_collector
 from ...worker.stage import set_stage
 from ..db_utils import acquire_with_retry
 from ..memory_engine import count_tokens, fq_table
+
+if TYPE_CHECKING:
+    from .attachment_store import RetainAttachmentLoader
 
 
 @dataclass
@@ -270,6 +273,7 @@ from . import (
 )
 from . import timing as _timing
 from .embedding_coalescer import CoalescingEmbedder
+from .entity_labels import label_tag_keys
 from .memory_budget import RetainMemoryBudget, estimate_chunk_bytes
 from .types import (
     CausalRelation,
@@ -513,6 +517,20 @@ def _remap_phase1_results(
     ]
 
     return remapped_entity_to_unit, remapped_unit_to_entity_ids, remapped_semantic
+
+
+def _attachment_filenames_for(contents: "list[RetainContent]") -> dict[str, str]:
+    """Merge the per-item filename maps of everything going into one document.
+
+    A retain item carries the names the caller gave its own attachments; a
+    document can be assembled from several items. Later items win on a clash,
+    which only arises when one document attaches identical bytes twice under two
+    names — in which case either answer is arbitrary and the row holds one name.
+    """
+    merged: dict[str, str] = {}
+    for content in contents:
+        merged.update(content.attachment_filenames)
+    return merged
 
 
 async def _insert_facts_and_links(
@@ -1044,6 +1062,8 @@ async def _extract_and_embed(
     pool: Any = None,
     operation_id: str | None = None,
     schema: str | None = None,
+    attachment_loader: "RetainAttachmentLoader | None" = None,
+    vlm_config: "LLMConfig | None" = None,
 ) -> _EmbeddedExtraction:
     """Shared pipeline: extract facts from contents and generate embeddings."""
     set_stage("retain.extract_and_embed")
@@ -1057,7 +1077,14 @@ async def _extract_and_embed(
     # so in the item's `context`, which extraction already reads and which the dry-run
     # `agent_name` override is deprecated in favour of.
     extraction = await fact_extraction.extract_facts_from_contents(
-        contents, llm_config, config, pool, operation_id, schema
+        contents,
+        llm_config,
+        config,
+        pool,
+        operation_id,
+        schema,
+        attachment_loader=attachment_loader,
+        vlm_config=vlm_config,
     )
     extracted_facts, chunks, usage = extraction.facts, extraction.chunks, extraction.usage
     log_buffer.append(
@@ -1192,6 +1219,8 @@ async def retain_batch(
     webhook_manager: Any = None,
     memory_defense_extension: "MemoryDefenseExtension | None" = None,
     audit_logger: Any = None,
+    attachment_loader: "RetainAttachmentLoader | None" = None,
+    vlm_config: "LLMConfig | None" = None,
 ) -> RetainBatchResult:
     """
     Process a batch of content through the retain pipeline.
@@ -1715,6 +1744,8 @@ async def retain_batch(
             document_body_override=document_body_override,
             delta_full_body=_delta_full_body,
             append_base_hash=append_base_hash,
+            attachment_loader=attachment_loader,
+            vlm_config=vlm_config,
         )
         if delta_result is not None:
             return delta_result
@@ -1732,6 +1763,9 @@ async def retain_batch(
     # at different boundaries and makes every stored chunk look changed. Fail loud.
     chunk_size = config.retain_chunk_size
     structured_chunk_size = config.retain_structured_chunk_size
+    # Same reasoning for the image cap: it moves chunk boundaries in exactly the
+    # same way, so it must come from this resolved config too.
+    max_attachments_per_chunk = config.retain_max_attachments_per_chunk
     all_pre_chunks: list[str] = []
     chunk_to_content: list[int] = []  # maps chunk index -> index into contents
     for content_idx, content in enumerate(contents):
@@ -1742,6 +1776,7 @@ async def retain_batch(
             content.content,
             chunk_size,
             structured_chunk_size=structured_chunk_size,
+            max_attachments_per_chunk=max_attachments_per_chunk,
         ):
             all_pre_chunks.append(chunk)
             chunk_to_content.append(content_idx)
@@ -1794,6 +1829,8 @@ async def retain_batch(
         append_base_hash=append_base_hash,
         append_base_watermark=append_base_watermark,
         force_reextract=force_reextract,
+        attachment_loader=attachment_loader,
+        vlm_config=vlm_config,
     )
 
 
@@ -2212,6 +2249,8 @@ async def _streaming_retain_batch(
     append_base_hash: str | None = None,
     append_base_watermark: int | None = None,
     force_reextract: bool = False,
+    attachment_loader: "RetainAttachmentLoader | None" = None,
+    vlm_config: "LLMConfig | None" = None,
 ) -> RetainBatchResult:
     """
     Process a large document in streaming mini-batches to bound memory usage.
@@ -2495,6 +2534,7 @@ async def _streaming_retain_batch(
                 entities=source.entities,
                 resolve_entities=source.resolve_entities,
                 tags=source.tags,
+                attachment_filenames=source.attachment_filenames,
                 observation_scopes=source.observation_scopes,
             )
             # Attribute this chunk's extraction LLM call to its document, so the
@@ -2516,6 +2556,8 @@ async def _streaming_retain_batch(
                     pool,
                     operation_id,
                     schema,
+                    attachment_loader=attachment_loader,
+                    vlm_config=vlm_config,
                 )
             finally:
                 reset_call_metadata(meta_token)
@@ -2773,6 +2815,7 @@ async def _streaming_retain_batch(
                                 retain_params,
                                 merged_tags,
                                 store_document_text=config.store_document_text,
+                                attachment_filenames=_attachment_filenames_for(contents),
                             )
                         else:
                             # A 0-fact re-ingest still deletes the outgoing memories, in the same
@@ -2787,6 +2830,7 @@ async def _streaming_retain_batch(
                                 merged_tags,
                                 ops=pool.ops,
                                 store_document_text=config.store_document_text,
+                                attachment_filenames=_attachment_filenames_for(contents),
                             )
                         doc_tracking_done[0] = True
                         # Memory: combined_content has been persisted; release
@@ -2979,6 +3023,7 @@ async def _streaming_retain_batch(
                                 retain_params,
                                 merged_tags,
                                 store_document_text=config.store_document_text,
+                                attachment_filenames=_attachment_filenames_for(contents),
                             )
                             log_buffer.append(
                                 f"[streaming] Document {effective_doc_id} updated "
@@ -2995,6 +3040,7 @@ async def _streaming_retain_batch(
                                 merged_tags,
                                 ops=pool.ops,
                                 store_document_text=config.store_document_text,
+                                attachment_filenames=_attachment_filenames_for(contents),
                             )
                             log_buffer.append(f"[streaming] Document {effective_doc_id} tracked (full content)")
                         doc_tracking_done[0] = True
@@ -3237,6 +3283,7 @@ async def _streaming_retain_batch(
                                 retain_params,
                                 merged_tags,
                                 store_document_text=config.store_document_text,
+                                attachment_filenames=_attachment_filenames_for(contents),
                             )
                         else:
                             # A no-facts re-ingest still deletes the outgoing memories, in the same
@@ -3251,6 +3298,7 @@ async def _streaming_retain_batch(
                                 merged_tags,
                                 ops=pool.ops,
                                 store_document_text=config.store_document_text,
+                                attachment_filenames=_attachment_filenames_for(contents),
                             )
                         doc_tracking_done[0] = True
                         # Memory: combined_content has been persisted and won't be
@@ -3436,6 +3484,8 @@ async def _try_delta_retain(
     # `document_body_override`, which an append fills with only the new tail.
     delta_full_body: str | None = None,
     append_base_hash: str | None = None,
+    attachment_loader: "RetainAttachmentLoader | None" = None,
+    vlm_config: "LLMConfig | None" = None,
 ) -> RetainBatchResult | None:
     """
     Attempt delta retain for a document upsert. Returns result tuple if delta
@@ -3751,6 +3801,8 @@ async def _try_delta_retain(
             pool,
             operation_id,
             schema,
+            attachment_loader=attachment_loader,
+            vlm_config=vlm_config,
         )
     finally:
         reset_call_metadata(meta_token)
@@ -3854,6 +3906,7 @@ async def _try_delta_retain(
                     combined_content,
                     retain_params,
                     merged_tags,
+                    attachment_filenames=_attachment_filenames_for(contents),
                 )
                 # Re-store the document's bodies in the store's document store with the
                 # FULL new chunk set — put_document dedups by content hash, so unchanged chunks and
@@ -3897,6 +3950,7 @@ async def _try_delta_retain(
                     merged_tags,
                     retain_params.get("metadata", {}),
                     observation_scopes=retain_params.get("observation_scopes"),
+                    label_tag_keys=label_tag_keys(getattr(config, "entity_labels", None)),
                     ops=pool.ops,
                 )
                 log_buffer.append(
@@ -4065,6 +4119,7 @@ async def _delta_metadata_only(
                     merged_tags,
                     retain_params.get("metadata", {}),
                     observation_scopes=retain_params.get("observation_scopes"),
+                    label_tag_keys=label_tag_keys(getattr(config, "entity_labels", None)),
                     ops=pool.ops,
                 )
         if outbox_callback is not None:
@@ -4104,6 +4159,7 @@ async def _delta_metadata_only(
                 combined_content,
                 retain_params,
                 merged_tags,
+                attachment_filenames=_attachment_filenames_for(contents),
             )
             await fact_storage.update_memory_units_metadata_and_tags(
                 conn,
@@ -4112,6 +4168,7 @@ async def _delta_metadata_only(
                 merged_tags,
                 retain_params.get("metadata", {}),
                 observation_scopes=retain_params.get("observation_scopes"),
+                label_tag_keys=label_tag_keys(getattr(config, "entity_labels", None)),
                 ops=pool.ops,
             )
             if outbox_callback is not None:
@@ -4154,6 +4211,7 @@ def _build_contents(contents_dicts: list[RetainContentDict], document_tags: list
             entities=item.get("entities", []),
             resolve_entities=item.get("resolve_entities", True),
             tags=merged_tags,
+            attachment_filenames=item.get("attachment_filenames") or {},
             observation_scopes=item.get("observation_scopes"),
         )
         contents.append(content)
@@ -4181,6 +4239,7 @@ def _chunk_contents_for_delta(contents: list[RetainContent], config) -> dict[int
             content.content,
             chunk_size,
             structured_chunk_size=structured_chunk_size,
+            max_attachments_per_chunk=config.retain_max_attachments_per_chunk,
         )
         for chunk_text in chunks:
             result[global_chunk_idx] = chunk_text

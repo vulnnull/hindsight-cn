@@ -122,6 +122,8 @@ class RetainContentDict(TypedDict, total=False):
         resolve_entities: Whether the supplied `entities` are resolved against the bank's
             existing entities (optional, default True). False takes them literally.
         tags: Visibility scope tags for this content item (optional)
+        attachment_filenames: Short attachment id -> filename, for inline attachments
+            in this item (optional)
         observation_scopes: How to scope observations for consolidation (optional).
             "per_tag" runs one pass per individual tag; "combined" (default) runs a
             single pass with all tags; "shared" runs a single pass over one global,
@@ -180,6 +182,11 @@ class RetainContent:
     # takes them literally; extracted entities are always resolved either way (#3479).
     resolve_entities: bool = True
     tags: list[str] = field(default_factory=list)  # Visibility scope tags
+    #: Short attachment id -> the name the caller gave it in *this* item. Carried
+    #: to `sync_document_attachments`, which records it on the document edge: a
+    #: filename describes the reference, not the bytes, so the same PDF can be
+    #: "policy-v1.pdf" here and "escalation-runbook.pdf" in another document.
+    attachment_filenames: dict[str, str] = field(default_factory=dict)
     observation_scopes: Literal["per_tag", "combined", "all_combinations", "shared"] | list[list[str]] | None = (
         None  # Observation scopes
     )
@@ -335,6 +342,12 @@ class ExtractedFact:
     mentioned_at: datetime | None = None
     metadata: dict[str, str] = field(default_factory=dict)
     tags: list[str] = field(default_factory=list)  # Visibility scope tags
+    # Short ids of the attachments this fact was drawn from, as the extractor
+    # attributed them. Empty for a fact stated in the prose — which is most of
+    # them, and the reason this is per-fact rather than per-chunk: every fact in
+    # a chunk used to inherit every attachment in it, so a sentence about
+    # recording a sync id carried the escalation PDF it never mentioned.
+    attachment_ids: list[str] = field(default_factory=list)
     observation_scopes: Literal["per_tag", "combined", "all_combinations", "shared"] | list[list[str]] | None = (
         None  # Observation scopes
     )
@@ -372,6 +385,11 @@ class ProcessedFact:
 
     # Causal relations
     causal_relations: list[CausalRelation] = field(default_factory=list)
+
+    # Short ids of the attachments this fact was drawn from, as the extractor
+    # attributed them. Empty for a fact stated in the surrounding prose — which
+    # is most of them, and the reason this is per-fact rather than per-chunk.
+    attachment_ids: list[str] = field(default_factory=list)
 
     # Chunk reference
     chunk_id: str | None = None
@@ -471,6 +489,7 @@ class ProcessedFact:
             metadata=extracted_fact.metadata,
             entities=entities,
             causal_relations=extracted_fact.causal_relations,
+            attachment_ids=list(extracted_fact.attachment_ids),
             chunk_id=chunk_id,
             content_index=extracted_fact.content_index,
             tags=extracted_fact.tags,

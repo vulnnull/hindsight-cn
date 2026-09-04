@@ -268,7 +268,7 @@ For non-English banks (especially CJK) and the language/extraction-language trad
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HINDSIGHT_API_LLM_PROVIDER` | Provider: `openai`, `openai-responses`, `openai-codex`, `claude-code`, `github-copilot`, `anthropic`, `gemini`, `groq`, `minimax`, `deepseek`, `zai`, `opencode-go`, `nous`, `xai-oauth`, `fireworks`, `ollama`, `ollama-cloud`, `lmstudio`, `llamacpp`, `vertexai`, `bedrock`, `litellm`, `litellmrouter`, `volcano`, `openrouter`, `requesty`, `none` | `openai` |
+| `HINDSIGHT_API_LLM_PROVIDER` | Provider: `openai`, `openai-responses`, `openai-codex`, `claude-code`, `github-copilot`, `anthropic`, `gemini`, `groq`, `minimax`, `deepseek`, `zai`, `opencode-go`, `meta`, `nous`, `xai-oauth`, `fireworks`, `ollama`, `ollama-cloud`, `lmstudio`, `llamacpp`, `vertexai`, `bedrock`, `litellm`, `litellmrouter`, `volcano`, `openrouter`, `requesty`, `none` | `openai` |
 | `HINDSIGHT_API_LLM_API_KEY` | API key for providers that require one; unused by `github-copilot` | - |
 | `HINDSIGHT_API_LLM_MODEL` | Model name | `gpt-5-mini` |
 | `HINDSIGHT_API_LLM_BASE_URL` | Custom LLM endpoint | Provider default |
@@ -285,6 +285,11 @@ For non-English banks (especially CJK) and the language/extraction-language trad
 | `HINDSIGHT_API_LLM_TEMPERATURE_RETAIN` | Temperature for fact extraction during retain. Number in `[0.0, 2.0]` or `none` to omit. Overrides `HINDSIGHT_API_LLM_TEMPERATURE`. | `0.1` |
 | `HINDSIGHT_API_LLM_TEMPERATURE_REFLECT` | Temperature for the reflect "thinking" step. Number in `[0.0, 2.0]` or `none` to omit. Overrides `HINDSIGHT_API_LLM_TEMPERATURE`. | `0.9` |
 | `HINDSIGHT_API_LLM_TEMPERATURE_CONSOLIDATION` | Temperature for consolidation (mental-model delta and dedup). Number in `[0.0, 2.0]` or `none` to omit. Overrides `HINDSIGHT_API_LLM_TEMPERATURE`. | `0.0` |
+| `HINDSIGHT_API_LLM_VISION` | Whether the configured LLM can read images, overriding what the provider reports about itself. Leave unset and each provider answers for itself: Anthropic and Gemini report yes, OpenAI reports yes, `none` reports no, and every gateway-style backend (LiteLLM, Ollama, LM Studio, OpenRouter, an OpenAI-compatible proxy) reports *unknown*, because its catalogue mixes vision-capable and text-only models. A retain carrying [inline attachments](#inline-attachments-in-retain) is refused with `422` on both "no" and "unknown" — dropping an attachment silently would leave a document that looks retained with the information the caller cared about gone. Set `true` when you are running a vision model behind such a gateway; set `false` to refuse images against an endpoint that rejects them despite its model name. | Provider decides |
+| `HINDSIGHT_API_VLM_PROVIDER` | Provider for the **vision slot** — the model used only for retain chunks that carry an [inline attachment](#inline-attachments-in-retain). Every text-only chunk keeps using the retain LLM, so a bank whose documents mostly *are* text does not pay a vision model's price for all of it. Unset, attachments go to the retain LLM. | Retain LLM |
+| `HINDSIGHT_API_VLM_API_KEY` | API key for the vision slot. | Retain LLM's |
+| `HINDSIGHT_API_VLM_MODEL` | Model for the vision slot. This is the model `HINDSIGHT_API_LLM_VISION` and the `422` vision check apply to, since it is the one that will actually be handed the attachment. | Retain LLM's |
+| `HINDSIGHT_API_VLM_BASE_URL` | Base URL for the vision slot. Follows `HINDSIGHT_API_VLM_PROVIDER`'s own default when that is set and this is not — it never inherits the retain provider's host, which would send the request to the wrong endpoint with the wrong key. | Provider default |
 | `HINDSIGHT_API_LLM_SEND_BANK_AS_USER` | Tag outbound LLM and embedding calls with `user=<bank_id>` so gateways (OpenRouter usage accounting, LiteLLM, Helicone) can attribute spend per bank. When enabled, the bank id is transmitted to the upstream provider as the end-user identifier. | `false` |
 | `HINDSIGHT_API_LLM_GROQ_SERVICE_TIER` | Groq service tier: `on_demand`, `flex`, `auto` | `auto` |
 | `HINDSIGHT_API_LLM_OPENAI_SERVICE_TIER` | OpenAI service tier: `flex` for 50% cost savings (OpenAI Flex Processing) | None (default) |
@@ -455,6 +460,20 @@ export HINDSIGHT_API_LLM_PROVIDER=opencode-go
 export HINDSIGHT_API_LLM_API_KEY=your-opencode-go-api-key
 export HINDSIGHT_API_LLM_MODEL=deepseek-v4-flash
 # Default base_url: https://opencode.ai/zen/go/v1 (override with HINDSIGHT_API_LLM_BASE_URL if needed)
+
+# Meta Model API (Muse Spark, OpenAI-compatible, https://ai.developer.meta.com)
+export HINDSIGHT_API_LLM_PROVIDER=meta
+export HINDSIGHT_API_LLM_API_KEY=your-meta-model-api-key
+export HINDSIGHT_API_LLM_MODEL=muse-spark-1.3
+# Default base_url: https://api.meta.ai/v1 (override with HINDSIGHT_API_LLM_BASE_URL if needed)
+# Muse Spark always reasons: leave HINDSIGHT_API_LLM_REASONING_EFFORT unset or set it to
+# minimal/low/medium/high/xhigh. "none" is rejected with HTTP 400. Reasoning tokens are
+# billed against the output budget, so keep the per-operation max-token limits generous.
+# Muse Spark reasons before every reply, so calls are slow: reflect's 30s default
+# deadline is not enough for its final synthesis and the call fails after retries.
+# Raise it (and the global deadline) when using this provider:
+export HINDSIGHT_API_REFLECT_LLM_TIMEOUT=300
+export HINDSIGHT_API_LLM_TIMEOUT=300
 
 # Nous Portal (OpenAI-compatible; no API key — uses your `hermes portal` login)
 export HINDSIGHT_API_LLM_PROVIDER=nous
@@ -742,7 +761,7 @@ server-level only (not overridable per tenant/bank) and a change requires a rest
 | `HINDSIGHT_API_EMBEDDINGS_OPENAI_BATCH_SIZE` | Max inputs per `embeddings.create` call for `openai`/`openrouter` providers — lower this when the upstream endpoint enforces stricter limits (e.g. DashScope caps at 10) | `100` |
 | `HINDSIGHT_API_EMBEDDINGS_OPENAI_DIMENSIONS` | Optional requested output dimensions for OpenAI `text-embedding-3` models (e.g., `384` to match an existing pgvector schema) | - |
 | `HINDSIGHT_API_EMBEDDINGS_MAX_CONCURRENT_REQUESTS` | Embedding requests a remote provider keeps in flight for one `encode()` call. This is what buys throughput from an embedding service: the same TEI server sustains ~903 texts/s at one in-flight request and ~2,080 at eight. Applies to every remote provider (`tei`, `openai`, `cohere`, `zeroentropy`, `litellm`, `litellm-sdk`, `google`, ...); the in-process `local`/`onnx` backends are unaffected. Lower it when the embedding service or your provider quota cannot take the parallelism | `8` |
-| `HINDSIGHT_API_EMBEDDINGS_MAX_RETRIES` | Retries after the first attempt when a remote embedding call fails transiently (5xx, timeout, connection error). `0` disables retrying. Applies to the `litellm` and `litellm-sdk` providers; 4xx auth/validation errors are never retried. | `4` |
+| `HINDSIGHT_API_EMBEDDINGS_MAX_RETRIES` | Retries after the first attempt when a remote embedding call fails transiently (5xx, timeout, connection error). `0` disables retrying. Applies to the `litellm`, `litellm-sdk` and `google` (Gemini API / Vertex AI) providers, including Gemini `429 RESOURCE_EXHAUSTED` quota responses; 4xx auth/validation errors are never retried. | `4` |
 | `HINDSIGHT_API_EMBEDDINGS_INITIAL_BACKOFF` | Initial backoff in seconds between embedding retries (doubles per attempt, with jitter) | `0.5` |
 | `HINDSIGHT_API_EMBEDDINGS_MAX_BACKOFF` | Cap on the backoff between embedding retries, in seconds | `4.0` |
 | `HINDSIGHT_API_EMBEDDINGS_RETRY_BUDGET` | Wall-clock ceiling, in seconds, on the time one `encode()` call may spend retrying (failed attempts plus backoff). Keeps a degraded provider from stalling a synchronous recall. | `15.0` |
@@ -767,6 +786,7 @@ server-level only (not overridable per tenant/bank) and a change requires a rest
 | `HINDSIGHT_API_EMBEDDINGS_LITELLM_DIMENSIONS` | Vector width the configured LiteLLM model returns. When set, the startup dimension probe is skipped, so the API boots even while the proxy is still starting. Declares the width rather than requesting it (the value is not sent to the proxy); a wrong value fails the first embedding call with an explicit error. | - |
 | `HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_API_KEY` | LiteLLM SDK API key for direct embedding provider access (optional — omit for providers that use ambient credentials, e.g. AWS Bedrock with IAM) | - |
 | `HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_MODEL` | LiteLLM SDK embedding model (use provider prefix, e.g., `cohere/embed-english-v3.0`) | `cohere/embed-english-v3.0` |
+| `HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_MODEL_ID` | **Bedrock only.** The target LiteLLM actually invokes, when it differs from `..._MODEL` — typically an [application inference profile](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles-support.html) ARN, which you need when a Service Control Policy denies `bedrock:InvokeModel` on the bare model id. LiteLLM picks the Bedrock request/response shape from `..._MODEL`, so leave that a recognizable id (e.g. `bedrock/amazon.titan-embed-text-v2:0`) and put the ARN here. | - |
 | `HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_API_BASE` | Custom base URL for LiteLLM SDK embeddings (optional) | - |
 | `HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_OUTPUT_DIMENSIONS` | Optional output embedding dimensions (provider-dependent, e.g., `768` for Gemini embedding models) | - |
 | `HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_ENCODING_FORMAT` | Encoding format for embedding responses. Set to empty string to omit the parameter (needed for Voyage AI, Gemini). | `float` |
@@ -1464,6 +1484,9 @@ Controls the retain (memory ingestion) pipeline.
 | `HINDSIGHT_API_RETAIN_MAX_COMPLETION_TOKENS` | Max completion tokens for fact extraction LLM calls | `64000` |
 | `HINDSIGHT_API_RETAIN_CHUNK_SIZE` | Max characters per chunk for fact extraction. Larger chunks extract fewer LLM calls but may lose context. | `3000` |
 | `HINDSIGHT_API_RETAIN_STRUCTURED_CHUNK_SIZE` | Max characters for a single JSONL line or conversation turn to keep whole. Unset uses `HINDSIGHT_API_RETAIN_CHUNK_SIZE`. Must be a positive integer when set. | - |
+| `HINDSIGHT_API_RETAIN_ATTACHMENT_MAX_SIZE_MB` | Max decoded size of a single attachment sent as inline retain content. Above every mainstream provider's own per-file ceiling, so the provider's limit binds first for legitimate content while an abusive upload is refused at the ingress. | `20` |
+| `HINDSIGHT_API_RETAIN_ATTACHMENT_MAX_COUNT` | Max inline attachments in one retain item. Split larger documents across several items. | `50` |
+| `HINDSIGHT_API_RETAIN_MAX_ATTACHMENTS_PER_CHUNK` | Max attachments in one extraction chunk. `HINDSIGHT_API_RETAIN_CHUNK_SIZE` budgets **text only** — a placeholder costs the ~22 characters it occupies and nothing more — so this is what bounds attachments, matching a provider's per-request limit. Lower it for a model with a smaller context. Configurable per bank. | `8` |
 | `HINDSIGHT_API_RETAIN_EXTRACTION_MODE` | Fact extraction mode: `concise`, `verbose`, `verbatim`, `chunks`, or `custom` | `concise` |
 | `HINDSIGHT_API_RETAIN_MISSION` | What this bank should pay attention to during extraction. Steers the LLM without replacing the extraction rules — works alongside any extraction mode. | - |
 | `HINDSIGHT_API_RETAIN_CUSTOM_INSTRUCTIONS` | Full prompt override for fact extraction (only used when mode is `custom`). Replaces built-in extraction rules entirely. | - |
@@ -1486,6 +1509,97 @@ Controls the retain (memory ingestion) pipeline.
 > **Batch-capable providers.** `HINDSIGHT_API_RETAIN_BATCH_ENABLED=true` only works with a retain LLM provider that implements a batch API: `openai`, `groq`, `gemini`, and `fireworks`. Batch always requires async retain (`async=true`); a sync retain with batch enabled errors. Other providers fail fast at startup.
 >
 > **Gemini** uses the [Gemini Batch API](https://ai.google.dev/gemini-api/docs/batch-api) (flat 50% input + output discount, 24h SLA — typically minutes). It needs no extra settings beyond `HINDSIGHT_API_RETAIN_BATCH_ENABLED=true` and an API-key `gemini` provider; Vertex AI (`vertexai`) is not batch-capable.
+
+#### Inline attachments in retain
+
+A retain item's `content` can be a plain string, as it always could, or an ordered
+list of text, image and file blocks so an attachment sits where it actually appears:
+
+```json
+{
+  "content": [
+    {"type": "text",  "text": "To reset the VPN, click the button shown:"},
+    {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "..."}},
+    {"type": "text",  "text": "...then reconnect."},
+    {"type": "file",  "source": {"type": "base64", "media_type": "application/pdf", "data": "..."},
+                      "filename": "escalation-policy.pdf"}
+  ]
+}
+```
+
+The point is *position*. Extraction runs the interleaved text and attachments
+through a vision model, so the model reads a screenshot beside the sentence that
+introduces it, rather than being handed a caption you produced beforehand. That is
+the same bargain the rest of Hindsight offers for text: hand it the raw content
+and trust the extractor.
+
+`image` and `file` are separate types because the providers separate them —
+Anthropic has distinct image and document blocks, OpenAI has `image_url` and file
+parts — so carrying your own distinction through means the conversion never has to
+guess from the media type alone.
+
+This is distinct from [`POST /files/retain`](#file-conversion), which converts a
+whole file to markdown as its **own** document — still the right tool for scanned
+PDFs and office documents when you want them parsed rather than looked at, but it
+separates the content from the prose around it.
+
+**Accepted types.** Any well-formed `type/subtype` is accepted. There is no
+allowlist: whether the model can read a format is the model's answer to give, and
+a provider that rejects one fails the retain with its own error, which is more
+informative than a guess made at the ingress. Bytes are served back under the
+Content-Type the caller declared.
+
+:::warning
+Because the declared type is served verbatim, a bank writer who retains active
+content (an SVG or an HTML file) can have it execute in the dataplane's origin
+when it is fetched. Treat write access to a bank as equivalent to being able to
+host content on that origin.
+:::
+
+What happens to the bytes:
+
+- They are hashed (sha256) and stored **content-addressed**, so the same
+  attachment across many documents or re-ingests is stored once, and re-retaining
+  an unchanged document is a no-op.
+- Storage goes through the same backend as uploaded files — `native`
+  (PostgreSQL), `s3`, `gcs`, `azure`. See [File storage](#file-storage).
+- The document's stored text keeps a placeholder (`⟦hs-att:...⟧`) where the
+  attachment sat, so chunking, idempotency, `update_mode=append` and
+  re-extraction behave exactly as they do for text.
+- `document_attachments` records which documents reference which attachment,
+  derived from that text on every write. Deleting a document reclaims only the
+  blobs nothing else still references.
+- Every read surface returns the attachments alongside the text —
+  `chunks[].attachments` and each memory's `attachments` on recall, plus
+  get-document, get-chunk, get-memory and list-memories — each with a
+  bank-authorized `url` serving the original bytes.
+
+Extracted **facts** never carry the placeholder: a fact reads `[image:
+image/png]` where the attachment was, and the machine-readable handle travels
+beside it in `attachments`. A content hash is not knowledge.
+
+A **memory's** `attachments` are the ones that fact was actually drawn from, not
+every attachment in its chunk. They are stored on the memory itself
+(`memory_units.attachment_ids`), like its tags, so they travel with the memory
+rather than living in a separate edge table. Extraction runs one call per chunk, and a chunk
+holding a screenshot also holds the prose around it, so the chunk's attachments
+would otherwise be shown against every fact the call produced — the architecture
+diagram offered as the evidence for the paragraph about paging policy. The
+extractor is asked which attachments each fact came from, and a fact stated in
+the surrounding text has no `attachments` at all. That emptiness is the feature:
+an attachment shown beside a memory means the model looked at it to produce that
+memory.
+
+A **chunk's** `attachments` stay exactly what they were — everything the chunk
+references — because that is a question about the chunk, not about a fact.
+
+Two things will refuse the retain outright, both with `422`, rather than dropping
+attachments silently:
+
+- The retain LLM is not vision-capable, or Hindsight cannot tell that it is. See
+  [`HINDSIGHT_API_LLM_VISION`](#llm-configuration).
+- `HINDSIGHT_API_RETAIN_BATCH_ENABLED=true`. The batch path builds provider
+  request bodies directly and never sees the interleaved content.
 
 #### Fireworks batch inference
 

@@ -68,6 +68,8 @@ from hindsight_api.engine.structured_output import provider_json_schema, strict_
 from hindsight_api.metrics import get_metrics_collector
 from hindsight_api.worker.stage import set_stage
 
+from ..response_models import LLMCallResult
+
 logger = logging.getLogger(__name__)
 
 
@@ -239,6 +241,10 @@ class OpenAIResponsesLLM(LLMInterface):
         """Whether the model is an OpenAI reasoning model (gpt-5.x, o1, o3)."""
         model_lower = self.model.lower()
         return any(x in model_lower for x in ["gpt-5", "o1", "o3"])
+
+    def supports_vision(self) -> bool:
+        """OpenAI's own Responses API — every model it serves reads images."""
+        return True
 
     async def verify_connection(self) -> None:
         """Verify configuration with a minimal Responses call."""
@@ -438,9 +444,8 @@ class OpenAIResponsesLLM(LLMInterface):
         max_backoff: float = 60.0,
         skip_validation: bool = False,
         strict_schema: bool = False,
-        return_usage: bool = False,
         attempt_context: Callable[[], AbstractAsyncContextManager[None]] | None = None,
-    ) -> Any:
+    ) -> LLMCallResult:
         """Make a Responses API call with retry logic (see ``LLMInterface.call``)."""
         start_time = time.time()
         is_reasoning_model = self._supports_reasoning_model()
@@ -509,7 +514,7 @@ class OpenAIResponsesLLM(LLMInterface):
                     f"slow llm call: scope={scope}, model={self.provider}/{self.model}, "
                     f"input_tokens={usage.input_tokens}, output_tokens={usage.output_tokens}, time={duration:.3f}s"
                 )
-            return (result, usage) if return_usage else result
+            return LLMCallResult(content=result, usage=usage)
 
         return await self._run_with_retries(
             params,

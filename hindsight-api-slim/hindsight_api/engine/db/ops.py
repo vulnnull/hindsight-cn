@@ -391,6 +391,7 @@ class DataAccessOps(ABC):
         tags_list: list[str],
         observation_scopes_list: list,
         text_signals_list: list,
+        attachment_ids_list: list,
         text_search_extension: str = "native",
     ) -> list[str]:
         """Batch-insert facts, returning IDs.
@@ -663,8 +664,24 @@ class DataAccessOps(ABC):
         conn: DatabaseConnection,
         table: str,
         bank_id: str,
+        limit: int,
+        offset: int,
     ) -> list[ResultRow]:
-        """List all webhooks for a bank, ordered by created_at."""
+        """One page of a bank's webhooks, ordered by created_at then id.
+
+        The id breaks ties so a page boundary never falls inside a group of rows
+        that share a created_at.
+        """
+        ...
+
+    @abstractmethod
+    async def count_webhooks_for_bank(
+        self,
+        conn: DatabaseConnection,
+        table: str,
+        bank_id: str,
+    ) -> int:
+        """Total number of webhooks registered for a bank."""
         ...
 
     @abstractmethod

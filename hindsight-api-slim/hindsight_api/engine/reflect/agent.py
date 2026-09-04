@@ -65,6 +65,22 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_ITERATIONS = 10
 
+#: Temperature for split synthesis's map calls. They copy claims and ids out of one
+#: chunk — the mechanical half of the job, like consolidation's extraction passes,
+#: which also run at 0. The reflect temperature (0.9 by default) belongs to the calls
+#: that reason and write; at that setting a map call sometimes answered a plainly
+#: relevant chunk with the six-token "(no relevant evidence)" sentinel and
+#: finish_reason=stop, dropping that chunk's evidence from the reduce (#4054).
+#:
+#: Applied only when a reflect temperature is configured at all: ``none`` resolves the
+#: whole chain to None so the parameter is omitted, which is how reasoning models that
+#: reject any temperature are run. Hardcoding 0 here would put it back for them.
+_MAP_TEMPERATURE = 0.0
+
+
+def _map_temperature() -> float | None:
+    return None if get_config().llm_temperature_reflect is None else _MAP_TEMPERATURE
+
 
 class ReflectNoAnswerError(RuntimeError):
     """The agent finished without producing an answer.
@@ -260,7 +276,7 @@ INSTRUCTIONS:
 
 OUTPUT:"""
 
-        structured_result, usage = await llm_config.call(
+        call_result = await llm_config.call(
             messages=[
                 {
                     "role": "system",
@@ -279,8 +295,9 @@ OUTPUT:"""
             initial_backoff=0.25,
             max_backoff=1.0,
             skip_validation=True,  # We'll handle the dict ourselves
-            return_usage=True,
         )
+        structured_result = call_result.content
+        usage = call_result.usage
 
         # Convert to dict
         if hasattr(structured_result, "model_dump"):
@@ -710,20 +727,31 @@ async def _run_reflect_agent_inner(
             f"total={elapsed_ms}ms"
         )
 
-    async def _tracked_llm_call(prompt: str, trace_scope: str, system_prompt: str, completion_cap: int | None) -> str:
-        """One tool-less LLM call with usage/trace accounting folded in."""
+    async def _tracked_llm_call(
+        prompt: str,
+        trace_scope: str,
+        system_prompt: str,
+        completion_cap: int | None,
+        temperature: float | None = None,
+    ) -> str:
+        """One tool-less LLM call with usage/trace accounting folded in.
+
+        ``temperature`` defaults to the reflect temperature, which is tuned for
+        writing an answer; callers that extract rather than write override it.
+        """
         nonlocal total_input_tokens, total_output_tokens, total_cached_tokens, total_thoughts_tokens
         llm_start = time.time()
-        response, usage = await llm_config.call(
+        call_result = await llm_config.call(
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt},
             ],
             scope="reflect",
-            temperature=get_config().llm_temperature_reflect,
+            temperature=get_config().llm_temperature_reflect if temperature is None else temperature,
             max_completion_tokens=completion_cap,
-            return_usage=True,
         )
+        response = call_result.content
+        usage = call_result.usage
         llm_duration = int((time.time() - llm_start) * 1000)
         total_input_tokens += usage.input_tokens
         total_output_tokens += usage.output_tokens
@@ -783,6 +811,7 @@ async def _run_reflect_agent_inner(
                         f"final_map_{i}",
                         CLAIMS_SYSTEM_PROMPT,
                         synthesis_max_completion_tokens,
+                        temperature=_map_temperature(),
                     )
                     for i, chunk in enumerate(chunks, 1)
                 )
@@ -1387,7 +1416,7 @@ async def _process_done_tool(
             )
             rewrite_user = f"Target budget: {max_tokens} tokens.\n\nText to rewrite:\n{answer}"
 
-        rewritten, rewrite_usage = await llm_config.call(
+        call_result = await llm_config.call(
             messages=[
                 {"role": "system", "content": rewrite_system},
                 {"role": "user", "content": rewrite_user},
@@ -1395,8 +1424,9 @@ async def _process_done_tool(
             scope="reflect",
             temperature=get_config().llm_temperature_reflect,
             max_completion_tokens=get_config().reflect_max_completion_tokens,
-            return_usage=True,
         )
+        rewritten = call_result.content
+        rewrite_usage = call_result.usage
         if document is not None:
             trimmed = _document_from_rewrite(rewritten, answer)
             document, answer = trimmed.structure, trimmed.markdown
