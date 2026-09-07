@@ -886,6 +886,11 @@ async def test_engine_list_tags_routes_through_the_installed_store(memory, reque
 
     await store.insert_facts(conn=None, ops=None, bank_id="seam-bank", facts=[_Fact()], document_id="d")
 
+    # The read 404s for a bank nobody created (#4175). A store owns the facts, never the bank row
+    # itself, so a real deployment always has this row — a retain writes it before the store sees
+    # anything. Only the stub reaches an engine read without one.
+    await memory.get_bank_profile("seam-bank", request_context=request_context)
+
     result = await memory.list_tags("seam-bank", request_context=request_context)
 
     assert result["items"] == [{"tag": "only-in-the-store", "count": 1}]
@@ -1103,6 +1108,7 @@ async def test_engine_list_memory_units_routes_through_store(memory, request_con
     store = InMemoryMemories({})
     set_memories(store)
     await _seed(store, "seam-bank", text="only in the store", fact_type="world")
+    await memory.get_bank_profile("seam-bank", request_context=request_context)  # see #4175 above
     res = await memory.list_memory_units("seam-bank", request_context=request_context)
     assert "list_memory_units" in store.calls
     assert res["total"] == 1  # the row exists only in the stub, so it can only have come from it
@@ -1144,6 +1150,7 @@ async def test_apply_edit_is_told_the_pre_edit_fact_type(memory, request_context
 async def test_engine_list_entities_routes_through_store(memory, request_context, restore_default_store):
     store = InMemoryMemories({})
     set_memories(store)
+    await memory.get_bank_profile("seam-bank", request_context=request_context)  # see #4175 above
     await memory.list_entities("seam-bank", request_context=request_context)
     assert "list_entities" in store.calls
 

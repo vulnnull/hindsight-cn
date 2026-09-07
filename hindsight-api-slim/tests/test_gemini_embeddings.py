@@ -20,9 +20,8 @@ import pytest
 
 from hindsight_api.config import HindsightConfig
 from hindsight_api.engine.embeddings import (
-    EmbeddingRetryPolicy,
+    RetryPolicy,
     GeminiEmbeddings,
-    _gemini_model_aggregates_inputs,
     create_embeddings_from_env,
 )
 
@@ -54,6 +53,8 @@ def _make_mock_google_module(mock_genai: MagicMock) -> MagicMock:
     mod.genai = mock_genai
     mod.genai.types.EmbedContentConfig = MagicMock(side_effect=lambda **kw: MagicMock(**kw))
     mod.genai.types.HttpOptions = MagicMock(side_effect=lambda **kw: MagicMock(**kw))
+    mod.genai.types.Content = MagicMock(side_effect=lambda **kw: MagicMock(**kw))
+    mod.genai.types.Part.from_text = MagicMock(side_effect=lambda text="": MagicMock(text=text))
     return mod
 
 
@@ -243,26 +244,20 @@ class TestGeminiEmbeddings:
         emb.encode(["hello"])
         assert mock_client.models.embed_content.call_args.kwargs["config"] is emb._embed_config
 
-    def test_encode_aggregating_model_embeds_one_per_call(self):
-        """Gemini Embedding 2+ aggregates multi-input requests, so each text must
-        be embedded in its own call to keep 1:1 input→vector alignment."""
+    def test_encode_gemini_embedding_2_batches_multiple_inputs(self):
+        """Gemini Embedding 2+ wraps inputs in Content objects so batch_size=100
+        correctly batches texts into a single request with 1:1 vector alignment."""
         emb = GeminiEmbeddings(model="gemini-embedding-2-preview", api_key="test-key", batch_size=100)
         mock_client = MagicMock()
-        mock_client.models.embed_content = MagicMock(
-            side_effect=[
-                _make_mock_embed_result([[0.1]]),
-                _make_mock_embed_result([[0.2]]),
-                _make_mock_embed_result([[0.3]]),
-            ]
-        )
+        mock_client.models.embed_content = MagicMock(return_value=_make_mock_embed_result([[0.1], [0.2], [0.3]]))
         emb._client = mock_client
         emb._dimension = 1
 
         assert emb.encode(["a", "b", "c"]) == [[0.1], [0.2], [0.3]]
-        # One call per input despite batch_size=100.
-        assert mock_client.models.embed_content.call_count == 3
-        for call in mock_client.models.embed_content.call_args_list:
-            assert len(call.kwargs["contents"]) == 1
+        # 1 call for 3 inputs when batch_size=100
+        assert mock_client.models.embed_content.call_count == 1
+        call_contents = mock_client.models.embed_content.call_args.kwargs["contents"]
+        assert len(call_contents) == 3
 
     def test_encode_raises_on_misaligned_vector_count(self):
         """A backend that aggregates inputs (returns fewer vectors than texts)
@@ -311,20 +306,6 @@ class TestGeminiEmbeddings:
         emb = GeminiEmbeddings(model="m", vertexai_project_id="proj", vertexai_region="europe-west1")
         assert emb.vertexai_region == "europe-west1"
 
-    @pytest.mark.parametrize(
-        "model,expected",
-        [
-            ("gemini-embedding-001", False),
-            ("gemini-embedding-2-preview", True),
-            ("gemini-embedding-2", True),
-            ("models/gemini-embedding-2-preview", True),
-            ("google/gemini-embedding-2", True),
-            ("text-embedding-004", False),
-        ],
-    )
-    def test_aggregating_model_detection(self, model, expected):
-        assert _gemini_model_aggregates_inputs(model) is expected
-
 
 class _GenAIError(Exception):
     """Stand-in for google.genai.errors.APIError, which carries the status on `code`."""
@@ -336,7 +317,7 @@ class _GenAIError(Exception):
 
 
 # Fast policy so these tests exercise the retry logic, not the sleeps.
-_FAST_POLICY = EmbeddingRetryPolicy(max_retries=3, initial_backoff=0.01, max_backoff=0.02, budget_seconds=5.0)
+_FAST_POLICY = RetryPolicy(max_retries=3, initial_backoff=0.01, max_backoff=0.02, budget_seconds=5.0)
 
 
 class TestGeminiEmbeddingsRetry:
@@ -347,7 +328,7 @@ class TestGeminiEmbeddingsRetry:
     retain and consolidation operations during an ordinary quota window.
     """
 
-    def _make_embeddings(self, side_effect, policy: EmbeddingRetryPolicy = _FAST_POLICY) -> GeminiEmbeddings:
+    def _make_embeddings(self, side_effect, policy: RetryPolicy = _FAST_POLICY) -> GeminiEmbeddings:
         emb = GeminiEmbeddings(model="gemini-embedding-001", api_key="test-key", retry_policy=policy)
         client = MagicMock()
         client.models.embed_content = MagicMock(side_effect=side_effect)
@@ -417,7 +398,7 @@ class TestGeminiEmbeddingsRetry:
         the whole call bounds it: here four concurrent batches with five retries each
         would be 24 upstream calls unshared, and the shared budget cuts it to a handful.
         """
-        policy = EmbeddingRetryPolicy(max_retries=5, initial_backoff=0.05, max_backoff=0.05, budget_seconds=0.06)
+        policy = RetryPolicy(max_retries=5, initial_backoff=0.05, max_backoff=0.05, budget_seconds=0.06)
         calls = {"n": 0}
         lock = threading.Lock()
 
@@ -564,6 +545,12 @@ class TestGeminiEmbeddingsFactory:
             emb = create_embeddings_from_env()
         assert emb.output_dimensionality == 256
 
+    def test_create_with_batch_size(self):
+        config = self._make_config(embeddings_gemini_batch_size=50)
+        with patch("hindsight_api.config.get_config", return_value=config):
+            emb = create_embeddings_from_env()
+        assert emb.batch_size == 50
+
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(
@@ -573,9 +560,12 @@ class TestGeminiEmbeddingsFactory:
 async def test_gemini_embedding_2_vertexai_one_vector_per_input():
     """Real Vertex AI check that the gemini-embedding-2 family stays 1:1.
 
-    These multimodal models aggregate a multi-input request into a single
-    embedding, so encode() must embed one input per call. Before the fix this
-    returned a single aggregated vector for the whole batch (the bug in #1139).
+    These multimodal models fuse the several Parts of one Content into a single
+    embedding, so encode() sends each text as its own Content (the bug in #1139
+    returned one aggregated vector for the whole batch). This is the only test
+    that can confirm it: the behaviour lives in the API, not in our code, so a
+    mocked client would pass either way. All three texts go out in ONE request
+    at the default batch size, which is exactly the case that used to aggregate.
     Runs in the CI jobs that provide GCP credentials; skips locally otherwise.
     """
     project_id = os.getenv("HINDSIGHT_API_EMBEDDINGS_VERTEXAI_PROJECT_ID") or os.getenv(
