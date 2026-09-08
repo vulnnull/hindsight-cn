@@ -557,6 +557,30 @@ class MetricsCollector(MetricsCollectorBase):
             name="hindsight.recall.phase.duration",
             description="Time attributed to one phase of a recall (diagnostic phases are subsets, not siblings)",
             unit="s",
+            # Buckets in SECONDS, sized for phases that take milliseconds. Without them the
+            # SDK default applies -- 0, 5, 10, 25, ... -- which for a unit of seconds means
+            # the first bucket is everything under five seconds. Every recall phase landed
+            # in it, so the histogram could report a mean but no percentile: asked for the
+            # p99 of a phase it answered 2500ms for all fifteen of them, which is simply the
+            # midpoint of that first bucket. A mean cannot explain a tail, and the tail is
+            # what a phase breakdown is for.
+            explicit_bucket_boundaries_advisory=[
+                0.001,
+                0.0025,
+                0.005,
+                0.01,
+                0.025,
+                0.05,
+                0.075,
+                0.1,
+                0.25,
+                0.5,
+                0.75,
+                1.0,
+                2.5,
+                5.0,
+                10.0,
+            ],
         )
         self.recall_phase_calls = self.meter.create_counter(
             name="hindsight.recall.phase.calls",

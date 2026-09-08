@@ -2502,6 +2502,67 @@ queued for a connection) and the `hindsight_db_pool_acquire_wait` histogram. A s
 or failing `/health` response additionally carries `db_acquire_ms`, `db_pool_waiting`,
 `db_pool_in_use`, and `db_pool_max` for triage.
 
+### CPU Profiling
+
+The loop watchdog above answers "is the loop blocked?". This answers the next question --
+*what is burning the CPU?* -- for a process you may not be able to attach a debugger to.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HINDSIGHT_API_PROFILE` | JSON object; unset disables profiling entirely. `{"every": 60, "top": 20}` | unset |
+
+`every` is the seconds between reports, `top` the rows in each. Set it and the API emits a
+CPU report to its normal log stream on that interval:
+
+```
+HINDSIGHT_API_PROFILE='{"every": 60, "top": 20}'
+```
+
+```
+[profile] thread hindsight-loop-            1.41 cores
+[profile] thread asyncio_                   0.37 cores
+[profile] 1598 functions active in the last 60s
+[profile] tottime=0.923 cumtime=1.833 ncalls=15842 <method 'encode' of 'builtins.CoreBPE' objects>
+[profile] tottime=0.691 cumtime=7.039 ncalls=1511590 <built-in method builtins.isinstance>
+```
+
+Each row is one log record tagged `[profile]`, so `grep '\[profile\]'` over the logs
+reconstructs the table.
+
+**It reports to the logs on purpose.** The case this exists for is a process dying without
+explanation. A file inside the container dies with the container unless a volume was mounted
+in advance, and an HTTP endpoint needs a live process and a route to it -- which is exactly
+what a crashing process does not offer. Container runtimes keep the previous container's
+stdout (`kubectl logs --previous`), so the last report before a crash is still readable
+afterwards. Each report is flushed as it is written, because a fatal signal takes buffered
+output with it.
+
+#### Reading the report
+
+Every report begins with per-thread CPU read from `/proc`, and that table is the arbiter:
+profiler overhead cannot distort it, so when the two disagree, `/proc` is right. It also
+shows whether work is spread across event loops or concentrated on one.
+
+Three things will mislead you otherwise:
+
+- **`tottime` is a function's own CPU; `cumtime` includes everything it called.** A
+  coroutine high in `cumtime` may simply be awaiting. Ranking by `cumtime` once put an ASGI
+  middleware at 77% of loop CPU when removing it changed throughput by 13%.
+- **cProfile roughly halves throughput and over-weights functions called very often.** Read
+  the ranking, not the milliseconds, and confirm anything load-bearing by changing one thing
+  and re-measuring.
+- **Numbers are per-window.** Each report is the delta since the previous one, not a running
+  total since boot.
+
+#### Limits
+
+Profiling is process-wide and single-instance: since Python 3.12 the profiler is a global
+monitoring tool, so nothing else in the process may profile at the same time (a second
+attempt logs `tool 2 is already in use` and leaves profiling off). On a free-threaded build
+this is the supported route, because `py-spy` cannot read a `Py_GIL_DISABLED` process --- it
+locates threads through the GIL, which such a build does not have. On a normal build,
+`py-spy` remains the better tool when you can attach to the process.
+
 ### Metrics
 
 Hindsight exposes Prometheus metrics at the `/metrics` endpoint, including:

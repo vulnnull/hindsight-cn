@@ -918,7 +918,15 @@ class MemoriesExtension(Extension, ABC):
 
         A store that indexes everything regardless ignores them, which is what the default does —
         and what Postgres does, where the columns behind both arms are maintained by the insert
-        itself and there is nothing separable to skip."""
+        itself and there is nothing separable to skip.
+
+        Returns a **mapping** describing the commit: ``seq`` (the store's write coordinate for this
+        retain), ``unit_ids`` (the ids actually written, echoed back) and ``new_entities`` (how many
+        entities the resolve minted). Read it with ``resp["seq"]`` / ``resp.get(...)``, never as
+        attributes — this is a plain mapping, not a response object, and callers that reached for
+        ``resp.seq`` raised ``AttributeError`` from inside a log line and failed the whole write.
+        Stated here because the return value was previously undeclared, which is what let the two
+        sides disagree without either being obviously wrong."""
         raise NotImplementedError("this store does not support a store-owned retain")
 
     async def assert_writable(self, bank_id: str) -> None:

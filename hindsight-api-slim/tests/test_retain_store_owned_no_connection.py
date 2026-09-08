@@ -8,6 +8,11 @@ delta re-retain — are pinned here:
 * the document bodies, the id mint and the ``retain`` RPC all run with NO connection held;
 * a delta names the chunks that moved rather than replacing the whole document;
 * a delta that loses its watermark compare-and-set writes nothing and falls back.
+
+The ``retain`` doubles below return a **mapping**, matching what the interface documents and
+what a real store-owned backend returns. They previously returned an attribute object, which is
+why a caller reaching for ``resp.seq`` passed here and raised ``AttributeError`` against a real
+store — a double that is easier to satisfy than the contract tests the double, not the code.
 """
 
 from types import SimpleNamespace
@@ -91,7 +96,7 @@ async def test_a_store_owned_batch_write_holds_no_connection(monkeypatch):
         async def retain(self, bank_id, unit_ids, facts, **kw):
             saw_open.append(tracker.open)
             retained.update(kw)
-            return SimpleNamespace(seq=3, new_entities=1)
+            return {"seq": 3, "unit_ids": list(unit_ids), "new_entities": 1}
 
     async def _insert(conn, *a, **k):
         assert conn is None, "the store write must not receive a connection"
@@ -159,7 +164,7 @@ async def test_a_store_owned_delta_holds_no_connection_and_scopes_its_replace(mo
             saw_open.append(tracker.open)
             retained.update(kw)
             retained["unit_ids"] = list(unit_ids)
-            return SimpleNamespace(seq=7, new_entities=0)
+            return {"seq": 7, "unit_ids": list(unit_ids), "new_entities": 0}
 
     async def _insert(*a, **k):
         saw_open.append(tracker.open)
@@ -180,7 +185,7 @@ async def test_a_store_owned_delta_holds_no_connection_and_scopes_its_replace(mo
         contents_dicts=[{"content": "hello"}],
         delta_contents=[SimpleNamespace(entities=None, resolve_entities=True)],
         document_tags=[],
-        document_body_override=None,
+        full_document_body=None,
         extracted_facts=[SimpleNamespace(chunk_index=0)],
         processed_facts=[_fact()],
         new_chunk_metadata=[SimpleNamespace(chunk_index=0)],
@@ -221,7 +226,7 @@ async def test_a_store_owned_delta_falls_back_when_the_document_moved(monkeypatc
     class _StoreOwned:
         async def retain(self, *a, **k):
             calls.append("retain")
-            return SimpleNamespace(seq=1, new_entities=0)
+            return {"seq": 1, "unit_ids": list(unit_ids), "new_entities": 0}
 
     monkeypatch.setattr(orch, "_store_document_bodies", _store_bodies)
     monkeypatch.setattr(orch.fact_storage, "insert_facts_batch", _insert)
@@ -237,7 +242,7 @@ async def test_a_store_owned_delta_falls_back_when_the_document_moved(monkeypatc
         contents_dicts=[{"content": "hello"}],
         delta_contents=[SimpleNamespace(entities=None, resolve_entities=True)],
         document_tags=[],
-        document_body_override=None,
+        full_document_body=None,
         extracted_facts=[SimpleNamespace(chunk_index=0)],
         processed_facts=[_fact()],
         new_chunk_metadata=[SimpleNamespace(chunk_index=0)],
