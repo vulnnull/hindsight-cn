@@ -97,7 +97,7 @@ FROM python:3.14-slim AS api-only-freethreaded
 WORKDIR /app
 
 RUN apt-get update && apt-get upgrade -y \
-    && apt-get install -y --no-install-recommends curl procps libssl3 libpq5 \
+    && apt-get install -y --no-install-recommends procps libssl3 libpq5 \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -m -u 1000 hindsight
 

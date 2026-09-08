@@ -110,6 +110,57 @@ class TestGeminiEmbeddings:
             location="us-central1",
         )
 
+    @pytest.mark.parametrize(
+        "model,vertexai,expected_requests",
+        [
+            # Vertex routes these to the single-content embedContent endpoint, which
+            # rejects a second Content client-side — one request per text is the only
+            # shape that comes back 1:1.
+            ("gemini-embedding-2-preview", True, 3),
+            ("google/gemini-embedding-2-preview", True, 3),
+            ("text-multilingual-maas-002", True, 3),
+            # The one Vertex gemini model the SDK still batches, and everything on the
+            # Gemini API, keep the configured batch size: one request for all three.
+            ("gemini-embedding-001", True, 1),
+            ("text-embedding-005", True, 1),
+            ("gemini-embedding-2-preview", False, 1),
+        ],
+    )
+    async def test_vertex_single_content_models_get_one_request_per_text(self, model, vertexai, expected_requests):
+        """Batching is capped at one text where the API takes one Content (#4001 follow-up).
+
+        Each text is already sent as its own Content, which is what keeps a
+        multimodal model from fusing a batch into a single vector. On Vertex the
+        SDK then refuses more than one Content for these models outright —
+        ``ValueError: The embedContent API for this model only supports one content
+        at a time.`` — so every encode() against gemini-embedding-2 raised before
+        reaching the network. Counting requests rather than asserting on the
+        exception is deliberate: the fix is the request shape, and a regression
+        would show up here as three texts back in one call.
+        """
+        mock_genai = _make_mock_genai()
+        embed_content = mock_genai.Client.return_value.models.embed_content
+        emb = GeminiEmbeddings(
+            model=model,
+            api_key=None if vertexai else "test-key",
+            vertexai_project_id="test-project" if vertexai else None,
+        )
+        with _patch_google_import(mock_genai):
+            await emb.initialize()
+
+        texts = ["a", "b", "c"]
+        # One vector per text in the batch the call actually carries, so the 1:1
+        # check inside _embed_batch passes for either shape.
+        embed_content.side_effect = lambda **kw: _make_mock_embed_result([[0.1] * 768] * len(kw["contents"]))
+        embed_content.reset_mock()
+        vectors = emb.encode(texts)
+
+        assert len(vectors) == len(texts)
+        assert embed_content.call_count == expected_requests
+        assert [len(c.kwargs["contents"]) for c in embed_content.call_args_list] == (
+            [1, 1, 1] if expected_requests == 3 else [3]
+        )
+
     async def test_initialization_missing_api_key(self):
         """Test that missing API key raises ValueError when no vertexai_project_id."""
         mock_genai = _make_mock_genai()

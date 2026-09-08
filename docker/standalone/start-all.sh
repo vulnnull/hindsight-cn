@@ -102,6 +102,34 @@ resolve_api_startup_wait_seconds() {
     echo "$DEFAULT_API_STARTUP_WAIT_SECONDS"
 }
 
+# =============================================================================
+# HTTP readiness probe
+#
+# The implementation is hindsight_api.http_probe, not Python embedded here: it
+# needs to be linted, type-checked and unit-tested, and the parity rules it
+# encodes (notably that `curl -sf` does NOT follow redirects) are too easy to
+# get subtly wrong to leave in a shell string. See that module's docstring.
+#
+# Every image that probes anything ships the API package, so `python3 -m` finds
+# it. It is held to stdlib-only imports by a test - see its docstring. cp-only
+# has no Python at all and probes nothing.
+# =============================================================================
+http_probe() {
+    local url="$1"
+    local timeout_seconds="${2:-5}"
+
+    python3 -m hindsight_api.http_probe "$url" "$timeout_seconds"
+}
+
+# A probe that cannot run at all would silently degrade into "never ready", so
+# check once, up front, where it can still say why.
+require_http_probe_runtime() {
+    if ! python3 -c "import hindsight_api.http_probe" >/dev/null 2>&1; then
+        echo "❌ HTTP readiness probes need python3 with hindsight_api.http_probe importable."
+        exit 1
+    fi
+}
+
 if [ "${HINDSIGHT_START_ALL_SOURCE_ONLY:-false}" = "true" ]; then
     return 0 2>/dev/null || exit 0
 fi
@@ -118,6 +146,7 @@ ENABLE_CP="${HINDSIGHT_ENABLE_CP:-true}"
 # 此等待循环确保依赖服务就绪后再启动。
 # =============================================================================
 if [ "${HINDSIGHT_WAIT_FOR_DEPS:-false}" = "true" ]; then
+    require_http_probe_runtime
     LLM_BASE_URL="${HINDSIGHT_API_LLM_BASE_URL:-http://host.docker.internal:1234/v1}"
     MAX_RETRIES="${HINDSIGHT_RETRY_MAX:-0}"  # 0 = 无限重试
     RETRY_INTERVAL="${HINDSIGHT_RETRY_INTERVAL:-10}"
@@ -142,7 +171,7 @@ if [ "${HINDSIGHT_WAIT_FOR_DEPS:-false}" = "true" ]; then
     }
 
     check_llm() {
-        curl -sf "${LLM_BASE_URL}/models" --connect-timeout 5 &>/dev/null
+        http_probe "${LLM_BASE_URL}/models" 5 &>/dev/null
     }
 
     echo "⏳ 等待依赖服务就绪..."
@@ -237,6 +266,7 @@ PIDS=()
 
 # 启动 API 服务
 if [ "$ENABLE_API" = "true" ]; then
+    require_http_probe_runtime
     cd /app/api
     API_HEALTH_URL="${HINDSIGHT_API_HEALTH_URL:-http://localhost:${HINDSIGHT_API_PORT:-8888}/health}"
     API_STARTUP_WAIT_SECONDS="$(resolve_api_startup_wait_seconds)"
@@ -253,7 +283,7 @@ if [ "$ENABLE_API" = "true" ]; then
             wait "$API_PID"
             exit $?
         fi
-        if curl -sf "$API_HEALTH_URL" &>/dev/null; then
+        if http_probe "$API_HEALTH_URL" 5 &>/dev/null; then
             api_ready=true
             break
         fi

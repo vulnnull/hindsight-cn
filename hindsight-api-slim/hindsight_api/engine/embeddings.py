@@ -2019,7 +2019,9 @@ class GeminiEmbeddings(Embeddings):
         # batches too, which is why RetryBudget takes a lock.
         budget = self.retry_policy.new_budget()
 
-        all_embeddings = self._encode_batched(texts, lambda batch: self._embed_batch(batch, budget))
+        all_embeddings = self._encode_batched(
+            texts, lambda batch: self._embed_batch(batch, budget), batch_size=self._effective_batch_size()
+        )
 
         # L2-normalize when output_dimensionality is set — Gemini only returns
         # normalized vectors at full 3072 dims; truncated dims need re-normalization
@@ -2033,6 +2035,30 @@ class GeminiEmbeddings(Embeddings):
             all_embeddings = (arr / norms).tolist()
 
         return all_embeddings
+
+    def _effective_batch_size(self) -> int:
+        """How many texts may share one ``embed_content`` call.
+
+        ``batch_size`` everywhere except the Vertex models that take exactly one
+        Content per request: on Vertex the SDK routes every embedding model whose
+        name contains ``gemini`` — bar ``gemini-embedding-001`` — and every ``maas``
+        model to the single-content ``embedContent`` endpoint, and raises
+        ``ValueError("The embedContent API for this model only supports one content
+        at a time.")`` client-side for anything longer. We cannot batch around that:
+        each text has to be its own Content to come back as its own vector (#4001),
+        so for these models one request per text is the only shape that returns the
+        1:1 alignment ``_embed_batch`` asserts. The Gemini API (non-Vertex) path has
+        no such limit and keeps the configured batch size.
+
+        Mirrored from ``google.genai._transformers.t_is_vertex_embed_content_model``
+        rather than imported: it is private, and a copy that drifts fails loudly
+        here (the SDK raises) instead of silently sending batches that never worked.
+        """
+        if not self._is_vertexai:
+            return self.batch_size
+        model = self.model.removeprefix("google/")
+        single_content_only = ("gemini" in model and model != "gemini-embedding-001") or "maas" in model
+        return 1 if single_content_only else self.batch_size
 
     def _embed_batch(self, batch: list[str], budget: "RetryBudget") -> list[list[float]]:
         """Embed one batch-sized slice through the google.genai sync client."""
