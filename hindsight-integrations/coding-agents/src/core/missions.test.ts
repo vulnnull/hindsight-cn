@@ -5,9 +5,12 @@ import {
   buildPageTrigger,
   CODING_BANK_TEMPLATE,
   codingBankManifest,
+  DEFAULT_PAGE_TRIGGER_CRON,
   expandCronHash,
   KNOWLEDGE_LABELS,
+  pageTriggerDrifted,
   pageTriggerFor,
+  pageTriggerPatch,
   PAGE_FACT_TYPES,
   REFLECT_MISSION,
   RETAIN_STRATEGIES,
@@ -20,10 +23,10 @@ import {
  * the fact.
  */
 describe("buildPageTrigger", () => {
-  it("defaults to the auto-refresh policy every page shipped with", () => {
+  it("defaults to the hourly staggered schedule", () => {
     expect(buildPageTrigger()).toMatchObject({
       fact_types: PAGE_FACT_TYPES,
-      refresh_after_consolidation: true,
+      refresh_cron: DEFAULT_PAGE_TRIGGER_CRON,
     });
     expect(buildPageTrigger(resolveConfig({}))).toEqual(buildPageTrigger());
   });
@@ -158,25 +161,99 @@ describe("hashed cron fields", () => {
   });
 
   it("passes a trigger with no cron through untouched", () => {
-    const auto = buildPageTrigger(resolveConfig({}));
+    const auto = buildPageTrigger(resolveConfig({ pageTriggerType: "auto-refresh" }));
     expect(pageTriggerFor(auto, "repo-a", "Component map")).toBe(auto);
   });
 });
 
-describe("page trigger config resolution", () => {
-  it("keeps today's behaviour when nothing is configured", () => {
-    expect(resolveConfig({}).pageTriggerType).toBe("auto-refresh");
-    expect(resolveConfig({}).pageTriggerCron).toBeUndefined();
+/**
+ * An existing page is re-synced to whatever the config says, so a changed default reaches a bank
+ * that was seeded under the old one — the point of the migration off auto-refresh.
+ */
+describe("pageTriggerDrifted", () => {
+  const settled = (name: string) => pageTriggerFor(buildPageTrigger(), "repo-a", name);
+
+  it("sees no drift in the policy it just wrote", () => {
+    const desired = settled("Component map");
+    // What the server reports back: the effective policy, with the exclusive counterpart at its
+    // default rather than absent.
+    expect(pageTriggerDrifted({ ...desired, refresh_after_consolidation: false }, desired)).toBe(
+      false
+    );
   });
 
-  // The API rejects a cron trigger with no expression, so honouring this literally would fail page
-  // creation outright. Falling back to the default keeps pages working; "manual" is how you ask
-  // for no refreshes.
-  it("falls back to auto-refresh when cron is asked for without an expression", () => {
-    expect(resolveConfig({ pageTriggerType: "cron" }).pageTriggerType).toBe("auto-refresh");
-    expect(resolveConfig({ pageTriggerType: "cron", pageTriggerCron: "   " }).pageTriggerType).toBe(
-      "auto-refresh"
+  it("sees a page still on the old auto-refresh default as drifted", () => {
+    expect(
+      pageTriggerDrifted(
+        { tags_match: "all", refresh_after_consolidation: true, refresh_cron: null },
+        settled("Component map")
+      )
+    ).toBe(true);
+  });
+
+  it("sees a different schedule as drifted", () => {
+    const desired = settled("Component map");
+    expect(pageTriggerDrifted({ tags_match: "all", refresh_cron: "0 3 * * *" }, desired)).toBe(
+      true
     );
+    // Compared against the page's OWN resolved cron, never the shared `H * * * *` — otherwise
+    // every page would look drifted on every session.
+    expect(desired.refresh_cron).not.toBe(DEFAULT_PAGE_TRIGGER_CRON);
+    expect(
+      pageTriggerDrifted({ ...desired, refresh_cron: DEFAULT_PAGE_TRIGGER_CRON }, desired)
+    ).toBe(true);
+  });
+
+  it("still sees the tags_match drift it was originally written for", () => {
+    const desired = settled("Component map");
+    expect(pageTriggerDrifted({ ...desired, tags_match: "all_strict" }, desired)).toBe(true);
+  });
+});
+
+/**
+ * The server drops the unstated counterpart of a TRUTHY refresh field, so a cron patch clears
+ * auto-refresh by itself. `manual` is falsy and clears nothing — hence the explicit null.
+ */
+describe("pageTriggerPatch", () => {
+  it("leaves a cron or auto-refresh patch alone", () => {
+    for (const type of ["cron", "auto-refresh"] as const) {
+      const desired = buildPageTrigger(resolveConfig({ pageTriggerType: type }));
+      expect(pageTriggerPatch(desired)).toEqual(desired);
+    }
+  });
+
+  it("clears an existing schedule when moving a page to manual", () => {
+    const patch = pageTriggerPatch(buildPageTrigger(resolveConfig({ pageTriggerType: "manual" })));
+    expect(patch.refresh_after_consolidation).toBe(false);
+    expect(patch.refresh_cron).toBeNull();
+  });
+});
+
+describe("page trigger config resolution", () => {
+  // The default: hourly, each page on its own hashed minute. Auto-refresh — one LLM synthesis per
+  // page per consolidation — is now opt-in.
+  it("schedules an unconfigured repo's pages hourly and staggered", () => {
+    expect(resolveConfig({}).pageTriggerType).toBe("cron");
+    expect(resolveConfig({}).pageTriggerCron).toBe(DEFAULT_PAGE_TRIGGER_CRON);
+    expect(DEFAULT_PAGE_TRIGGER_CRON).toBe("H * * * *");
+    const trigger = buildPageTrigger(resolveConfig({}));
+    expect(trigger.refresh_cron).toBe(DEFAULT_PAGE_TRIGGER_CRON);
+    expect(trigger.refresh_after_consolidation).toBeUndefined();
+    // And the `H` is resolved per page before it is sent — see "hashed cron fields" above.
+    expect(pageTriggerFor(trigger, "repo-a", "Component map").refresh_cron).toMatch(
+      /^(?:[0-9]|[1-5][0-9]) \* \* \* \*$/
+    );
+  });
+
+  // The API rejects a cron trigger with no expression, so honouring an empty one literally would
+  // fail page creation outright. The default schedule stands in; "manual" is how you ask for no
+  // refreshes.
+  it("uses the default schedule when cron is asked for without an expression", () => {
+    for (const raw of [{}, { pageTriggerCron: "   " }] as const) {
+      const cfg = resolveConfig({ pageTriggerType: "cron", ...raw });
+      expect(cfg.pageTriggerType).toBe("cron");
+      expect(cfg.pageTriggerCron).toBe(DEFAULT_PAGE_TRIGGER_CRON);
+    }
   });
 
   /**
@@ -184,11 +261,11 @@ describe("page trigger config resolution", () => {
    * would reach the server verbatim and fail page creation with a parse error naming syntax this
    * package invented. Only the H fields are checked — ordinary cron syntax is the server's.
    */
-  it("falls back to auto-refresh on a malformed hashed field", () => {
+  it("falls back to the default schedule on a malformed hashed field", () => {
     for (const bad of ["H(9-3) * * * *", "H(0-99) * * * *", "H H", "Hx * * * *"]) {
-      expect(resolveConfig({ pageTriggerType: "cron", pageTriggerCron: bad }).pageTriggerType).toBe(
-        "auto-refresh"
-      );
+      const cfg = resolveConfig({ pageTriggerType: "cron", pageTriggerCron: bad });
+      expect(cfg.pageTriggerType).toBe("cron");
+      expect(cfg.pageTriggerCron).toBe(DEFAULT_PAGE_TRIGGER_CRON);
     }
   });
 
@@ -200,10 +277,17 @@ describe("page trigger config resolution", () => {
     }
   });
 
+  it("keeps auto-refresh available for a repo that opts into it", () => {
+    const cfg = resolveConfig({ pageTriggerType: "auto-refresh" });
+    expect(cfg.pageTriggerType).toBe("auto-refresh");
+    expect(cfg.pageTriggerCron).toBeUndefined();
+    expect(buildPageTrigger(cfg).refresh_after_consolidation).toBe(true);
+  });
+
   it("ignores a value that is not one of the three types", () => {
-    expect(resolveConfig({ pageTriggerType: "whenever" as never }).pageTriggerType).toBe(
-      "auto-refresh"
-    );
+    const cfg = resolveConfig({ pageTriggerType: "whenever" as never });
+    expect(cfg.pageTriggerType).toBe("cron");
+    expect(cfg.pageTriggerCron).toBe(DEFAULT_PAGE_TRIGGER_CRON);
   });
 });
 

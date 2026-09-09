@@ -18,7 +18,7 @@ import { DEFAULT_SEED_LIMIT } from "./seed";
 import { isOptedIn } from "./bank";
 import { log } from "./log";
 import { DEFAULT_OBSERVATION_SCOPES, type ObservationScopes } from "./hindsight";
-import { isHashedCron, parseHashedCron } from "./missions";
+import { DEFAULT_PAGE_TRIGGER_CRON, isHashedCron, parseHashedCron } from "./missions";
 
 /** Default config-file path: ~/.hindsight/coding-agent.json */
 export // HINDSIGHT_CONFIG joins the two env exceptions (diag/log files): it points at THE config file,
@@ -108,14 +108,16 @@ export interface RawConfig {
   pageRefreshEveryTurns?: number; // knowledge-page refresh cadence in user turns (default 10)
   /** What it COSTS to keep this project's knowledge pages current — the trigger stamped on every
    *  page this plugin creates (the seeded taxonomy and each captured initiative):
-   *    "auto-refresh" (default) — refresh after every consolidation that produced new material
-   *    "cron"                   — refresh on `pageTriggerCron` only, and only when actually stale
+   *    "cron" (default)         — refresh on `pageTriggerCron` only, and only when actually stale
+   *    "auto-refresh"           — refresh after every consolidation that produced new material
    *    "manual"                 — never refresh on its own; the tools and control plane still can
    *  Auto-refresh is both the most current and the most expensive: one LLM synthesis per page per
-   *  consolidation, which adds up fast across auto-surveyed repos (#3506). Existing pages keep the
-   *  trigger they were created with — this changes what NEW pages get. */
+   *  consolidation, which adds up fast across auto-surveyed repos (#3506) — hence the hourly
+   *  staggered schedule as the default. Existing pages keep the trigger they were created with —
+   *  this changes what NEW pages get. */
   pageTriggerType?: "auto-refresh" | "cron" | "manual";
   /** Schedule for `pageTriggerType: "cron"` — UTC, standard 5-field cron, e.g. "0 3 * * *".
+   *  Defaults to DEFAULT_PAGE_TRIGGER_CRON ("H * * * *": hourly, on each page's own minute).
    *  A field written `H` ("0 3 * * *" -> "H H * * *") is replaced per page by a value hashed from
    *  bank + page name, so pages spread across the period instead of all firing on the one minute
    *  this shared setting names. See `expandCronHash` in core/missions.ts. */
@@ -229,34 +231,41 @@ export interface Config {
 }
 
 /**
- * Which page-refresh trigger a raw config asks for.
+ * The page-refresh trigger a raw config asks for: the schedule kind, and the expression it fires on.
  *
- * `"cron"` without a `pageTriggerCron` is a broken config, not a request to stop refreshing: the
- * API rejects a cron trigger with no expression, which would fail page creation outright. Fall
- * back to the default and say so — a user who wants pages to stop refreshing writes "manual".
+ * `"cron"` is the default and needs no `pageTriggerCron`: an omitted expression takes
+ * DEFAULT_PAGE_TRIGGER_CRON, so the common config — none of these fields at all — is an hourly
+ * staggered refresh. A user who wants pages to stop refreshing on their own writes "manual".
  *
- * A malformed `H` is refused here for the same reason and not one step later: `expandCronHash`
- * leaves an expression it cannot read alone, so an unchecked `"H(9-3) * * * *"` would reach the
- * server verbatim and fail page creation with a cron parse error naming syntax this package
- * invented. Ordinary cron syntax stays unvalidated — the server owns that, and duplicating its
- * parser here would only disagree with it.
+ * A malformed `H` is refused here and not one step later: `expandCronHash` leaves an expression it
+ * cannot read alone, so an unchecked `"H(9-3) * * * *"` would reach the server verbatim and fail
+ * page creation with a cron parse error naming syntax this package invented. Such an expression
+ * takes the default schedule, with a warning — the same as writing none. Ordinary cron syntax
+ * stays unvalidated: the server owns that, and duplicating its parser here would only disagree
+ * with it.
  */
-function resolvePageTriggerType(raw: RawConfig): "auto-refresh" | "cron" | "manual" {
-  if (raw.pageTriggerType === "manual") return "manual";
-  if (raw.pageTriggerType === "cron") {
-    const cron = raw.pageTriggerCron?.trim();
-    if (cron && (!isHashedCron(cron) || parseHashedCron(cron))) return "cron";
+function resolvePageTrigger(raw: RawConfig): {
+  type: "auto-refresh" | "cron" | "manual";
+  cron?: string;
+} {
+  if (raw.pageTriggerType === "manual") return { type: "manual" };
+  if (raw.pageTriggerType === "auto-refresh") return { type: "auto-refresh" };
+  if (raw.pageTriggerType !== undefined && raw.pageTriggerType !== "cron")
     log.warn(
       "config",
-      cron
-        ? `pageTriggerCron ${JSON.stringify(cron)} has a malformed hashed field — ` +
-            'write `H` or `H(<lo>-<hi>)` within the field\'s own range, e.g. "H H(0-5) * * *" — ' +
-            'falling back to "auto-refresh"'
-        : 'pageTriggerType "cron" needs pageTriggerCron (UTC 5-field, e.g. "H H * * *") — ' +
-            'falling back to "auto-refresh"'
+      `ignoring pageTriggerType=${JSON.stringify(raw.pageTriggerType)} — ` +
+        "expected cron|auto-refresh|manual"
     );
-  }
-  return "auto-refresh";
+  const cron = raw.pageTriggerCron?.trim();
+  if (!cron) return { type: "cron", cron: DEFAULT_PAGE_TRIGGER_CRON };
+  if (!isHashedCron(cron) || parseHashedCron(cron)) return { type: "cron", cron };
+  log.warn(
+    "config",
+    `pageTriggerCron ${JSON.stringify(cron)} has a malformed hashed field — ` +
+      'write `H` or `H(<lo>-<hi>)` within the field\'s own range, e.g. "H H(0-5) * * *" — ' +
+      `falling back to ${JSON.stringify(DEFAULT_PAGE_TRIGGER_CRON)}`
+  );
+  return { type: "cron", cron: DEFAULT_PAGE_TRIGGER_CRON };
 }
 
 /** Default timeout for the agent-invoked `hindsight_reflect` tool — see RawConfig.reflectToolTimeoutMs. */
@@ -322,6 +331,7 @@ export function resolveConfig(raw: RawConfig = {}): Config {
     ? (raw.serverMode as "cloud" | "self-hosted" | "daemon")
     : "cloud";
   const apiPort = raw.apiPort || DEFAULT_DAEMON_PORT;
+  const pageTrigger = resolvePageTrigger(raw);
   return {
     serverMode,
     // Daemon mode resolves the URL HERE rather than at each call site: every entry point already
@@ -362,8 +372,8 @@ export function resolveConfig(raw: RawConfig = {}): Config {
     reflectBudget: resolveReflectBudget(raw),
     autoReflect: raw.autoReflect ?? true,
     pageRefreshEveryTurns: raw.pageRefreshEveryTurns || 10,
-    pageTriggerType: resolvePageTriggerType(raw),
-    pageTriggerCron: raw.pageTriggerCron?.trim() || undefined,
+    pageTriggerType: pageTrigger.type,
+    pageTriggerCron: pageTrigger.cron,
     autoSeed: raw.autoSeed ?? true,
     seedLimit: raw.seedLimit || DEFAULT_SEED_LIMIT,
     codebaseSurvey: raw.codebaseSurvey ?? true,

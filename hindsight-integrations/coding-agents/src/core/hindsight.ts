@@ -9,10 +9,14 @@ import {
   type BankOverrides,
   buildPageTrigger,
   codingBankManifest,
+  type CurrentPageTrigger,
   PAGE_MAX_TOKENS,
   pagesFor,
+  pageScopeRule,
   type PageTrigger,
+  pageTriggerDrifted,
   pageTriggerFor,
+  pageTriggerPatch,
 } from "./missions";
 import { pool, semverGte, sleep } from "./util";
 import type { RetainStamp } from "./retain-stamp";
@@ -26,7 +30,7 @@ export interface KnowledgeNode {
   description?: string;
   /** The page's EFFECTIVE refresh policy, on servers new enough to report it (#3572). Absent
    *  everywhere else, which `seedPages()` reads as "unknown, leave it alone". */
-  trigger?: { tags_match?: string };
+  trigger?: CurrentPageTrigger;
   children?: KnowledgeNode[];
 }
 
@@ -673,20 +677,25 @@ export class HindsightClient {
         const sourceDrift = hit.description !== page.source_query;
         // Older servers omit trigger from the tree, so an absent value means unknown rather
         // than drift. Those servers also reject a trigger-only PATCH as an empty update.
-        const triggerDrift =
-          hit.trigger != null && hit.trigger.tags_match !== pageTrigger.tags_match;
+        const triggerDrift = hit.trigger != null && pageTriggerDrifted(hit.trigger, body.trigger);
         if (!sourceDrift && !triggerDrift) continue;
 
         // The name IS the match key, so it can't drift; the source query and the trigger can.
-        // The trigger is re-sent when the server reports it drifting, because it is the only way
-        // a policy change reaches a page that already exists. Servers that do not report a page's
+        // The trigger is re-sent on ANY difference in the policy this plugin states — the refresh
+        // schedule included, not just `tags_match` as before — because that is the only way a
+        // changed default reaches a bank that was seeded under the old one (the hourly staggered
+        // schedule that replaced auto-refresh would otherwise apply to new repos only). The
+        // config is therefore the source of truth for these pages: a trigger edited in the
+        // control plane is re-synced back on the next session, and a repo that wants a different
+        // policy sets `pageTriggerType`/`pageTriggerCron`. Servers that do not report a page's
         // trigger leave its policy unknown; source-query drift can still be reconciled safely.
         const patch: { trigger?: PageTrigger; source_query?: string; tags?: string[] } = {};
         if (sourceDrift) {
           patch.source_query = page.source_query;
           patch.tags = page.tags;
         }
-        if (triggerDrift) patch.trigger = pageTrigger;
+        // The page's OWN resolved trigger (a hashed cron differs per page), not the shared one.
+        if (triggerDrift) patch.trigger = pageTriggerPatch(body.trigger);
         const r = await this.req(
           "PATCH",
           this.bankUrl(`/knowledge-base/nodes/${encodeURIComponent(hit.id)}`),
@@ -702,11 +711,49 @@ export class HindsightClient {
         updated++;
       }
     }
+    const initiatives = await this.resyncInitiativeTriggers(roots, pageTrigger);
     this.log(
       `[bank] knowledge pages seeded on ${this.bank} (scoped to ${this.project ?? this.bank}): ` +
         `${created} created, ${updated} re-synced, ` +
-        `${pages.length - created - updated} unchanged`
+        `${pages.length - created - updated} unchanged` +
+        (initiatives ? `, ${initiatives} initiative pages re-synced` : "")
     );
+  }
+
+  /**
+   * Bring the captured initiative pages onto the same refresh policy as the seeded taxonomy.
+   *
+   * `captureInitiative` stamps this very trigger when it creates a page, so on a bank seeded under
+   * an older default they are the same drift as the taxonomy — and on a real repo they are most of
+   * it: five taxonomy pages against one page per initiative, each an LLM synthesis per
+   * consolidation under the auto-refresh that used to be the default (#3506).
+   *
+   * Only the trigger is touched. Their `name` and `source_query` are written once, from the
+   * initiative's own title, and re-stating either would rebuild a page whose question never
+   * changed. The tree read above is reused rather than re-fetched.
+   */
+  private async resyncInitiativeTriggers(
+    roots: KnowledgeNode[],
+    pageTrigger: PageTrigger
+  ): Promise<number> {
+    const folder = roots.find(
+      (n) => n.kind === "folder" && (n.name || "").toLowerCase() === "initiatives"
+    );
+    let updated = 0;
+    for (const page of folder?.children ?? []) {
+      // No trigger reported = policy unknown, not divergent (a server older than #3572).
+      if (page.kind !== "page" || page.trigger == null) continue;
+      const desired = pageTriggerFor(pageTrigger, this.bank, page.name);
+      if (!pageTriggerDrifted(page.trigger, desired)) continue;
+      const r = await this.req(
+        "PATCH",
+        this.bankUrl(`/knowledge-base/nodes/${encodeURIComponent(page.id)}`),
+        { trigger: pageTriggerPatch(desired) }
+      );
+      if ([404, 405, 501].includes(r.status)) break;
+      updated++;
+    }
+    return updated;
   }
 
   /** URL/id-safe slug: lowercase, non-alphanumerics → "-", trim dashes, cap length; fallback "initiative". */
@@ -749,11 +796,21 @@ export class HindsightClient {
     let pageId = args.relatesToPageId;
     if (!pageId) {
       const folderId = await this.ensureFolder("Initiatives");
+      // Same subject scoping and budget as the seeded pages: an initiative page synthesizes from
+      // the same bank, which also holds facts about the dependencies this repo merely uses, and
+      // "the project's memory" alone never said WHICH project (#3476). `max_tokens` is stated for
+      // the same reason `seedPages` states it — leaving it implicit pins these pages to whatever
+      // the server's page default happens to be, which is only coincidentally PAGE_MAX_TOKENS.
+      const subject = this.project ?? this.bank;
       const r = await this.req("POST", this.bankUrl("/knowledge-base/pages"), {
         name: args.title,
-        source_query: `Summarize the "${args.title}" initiative: what is being built or changed and why, and its current state — drawn from the project's memory.`,
+        source_query:
+          `Summarize the "${args.title}" initiative: what is being built or changed and why, ` +
+          `and its current state — drawn from the project's memory.` +
+          pageScopeRule(subject),
         parent_id: folderId,
         tags: ["knowledge:feature-work"],
+        max_tokens: PAGE_MAX_TOKENS,
         trigger: pageTriggerFor(args.pageTrigger ?? buildPageTrigger(), this.bank, args.title),
       });
       try {

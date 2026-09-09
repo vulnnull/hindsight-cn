@@ -59,6 +59,7 @@ from ..worker.exceptions import DeferOperation, RetryTaskAt, format_task_error
 from ..worker.stage import set_stage
 from .audit import AuditLogger, audit_context
 from .bank_stats_cache import BankStatsCache, DistributedBankStatsCache
+from .chunk_ids import build_chunk_id, parse_chunk_id, resolve_chunk_id_in
 from .db import DatabaseBackend, DatabaseConnection, ResultRow, create_database_backend
 from .db.ops_postgresql import pg_search_vector_expr
 from .db.postgresql import PostgreSQLBackend
@@ -211,32 +212,6 @@ def _bind_bank_id(
 def count_tokens(text: str) -> int:
     """Count tokens in text under the configured encoding (see engine/token_encoding.py)."""
     return _token_encoding_count(text)
-
-
-def _parse_chunk_id(chunk_id: str | None) -> "tuple[str, str, int] | None":
-    """Split a ``{bank_id}_{document_id}_{index}`` chunk_id into its parts.
-
-    Retain builds chunk ids in exactly this shape (see ``retain/chunk_storage.py``), which makes
-    them self-describing — the addressed chunk route has no bank in its path and normally recovers
-    it from the SQL row, but a store that owns the document store has no such row. Both splits are
-    from the RIGHT: the index is the final segment, and the document id before it is a UUID, which
-    contains no underscore. A bank id containing underscores is therefore still parsed correctly.
-
-    Returns ``None`` when the id is not in that shape, so the caller falls through to the SQL
-    lookup rather than guessing.
-    """
-    if not chunk_id:
-        return None
-    head, _, idx_s = chunk_id.rpartition("_")
-    if not head or not idx_s:
-        return None
-    bank_id, _, document_id = head.rpartition("_")
-    if not bank_id or not document_id:
-        return None
-    try:
-        return bank_id, document_id, int(idx_s)
-    except ValueError:
-        return None
 
 
 def _epoch_ms_to_datetime(value: Any) -> datetime | None:
@@ -558,6 +533,7 @@ from .mental_model_refresh import (
 from .multi_llm import MultiLLMProvider
 from .query_analyzer import QueryAnalyzer
 from .reflect import ReflectNoAnswerError, ReflectToolExecutionError, run_reflect_agent
+from .reflect.models import StructuredOutputResult
 from .reflect.retractions import (
     RetractedGrounding,
     based_on_fact_ids,
@@ -2090,7 +2066,6 @@ class MemoryEngine(MemoryEngineInterface):
         operation_validator: "OperationValidatorExtension | None" = None,
         tenant_extension: "TenantExtension | None" = None,
         skip_llm_verification: bool | None = None,
-        run_background_tasks: bool = True,
     ):
         """
         Initialize the temporal + semantic memory system.
@@ -2132,10 +2107,6 @@ class MemoryEngine(MemoryEngineInterface):
                              If provided, operations require a RequestContext for authentication.
             skip_llm_verification: Skip LLM connection verification during initialization.
                                   Defaults to HINDSIGHT_API_SKIP_LLM_VERIFICATION env var or False.
-            run_background_tasks: Whether this engine runs the background maintenance loop.
-                                  Set False for the extra event loops of the multi-loop launcher,
-                                  which serve HTTP only — a process needs exactly one maintenance
-                                  loop, not one per event loop.
         """
         # Load config from environment for any missing parameters
         from ..config import _get_raw_config, get_config
@@ -2528,7 +2499,6 @@ class MemoryEngine(MemoryEngineInterface):
         from .maintenance import MaintenanceLoop
 
         self._maintenance_loop: MaintenanceLoop | None = None
-        self._run_background_tasks = run_background_tasks
 
         # Backpressure mechanism: limit concurrent searches to prevent overwhelming the database
         # Configurable via HINDSIGHT_API_RECALL_MAX_CONCURRENT (default: 50)
@@ -4978,13 +4948,8 @@ class MemoryEngine(MemoryEngineInterface):
         # re-schedules banks with eligible-but-unscheduled facts.
         from .maintenance import MaintenanceLoop
 
-        if self._run_background_tasks:
-            self._maintenance_loop = MaintenanceLoop(self)
-            self._maintenance_loop.start()
-
-        # The span recorder registry is process-wide, so with more than one event loop
-        # every engine's recorder sees every loop's LLM calls. Pin ours to this loop.
-        self._llm_recorder.bind_loop(asyncio.get_running_loop())
+        self._maintenance_loop = MaintenanceLoop(self)
+        self._maintenance_loop.start()
 
         self._initialized = True
         logger.info("Memory system initialized (pool and task backend started)")
@@ -8497,26 +8462,24 @@ class MemoryEngine(MemoryEngineInterface):
                     if _owns_docs and not chunks_rows:
                         # A store that owns the document store AND wrote no SQL chunks row (PG-free
                         # retain) leaves the chunks table empty, so the query above found nothing.
-                        # Synthesize the metadata from the chunk_ids themselves — a chunk_id is
-                        # ``{bank_id}_{document_id}_{chunk_index}`` and bank_id is known, so the last
-                        # ``_``-segment is the index and everything between is the document_id — then
-                        # let the overlay below fill in the text from the store. Independent of the
-                        # per-request capability flags: it fires whenever docs are owned and SQL is
-                        # empty, which is exactly the PG-free case.
-                        _pfx = f"{bank_id}_"
+                        # Synthesize the metadata from the chunk_ids themselves — the id carries
+                        # the document and the index, and bank_id is known (see
+                        # ``engine/chunk_ids.py``) — then let the overlay below fill in the text
+                        # from the store. Independent of the per-request capability flags: it
+                        # fires whenever docs are owned and SQL is empty, which is exactly the
+                        # PG-free case.
                         chunks_rows = []
                         for _cid in chunk_ids_ordered:
-                            if not _cid.startswith(_pfx):
-                                continue
-                            _doc, _, _idx_s = _cid[len(_pfx) :].rpartition("_")
-                            if not _doc:
-                                continue
-                            try:
-                                _idx = int(_idx_s)
-                            except ValueError:
+                            _ref = resolve_chunk_id_in(_cid, bank_id)
+                            if _ref is None:
                                 continue
                             chunks_rows.append(
-                                {"chunk_id": _cid, "chunk_text": "", "chunk_index": _idx, "document_id": _doc}
+                                {
+                                    "chunk_id": _cid,
+                                    "chunk_text": "",
+                                    "chunk_index": _ref.chunk_index,
+                                    "document_id": _ref.document_id,
+                                }
                             )
 
                     if _owns_docs:
@@ -12294,12 +12257,12 @@ class MemoryEngine(MemoryEngineInterface):
         await self._authenticate_tenant(request_context)
 
         # A store that owns the document store keeps no SQL `chunks` row to look this id up in.
-        # The id is self-describing — retain builds it as `{bank_id}_{document_id}_{index}` — so
-        # the bank and document are recoverable from it without a row. Attempted before touching
-        # SQL because for such a bank the SELECT below can only ever miss.
-        _parsed = _parse_chunk_id(chunk_id)
+        # The id is self-describing — retain builds it from the bank, document and index (see
+        # `engine/chunk_ids.py`) — so those are recoverable from it without a row. Attempted
+        # before touching SQL because for such a bank the SELECT below can only ever miss.
+        _parsed = parse_chunk_id(chunk_id)
         if _parsed is not None:
-            _cbank, _cdoc, _cidx = _parsed
+            _cbank, _cdoc, _cidx = _parsed.bank_id, _parsed.document_id, _parsed.chunk_index
             from .memories import get_memories
 
             _chunk_store = get_memories()
@@ -12421,10 +12384,9 @@ class MemoryEngine(MemoryEngineInterface):
             return {
                 "items": [
                     {
-                        # Rebuilt to the same shape retain writes
-                        # (chunk_storage.py: f"{bank_id}_{document_id}_{index}") so an id from
-                        # this route is accepted by the addressed chunk route.
-                        "chunk_id": f"{bank_id}_{document_id}_{idx}",
+                        # Rebuilt the same way retain builds it (``engine/chunk_ids.py``) so an
+                        # id from this route is accepted by the addressed chunk route.
+                        "chunk_id": build_chunk_id(bank_id, document_id, idx),
                         "document_id": document_id,
                         "bank_id": bank_id,
                         "chunk_index": idx,
@@ -14454,6 +14416,7 @@ class MemoryEngine(MemoryEngineInterface):
                 document=agent_result.document,
                 based_on=based_on,
                 structured_output=agent_result.structured_output,
+                structured_output_error=agent_result.structured_output_error,
                 usage=usage,
                 tool_trace=tool_trace_result,
                 llm_trace=llm_trace_result,
@@ -16951,19 +16914,18 @@ class MemoryEngine(MemoryEngineInterface):
             response_schema = (mental_model.get("trigger") or {}).get("response_schema")
             prev_structured_output = (mental_model.get("reflect_response") or {}).get("structured_output")
 
-            async def _structured_output_for(content_text: str) -> dict[str, Any] | None:
+            async def _structured_output_for(content_text: str) -> StructuredOutputResult:
                 if not response_schema or not content_text.strip():
-                    return None
+                    return StructuredOutputResult(error="no response_schema, or the content was empty")
                 from .reflect.agent import _generate_structured_output
 
-                result = await _generate_structured_output(
+                return await _generate_structured_output(
                     content_text,
                     response_schema,
                     self._reflect_llm_config,
                     f"mm-{mental_model_id[:8]}",
                     mental_model.get("max_tokens"),
                 )
-                return result.structured_output
 
             if run.outcome == "content_preserved_no_new_facts":
                 logger.info(
@@ -17051,14 +17013,17 @@ class MemoryEngine(MemoryEngineInterface):
             # previously-stored value); failing here leaves content/structured untouched,
             # so the prior content and structured_output are preserved for retry.
             if response_schema:
-                structured_output = await _structured_output_for(run.final_content)
-                if structured_output is None:
+                structured = await _structured_output_for(run.final_content)
+                if structured.structured_output is None:
                     await _preserve_and_fail(
                         reason="structured_output_failed",
                         outcome="refresh_failed_structured_output",
-                        detail="structured output extraction failed while a response_schema is configured.",
+                        detail=(
+                            "structured output extraction failed while a response_schema is configured"
+                            f" ({structured.error})."
+                        ),
                     )
-                reflect_response_payload["structured_output"] = structured_output
+                reflect_response_payload["structured_output"] = structured.structured_output
 
             # Update the mental model with new content and reflect_response.
             # Passing last_refreshed_source_query records the query used for this

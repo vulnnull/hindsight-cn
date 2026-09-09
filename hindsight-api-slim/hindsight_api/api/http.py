@@ -26,7 +26,9 @@ from fastapi.responses import JSONResponse
 
 from hindsight_api.api import page_markdown
 from hindsight_api.api.disconnect import ClientDisconnectCancellationMiddleware, get_scope_cancellation_token
+from hindsight_api.api.observability import HttpObservabilityMiddleware
 from hindsight_api.api.passthrough_headers import collect_passthrough_headers
+from hindsight_api.api.unknown_params import UnknownParamsRoute, use_unknown_params_routes
 from hindsight_api.cancellation import OperationCancelledError
 from hindsight_api.engine.audit import (
     AuditEntry,
@@ -255,7 +257,6 @@ from hindsight_api.metrics import (
     create_metrics_collector,
     get_metrics_collector,
     initialize_metrics,
-    normalize_http_endpoint,
     reset_metrics_collector,
 )
 from hindsight_api.models import RequestContext
@@ -1594,6 +1595,15 @@ class ReflectResponse(BaseModel):
     structured_output: dict | None = Field(
         default=None,
         description="Structured output parsed according to the request's response_schema. Only present when response_schema was provided in the request.",
+    )
+    structured_output_error: str | None = Field(
+        default=None,
+        description=(
+            "Why structured output could not be produced. Present only when a response_schema was "
+            "given and the extraction call failed (provider error, timeout, unparseable output). "
+            "A missing structured_output *without* this field means the answer held nothing "
+            "matching the schema — the reflect itself still succeeded either way."
+        ),
     )
     usage: TokenUsage | None = Field(
         default=None,
@@ -4593,7 +4603,6 @@ def create_app(
     memory: MemoryEngine,
     initialize_memory: bool = True,
     http_extension: HttpExtension | None = None,
-    run_background_tasks: bool = True,
 ) -> FastAPI:
     """
     Create and configure the FastAPI application.
@@ -4604,10 +4613,6 @@ def create_app(
         initialize_memory: Whether to initialize memory system on startup (default: True)
         http_extension: Optional HTTP extension to mount custom endpoints under /extension/.
                        If None, attempts to load from HINDSIGHT_API_HTTP_EXTENSION env var.
-        run_background_tasks: Whether this app starts the worker poller (default: True).
-                       Set False for the extra event loops of the multi-loop launcher: the
-                       worker id identifies the *process*, so a second poller under the same
-                       id would claim the same tasks rather than add capacity.
 
     Returns:
         Configured FastAPI application
@@ -4688,7 +4693,7 @@ def create_app(
 
         # Start worker poller if the backend supports it.
         # All current backends (PostgreSQL, Oracle) support async worker/poller.
-        if run_background_tasks and config.worker_enabled and memory._backend.supports_worker_poller:
+        if config.worker_enabled and memory._backend.supports_worker_poller:
             from ..config import DEFAULT_DATABASE_SCHEMA
             from ..utils import warn_if_container_default_worker_id
 
@@ -4712,7 +4717,7 @@ def create_app(
             )
             poller_task = asyncio.create_task(poller.run())
             logging.info(f"Worker poller started (worker_id={worker_id})")
-        elif run_background_tasks and config.worker_enabled and not memory._backend.supports_worker_poller:
+        elif config.worker_enabled and not memory._backend.supports_worker_poller:
             logging.warning(
                 "Worker poller disabled — backend does not support async operations. "
                 "Tasks (mental model refresh, consolidation) will run synchronously."
@@ -4819,99 +4824,13 @@ def create_app(
 
     app.openapi = _patched_openapi  # type: ignore[assignment]
 
-    # Add unknown parameters detection middleware
-    @app.middleware("http")
-    async def unknown_params_middleware(request, call_next):
-        """Detect unknown query params and body fields, log warning and set response header."""
-        import inspect
-
-        from starlette.routing import Match
-
-        ignored_params: list[str] = []
-
-        # --- Query parameters ---
-        if request.query_params:
-            for route in app.routes:
-                match, _ = route.matches(request.scope)
-                if match == Match.FULL:
-                    endpoint = getattr(route, "endpoint", None)
-                    if endpoint:
-                        sig = inspect.signature(endpoint)
-                        declared = set(sig.parameters.keys())
-                        path_params = set(getattr(route, "param_convertors", {}).keys()) | set(
-                            request.path_params.keys()
-                        )
-                        known_query = declared - path_params
-                        for name in request.query_params:
-                            if name not in known_query and name not in path_params:
-                                ignored_params.append(name)
-                    break
-
-        # --- Body fields ---
-        body_ignored: list[str] = []
-        content_type = request.headers.get("content-type", "")
-        if request.method in ("POST", "PUT", "PATCH") and "application/json" in content_type:
-            try:
-                body_bytes = await request.body()
-                if body_bytes:
-                    body_json = json.loads(body_bytes)
-                    if isinstance(body_json, dict):
-                        for route in app.routes:
-                            match, _ = route.matches(request.scope)
-                            if match == Match.FULL:
-                                endpoint = getattr(route, "endpoint", None)
-                                if endpoint:
-                                    sig = inspect.signature(endpoint)
-                                    for param in sig.parameters.values():
-                                        ann = param.annotation
-                                        if isinstance(ann, type) and issubclass(ann, BaseModel):
-                                            known_fields = set(ann.model_fields.keys())
-                                            for field in ann.model_fields.values():
-                                                # Pydantic models can expose public JSON names via aliases
-                                                # (for example RetainRequest.async_ is sent as "async").
-                                                # Treat aliases as known fields so valid client payloads are
-                                                # not reported as ignored parameters.
-                                                if isinstance(field.alias, str):
-                                                    known_fields.add(field.alias)
-                                            for key in body_json:
-                                                if key not in known_fields:
-                                                    body_ignored.append(key)
-                                            break
-                                break
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                pass
-
-        all_ignored = ignored_params + body_ignored
-
-        response = await call_next(request)
-
-        if all_ignored:
-            ignored_str = ", ".join(all_ignored)
-            logger.warning(
-                "Unknown parameters ignored: [%s] for %s %s",
-                ignored_str,
-                request.method,
-                request.url.path,
-            )
-            response.headers["X-Ignored-Params"] = ignored_str
-
-        return response
-
-    # Add HTTP metrics middleware
-    @app.middleware("http")
-    async def http_metrics_middleware(request, call_next):
-        """Record HTTP request metrics."""
-        # Template id segments (bank ids, UUIDs, numeric ids) so the endpoint
-        # metric label stays bounded-cardinality.
-        path = normalize_http_endpoint(request.url.path)
-
-        status_code = [500]  # Default to 500, will be updated
-        metrics_collector = get_metrics_collector()
-
-        with metrics_collector.record_http_request(request.method, path, lambda: status_code[0]):
-            response = await call_next(request)
-            status_code[0] = response.status_code
-            return response
+    # Unknown-param reporting and HTTP metrics used to be two
+    # `@app.middleware("http")` handlers. Both are gone: that decorator installs a
+    # Starlette BaseHTTPMiddleware, whose per-request child task and memory-stream
+    # hops cost ~3x the throughput of the whole endpoint on cheap routes. The
+    # reporting now happens in the route class (already resolved, nothing to
+    # re-discover) and the metrics in a pure-ASGI middleware installed below.
+    app.router.route_class = UnknownParamsRoute
 
     # Register all routes
     _register_routes(app)
@@ -4919,12 +4838,17 @@ def create_app(
     # Mount HTTP extension router if available
     if http_extension:
         extension_router = http_extension.get_router(memory)
+        # include_router does not apply the app's route_class to a router's own
+        # routes, so without this the extension loses the unknown-param reporting
+        # the old middleware gave it (it sat above the router).
+        use_unknown_params_routes(extension_router)
         app.include_router(extension_router, prefix="/ext", tags=["Extension"])
         logging.info("HTTP extension router mounted at /ext/")
 
         # Mount root router if provided (for well-known endpoints, etc.)
         root_router = http_extension.get_root_router(memory)
         if root_router:
+            use_unknown_params_routes(root_router)
             app.include_router(root_router)
             logging.info("HTTP extension root router mounted")
 
@@ -4934,6 +4858,9 @@ def create_app(
     # Request.is_disconnected(), so the only way to observe an abandoned request
     # is to own the raw ASGI receive channel from outside it (issue #2122).
     app.add_middleware(ClientDisconnectCancellationMiddleware)
+    # Pure ASGI, so unlike the BaseHTTPMiddleware it replaces it adds no task hop:
+    # records the request metrics and attaches X-Ignored-Params for the route class.
+    app.add_middleware(HttpObservabilityMiddleware)
 
     _instrument_app_for_tracing(app, config)
 
@@ -5962,6 +5889,7 @@ def _register_routes(app: FastAPI):
                 text=core_result.text,
                 based_on=based_on_result,
                 structured_output=core_result.structured_output,
+                structured_output_error=core_result.structured_output_error,
                 usage=core_result.usage,
                 trace=trace_result,
             )
@@ -7918,6 +7846,23 @@ def _register_routes(app: FastAPI):
         "Use dry_run=true to validate the manifest without applying changes.",
         operation_id="import_bank_template",
         tags=["Bank Templates"],
+        # Keep parsing and validation in the handler so malformed JSON and
+        # template errors retain the API's established 400 response format,
+        # while publishing the typed manifest schema for OpenAPI clients.
+        openapi_extra={
+            "requestBody": {
+                "required": True,
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "title": "Manifest",
+                            "description": "Bank template manifest",
+                            "$ref": "#/components/schemas/BankTemplateManifest",
+                        }
+                    }
+                },
+            }
+        },
     )
     @audited("import_bank_template", request_param=None)
     async def api_import_bank_template(
@@ -7928,7 +7873,7 @@ def _register_routes(app: FastAPI):
     ):
         """Import a bank template manifest."""
         try:
-            # Parse raw JSON and validate against the Pydantic model manually
+            # Parse and validate against the Pydantic model manually
             # so we can return clean error messages instead of raw 422s.
             raw_body = await request.json()
             from pydantic import ValidationError

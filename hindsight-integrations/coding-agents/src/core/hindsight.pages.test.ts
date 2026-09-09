@@ -5,12 +5,18 @@ import {
   KNOWLEDGE_LABELS,
   PAGE_MAX_TOKENS,
   pagesFor,
+  pageScopeRule,
+  pageTriggerFor,
   RETAIN_STRATEGIES,
 } from "./missions";
 import { resolveConfig } from "./config";
 
 /** What a client built with `bank: "repo-a"` and no `project` seeds — the bank id is the fallback. */
 const PAGES = pagesFor("repo-a");
+
+/** The trigger a page on bank "repo-a" settles at under the default config — its hashed cron
+ *  already resolved, which is what the server would report back for it. */
+const settledTrigger = (name: string) => pageTriggerFor(buildPageTrigger(), "repo-a", name);
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -185,7 +191,9 @@ describe("HindsightClient.seedPages", () => {
         /^knowledge:(feature-work|decision|convention|component|concept)$/
       );
       expect(post.body.max_tokens).toBe(PAGE_MAX_TOKENS);
-      expect(post.body.trigger.refresh_after_consolidation).toBe(true);
+      // The default schedule, with the page's own hashed minute already resolved.
+      expect(post.body.trigger.refresh_after_consolidation).toBeUndefined();
+      expect(post.body.trigger.refresh_cron).toMatch(/^(?:[0-9]|[1-5][0-9]) \* \* \* \*$/);
       // NOT the server's `all_strict` default for a tagged model: that excludes untagged
       // memories, and every observation this plugin's banks consolidate is untagged.
       expect(post.body.trigger.tags_match).toBe("all");
@@ -230,7 +238,9 @@ describe("HindsightClient.seedPages", () => {
             kind: "page",
             name: p.name,
             description: p.source_query,
-            trigger: { tags_match: buildPageTrigger().tags_match },
+            // The EFFECTIVE policy as the server reports it: the page's own resolved schedule,
+            // and the auto-refresh it is mutually exclusive with reported at its default.
+            trigger: { ...settledTrigger(p.name), refresh_after_consolidation: false },
           })),
         },
       },
@@ -276,7 +286,7 @@ describe("HindsightClient.seedPages", () => {
             kind: "page",
             name: p.name.toUpperCase(),
             description: p === drifted ? "an older wording of the query" : p.source_query,
-            trigger: { tags_match: buildPageTrigger().tags_match },
+            trigger: settledTrigger(p.name),
           })),
         },
       },
@@ -319,10 +329,138 @@ describe("HindsightClient.seedPages", () => {
 
     const patches = calls.filter((k) => k.method === "PATCH");
     expect(patches).toHaveLength(PAGES.length);
-    for (const patch of patches) {
+    for (const [i, patch] of patches.entries()) {
       // ONLY the trigger: sending `source_query` would schedule a full rebuild of every page on
-      // a bank whose question never changed.
-      expect(patch.body).toEqual({ trigger: buildPageTrigger() });
+      // a bank whose question never changed. The cron is the page's OWN resolved one — patching
+      // the literal `H * * * *` would reach the server as a cron it cannot parse.
+      expect(patch.body).toEqual({
+        trigger: pageTriggerFor(buildPageTrigger(), "repo-a", PAGES[i].name),
+      });
+    }
+  });
+
+  /**
+   * The whole point of re-syncing the refresh policy and not just `tags_match`: a bank seeded
+   * before the default became the hourly staggered schedule sits on `refresh_after_consolidation`
+   * — one LLM synthesis per page per consolidation — and nothing about its source query changed,
+   * so without this it would keep paying that forever (#3506).
+   */
+  it("migrates a bank still on the old auto-refresh default onto the schedule", async () => {
+    const calls: any[] = [];
+    stubFetchRouted(calls, [
+      {
+        match: (m, u) => m === "GET" && u.endsWith("/knowledge-base/tree"),
+        json: {
+          roots: PAGES.map((p, i) => ({
+            id: `kp-${i}`,
+            kind: "page",
+            name: p.name,
+            description: p.source_query,
+            trigger: { tags_match: "all", refresh_after_consolidation: true, refresh_cron: null },
+          })),
+        },
+      },
+    ]);
+    const c = new HindsightClient({ apiUrl: "http://x", bank: "repo-a" });
+    await c.seedPages();
+
+    const patches = calls.filter((k) => k.method === "PATCH");
+    expect(patches).toHaveLength(PAGES.length);
+    for (const [i, patch] of patches.entries()) {
+      expect(patch.body.trigger.refresh_cron).toBe(settledTrigger(PAGES[i].name).refresh_cron);
+      // Stating the cron is what clears the auto-refresh server-side; the two are exclusive.
+      expect(patch.body.trigger.refresh_after_consolidation).toBeUndefined();
+      expect(patch.body.source_query).toBeUndefined();
+    }
+  });
+
+  /**
+   * On a repo that has been worked for a while the captured initiative pages outnumber the seeded
+   * taxonomy several times over, and `captureInitiative` stamps them with the same trigger — so a
+   * migration that skipped them would leave most of the auto-refresh cost in place (#3506).
+   */
+  it("re-syncs the initiative pages under their folder, trigger only", async () => {
+    const calls: any[] = [];
+    stubFetchRouted(calls, [
+      {
+        match: (m, u) => m === "GET" && u.endsWith("/knowledge-base/tree"),
+        json: {
+          roots: [
+            ...PAGES.map((p, i) => ({
+              id: `kp-${i}`,
+              kind: "page",
+              name: p.name,
+              description: p.source_query,
+              trigger: { ...settledTrigger(p.name), refresh_after_consolidation: false },
+            })),
+            {
+              id: "folder-initiatives",
+              kind: "folder",
+              name: "Initiatives",
+              children: [
+                {
+                  id: "kp-init-1",
+                  kind: "page",
+                  name: "Typo-tolerant tag matching",
+                  description: "Summarize the initiative",
+                  trigger: { tags_match: "all", refresh_after_consolidation: true },
+                },
+                {
+                  // Already settled — an idempotent run must not touch it.
+                  id: "kp-init-2",
+                  kind: "page",
+                  name: "opencode2 harness support",
+                  description: "Summarize the initiative",
+                  trigger: {
+                    ...settledTrigger("opencode2 harness support"),
+                    refresh_after_consolidation: false,
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    ]);
+    const c = new HindsightClient({ apiUrl: "http://x", bank: "repo-a" });
+    await c.seedPages();
+
+    const patches = calls.filter((k) => k.method === "PATCH");
+    expect(patches).toHaveLength(1);
+    expect(patches[0].url).toContain("kp-init-1");
+    // The initiative's own question is left alone — it was written from the title at capture time,
+    // and re-stating it would rebuild a page whose question never changed.
+    expect(patches[0].body).toEqual({
+      trigger: pageTriggerFor(buildPageTrigger(), "repo-a", "Typo-tolerant tag matching"),
+    });
+  });
+
+  // "manual" is the one policy whose refresh field is falsy, so the server drops no counterpart:
+  // without an explicit null the page would keep firing on the cron it already had.
+  it("clears an existing schedule when the config asks for manual refreshes", async () => {
+    const calls: any[] = [];
+    stubFetchRouted(calls, [
+      {
+        match: (m, u) => m === "GET" && u.endsWith("/knowledge-base/tree"),
+        json: {
+          roots: PAGES.map((p, i) => ({
+            id: `kp-${i}`,
+            kind: "page",
+            name: p.name,
+            description: p.source_query,
+            trigger: { ...settledTrigger(p.name), refresh_after_consolidation: false },
+          })),
+        },
+      },
+    ]);
+    const c = new HindsightClient({ apiUrl: "http://x", bank: "repo-a" });
+    await c.seedPages(buildPageTrigger(resolveConfig({ pageTriggerType: "manual" })));
+
+    const patches = calls.filter((k) => k.method === "PATCH");
+    expect(patches).toHaveLength(PAGES.length);
+    for (const patch of patches) {
+      expect(patch.body.trigger.refresh_after_consolidation).toBe(false);
+      expect(patch.body.trigger.refresh_cron).toBeNull();
     }
   });
 
@@ -548,6 +686,35 @@ describe("HindsightClient.ensureFolder", () => {
 });
 
 describe("HindsightClient.captureInitiative", () => {
+  // The subject is a property of the BANK (`project` when it is one repo's, the bank id otherwise
+  // — #4146), exactly as it is for the seeded pages.
+  it("names the repository, not the bank, when the client knows one", async () => {
+    const calls: any[] = [];
+    stubFetchRouted(calls, [
+      { match: (m, u) => m === "GET" && u.endsWith("/knowledge-base/tree"), json: { roots: [] } },
+      {
+        match: (m, u) => m === "POST" && u.endsWith("/knowledge-base/folders"),
+        json: { id: "folder-abc" },
+      },
+      {
+        match: (m, u) => m === "POST" && u.endsWith("/knowledge-base/pages"),
+        json: { page_id: "pg" },
+      },
+      { match: (m, u) => m === "POST" && u.endsWith("/memories"), json: { operation_id: "op-1" } },
+    ]);
+    const c = new HindsightClient({
+      apiUrl: "http://x",
+      bank: "coding-agent::dotfiles",
+      project: "dotfiles",
+    });
+    await c.captureInitiative({ title: "Retry backoff", summary: "..." });
+
+    const pagePost = calls.find(
+      (k) => k.method === "POST" && k.url.endsWith("/knowledge-base/pages")
+    );
+    expect(pagePost.body.source_query).toContain(pageScopeRule("dotfiles"));
+  });
+
   it("new initiative: POSTs a per-initiative page + a marker retain naming the same page id", async () => {
     const calls: any[] = [];
     stubFetchRouted(calls, [
@@ -584,6 +751,12 @@ describe("HindsightClient.captureInitiative", () => {
     expect(pagePost.body.name).toBe("Retry backoff for the uploader");
     expect(pagePost.body.parent_id).toBe("folder-abc");
     expect(pagePost.body.tags).toEqual(["knowledge:feature-work"]);
+    // Same subject scoping and budget as a seeded page: the bank also holds facts about the
+    // dependencies this repo merely uses, and "the project's memory" never said which project
+    // (#3476). No `project` was given, so the subject is the bank — as in `seedPages`.
+    expect(pagePost.body.source_query).toContain('Summarize the "Retry backoff for the uploader"');
+    expect(pagePost.body.source_query).toContain(pageScopeRule("repo-a"));
+    expect(pagePost.body.max_tokens).toBe(PAGE_MAX_TOKENS);
 
     // Marker retain POST to /memories. The page id rides on the metadata and on the context —
     // NEVER on a tag: tags are matched with exact set-ops against a fixed vocabulary, and one

@@ -138,6 +138,15 @@ enable_reranking = "Set via `bank set-config` (hierarchical config)."
 [fields.update_bank_config]
 updates = "Flattened into per-setting flags (--llm-provider, --llm-model, etc) on `bank set-config`."
 
+# `bank import-template` takes the whole manifest as a JSON file argument rather
+# than per-field flags — a template is authored by `bank export-template` and fed
+# back in verbatim, so flattening it into flags would defeat the round trip.
+[fields.import_bank_template]
+version = "Whole manifest is passed as a JSON file to `bank import-template`."
+bank = "Whole manifest is passed as a JSON file to `bank import-template`."
+mental_models = "Whole manifest is passed as a JSON file to `bank import-template`."
+directives = "Whole manifest is passed as a JSON file to `bank import-template`."
+
 [fields.create_webhook]
 http_config = "Advanced HTTP customisation (headers/method/timeout/params) is not exposed in the CLI yet; use the JSON API if needed."
 
