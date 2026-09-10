@@ -423,6 +423,7 @@ class MetricsCollector(MetricsCollectorBase):
         from .config import get_config
 
         self._include_bank_id = get_config().metrics_include_bank_id
+        self._record_diagnostic_phases = get_config().recall_diagnostic_phases
 
         # Operation latency histogram (in seconds)
         # Records duration of retain, recall, reflect operations
@@ -538,11 +539,6 @@ class MetricsCollector(MetricsCollectorBase):
             description="Time in an operation-validator hook, which runs outside the operation's own timer",
             unit="s",
         )
-        self.validator_phase_calls = self.meter.create_counter(
-            name="hindsight.validator.phase.calls",
-            description="Number of operation-validator hook invocations",
-            unit="calls",
-        )
         # A recall's phases, from the same tracer that writes the `[phases]` log line. That line is
         # per-request and lives in a log; this is the aggregate, so "where does a recall's time go"
         # is answerable across a window without grepping. `hindsight.operation.duration` for a
@@ -581,11 +577,6 @@ class MetricsCollector(MetricsCollectorBase):
                 5.0,
                 10.0,
             ],
-        )
-        self.recall_phase_calls = self.meter.create_counter(
-            name="hindsight.recall.phase.calls",
-            description="Number of times a recall phase ran",
-            unit="calls",
         )
         # Consolidation batch calls that failed. Labelled by failure class so the two
         # populations stay separable: `retry` is transport-shaped and usually self-heals,
@@ -864,7 +855,6 @@ class MetricsCollector(MetricsCollectorBase):
         """Record one operation-validator hook. `hook` is "pre" or "post"."""
         attrs = {"operation": operation, "hook": hook, "tenant": _get_tenant()}
         self.validator_phase_duration.record(seconds, attrs)
-        self.validator_phase_calls.add(1, attrs)
 
     def record_recall_phase(self, phase: str, seconds: float, *, diagnostic: bool = False):
         """Record one phase of a recall.
@@ -873,9 +863,13 @@ class MetricsCollector(MetricsCollectorBase):
         per-arm timing inside `parallel_retrieval`, say — so a consumer summing phases into a
         request total can exclude them instead of double-counting.
         """
+        if diagnostic and not self._record_diagnostic_phases:
+            return
         attrs = {"phase": phase, "tenant": _get_tenant(), "diagnostic": str(bool(diagnostic)).lower()}
+        # One instrument, not two: the histogram already carries `_count` for this attribute set,
+        # so the parallel counter was recording the same measurement a second time — and OTel's
+        # consume_measurement path, not the record call, is what costs.
         self.recall_phase_duration.record(seconds, attrs)
-        self.recall_phase_calls.add(1, attrs)
 
     def record_loop_stall(self, stall_seconds: float):
         """Record a detected event-loop stall. Called from the watchdog thread."""

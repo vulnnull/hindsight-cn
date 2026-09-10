@@ -53,6 +53,7 @@ from ..config import (
     LLMStrategyConfig,
     get_config,
 )
+from ..metrics import get_metrics_collector
 from ..tracing import create_operation_span, extract_task_trace_context, inject_task_trace_context
 from ..utils import mask_network_location
 from ..worker.exceptions import DeferOperation, RetryTaskAt, format_task_error
@@ -192,6 +193,9 @@ def _bind_bank_id(
 
     def decorate(func: Callable[_P, Awaitable[_R]]) -> Callable[_P, Awaitable[_R]]:
         sig = inspect.signature(func)
+        # Decided once per decorated function rather than per call: this decorator wraps every
+        # bank-scoped engine method, and only recall has a phase breakdown to feed.
+        times_recall_body = getattr(func, "__name__", None) == "recall_async"
 
         @functools.wraps(func)
         async def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
@@ -199,10 +203,19 @@ def _bind_bank_id(
             if key is not None and type(value) is dict:
                 value = value.get(key)
             token = _current_bank_id.set(value if type(value) is str else None)
+            # Times the decorated coroutine itself, so "inside recall_async" can be separated from
+            # "between the handler's timer and the body running". Every await inside the body is
+            # already a phase and they summed to about half of `engine_call`, with no CPU to
+            # explain the rest — so the split has to be measured rather than reasoned about.
+            _t0_body = time.time()
             try:
                 return await func(*args, **kwargs)
             finally:
                 _current_bank_id.reset(token)
+                if times_recall_body:
+                    get_metrics_collector().record_recall_phase(
+                        "recall_async_body", time.time() - _t0_body, diagnostic=True
+                    )
 
         return wrapper
 
@@ -7171,7 +7184,16 @@ class MemoryEngine(MemoryEngineInterface):
             - chunks: Optional dict of chunks (if include_chunks=True, independent of max_tokens)
         """
         # Authenticate tenant and set schema in context (for fq_table())
+        # Timed: an awaited call with no phase timer, sitting INSIDE the window the HTTP handler
+        # reports as `recall=`. On a loaded fleet the existing phases covered 10% of a recall's
+        # wall time (store hop 32ms, embedding 5ms of a 356ms mean) while event-loop lag stayed at
+        # 0.2ms — so the other 90% is a real await, and every untimed await here is a candidate.
+        _auth_t0 = time.time()
         await self._authenticate_tenant(request_context)
+        _auth_s = time.time() - _auth_t0
+        get_metrics_collector().record_recall_phase("engine_auth", _auth_s)
+        if _auth_s > 0.025:
+            logger.info("[RECALL AUTH] bank=%s tenant_auth=%.3fs", bank_id, _auth_s)
 
         # Cooperative cancellation checkpoint: if the client already disconnected
         # while this request waited to be scheduled, abort before doing any work
@@ -7241,7 +7263,12 @@ class MemoryEngine(MemoryEngineInterface):
                 tags_match=tags_match,
                 tag_groups=tag_groups,
             )
+            _t0 = time.time()
             result = await self._validate_operation(self._operation_validator.validate_recall(ctx))
+            _d = time.time() - _t0
+            get_metrics_collector().record_recall_phase("validate_pre", _d)
+            if _d > 0.100:
+                logger.info("[RECALL PHASE] validate_pre=%.3fs bank=%s", _d, bank_id)
             if result:
                 if result.tags is not None:
                     tags = result.tags
@@ -7252,12 +7279,22 @@ class MemoryEngine(MemoryEngineInterface):
 
         # Resolve fuzzy tag tokens into real tags before anything builds SQL. Runs after
         # the validator so a validator-supplied tag_groups is resolved too.
+        _t0 = time.time()
         tag_groups = await self._resolve_fuzzy_tag_groups(bank_id, tag_groups)
+        _d = time.time() - _t0
+        get_metrics_collector().record_recall_phase("fuzzy_tags", _d)
+        if _d > 0.100:
+            logger.info("[RECALL PHASE] fuzzy_tags=%.3fs bank=%s", _d, bank_id)
 
         # Map budget enum to thinking_budget number using bank-resolved config.
         # Function "fixed" preserves legacy {LOW: 100, MID: 300, HIGH: 1000}; function "adaptive"
         # derives from max_tokens and clamps to [recall_budget_min, recall_budget_max].
+        _t0 = time.time()
         budget_config_dict = await self._config_resolver.get_bank_config(bank_id, request_context)
+        _d = time.time() - _t0
+        get_metrics_collector().record_recall_phase("bank_config", _d)
+        if _d > 0.100:
+            logger.info("[RECALL PHASE] bank_config=%.3fs bank=%s", _d, bank_id)
         thinking_budget = _resolve_thinking_budget(budget_config_dict, budget, max_tokens)
         # Reranker candidate cap, optionally scaled by the same budget level (env-configured,
         # 0/unset → flat reranker_max_candidates). Static config, so read from get_config().
@@ -7295,10 +7332,12 @@ class MemoryEngine(MemoryEngineInterface):
             semaphore_wait_start = time.time()
             async with self._search_semaphore:
                 semaphore_wait = time.time() - semaphore_wait_start
+                get_metrics_collector().record_recall_phase("semaphore_acquire", semaphore_wait)
                 # Retry loop for connection errors
                 max_retries = 3
                 for attempt in range(max_retries + 1):
                     try:
+                        _t0_swr2 = time.time()
                         result = await self._search_with_retries(
                             bank_id,
                             query,
@@ -7331,6 +7370,9 @@ class MemoryEngine(MemoryEngineInterface):
                             enable_text_search=enable_text_search,
                             enable_temporal_retrieval=enable_temporal_retrieval,
                             enable_graph_retrieval=enable_graph_retrieval,
+                        )
+                        get_metrics_collector().record_recall_phase(
+                            "search_with_retries", time.time() - _t0_swr2, diagnostic=True
                         )
                         break  # Success - exit retry loop
                     except OperationCancelledError:
@@ -7378,7 +7420,12 @@ class MemoryEngine(MemoryEngineInterface):
                                     error=error_msg,
                                 )
                                 try:
+                                    _t0 = time.time()
                                     await self._operation_validator.on_recall_complete(result_ctx)
+                                    _d = time.time() - _t0
+                                    get_metrics_collector().record_recall_phase("validate_post", _d)
+                                    if _d > 0.100:
+                                        logger.info("[RECALL PHASE] validate_post=%.3fs bank=%s", _d, bank_id)
                                 except Exception as hook_err:
                                     logger.warning(f"Post-recall hook error (non-fatal): {hook_err}")
                             raise
@@ -7406,7 +7453,9 @@ class MemoryEngine(MemoryEngineInterface):
                             error=error_msg,
                         )
                         try:
+                            _t0_vp = time.time()
                             await self._operation_validator.on_recall_complete(result_ctx)
+                            get_metrics_collector().record_recall_phase("validate_post", time.time() - _t0_vp)
                         except Exception as hook_err:
                             logger.warning(f"Post-recall hook error (non-fatal): {hook_err}")
                     raise Exception(error_msg)
@@ -7433,7 +7482,9 @@ class MemoryEngine(MemoryEngineInterface):
                     error=None,
                 )
                 try:
+                    _t0_vp = time.time()
                     await self._operation_validator.on_recall_complete(result_ctx)
+                    get_metrics_collector().record_recall_phase("validate_post", time.time() - _t0_vp)
                 except Exception as e:
                     logger.warning(f"Post-recall hook error (non-fatal): {e}")
 
@@ -7562,6 +7613,7 @@ class MemoryEngine(MemoryEngineInterface):
             embedding_span.set_attribute("hindsight.query", query[:100])
 
             try:
+                get_metrics_collector().record_recall_phase("swr_prelude", time.time() - backend_acquire_start)
                 query_embeddings = await embedding_utils.generate_embeddings_batch(
                     self.embeddings,
                     [query],
@@ -7655,11 +7707,13 @@ class MemoryEngine(MemoryEngineInterface):
             )
             if _store_result is not None:
                 _full_elapsed = time.time() - _full_start
+                _t0_tail = time.time()
                 log_buffer.append(
                     f"  [1.5] Store-answered recall: {len(_store_result.results)} results in {_full_elapsed:.3f}s"
                 )
                 if not quiet:
                     logger.info("\n" + "\n".join(log_buffer))
+                    get_metrics_collector().record_recall_phase("store_branch_tail", time.time() - _t0_tail)
                 # The store's own per-stage timings become this recall's phase breakdown.
                 # Without this the trace goes dark exactly where the work moved to, and the
                 # only thing left to compare between the two paths is a total.
@@ -7671,8 +7725,15 @@ class MemoryEngine(MemoryEngineInterface):
                 # showed up as an unattributed remainder, on the one path where the work is not
                 # in this process to begin with. `store_*` are the store's own stages, `full_recall`
                 # is the whole hop including the Python either side of it.
+                _store_reported = 0.0
                 for _name, _micros in (_store_result.store_stages or {}).items():
                     tracer.add_phase_metric(f"store_{_name}", _micros / 1_000_000)
+                    _store_reported += _micros / 1_000_000
+                # The hop minus what the store says it spent: our gRPC client, the
+                # serialization either side, and any time the request sat in the
+                # channel. Recorded per-request because p99s of the individual stages
+                # are not additive, so this gap cannot be derived after the fact.
+                tracer.add_phase_metric("store_hop_overhead", max(0.0, _full_elapsed - _store_reported))
                 tracer.add_phase_metric(
                     "full_recall",
                     _full_elapsed,
