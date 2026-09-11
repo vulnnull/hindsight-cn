@@ -956,11 +956,27 @@ async def _attach_to_memories(
     LLM call attributes the diagram to the paragraph that never mentioned it.
 
     One lookup for the whole page, not one per memory.
+
+    A store that owns its rows renders them itself and puts each memory's ids on
+    the item as ``attachment_ids``. Those are taken off here — the key is an
+    internal carrier, and leaving it would make the payload differ by backend —
+    and handed to the engine, so the lookup resolves them instead of reading them
+    back from a table the store never wrote.
     """
-    unit_ids = [item.get("id") for item in items if isinstance(item, dict) and item.get("id")]
+    unit_ids: list[str] = []
+    carried: dict[str, tuple[str | None, list[str]]] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        ids = item.pop("attachment_ids", None)
+        if not item.get("id"):
+            continue
+        unit_ids.append(item["id"])
+        if ids is not None:
+            carried[str(item["id"])] = (item.get("document_id"), list(ids))
     if not unit_ids:
         return
-    by_unit = await memory_app.attachments_for_memories(bank_id, unit_ids, request_context)
+    by_unit = await memory_app.attachments_for_memories(bank_id, unit_ids, request_context, carried=carried)
     if not by_unit:
         return
     for item in items:
@@ -974,6 +990,7 @@ async def _attach_to_recall_results(
     bank_id: str,
     results: "list[RecallResult]",
     request_context: RequestContext,
+    carried: "dict[str, tuple[str | None, list[str]]] | None" = None,
 ) -> None:
     """Add ``attachments`` to recall results — the same per-fact edge as :func:`_attach_to_memories`.
 
@@ -986,11 +1003,15 @@ async def _attach_to_recall_results(
     One lookup for the whole page. For a bank that has retained no attachments it
     is a single indexed read of the ids column that returns nothing to resolve,
     which is why this is unconditional rather than another `include` flag.
+
+    ``carried`` is unit id -> ``(document_id, attachment_ids)`` for results whose
+    ids the memories store returned on the row. For a store-owned bank that is the
+    only source: the engine resolves them and never reads ``memory_units``.
     """
     unit_ids = [result.id for result in results if result.id]
     if not unit_ids:
         return
-    by_unit = await memory_app.attachments_for_memories(bank_id, unit_ids, request_context)
+    by_unit = await memory_app.attachments_for_memories(bank_id, unit_ids, request_context, carried=carried)
     if not by_unit:
         return
     for result in results:
@@ -5769,7 +5790,17 @@ def _register_routes(app: FastAPI):
                 )
 
             recall_results = [_fact_to_result(fact) for fact in core_result.results]
-            await _attach_to_recall_results(app.state.memory, bank_id, recall_results, request_context)
+            await _attach_to_recall_results(
+                app.state.memory,
+                bank_id,
+                recall_results,
+                request_context,
+                carried={
+                    fact.id: (fact.document_id, fact.attachment_ids)
+                    for fact in core_result.results
+                    if fact.attachment_ids is not None
+                },
+            )
 
             # Convert chunks from engine to HTTP API format
             chunks_response = None
@@ -7276,7 +7307,13 @@ def _register_routes(app: FastAPI):
                 raise HTTPException(status_code=404, detail="Document not found")
             items = result.get("items") or []
             by_chunk = await app.state.memory.attachments_for_chunks(
-                bank_id, [c["chunk_id"] for c in items if c.get("chunk_id")], request_context
+                bank_id,
+                [c["chunk_id"] for c in items if c.get("chunk_id")],
+                request_context,
+                # The page already holds each chunk's text; a store-owned bank resolves from it.
+                carried_texts={
+                    c["chunk_id"]: (c.get("document_id"), c.get("chunk_text")) for c in items if c.get("chunk_id")
+                },
             )
             for chunk in items:
                 records = by_chunk.get(chunk.get("chunk_id"))
@@ -7355,7 +7392,14 @@ def _register_routes(app: FastAPI):
             document = await app.state.memory.get_document(document_id, bank_id, request_context=request_context)
             if not document:
                 raise HTTPException(status_code=404, detail="Document not found")
-            by_document = await app.state.memory.attachments_for_documents(bank_id, [document_id], request_context)
+            by_document = await app.state.memory.attachments_for_documents(
+                bank_id,
+                [document_id],
+                request_context,
+                # Used only for a store-owned bank, which has no document edge to read; a null
+                # text (full text not kept) makes the engine fall back to the chunk texts.
+                carried_texts={document_id: document.get("original_text")},
+            )
             if by_document.get(document_id):
                 document["attachments"] = [_attachment_payload(bank_id, record) for record in by_document[document_id]]
             return document
@@ -7456,7 +7500,12 @@ def _register_routes(app: FastAPI):
             # it belongs to, and attachments_for_chunks authorizes against it.
             chunk_bank = chunk.get("bank_id")
             if chunk_bank:
-                by_chunk = await app.state.memory.attachments_for_chunks(chunk_bank, [chunk_id], request_context)
+                by_chunk = await app.state.memory.attachments_for_chunks(
+                    chunk_bank,
+                    [chunk_id],
+                    request_context,
+                    carried_texts={chunk_id: (chunk.get("document_id"), chunk.get("chunk_text"))},
+                )
                 if by_chunk.get(chunk_id):
                     chunk["attachments"] = [_attachment_payload(chunk_bank, record) for record in by_chunk[chunk_id]]
             return chunk
