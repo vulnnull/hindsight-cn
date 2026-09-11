@@ -15,6 +15,7 @@ import asyncio
 import importlib
 import logging
 import os
+import random
 import re
 
 _resource_mod = importlib.import_module("resource") if importlib.util.find_spec("resource") else None
@@ -424,6 +425,7 @@ class MetricsCollector(MetricsCollectorBase):
 
         self._include_bank_id = get_config().metrics_include_bank_id
         self._record_diagnostic_phases = get_config().recall_diagnostic_phases
+        self._recall_phase_sample_every = get_config().recall_phase_sample_every
 
         # Operation latency histogram (in seconds)
         # Records duration of retain, recall, reflect operations
@@ -864,6 +866,12 @@ class MetricsCollector(MetricsCollectorBase):
         request total can exclude them instead of double-counting.
         """
         if diagnostic and not self._record_diagnostic_phases:
+            return
+        # Opt-in sampling: ~10 phases per recall each go through OTel's aggregation, which was
+        # ~4.6% of a recall-heavy API's busy CPU. Sampling each call independently at 1/N keeps
+        # every phase's distribution (and so its percentiles) unbiased; only the histogram's
+        # absolute counts scale by 1/N. Default 1 records every call, exactly as before.
+        if self._recall_phase_sample_every > 1 and random.random() * self._recall_phase_sample_every >= 1.0:
             return
         attrs = {"phase": phase, "tenant": _get_tenant(), "diagnostic": str(bool(diagnostic)).lower()}
         # One instrument, not two: the histogram already carries `_count` for this attribute set,

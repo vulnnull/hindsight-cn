@@ -59,6 +59,9 @@ _LANGUAGE_AND_RULES = """\
 - Be a thoughtful interpreter, not just a literal repeater
 - When the exact answer isn't stated, use what IS stated to give a best-effort answer AND surface any uncertainty — never invent confidence the data doesn't support.
 
+## What Counts As Inference
+Infer freely about what the retrieved data covers. Never produce a value (number, date, name, status, amount) for a period, entity or person the data does not cover: extrapolating a trend, interpolating between dated facts, or borrowing from a similar entity is invention. If no fact states the value for the thing asked, say the data does not record it (a complete answer), then give what IS recorded, labelled with the period or entity it belongs to. Never call a derived value exact, reliable, deduced or confirmed; label any derivation an estimate. Qualitative inference is unaffected.
+
 ## Temporal Reasoning
 Every memory and observation carries temporal fields in the JSON tool result:
 - `mentioned_at` — when the user retained the fact (always set).

@@ -11,10 +11,38 @@ import { HOOK_HARNESSES } from "../harness/hook-lifecycle";
 const listPagesOk = async () => ({ items: [{ id: "p1", name: "Component map" }] });
 
 describe("buildSessionStartContext", () => {
+  it("warns in the user-visible banner when the old Claude Code plugin is still active", async () => {
+    const client = { listDocumentIds: async () => new Set(["git:a"]), listPages: listPagesOk };
+    const detectLegacyPlugin = vi.fn().mockReturnValue("hindsight-memory@hindsight");
+    const out = await buildSessionStartContext({
+      cwd: "/repo/dir",
+      bankId: "bank-1",
+      cfg: resolveConfig({ autoSeed: false }),
+      client,
+      detectLegacyPlugin,
+    });
+    expect(detectLegacyPlugin).toHaveBeenCalledWith("/repo/dir");
+    expect(out.systemMessage).toContain("bank-1");
+    expect(out.systemMessage).toContain("claude plugin uninstall hindsight-memory@hindsight");
+    expect(out.additionalContext).not.toContain("hindsight-memory@hindsight");
+  });
+
+  it("no warning when the old plugin is absent", async () => {
+    const client = { listDocumentIds: async () => new Set(["git:a"]), listPages: listPagesOk };
+    const out = await buildSessionStartContext({
+      cwd: "/repo/dir",
+      bankId: "bank-1",
+      cfg: resolveConfig({ autoSeed: false }),
+      client,
+      detectLegacyPlugin: () => undefined,
+    });
+    expect(out.systemMessage).not.toContain("plugin uninstall");
+  });
+
   it("cold git repo + autoSeed on -> seeds + surveys, note in systemMessage (user-visible) + roster in additionalContext (model)", async () => {
     const client = { listDocumentIds: async () => new Set<string>(), listPages: listPagesOk };
     const startSeed = vi.fn();
-    const startSurvey = vi.fn();
+    const startSurvey = vi.fn().mockResolvedValue(true);
     const out = await buildSessionStartContext({
       cwd: "/repo/dir",
       bankId: "bank-1",
@@ -58,7 +86,7 @@ describe("buildSessionStartContext", () => {
       harness: "codex",
       hasGit: () => true,
       startSeed,
-      startSurvey: vi.fn(),
+      startSurvey: vi.fn().mockResolvedValue(true),
     });
     expect(startSeed).toHaveBeenCalledWith("/repo/dir", { limit: 300, harness: "codex" });
   });
@@ -66,7 +94,7 @@ describe("buildSessionStartContext", () => {
   it("cold git repo + codebaseSurvey:false -> starts the seed but NOT the survey", async () => {
     const client = { listDocumentIds: async () => new Set<string>(), listPages: listPagesOk };
     const startSeed = vi.fn();
-    const startSurvey = vi.fn();
+    const startSurvey = vi.fn().mockResolvedValue(true);
     const out = await buildSessionStartContext({
       cwd: "/repo/dir",
       bankId: "bank-1",
@@ -152,7 +180,7 @@ describe("buildSessionStartContext", () => {
 
   it("warm bank (non-empty doc set) -> deepen engine fires, but no survey/note", async () => {
     const startSeed = vi.fn();
-    const startSurvey = vi.fn();
+    const startSurvey = vi.fn().mockResolvedValue(true);
     const client = { listDocumentIds: async () => new Set(["git:abc"]), listPages: listPagesOk };
     const out = await buildSessionStartContext({
       cwd: "/repo/dir",
@@ -325,7 +353,7 @@ describe("buildSessionStartContext — periodic re-survey (bank-stored commit co
   ];
 
   it(">= threshold since the latest reachable baseline -> re-surveys + records a new baseline", async () => {
-    const startSurvey = vi.fn();
+    const startSurvey = vi.fn().mockResolvedValue(true);
     const retain = vi.fn();
     await buildSessionStartContext({
       cwd: "/repo",
@@ -358,7 +386,7 @@ describe("buildSessionStartContext — periodic re-survey (bank-stored commit co
       client: warmClient(["survey-baseline:oldsha"], retain),
       hasGit: () => true,
       startSeed: vi.fn(),
-      startSurvey: vi.fn(),
+      startSurvey: vi.fn().mockResolvedValue(true),
       headSha: () => "newsha",
       commitsSince: () => 25,
     });
@@ -374,7 +402,7 @@ describe("buildSessionStartContext — periodic re-survey (bank-stored commit co
   });
 
   it("< threshold -> no re-survey, no new baseline", async () => {
-    const startSurvey = vi.fn();
+    const startSurvey = vi.fn().mockResolvedValue(true);
     const retain = vi.fn();
     await buildSessionStartContext({
       cwd: "/repo",
@@ -392,7 +420,7 @@ describe("buildSessionStartContext — periodic re-survey (bank-stored commit co
   });
 
   it("no baseline yet (upgrade from a pre-feature bank) -> records HEAD as baseline, does NOT survey", async () => {
-    const startSurvey = vi.fn();
+    const startSurvey = vi.fn().mockResolvedValue(true);
     const retain = vi.fn();
     await buildSessionStartContext({
       cwd: "/repo",
@@ -410,7 +438,7 @@ describe("buildSessionStartContext — periodic re-survey (bank-stored commit co
   });
 
   it("all markers unreachable (rebase/gc) -> re-baselines to HEAD, does NOT survey", async () => {
-    const startSurvey = vi.fn();
+    const startSurvey = vi.fn().mockResolvedValue(true);
     const retain = vi.fn();
     await buildSessionStartContext({
       cwd: "/repo",
@@ -428,7 +456,7 @@ describe("buildSessionStartContext — periodic re-survey (bank-stored commit co
   });
 
   it("takes the MIN reachable count (newest survey), ignoring older + dead-branch markers", async () => {
-    const startSurvey = vi.fn();
+    const startSurvey = vi.fn().mockResolvedValue(true);
     const counts: Record<string, number | null> = { old1: 50, old2: 10, dead: null };
     await buildSessionStartContext({
       cwd: "/repo",
@@ -445,7 +473,7 @@ describe("buildSessionStartContext — periodic re-survey (bank-stored commit co
   });
 
   it("surveyRefreshCommits=0 disables re-survey even far past threshold", async () => {
-    const startSurvey = vi.fn();
+    const startSurvey = vi.fn().mockResolvedValue(true);
     await buildSessionStartContext({
       cwd: "/repo",
       bankId: "bank-1",
@@ -461,7 +489,7 @@ describe("buildSessionStartContext — periodic re-survey (bank-stored commit co
   });
 
   it("cold seed records the survey baseline", async () => {
-    const startSurvey = vi.fn();
+    const startSurvey = vi.fn().mockResolvedValue(true);
     const retain = vi.fn();
     await buildSessionStartContext({
       cwd: "/repo",
@@ -481,7 +509,7 @@ describe("buildSessionStartContext — periodic re-survey (bank-stored commit co
 
 describe("buildSessionStartContext — crashed-survey retry (baseline without findings)", () => {
   it("re-fires the survey when a baseline exists but NO findings docs ever arrived", async () => {
-    const startSurvey = vi.fn();
+    const startSurvey = vi.fn().mockResolvedValue(true);
     const retain = vi.fn();
     const client = {
       listDocumentIds: async (tag: string) =>
@@ -507,4 +535,34 @@ describe("buildSessionStartContext — crashed-survey retry (baseline without fi
     expect(startSurvey).toHaveBeenCalledTimes(1);
     expect(out).toBeTruthy();
   });
+});
+
+describe("survey launch admission", () => {
+  it.each([false, true])(
+    "does not advance a %s warm/cold baseline when launch is skipped or fails",
+    async (warm) => {
+      const retain = vi.fn();
+      const startSurvey = vi.fn().mockResolvedValue(false);
+      await buildSessionStartContext({
+        cwd: "/repo",
+        bankId: "bank-1",
+        cfg: resolveConfig({ surveyRefreshCommits: 20 }),
+        client: {
+          listDocumentIds: async (tag) =>
+            tag === "source:survey-baseline"
+              ? new Set(["survey-baseline:oldsha"])
+              : new Set(warm ? ["git:old"] : []),
+          listPages: listPagesOk,
+          retain,
+        },
+        hasGit: () => true,
+        startSeed: vi.fn(),
+        startSurvey,
+        headSha: () => "newsha",
+        commitsSince: () => 25,
+      });
+      expect(startSurvey).toHaveBeenCalledOnce();
+      expect(retain).not.toHaveBeenCalled();
+    }
+  );
 });

@@ -35,6 +35,7 @@ import { setLogLevel } from "./log";
 import { parsePageList, buildKnowledgePreamble, type PageRef } from "./knowledge-injection";
 import type { ClientOpts, RetainOpts } from "./hindsight";
 import { buildRetainStamp } from "./retain-stamp";
+import { detectLegacyClaudePlugin, legacyClaudePluginWarning } from "./legacy";
 import { HindsightClient } from "./hindsight";
 import { sessionCacheFile, sessionRootDir, writeSessionCache } from "./session-cache";
 
@@ -147,12 +148,12 @@ export async function buildSessionStartContext(args: {
   stateDir?: string;
   hasGit?: (dir: string) => boolean;
   startSeed?: (repoDir: string, opts?: { limit?: number; harness?: string }) => void;
-  startSurvey?: (
-    repoDir: string,
-    opts?: { harness?: SurveyHarness; model?: string; budgetUsd?: number }
-  ) => void;
+  startSurvey?: typeof startCodebaseSurvey;
   headSha?: (dir: string) => string | null;
   commitsSince?: (dir: string, sinceSha: string) => number | null;
+  /** Registry key of the old Claude Code plugin still active for `cwd`; defaults to reading
+   *  Claude's plugin files, and only for the claude-code harness. */
+  detectLegacyPlugin?: (cwd: string) => string | undefined;
 }): Promise<SessionStartOutput> {
   const { cwd, bankId, cfg, client, stateDir } = args;
   const t0 = Date.now();
@@ -232,13 +233,13 @@ export async function buildSessionStartContext(args: {
           if (docIds.size === 0) {
             if (cfg.codebaseSurvey !== false) {
               // Run the survey under the current harness's own CLI (falls back to any available agent).
-              startSurvey(cwd, {
+              const started = await startSurvey(cwd, {
                 harness: harness as SurveyHarness,
                 model: cfg.surveyModel,
                 budgetUsd: cfg.surveyBudgetUsd,
               });
               const sha = resolveHeadSha(cwd);
-              if (sha) recordSurveyBaseline(sha); // baseline for the commit-count re-survey below
+              if (started && sha) recordSurveyBaseline(sha);
             }
             diag(harness, "seed_started", { bank: bankId });
           } else if (cfg.codebaseSurvey !== false && cfg.surveyRefreshCommits > 0) {
@@ -268,17 +269,19 @@ export async function buildSessionStartContext(args: {
               const findingsAbsent =
                 counts.length > 0 && !SURVEY_DOC_IDS.some((id) => uploads.has(id));
               if ((sinceLast !== null && sinceLast >= cfg.surveyRefreshCommits) || findingsAbsent) {
-                startSurvey(cwd, {
+                const started = await startSurvey(cwd, {
                   harness: harness as SurveyHarness,
                   model: cfg.surveyModel,
                   budgetUsd: cfg.surveyBudgetUsd,
                 });
-                recordSurveyBaseline(sha);
-                diag(harness, "survey_refresh", {
-                  bank: bankId,
-                  commits: sinceLast,
-                  retry: findingsAbsent,
-                });
+                if (started) {
+                  recordSurveyBaseline(sha);
+                  diag(harness, "survey_refresh", {
+                    bank: bankId,
+                    commits: sinceLast,
+                    retry: findingsAbsent,
+                  });
+                }
               } else if (sinceLast === null) {
                 recordSurveyBaseline(sha); // first baseline, or reset after a rebase — no survey
               }
@@ -319,6 +322,16 @@ export async function buildSessionStartContext(args: {
     }).catch(() => undefined);
   }
   systemMessage = buildSeedBanner(bankId, cold === true, gitNote);
+
+  // The old per-agent plugin keeps running next to this one until the user removes it — say so
+  // where they will see it. Only Claude Code had that plugin.
+  const detectLegacy =
+    args.detectLegacyPlugin ?? (harness === "claude-code" ? detectLegacyClaudePlugin : undefined);
+  const legacyPlugin = detectLegacy?.(cwd);
+  if (legacyPlugin) {
+    systemMessage += `\n${legacyClaudePluginWarning(legacyPlugin)}`;
+    diag(harness, "legacy_plugin_active", { plugin: legacyPlugin });
+  }
 
   // ALWAYS record the session start (warm sessions used to log nothing — undebuggable).
   diag(harness, "session_start", { bank: bankId, cold, pages: pages.length, ms: Date.now() - t0 });

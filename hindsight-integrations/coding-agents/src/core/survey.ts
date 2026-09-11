@@ -37,11 +37,20 @@
  * missing binary or a spawn failure must silently no-op, never crash the caller.
  */
 import { spawn as realSpawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { binOnPath } from "./util";
+import { resolveHostConfig } from "./host-client";
+import {
+  acquireLease,
+  LEASE_STALE_MS,
+  releaseLease,
+  SURVEY_SPEC_ENV,
+  type SurveySupervisorSpec,
+} from "./survey-lease";
 
 /** Deterministic doc ids of the survey's findings (its fixed titles slugified by
  *  hindsight_ingest_document). Their presence in the bank = the survey actually FINISHED —
@@ -282,9 +291,12 @@ function buildSurveyPlan(
  * Spawn a DETACHED headless agent to survey `repoDir` and ingest structural findings via the
  * `hindsight_ingest_document` tool. Runs the survey under the current harness's own CLI when
  * available, else falls back to any available agent (claude → codex → antigravity → opencode — claude and
- * codex first because their inline-MCP recipes are self-contained). Fire-and-forget; never throws.
+ * codex first because their inline-MCP recipes are self-contained). The agent runs under the
+ * detached lease supervisor (survey-supervisor.ts), so only one survey per destination runs at a
+ * time (#4255). Resolves once launched, not when the survey finishes; false means no launch.
+ * Never throws.
  */
-export function startCodebaseSurvey(
+export async function startCodebaseSurvey(
   repoDir: string,
   opts: {
     harness?: SurveyHarness;
@@ -294,8 +306,10 @@ export function startCodebaseSurvey(
     claudeBin?: string;
     spawn?: typeof realSpawn;
     exists?: (bin: string) => boolean; // seam for tests
+    supervisorPath?: string;
+    lease?: { dir?: string; staleMs?: number; heartbeatMs?: number }; // seam for tests
   } = {}
-): void {
+): Promise<boolean> {
   try {
     const spawnFn = opts.spawn ?? realSpawn;
     const exists = opts.exists ?? binOnPath;
@@ -324,22 +338,62 @@ export function startCodebaseSurvey(
         budgetUsd: opts.budgetUsd,
         mcpServerPath,
       });
-      const child = spawnFn(plan.bin, plan.args, {
-        cwd: repoDir,
-        detached: true,
-        stdio: "ignore",
-        windowsHide: true,
-        env: plan.env,
+      // Use the SAME resolver as the selected agent's MCP/plugin, including fallback harnesses
+      // and bank overrides. Hash credentials too: equal bank ids on one API can belong to
+      // different tenants, but neither tokens nor bank names should appear in scratch paths.
+      const { cfg, bankId } = resolveHostConfig(harness, repoDir);
+      if (cfg.disabled) return false;
+      const key = createHash("sha256")
+        .update(JSON.stringify([cfg.apiUrl.replace(/\/+$/, ""), cfg.apiToken ?? "", bankId]))
+        .digest("hex");
+      const lease = acquireLease(
+        opts.lease?.dir ?? join(tmpdir(), "hindsight-coding-agent", "surveys"),
+        key,
+        opts.lease?.staleMs ?? LEASE_STALE_MS
+      );
+      if (!lease) return false;
+      const spec: SurveySupervisorSpec = {
+        lease,
+        bin: plan.bin,
+        args: plan.args,
+        ...(opts.lease?.heartbeatMs ? { heartbeatMs: opts.lease.heartbeatMs } : {}),
+      };
+      const supervisorPath =
+        opts.supervisorPath ??
+        join(dirname(fileURLToPath(import.meta.url)), "survey-supervisor.js");
+      return await new Promise<boolean>((resolve) => {
+        try {
+          // The agent inherits the supervisor's cwd and env. The spec rides in the environment,
+          // never argv — see SURVEY_SPEC_ENV for the endpoint-security kill that argv triggers.
+          const child = spawnFn("node", [supervisorPath], {
+            cwd: repoDir,
+            detached: true,
+            stdio: "ignore",
+            windowsHide: true,
+            env: { ...plan.env, [SURVEY_SPEC_ENV]: JSON.stringify(spec) },
+          });
+          let spawned = false;
+          // spawn() failures (node not found, EACCES, sandboxes) arrive as an async 'error' event;
+          // unhandled, it would crash the caller.
+          child.on("error", () => {
+            if (spawned) return; // the supervisor owns the lease now
+            releaseLease(lease);
+            resolve(false);
+          });
+          child.once("spawn", () => {
+            spawned = true;
+            child.unref();
+            resolve(true);
+          });
+        } catch {
+          releaseLease(lease);
+          resolve(false);
+        }
       });
-      // spawn() failures (binary not found, EACCES, sandboxed environments) often arrive
-      // ASYNCHRONOUSLY as an 'error' event on the child, not as a synchronous throw — an unhandled
-      // 'error' event would crash the caller. Swallow it: fire-and-forget best-effort.
-      child.on("error", () => {});
-      child.unref();
-      return; // one survey agent is enough
     }
     // No capable agent found — fail open (the git-log seed already ran; the survey is a bonus).
   } catch {
     /* best-effort: a failed spawn must not break the caller */
   }
+  return false;
 }
