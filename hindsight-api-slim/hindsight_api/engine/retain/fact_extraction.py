@@ -1130,6 +1130,10 @@ _CONCISE_EXAMPLES = """
 EXAMPLES (shown in English for illustration; for non-English input, ALL output values MUST be in the input language)
 ══════════════════════════════════════════════════════════════════════════
 
+The examples below demonstrate output format and selectivity only. Never emit
+their facts, entities, or dates unless those details also appear in the actual
+input text being processed.
+
 Example 1 - Selective extraction (Event Date: June 10, 2024):
 Input: "Hey! How's it going? Good morning! So I'm planning my wedding - want a small outdoor ceremony. Just got back from Emily's wedding, she married Sarah at a rooftop garden. It was nice weather. I grabbed a coffee on the way."
 
@@ -1939,8 +1943,11 @@ async def _extract_facts_from_chunk(
     )
     # OUTER content-validation attempts (re-prompts on malformed JSON). Follows the
     # same `N + 1` convention as the providers' transport-retry loops — N retries after
-    # the initial request — so a zero budget still performs one request (#2731). The raw
-    # budget is forwarded unchanged to llm_config.call(), which owns transport retries.
+    # the initial request — so a zero budget still performs one request (#2731).
+    # Transport retries are NOT forwarded per call: the retain LLM is built with this
+    # same budget as its default, and in a multi-LLM chain each member may override
+    # it (``HINDSIGHT_API_LLM_<n>_MAX_RETRIES``). A per-call value would win over the
+    # member's own and hand every member the same budget.
     outer_attempts = llm_max_retries + 1
     last_error: Exception | None = None
 
@@ -1963,7 +1970,6 @@ async def _extract_facts_from_chunk(
                 temperature=config.llm_temperature_retain,
                 strict_schema=config.llm_strict_schema_retain,
                 max_completion_tokens=config.retain_max_completion_tokens,
-                max_retries=llm_max_retries,
                 initial_backoff=initial_backoff,
                 max_backoff=max_backoff,
                 skip_validation=True,  # Get raw JSON, we'll validate leniently

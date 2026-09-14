@@ -164,6 +164,23 @@ def get_column_dimension(db_url: str, schema: str = "public", table: str = "memo
         return result
 
 
+def get_vector_index_names(db_url: str, schema: str, table: str) -> list[str]:
+    """Names of the vector indexes on ``table.embedding``."""
+    engine = create_engine(db_url)
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text("""
+                SELECT indexname FROM pg_indexes
+                WHERE schemaname = :schema AND tablename = :table
+                  AND indexdef LIKE '%embedding%'
+                  AND (indexdef LIKE '%hnsw%' OR indexdef LIKE '%vchordrq%'
+                       OR indexdef LIKE '%diskann%' OR indexdef LIKE '%scann%')
+            """),
+            {"schema": schema, "table": table},
+        ).fetchall()
+        return [row[0] for row in rows]
+
+
 def get_row_count(db_url: str, schema: str = "public") -> int:
     """Get the number of rows with embeddings in memory_units."""
     engine = create_engine(db_url)
@@ -348,6 +365,59 @@ class TestEmbeddingDimension:
 
         # Cleanup
         clear_mental_model_embeddings(db_url, schema)
+
+    def test_store_owned_memories_leaves_memory_units_untouched(self, dimension_test_schema):
+        """A custom memories store owns the memory rows, so memory_units is never resized —
+        not even when it holds rows that would otherwise block the change — while
+        mental_models, which stays in Postgres, still follows the model."""
+        db_url, schema = dimension_test_schema
+
+        clear_embeddings(db_url, schema)
+        clear_mental_model_embeddings(db_url, schema)
+        # An earlier test's blocked mental_models change can leave memory_units resized.
+        _ensure_embedding_dimension_with_retry(db_url, 384, schema=schema)
+        insert_test_embedding(db_url, schema, 384)
+
+        ensure_embedding_dimension(db_url, 768, schema=schema, store_owned_memories=True)
+
+        assert get_column_dimension(db_url, schema) == 384
+        assert get_column_dimension(db_url, schema, table="mental_models") == 768
+
+        # Restore for other tests
+        clear_embeddings(db_url, schema)
+        _ensure_embedding_dimension_with_retry(db_url, 384, schema=schema)
+        assert get_column_dimension(db_url, schema, table="mental_models") == 384
+
+    def test_store_owned_memories_keeps_mental_models_unindexed(self, dimension_test_schema):
+        """The store answers every mental-model vector query, so mental_models.embedding carries
+        no vector index: the one the base migrations built is dropped even when the dimension
+        already matches, and a resize past pgvector's 2000-dim HNSW limit succeeds. Switching
+        back to the Postgres store rebuilds it."""
+        db_url, schema = dimension_test_schema
+
+        clear_embeddings(db_url, schema)
+        clear_mental_model_embeddings(db_url, schema)
+        _ensure_embedding_dimension_with_retry(db_url, 384, schema=schema)
+        assert get_vector_index_names(db_url, schema, "mental_models")
+
+        ensure_embedding_dimension(db_url, 384, schema=schema, store_owned_memories=True)
+        assert get_vector_index_names(db_url, schema, "mental_models") == []
+
+        # Back on the Postgres store at the same dimension — no resize to piggyback on, and the
+        # table is populated — the missing index is still rebuilt.
+        insert_test_mental_model_embedding(db_url, schema, 384)
+        _ensure_embedding_dimension_with_retry(db_url, 384, schema=schema)
+        assert get_vector_index_names(db_url, schema, "mental_models")
+        clear_mental_model_embeddings(db_url, schema)
+
+        ensure_embedding_dimension(db_url, 3072, schema=schema, store_owned_memories=True)
+        assert get_column_dimension(db_url, schema, table="mental_models") == 3072
+        assert get_vector_index_names(db_url, schema, "mental_models") == []
+
+        # Restore for other tests
+        _ensure_embedding_dimension_with_retry(db_url, 384, schema=schema)
+        assert get_column_dimension(db_url, schema, table="mental_models") == 384
+        assert get_vector_index_names(db_url, schema, "mental_models")
 
     async def test_local_embeddings_dimension_detection(self, embeddings):
         """Test that LocalSTEmbeddings correctly detects dimension."""

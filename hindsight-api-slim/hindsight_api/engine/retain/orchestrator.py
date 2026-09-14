@@ -736,6 +736,7 @@ async def _streaming_session_retain(
     doc_replace_done: list[bool],
     entity_resolver,
     log_buffer: list[str],
+    attachment_filenames: dict[str, str] | None = None,
 ) -> list[list[str]]:
     """Hand one consumer batch to the store's retain session.
 
@@ -748,7 +749,7 @@ async def _streaming_session_retain(
     yet. That is deliberate: the ids are the engine's, and a retain that is still buffering has to
     be able to answer with them.
     """
-    from ..memories.base import RetainDocumentPart, build_fact_records
+    from ..memories.base import RetainDocumentPart, build_fact_records, document_record_metadata
     from . import entity_processing, fact_storage
     from .entity_processing import UserEntities
 
@@ -803,7 +804,9 @@ async def _streaming_session_retain(
             chunk_texts=[],
             facts=records,
             tags=list(merged_tags or []),
-            metadata=({"retain_params": json.dumps(retain_params)} if retain_params else {}),
+            # Whichever part of a document reaches the session first supplies its record metadata,
+            # so this must be the WHOLE document's map, never just this batch's items' names.
+            metadata=document_record_metadata(retain_params, attachment_filenames),
             entity_names=names,
             replace_chunk_ids=replace_chunk_ids,
         )
@@ -1629,6 +1632,11 @@ async def retain_batch(
             )
         existing_text = base_row["original_text"] if base_row else None
         append_base_hash = base_row["content_hash"] if base_row else _APPEND_BASE_ABSENT
+        # The stored document's attachment names, carried onto the prepended base below. A
+        # store-owned record's metadata is REPLACED on every write, so an append that did not
+        # restate them would erase every name the earlier turns gave. (A SQL bank merges them in
+        # `sync_document_attachments` instead, so this stays empty there.)
+        prior_filenames: dict[str, str] = {}
         # The base text comes from whichever store HOLDS it. For a store that owns the document
         # store the SQL row keeps only metadata and `original_text` is NULL by construction
         # (`fact_storage.upsert_document_metadata`), so this read returned nothing to prepend and
@@ -1640,7 +1648,10 @@ async def retain_batch(
         if not existing_text and _store.store_owned_for(bank_id):
             _record = await _store.get_document_record(bank_id=bank_id, document_id=effective_doc_id, include_text=True)
             if _record:
+                from ..memories.base import document_attachment_filenames
+
                 existing_text = _record.get("original_text")
+                prior_filenames = document_attachment_filenames(_record)
                 # Read WITH the base, not later: a watermark taken after the read would already
                 # include a writer that beat us, and the guard would pass while the base was stale.
                 append_base_watermark = _record.get("watermark")
@@ -1653,6 +1664,9 @@ async def retain_batch(
         if existing_text:
             # Prepend existing text as a new content item at the beginning
             existing_content: RetainContentDict = {"content": existing_text}
+            if prior_filenames:
+                # First, so a name the new turn gives the same attachment wins.
+                existing_content["attachment_filenames"] = prior_filenames
             # Copy context/tags from first item for consistency
             first = contents_dicts[0]
             if first.get("context"):
@@ -1672,6 +1686,11 @@ async def retain_batch(
             _merged_text = merge_json_array_parts([_item.get("content", "") for _item in contents_dicts])
             if _merged_text is not None:
                 merged_item: RetainContentDict = {"content": _merged_text}
+                merged_filenames: dict[str, str] = {}
+                for _item in contents_dicts:
+                    merged_filenames.update(_item.get("attachment_filenames") or {})
+                if merged_filenames:
+                    merged_item["attachment_filenames"] = merged_filenames
                 if first.get("context"):
                     merged_item["context"] = first["context"]
                 if first.get("event_date"):
@@ -2022,6 +2041,7 @@ async def _store_document_bodies(
     retain_params: dict | None = None,
     chunk_index_offset: int = 0,
     expect_watermark: int | None = None,
+    attachment_filenames: dict[str, str] | None = None,
 ) -> None:
     """Route a document's bulky bodies — its extracted text and ordered chunk texts — to the
     store's dedicated document store, when the store owns one. No-op for Postgres.
@@ -2037,9 +2057,13 @@ async def _store_document_bodies(
     ``get_document`` returned null ``retain_params`` / ``document_metadata`` /
     ``observation_scopes`` for such a bank. The store's metadata map is ``string -> string``, so
     the params are carried as one JSON value rather than flattened.
+
+    ``attachment_filenames`` rides the same map for the same reason: it is what
+    ``document_attachments.filename`` holds for a SQL bank, and that table needs a SQL
+    ``documents`` row this bank never has.
     """
     from ..memories import get_memories
-    from ..memories.base import StoreWriteConflict
+    from ..memories.base import StoreWriteConflict, document_record_metadata
 
     store = get_memories()
     if not store.store_owned_for(bank_id):
@@ -2079,7 +2103,7 @@ async def _store_document_bodies(
             original_text=combined_content if config.store_document_text else None,
             chunk_texts=list(chunk_texts),
             tags=list(merged_tags or []),
-            metadata=({"retain_params": json.dumps(retain_params)} if retain_params else {}),
+            metadata=document_record_metadata(retain_params, attachment_filenames),
             expect_watermark=expect_watermark,
         )
     except StoreWriteConflict as e:
@@ -2113,6 +2137,7 @@ class DocumentBodyMeta:
     config: Any
     retain_params: dict | None
     expect_watermark: int | None
+    attachment_filenames: dict[str, str] | None = None
 
 
 @dataclasses.dataclass
@@ -2188,6 +2213,7 @@ async def _document_body_write_args(acc: DocumentBodyAccumulator, document_id: s
             merged_tags=meta.merged_tags,
             config=meta.config,
             retain_params=meta.retain_params,
+            attachment_filenames=meta.attachment_filenames,
             # The append CAS belongs to the write derived from the stored base, which is the first
             # one this retain issues; later flushes build on what it wrote.
             expect_watermark=meta.expect_watermark if acc.flushed_bytes == 0 else None,
@@ -2227,6 +2253,7 @@ async def flush_document_bodies(body_accum: dict[str, DocumentBodyAccumulator]) 
     more than the WAL-head contention the batch would avoid.
     """
     from ..memories import get_memories
+    from ..memories.base import document_record_metadata
 
     pending = list(body_accum.items())
     body_accum.clear()
@@ -2267,7 +2294,7 @@ async def flush_document_bodies(body_accum: dict[str, DocumentBodyAccumulator]) 
                     "original_text": (a["combined_content"] if a["config"].store_document_text else None),
                     "chunk_texts": a["chunk_texts"],
                     "tags": list(a["merged_tags"] or []),
-                    "metadata": ({"retain_params": json.dumps(a["retain_params"])} if a["retain_params"] else {}),
+                    "metadata": document_record_metadata(a["retain_params"], a["attachment_filenames"]),
                 }
                 for a in batch
             ],
@@ -2436,7 +2463,7 @@ async def _streaming_retain_batch(
     # document's chunk texts for the retain and then flush them into a no-op — and worse, it would
     # pin exactly the strings the streaming producer frees as it goes (`all_pre_chunks[i] = ""`).
     from ..memories import get_memories
-    from ..memories.base import RetainDocumentPart
+    from ..memories.base import RetainDocumentPart, document_record_metadata
 
     # A session owns the document body: it carries the chunk texts in the same entry as the facts,
     # so accumulating them here as well would write them twice.
@@ -2454,7 +2481,7 @@ async def _streaming_retain_batch(
                     chunk_texts=list(all_pre_chunks),
                     facts=[],
                     tags=list(merged_tags or []),
-                    metadata=({"retain_params": json.dumps(retain_params)} if retain_params else {}),
+                    metadata=document_record_metadata(retain_params, _attachment_filenames_for(contents)),
                 )
             )
     elif body_accum is not None and effective_doc_id and get_memories().store_owned_for(bank_id):
@@ -2476,6 +2503,7 @@ async def _streaming_retain_batch(
                 config=config,
                 retain_params=retain_params,
                 expect_watermark=append_base_watermark,
+                attachment_filenames=_attachment_filenames_for(contents),
             )
         await _flush_document_body(acc, effective_doc_id, force=False)
     else:
@@ -2488,6 +2516,7 @@ async def _streaming_retain_batch(
             merged_tags=merged_tags,
             config=config,
             retain_params=retain_params,
+            attachment_filenames=_attachment_filenames_for(contents),
             # An append derives the new body from the stored one, so its write is conditional on
             # that base still being current. Only the first sub-batch carries it: it is the one
             # that read the base, and the later sub-batches build on what it just wrote.
@@ -3002,6 +3031,7 @@ async def _streaming_retain_batch(
                         doc_replace_done=doc_replace_done,
                         entity_resolver=entity_resolver,
                         log_buffer=log_buffer,
+                        attachment_filenames=_attachment_filenames_for(contents),
                     )
                 combined_content = ""
                 try:
@@ -3990,6 +4020,7 @@ async def _try_delta_retain(
                     merged_tags=merged_tags,
                     config=config,
                     retain_params=retain_params,
+                    attachment_filenames=_attachment_filenames_for(contents),
                 )
                 log_buffer.append(f"  Document metadata update in {time.time() - step_start:.3f}s")
 
@@ -4141,6 +4172,7 @@ async def _delta_metadata_only(
 ) -> RetainBatchResult | None:
     """Handle the case where no chunks changed — just update document metadata and tags."""
     from ..memories import get_memories as _get_memories_meta
+    from ..memories.base import document_record_metadata
 
     _meta_store = _get_memories_meta()
     if _meta_store.store_owned_for(bank_id):
@@ -4170,7 +4202,11 @@ async def _delta_metadata_only(
             original_text=combined_content,
             chunk_texts=chunk_texts,
             tags=merged_tags,
-            metadata=retain_params,
+            # The same map every other write path produces. This path used to pass the params dict
+            # itself, which the store flattened key by key: the record then carried no
+            # `retain_params` entry, and a metadata-only re-retain blanked what get_document and
+            # reprocess read back.
+            metadata=document_record_metadata(retain_params, _attachment_filenames_for(contents)),
         )
         # The document record now carries the new labels, but the memories do not: the SQL branch
         # below propagates them onto the units with the same call, and without it a tags-only

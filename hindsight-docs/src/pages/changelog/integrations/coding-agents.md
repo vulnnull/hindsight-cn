@@ -10,6 +10,12 @@ For the source code, see [`hindsight-integrations/coding-agents`](https://github
 
 ← [Back to main changelog](/changelog)
 
+## [0.6.1](https://github.com/vectorize-io/hindsight/tree/integrations/coding-agents/v0.6.1)
+
+**Improvements**
+
+- Reduced noisy output during fallback reflection by keeping details in diagnostic logs.<span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/nicoloboschi" target="_blank" rel="noopener noreferrer" style={{color: "var(--ifm-color-primary)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px", verticalAlign: "middle"}}><img src="https://github.com/nicoloboschi.png?size=40" alt="@nicoloboschi" width="18" height="18" style={{borderRadius: "50%"}} />@nicoloboschi</a><span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/vectorize-io/hindsight/commit/daaba6542" target="_blank" rel="noopener noreferrer" style={{fontFamily: "var(--ifm-font-family-monospace, monospace)", fontSize: "0.85em", color: "var(--ifm-color-emphasis-600)"}}>daaba6542</a>
+
 ## [0.6.0](https://github.com/vectorize-io/hindsight/tree/integrations/coding-agents/v0.6.0)
 
 **Features**

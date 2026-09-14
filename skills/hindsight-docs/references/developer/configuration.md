@@ -585,6 +585,8 @@ The unindexed `HINDSIGHT_API_LLM_*` config is the **primary** (member 1). Extra 
 | `HINDSIGHT_API_LLM_<n>_VERTEXAI_PROJECT_ID` / `_VERTEXAI_REGION` / `_VERTEXAI_SERVICE_ACCOUNT_KEY` | Per-member Vertex AI project, region, and service-account key path (for a `vertexai` member). Each falls back to the global `HINDSIGHT_API_LLM_VERTEXAI_*` when unset. | Global / `us-central1` / ADC |
 | `HINDSIGHT_API_LLM_<n>_CODEX_HOME` | Per-member Codex credentials directory — the directory holding the `auth.json` this member authenticates with (for an `openai-codex` member). Set it so two Codex members run as two independently authorized ChatGPT profiles; without it every member resolves the same store. Falls back to the global `HINDSIGHT_API_LLM_CODEX_HOME`, then `CODEX_HOME`, then `~/.codex`. | Global / `CODEX_HOME` / `~/.codex` |
 | `HINDSIGHT_API_LLM_<n>_LITELLMROUTER_CONFIG` | Per-member LiteLLM Router config JSON (for a `litellmrouter` member). Falls back to the global `HINDSIGHT_API_LLM_LITELLMROUTER_CONFIG` when unset. | - |
+| `HINDSIGHT_API_LLM_<n>_TIMEOUT` | Per-member request timeout, in seconds. Falls back to the operation's timeout when unset. | Operation timeout |
+| `HINDSIGHT_API_LLM_<n>_MAX_RETRIES` | Per-member retry budget. Falls back to the operation's `MAX_RETRIES` when unset; `0` is a valid setting and means fail over immediately. | Operation `MAX_RETRIES` |
 | `HINDSIGHT_API_LLM_STRATEGY` | JSON routing strategy across the chain. Unset = single primary LLM (no change). | - |
 
 The strategy JSON supports three modes:
@@ -639,6 +641,16 @@ Two further limits:
 **Per-operation chains.** Each operation can define its own members + strategy with the `RETAIN` / `REFLECT` / `CONSOLIDATION` prefix (e.g. `HINDSIGHT_API_RETAIN_LLM_1_PROVIDER`, `HINDSIGHT_API_RETAIN_LLM_STRATEGY`). A per-operation slot with no indexed members (or no strategy) inherits the global chain.
 
 The indexed members are credential fields — never returned by the bank-config API and server-level only (not per-bank configurable). **Batch retain** runs on the first batch-capable member in declared order, which need not be the primary — so a chain whose primary has no batch API can still use `HINDSIGHT_API_RETAIN_BATCH_ENABLED=true` as long as one member supports it. That member serves the whole batch (submit, polling and retrieval all target the account that holds it), so batch does not fail over the way the interactive retain/reflect/consolidation calls do. An in-flight batch is bound to the account that submitted it, so if the worker restarts mid-batch it resumes on that same account even when the chain has since been reordered or extended. Removing that member — or rotating its API key — while a batch is still running makes the operation fail with an explicit error instead of polling a different account.
+
+**Retries inside a chain.** A failover chain is itself a retry: when a member
+fails, the next one is tried. Retrying a non-terminal member first only delays
+that handoff, and when it is failing because it is saturated the immediate
+retry is likely to fail the same way. The last member is the opposite case —
+it has nowhere to fail over to, so its retry budget is the only thing between a
+transient error and a failed request, and it is where honouring a `Retry-After`
+pays. A single operation-wide `MAX_RETRIES` cannot express both, so set
+`HINDSIGHT_API_LLM_MAX_RETRIES=0` to fail over promptly and give the final
+member its own budget with `HINDSIGHT_API_LLM_<n>_MAX_RETRIES`.
 
 ### Built-in llama.cpp
 
@@ -1405,6 +1417,8 @@ For advanced authentication (JWT, OAuth, multi-tenant schemas), implement a cust
 | `HINDSIGHT_API_MCP_ENABLED` | Enable MCP server at `/mcp/{bank_id}/` | `true` |
 | `HINDSIGHT_API_GZIP_MIN_SIZE` | Minimum response size (bytes) to gzip. Compressing a recall response costs ~5% of its CPU, so a CPU-bound (rather than bandwidth-bound) deployment can raise this past its typical response size. Negative disables compression entirely. | `1024` |
 | `HINDSIGHT_API_LOOP_LAG_REPORT_SECONDS` | Diagnostic: log event-loop lag percentiles (`[loop-lag]`) every N seconds (minimum 1), to tell a slow await from an oversubscribed loop. `0` disables the probe. | `0` |
+| `HINDSIGHT_API_LOOP_LAG_METRIC` | Record every event-loop lag sample in the `hindsight_event_loop_lag_seconds` histogram (sampled every 50 ms), independent of the log reports above. A loop that is busy but never blocked shows up here and nowhere else: the recall phase timers stay fast while requests wait for the loop. | `false` |
+| `HINDSIGHT_API_METRICS_WORKER_LABEL` | With `--workers N` every worker is its own process with its own metrics, but they share one port, so a scrape of `/metrics` reaches one worker at random: counters jump between processes (a rate over them reads every switch as a reset) and a saturated worker is invisible. When on, each worker publishes a snapshot of its metrics every 5 s and `/metrics` returns every live worker's series, each labelled `api_worker="<slot>"` (slot `0..N-1`). One port and one scrape target; the extra label is the only visible change. | `false` |
 | `HINDSIGHT_API_TOKENIZER_ENCODING` | Vocabulary used for every token count and chunk boundary (recall budgets, chunk sizes, prompt fitting, embedding truncation). `o200k_base` matches current OpenAI models and counts non-Latin text far closer to what they actually charge; `cl100k_base` reproduces the counts Hindsight produced before this default changed. Server-level: token budgets are only comparable between banks if they are all counted the same way. Other bundled vocabulary: `o200k_harmony`. | `o200k_base` |
 | `HINDSIGHT_API_MODEL_INIT_TIMEOUT` | Wall-clock cap (seconds) on startup model/connection initialization. If embeddings, the cross-encoder, or LLM verification block (e.g. an offline model download or an unreachable provider), the server fails fast with a clear error instead of hanging forever. Increase if a legitimate first-time model download needs more time. | `300` |
 | `HINDSIGHT_API_STARTUP_WAIT_SECONDS` | **Docker image only.** How long the container waits for the API to answer `/health` before it stops and restarts. Raising `HINDSIGHT_API_MODEL_INIT_TIMEOUT` above the default raises this wait too, so a slow first-time model download is not cut short; set this to override the wait on its own. | `300`, or `HINDSIGHT_API_MODEL_INIT_TIMEOUT` + 30s when that is longer |
@@ -1418,6 +1432,12 @@ For advanced authentication (JWT, OAuth, multi-tenant schemas), implement a cust
 | `HINDSIGHT_API_LINK_EXPANSION_TIMEOUT` | Timeout (seconds) for the per-entity graph expansion query in `link_expansion` retrieval. | `10` |
 | `HINDSIGHT_API_RECALL_MAX_CONCURRENT` | Max concurrent recall operations per worker (backpressure) | `32` |
 | `HINDSIGHT_API_RECALL_CONNECTION_BUDGET` | Max concurrent DB connections per recall operation | `4` |
+| `HINDSIGHT_API_ADMISSION_RECALL_MAX_IN_FLIGHT` | Concurrent recalls admitted per worker before requests queue. `0` derives it from the CPU budget this process has (cgroup quota) divided by `HINDSIGHT_API_WORKERS`; a negative value disables the lane. A latency target, not a capacity limit: throughput is unchanged either way, but too low throttles I/O-bound work and too high rebuilds the queue. | `0` (derived) |
+| `HINDSIGHT_API_ADMISSION_RECALL_MAX_WAIT_MS` | How long a recall may queue for a slot before being refused with 503 + `Retry-After`. A queued request whose client disconnects releases its place immediately. Absorbs bursts; lower it if load is persistently over capacity, where a long queue just delays the same refusals. | `30000` |
+| `HINDSIGHT_API_ADMISSION_REFLECT_MAX_IN_FLIGHT` | As above, for reflect. | `0` (derived) |
+| `HINDSIGHT_API_ADMISSION_REFLECT_MAX_WAIT_MS` | As above, for reflect. | `5000` |
+| `HINDSIGHT_API_ADMISSION_RETAIN_MAX_IN_FLIGHT` | As above, for retain. Only bites on the synchronous path; an async retain returns as soon as the operation is queued. | `0` (derived) |
+| `HINDSIGHT_API_ADMISSION_RETAIN_MAX_WAIT_MS` | As above, for retain. | `2000` |
 | `HINDSIGHT_API_RECALL_MAX_QUERY_TOKENS` | Maximum token length of a recall query. API requests exceeding this limit are rejected with HTTP 400; recalls that Hindsight runs internally (consolidation, reflect, MCP) truncate the query to the limit instead of failing. `0` disables the limit. | `500` |
 | `HINDSIGHT_API_QUERY_ANALYZER_LANGUAGES` | Restrict the locales `dateparser` considers when extracting temporal constraints from a recall query, as a comma-separated list of language codes (e.g. `en` or `en,zh`). Empty keeps full auto-detection across all supported locales. Restricting is significantly faster (auto-detection dominates recall's CPU cost) and avoids locale misdetection on a known-language corpus, but explicit dates written in an unlisted locale will then misparse rather than yield no constraint — only set this when you know which languages your queries use. Does not affect Chinese, which is handled before `dateparser` runs. | _(empty)_ |
 | `HINDSIGHT_API_RERANKER_MAX_CANDIDATES` | Max candidates to rerank per recall (RRF pre-filters the rest) | `300` |

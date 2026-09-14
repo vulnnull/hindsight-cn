@@ -77,6 +77,34 @@ def test_skips_embedding_dim_when_none_and_extensions_when_disabled(record_steps
     assert record_steps == [("run_migrations", "a")]
 
 
+@pytest.mark.parametrize("store_owned_memories", [False, True])
+def test_store_owned_memories_reaches_every_reconcile_step(monkeypatch, store_owned_memories):
+    """A custom memories store must reach all three post-migration reconcile steps."""
+    monkeypatch.setattr(migrations, "_should_isolate_migrations", lambda: False)
+    monkeypatch.setattr(migrations, "run_migrations", lambda *a, **k: None)
+    seen: dict[str, bool] = {}
+
+    def make(step):
+        def _step(database_url, *args, store_owned_memories=False, **kwargs):
+            seen[step] = store_owned_memories
+
+        return _step
+
+    monkeypatch.setattr(migrations, "ensure_embedding_dimension", make("embedding_dimension"))
+    monkeypatch.setattr(migrations, "ensure_vector_extension", make("vector_extension"))
+    monkeypatch.setattr(migrations, "ensure_text_search_extension", make("text_search_extension"))
+
+    migrations.run_migrations_for_schemas(
+        "postgresql://x/db", ["a"], embedding_dimension=3072, store_owned_memories=store_owned_memories
+    )
+
+    assert seen == {
+        "embedding_dimension": store_owned_memories,
+        "vector_extension": store_owned_memories,
+        "text_search_extension": store_owned_memories,
+    }
+
+
 def test_parallel_fans_out_across_schemas(monkeypatch):
     """concurrency>1 runs distinct schemas at the same time (not serialized)."""
     # Same reason as the record_steps fixture: this test patches the migration step

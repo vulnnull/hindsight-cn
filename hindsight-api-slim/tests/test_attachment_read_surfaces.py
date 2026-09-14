@@ -81,6 +81,96 @@ def _assert_handle(attachments) -> None:
     assert entry["url"].endswith(f"/attachments/{PNG_ID}")
 
 
+PDF_BYTES = b"%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n"
+PDF_ID = short_attachment_id(compute_attachment_hash(PDF_BYTES))
+PDF_NAME = "vpn-reset-guide.pdf"
+NAMED_DOCUMENT_ID = "vpn-guide"
+
+
+@pytest.fixture
+async def bank_with_named_file(api_client):
+    """A bank holding one document whose text carries one file the caller named."""
+    bank_id = f"named-{uuid.uuid4().hex[:8]}"
+    assert (await api_client.put(f"/v1/default/banks/{bank_id}", json={})).status_code == 200
+    config = await api_client.patch(
+        f"/v1/default/banks/{bank_id}/config",
+        json={"updates": {"retain_extraction_mode": "chunks"}},
+    )
+    assert config.status_code == 200, config.text
+    response = await api_client.post(
+        f"/v1/default/banks/{bank_id}/memories",
+        json={
+            "items": [
+                {
+                    "content": [
+                        {"type": "text", "text": "To reset the VPN, follow the attached guide."},
+                        {
+                            "type": "file",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "application/pdf",
+                                "data": base64.b64encode(PDF_BYTES).decode(),
+                            },
+                            "filename": PDF_NAME,
+                        },
+                    ],
+                    "document_id": NAMED_DOCUMENT_ID,
+                }
+            ],
+            "async": False,
+        },
+    )
+    assert response.status_code == 200, response.text
+    return bank_id
+
+
+def _assert_named(attachments, where: str) -> None:
+    assert attachments, f"{where}: no attachments returned"
+    assert [a["id"] for a in attachments] == [PDF_ID], where
+    assert attachments[0]["filename"] == PDF_NAME, f"{where}: filename was {attachments[0].get('filename')!r}"
+
+
+@pytest.mark.asyncio
+async def test_every_surface_returns_the_filename_the_caller_gave(api_client, bank_with_named_file):
+    """The name the caller gave an attachment is part of the handle, on every surface.
+
+    It lives on the document edge, not the blob, so each surface has to reach the document to find
+    it -- and "which surface forgot to" is exactly the failure this pins.
+    """
+    bank_id = bank_with_named_file
+    base = f"/v1/default/banks/{bank_id}"
+
+    listed = await api_client.get(f"{base}/memories/list")
+    assert listed.status_code == 200, listed.text
+    with_file = [m for m in listed.json()["items"] if m.get("attachments")]
+    assert with_file, "no memory carries the file"
+    _assert_named(with_file[0]["attachments"], "list memories")
+
+    detail = await api_client.get(f"{base}/memories/{with_file[0]['id']}")
+    assert detail.status_code == 200, detail.text
+    _assert_named(detail.json().get("attachments"), "get memory")
+
+    recall = await api_client.post(f"{base}/memories/recall", json={"query": "How do I reset the VPN?"})
+    assert recall.status_code == 200, recall.text
+    recalled = [r for r in recall.json()["results"] if r.get("attachments")]
+    assert recalled, "no recalled fact carries the file"
+    _assert_named(recalled[0]["attachments"], "recall")
+
+    document = await api_client.get(f"{base}/documents/{NAMED_DOCUMENT_ID}")
+    assert document.status_code == 200, document.text
+    _assert_named(document.json().get("attachments"), "get document")
+
+    chunks = await api_client.get(f"{base}/documents/{NAMED_DOCUMENT_ID}/chunks")
+    assert chunks.status_code == 200, chunks.text
+    chunk_items = [c for c in chunks.json()["items"] if c.get("attachments")]
+    assert chunk_items, "no chunk carries the file"
+    _assert_named(chunk_items[0]["attachments"], "list chunks")
+
+    chunk = await api_client.get(f"/v1/default/chunks/{chunk_items[0]['chunk_id']}")
+    assert chunk.status_code == 200, chunk.text
+    _assert_named(chunk.json().get("attachments"), "get chunk")
+
+
 @pytest.mark.asyncio
 async def test_get_document_returns_its_attachments(api_client, bank_with_attachment):
     response = await api_client.get(f"/v1/default/banks/{bank_with_attachment}/documents/{DOCUMENT_ID}")

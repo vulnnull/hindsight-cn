@@ -608,7 +608,12 @@ class InMemoryMemories(MemoriesExtension):
         doc = self.documents.get(str(document_id))
         if doc is None:
             return None
-        record = {"id": doc["id"], "content_hash": doc["content_hash"], "tags": list(doc["tags"])}
+        record = {
+            "id": doc["id"],
+            "content_hash": doc["content_hash"],
+            "tags": list(doc["tags"]),
+            "metadata": dict(doc["metadata"]),
+        }
         if include_text:
             record["original_text"] = doc["original_text"]
         return record

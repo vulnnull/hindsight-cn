@@ -19,8 +19,8 @@ import uuid
 import pytest
 
 from hindsight_api.engine.retain.attachment_content import (
-    compute_attachment_hash,
     attachment_placeholder,
+    compute_attachment_hash,
     iter_placeholder_ids,
     short_attachment_id,
 )
@@ -58,21 +58,18 @@ async def _retain(client, bank_id: str, content, **item_fields):
     )
 
 
-async def _document_text(memory, bank_id: str, document_id: str) -> str:
-    """The exact canonical body retain stored.
+async def _document_text(client, bank_id: str, document_id: str) -> str:
+    """The exact canonical body retain stored, as the document API returns it.
 
-    Read straight from `documents` on purpose: the property under test is that
-    the placeholder text is byte-for-byte what the pipeline persists (that is
-    what content_hash idempotency keys on), and no engine read method exposes
-    the stored body verbatim.
+    The property under test is that the placeholder text is byte-for-byte what
+    the pipeline persists (that is what content_hash idempotency keys on).
+    ``original_text`` on get-document is that stored body verbatim on every
+    backend -- a SQL bank reads it from ``documents``, a store-owned bank from
+    the store's document record, where its ``documents`` column is NULL.
     """
-    backend = await memory._get_backend()
-    async with backend.acquire() as conn:
-        return await conn.fetchval(
-            "SELECT original_text FROM documents WHERE id = $1 AND bank_id = $2",
-            document_id,
-            bank_id,
-        )
+    response = await client.get(f"/v1/default/banks/{bank_id}/documents/{document_id}")
+    assert response.status_code == 200, response.text
+    return response.json()["original_text"]
 
 
 async def _bank_attachment_rows(memory, bank_id: str) -> list[dict]:
@@ -113,7 +110,7 @@ async def test_image_block_becomes_a_placeholder_in_the_stored_document(api_clie
     )
     assert response.status_code == 200, response.text
 
-    stored = await _document_text(memory, bank_id, document_id)
+    stored = await _document_text(api_client, bank_id, document_id)
     expected_hash = compute_attachment_hash(PNG_BYTES)
     assert stored == (
         f"To reset the VPN, click the button shown:\n\n{attachment_placeholder(expected_hash)}\n\n...then reconnect."
@@ -159,7 +156,7 @@ async def test_the_same_image_across_documents_is_stored_once(api_client, memory
 
     # Both documents still name it.
     for document_id in ("article-1", "article-2"):
-        text = await _document_text(memory, bank_id, document_id)
+        text = await _document_text(api_client, bank_id, document_id)
         assert list(iter_placeholder_ids(text)) == [short_attachment_id(compute_attachment_hash(PNG_BYTES))]
 
 
@@ -194,11 +191,11 @@ async def test_re_retaining_identical_multimodal_content_is_idempotent(api_clien
 
     first = await _retain(api_client, bank_id, content, document_id="stable")
     assert first.status_code == 200, first.text
-    text_after_first = await _document_text(memory, bank_id, "stable")
+    text_after_first = await _document_text(api_client, bank_id, "stable")
 
     second = await _retain(api_client, bank_id, content, document_id="stable")
     assert second.status_code == 200, second.text
-    text_after_second = await _document_text(memory, bank_id, "stable")
+    text_after_second = await _document_text(api_client, bank_id, "stable")
 
     assert text_after_first == text_after_second
     assert len(await _bank_attachment_rows(memory, bank_id)) == 1
@@ -214,7 +211,7 @@ async def test_a_lone_text_block_is_identical_to_the_plain_string_form(api_clien
         await _retain(api_client, bank_id, [_text_block("Alice joined the AI team")], document_id="b")
     ).status_code == 200
 
-    assert await _document_text(memory, bank_id, "s") == await _document_text(memory, bank_id, "b")
+    assert await _document_text(api_client, bank_id, "s") == await _document_text(api_client, bank_id, "b")
 
 
 @pytest.mark.asyncio
@@ -304,7 +301,9 @@ async def test_an_image_alone_is_content_even_with_no_prose(api_client, memory):
     response = await _retain(api_client, bank_id, [_image_block()], document_id="bare")
 
     assert response.status_code == 200, response.text
-    assert await _document_text(memory, bank_id, "bare") == attachment_placeholder(compute_attachment_hash(PNG_BYTES))
+    assert await _document_text(api_client, bank_id, "bare") == attachment_placeholder(
+        compute_attachment_hash(PNG_BYTES)
+    )
 
 
 @pytest.mark.asyncio
@@ -323,7 +322,7 @@ async def test_plain_string_content_cannot_summon_an_image(api_client, memory):
     response = await _retain(api_client, bank_id, f"see {stolen} here", document_id="thief")
 
     assert response.status_code == 200, response.text
-    assert await _document_text(memory, bank_id, "thief") == "see  here"
+    assert await _document_text(api_client, bank_id, "thief") == "see  here"
 
 
 @pytest.mark.asyncio
@@ -336,14 +335,14 @@ async def test_editing_a_documents_text_keeps_its_own_attachments(api_client, me
     """
     bank_id = f"img-{uuid.uuid4().hex[:8]}"
     await _retain(api_client, bank_id, [_text_block("before:"), _image_block()], document_id="article")
-    stored = await _document_text(memory, bank_id, "article")
+    stored = await _document_text(api_client, bank_id, "article")
     assert list(iter_placeholder_ids(stored))
 
     edited = stored.replace("before:", "after the rewrite:")
     response = await _retain(api_client, bank_id, edited, document_id="article")
 
     assert response.status_code == 200, response.text
-    text = await _document_text(memory, bank_id, "article")
+    text = await _document_text(api_client, bank_id, "article")
     assert "after the rewrite:" in text
     assert list(iter_placeholder_ids(text)) == list(iter_placeholder_ids(stored))
 
@@ -353,10 +352,10 @@ async def test_the_exemption_is_scoped_to_the_document_that_owns_it(api_client, 
     """Document A's attachment must not be summonable from document B's text."""
     bank_id = f"img-{uuid.uuid4().hex[:8]}"
     await _retain(api_client, bank_id, [_text_block("owner"), _image_block()], document_id="owner")
-    owner_text = await _document_text(memory, bank_id, "owner")
+    owner_text = await _document_text(api_client, bank_id, "owner")
     stolen = f"see {owner_text.split(chr(10))[2]} here"
 
     response = await _retain(api_client, bank_id, stolen, document_id="thief")
 
     assert response.status_code == 200, response.text
-    assert not list(iter_placeholder_ids(await _document_text(memory, bank_id, "thief")))
+    assert not list(iter_placeholder_ids(await _document_text(api_client, bank_id, "thief")))

@@ -476,7 +476,7 @@ resolves the same `auth.json`. To run more than one independently authorized
 ChatGPT account — for example, to fail over when the preferred account hits its
 usage limit — give each one its own credentials directory with
 `HINDSIGHT_API_LLM_CODEX_HOME` (primary) and `HINDSIGHT_API_LLM_<n>_CODEX_HOME`
-(indexed multi-LLM chain
+(indexed [multi-LLM chain](./configuration#multi-llm-strategies-failover--round-robin)
 members). Each falls back to `CODEX_HOME`, then `~/.codex`, when unset.
 
 ```bash

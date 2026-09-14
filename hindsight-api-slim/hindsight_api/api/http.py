@@ -26,6 +26,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, Response
 
 from hindsight_api.api import page_markdown
+from hindsight_api.api.admission import AdmissionAbandoned, AdmissionRejected, build_controller_from_config
 from hindsight_api.api.disconnect import ClientDisconnectCancellationMiddleware, get_scope_cancellation_token
 from hindsight_api.api.observability import HttpObservabilityMiddleware
 from hindsight_api.api.passthrough_headers import collect_passthrough_headers
@@ -4729,7 +4730,7 @@ def create_app(
 
         # Started here rather than at import time because it needs a running loop, and it must run
         # on the loop that actually serves requests — that is the only one whose lag says anything.
-        _install_loop_lag(config.loop_lag_report_seconds)
+        _install_loop_lag(config.loop_lag_report_seconds, metric=config.loop_lag_metric)
 
         poller = None
         poller_task = None
@@ -4744,6 +4745,12 @@ def create_app(
             prometheus_reader = initialize_metrics(service_name="hindsight-api", service_version="1.0.0")
             create_metrics_collector()
             app.state.prometheus_reader = prometheus_reader
+            if config.metrics_worker_label:
+                # With --workers N a scrape of /metrics reaches one random worker; make every
+                # worker's series part of every scrape (see hindsight_api.metrics_multiworker).
+                from hindsight_api.metrics_multiworker import start_worker_metrics
+
+                app.state.worker_metrics = start_worker_metrics(max(1, config.workers))
             logging.info("Metrics initialized - available at /metrics endpoint")
         except Exception as e:
             logging.warning(f"Failed to initialize metrics: {e}. Metrics will be disabled (using no-op collector).")
@@ -4919,6 +4926,10 @@ def create_app(
     # re-discover) and the metrics in a pure-ASGI middleware installed below.
     app.router.route_class = UnknownParamsRoute
 
+    # Per-operation admission control, consulted by the `admit_for` dependency on
+    # the heavy routes. One controller per app so the limits are a process budget.
+    app.state.admission = build_controller_from_config(config)
+
     # Register all routes
     _register_routes(app)
 
@@ -5075,6 +5086,44 @@ def _register_routes(app: FastAPI):
                 api_key = authorization.strip()
         extra_headers = collect_passthrough_headers(request.headers.raw, get_config().extension_passthrough_headers)
         return RequestContext(api_key=api_key, extra_headers=extra_headers)
+
+    def admit_for(operation: PrecheckOperation):
+        """Build a FastAPI dependency that holds an admission permit for the request.
+
+        Yield-style so the permit is held for the whole request and released once the
+        response has been produced. Declared alongside ``precheck_for`` on the heavy
+        routes: FastAPI resolves dependencies before deserialising the body, so an
+        overloaded server refuses without ever reading the payload.
+
+        Returns 503 with ``Retry-After`` rather than queueing indefinitely — see
+        :mod:`hindsight_api.api.admission` for why the wait, not the concurrency, is
+        the thing worth bounding.
+        """
+
+        async def _admit_dep(request: Request):
+            controller = getattr(app.state, "admission", None)
+            if controller is None:
+                yield
+                return
+            # Recall and reflect carry a disconnect token (see api/disconnect.py). A
+            # queued request whose client has gone gives up its place immediately,
+            # which is what makes a patient deadline affordable.
+            abandoned = get_scope_cancellation_token(request.scope)
+            try:
+                async with controller.admit(str(operation), abandoned=abandoned):
+                    yield
+            except AdmissionAbandoned:
+                # Nobody left to answer. Close the request without spending a slot
+                # or building a response.
+                raise HTTPException(status_code=499, detail="client disconnected while queued") from None
+            except AdmissionRejected as e:
+                raise HTTPException(
+                    status_code=503,
+                    detail=(f"Server is at capacity for '{e.lane}' ({e.limit} concurrent); try again shortly."),
+                    headers={"Retry-After": str(e.retry_after_seconds)},
+                ) from None
+
+        return _admit_dep
 
     def precheck_for(operation: PrecheckOperation):
         """
@@ -5275,7 +5324,8 @@ def _register_routes(app: FastAPI):
         from fastapi.responses import Response
         from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
-        metrics_data = generate_latest()
+        worker_metrics = getattr(app.state, "worker_metrics", None)
+        metrics_data = worker_metrics.render() if worker_metrics is not None else generate_latest()
         return Response(content=metrics_data, media_type=CONTENT_TYPE_LATEST)
 
     @app.get(
@@ -5665,6 +5715,7 @@ def _register_routes(app: FastAPI):
         http_request: Request,
         request_context: RequestContext = Depends(get_request_context),
         _precheck: None = Depends(precheck_for(PrecheckOperation.RECALL)),
+        _admit: None = Depends(admit_for(PrecheckOperation.RECALL)),
     ):
         """Run a recall and return results with trace."""
         import time
@@ -5917,6 +5968,7 @@ def _register_routes(app: FastAPI):
         http_request: Request,
         request_context: RequestContext = Depends(get_request_context),
         _precheck: None = Depends(precheck_for(PrecheckOperation.REFLECT)),
+        _admit: None = Depends(admit_for(PrecheckOperation.REFLECT)),
     ):
         metrics = get_metrics_collector()
 
@@ -7392,6 +7444,10 @@ def _register_routes(app: FastAPI):
             document = await app.state.memory.get_document(document_id, bank_id, request_context=request_context)
             if not document:
                 raise HTTPException(status_code=404, detail="Document not found")
+            # A store-owned bank's document carries its attachment names from the record just
+            # read; taken off so the payload is the same shape on either backend, and handed on so
+            # the engine does not read that record a second time.
+            stored_names = document.pop("attachment_filenames", None)
             by_document = await app.state.memory.attachments_for_documents(
                 bank_id,
                 [document_id],
@@ -7399,6 +7455,7 @@ def _register_routes(app: FastAPI):
                 # Used only for a store-owned bank, which has no document edge to read; a null
                 # text (full text not kept) makes the engine fall back to the chunk texts.
                 carried_texts={document_id: document.get("original_text")},
+                carried_filenames=None if stored_names is None else {document_id: stored_names},
             )
             if by_document.get(document_id):
                 document["attachments"] = [_attachment_payload(bank_id, record) for record in by_document[document_id]]
@@ -9013,6 +9070,7 @@ def _register_routes(app: FastAPI):
         request: RetainRequest,
         request_context: RequestContext = Depends(get_request_context),
         _precheck: None = Depends(precheck_for(PrecheckOperation.RETAIN)),
+        _admit: None = Depends(admit_for(PrecheckOperation.RETAIN)),
     ):
         """Retain memories with optional async processing."""
         metrics = get_metrics_collector()
@@ -9029,6 +9087,7 @@ def _register_routes(app: FastAPI):
             # and silently delete every screenshot in the article. Only paid for
             # when the caller actually wrote something placeholder-shaped.
             allowed_by_document: dict[str, set[str]] = {}
+            names_by_document: dict[str, dict[str, str]] = {}
             revisited = {
                 item.document_id
                 for item in request.items
@@ -9038,6 +9097,13 @@ def _register_routes(app: FastAPI):
                 existing = await app.state.memory.attachments_for_documents(bank_id, sorted(revisited), request_context)
                 allowed_by_document = {
                     document_id: {record.short_id for record in records} for document_id, records in existing.items()
+                }
+                # The names those attachments already have. The edit re-sends only placeholders,
+                # so without these a store-owned document -- whose record's names are replaced on
+                # every write -- would lose them. A SQL bank merges the same names back itself.
+                names_by_document = {
+                    document_id: {record.short_id: record.filename for record in records if record.filename}
+                    for document_id, records in existing.items()
                 }
 
             canonical_contents = [
@@ -9071,6 +9137,13 @@ def _register_routes(app: FastAPI):
                     for attachment in canonical.attachments
                     if attachment.filename
                 }
+                kept_names = names_by_document.get(item.document_id or "")
+                if kept_names:
+                    referenced = set(iter_placeholder_ids(canonical.text))
+                    item_filenames = {
+                        **{short_id: name for short_id, name in kept_names.items() if short_id in referenced},
+                        **item_filenames,
+                    }
                 if item_filenames:
                     content_dict["attachment_filenames"] = item_filenames
                 if item.timestamp == "unset":

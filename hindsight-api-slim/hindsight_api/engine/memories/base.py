@@ -131,8 +131,58 @@ META_CONSOLIDATED_FLAG = "consolidated"
 #: provenance the extractor records. Carried on the memory so read surfaces can resolve
 #: it from the rows the store already returned, without a second lookup.
 META_ATTACHMENT_IDS = "attachment_ids"
+
+# Keys in a store-owned DOCUMENT record's metadata map (string -> string, so structured values
+# travel as one JSON string each). Unlike the memory bag above these describe the document, and
+# the same record read serves every one of them.
+#: The document's replayable retain parameters, as one JSON object.
+DOC_META_RETAIN_PARAMS = "retain_params"
+#: The names the caller gave this document's attachments, as a JSON object of short id ->
+#: filename. On the document rather than the fact because a filename describes the reference,
+#: not the bytes: the same image can be "diagram.png" in one document and "fig-2.png" in another.
+#: It is what `document_attachments.filename` holds for a bank whose documents live in SQL.
+DOC_META_ATTACHMENT_FILENAMES = "attachment_filenames"
 CONSOLIDATED_NO = "0"
 CONSOLIDATED_YES = "1"
+
+
+def document_record_metadata(
+    retain_params: "dict | None", attachment_filenames: "Mapping[str, str] | None" = None
+) -> dict[str, str]:
+    """The metadata map a store-owned document record is written with.
+
+    One builder for every write path, because a path that forgets a key does not fail -- it
+    writes a record without it, and the key reads back as absent until the next full re-ingest.
+    The map REPLACES the record's previous one: a write carries every name the document should
+    keep, which is why the paths that re-send stored text (append, reprocess, an edit re-sending
+    placeholders) carry the names they read back with it.
+    """
+    out: dict[str, str] = {}
+    if retain_params:
+        out[DOC_META_RETAIN_PARAMS] = json.dumps(retain_params)
+    names = {str(k): str(v) for k, v in (attachment_filenames or {}).items() if k and v}
+    if names:
+        out[DOC_META_ATTACHMENT_FILENAMES] = json.dumps(names, sort_keys=True)
+    return out
+
+
+def document_attachment_filenames(record: "Mapping | None") -> dict[str, str]:
+    """A store-owned document record's attachment names (short id -> filename); ``{}`` if none.
+
+    Tolerant by design: a record written before the key existed, or one whose value does not
+    parse, has no names -- which reads back as a null ``filename``, exactly what it read before.
+    """
+    raw = ((record or {}).get("metadata") or {}).get(DOC_META_ATTACHMENT_FILENAMES)
+    if not raw:
+        return {}
+    try:
+        decoded = json.loads(raw) if isinstance(raw, str) else raw
+    except ValueError:
+        return {}
+    if not isinstance(decoded, dict):
+        return {}
+    return {str(k): str(v) for k, v in decoded.items() if k and v}
+
 
 #: Prefix for the per-source metadata key an observation carries, one per source.
 #: The forward list (:data:`META_SOURCE_MEMORY_IDS`) reads an observation's

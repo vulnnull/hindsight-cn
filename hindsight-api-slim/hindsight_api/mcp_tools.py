@@ -3819,6 +3819,8 @@ def _register_get_document(mcp: FastMCP, memory: MemoryEngine, config: MCPToolsC
         )
         if result is None:
             raise _ToolError(f"Document '{document_id}' not found")
+        # An engine-internal carrier a store-owned bank's document has and a SQL one does not.
+        result.pop("attachment_filenames", None)
         return result
 
     if config.include_bank_id_param:

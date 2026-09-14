@@ -522,8 +522,8 @@ async def test_retain_llm_max_retries_overrides_global():
 async def test_zero_retry_budget_performs_single_chunk_extraction_call():
     """
     Direct _extract_facts_from_chunk with a retry budget of 0 (issue #2731):
-    the outer loop must still run once, and the RAW budget (0) must reach the
-    provider so it stays the single owner of transport retries.
+    the outer loop must still run once, and no per-call budget is forwarded, so
+    the provider's own configured default stays the single owner of transport retries.
     """
     from hindsight_api.engine.retain.fact_extraction import _extract_facts_from_chunk
 
@@ -548,7 +548,7 @@ async def test_zero_retry_budget_performs_single_chunk_extraction_call():
         )
 
     assert llm_config.call.call_count == 1
-    assert llm_config.call.call_args.kwargs["max_retries"] == 0
+    assert "max_retries" not in llm_config.call.call_args.kwargs
     assert len(facts) == 1
 
 
@@ -759,20 +759,18 @@ def retain_config(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "retain_budget, expected_forwarded_retries",
+    "retain_budget",
     [
         # The reported repro: a gateway owns transport retries, so the operator
         # sets the budget to 0. This used to perform ZERO extraction requests and
         # raise "Fact extraction failed after 0 attempts".
-        pytest.param("0", 0, id="zero_budget_gateway_owns_retries"),
-        pytest.param("1", 1, id="budget_one"),
-        pytest.param("3", 3, id="budget_three"),
-        pytest.param(None, 3, id="unset_falls_back_to_global"),
+        pytest.param("0", id="zero_budget_gateway_owns_retries"),
+        pytest.param("1", id="budget_one"),
+        pytest.param("3", id="budget_three"),
+        pytest.param(None, id="unset_falls_back_to_global"),
     ],
 )
-async def test_retry_budget_always_performs_initial_extraction_request(
-    retain_config, retain_budget, expected_forwarded_retries
-):
+async def test_retry_budget_always_performs_initial_extraction_request(retain_config, retain_budget):
     """Any retry budget — including 0 — must still perform the initial request."""
     from hindsight_api.engine.retain.fact_extraction import extract_facts_from_text
 
@@ -791,9 +789,9 @@ async def test_retry_budget_always_performs_initial_extraction_request(
     assert llm.call.call_count == 1
     assert len(facts) == 1
     assert "Alice visited Paris" in facts[0].fact
-    # The RAW budget reaches the provider — not the outer attempt count — so the
-    # provider stays the single retry owner (0 => gateway owns transport retries).
-    assert llm.call.call_args.kwargs["max_retries"] == expected_forwarded_retries
+    # No per-call budget is forwarded — neither the raw budget nor the outer attempt
+    # count — so the provider's configured default stays the single retry owner.
+    assert "max_retries" not in llm.call.call_args.kwargs
 
 
 @pytest.mark.asyncio
@@ -830,3 +828,40 @@ async def test_malformed_response_still_attempts_then_fails_loudly(retain_config
 
     assert llm.call.call_count == expected_calls
     assert "after 0 attempts" not in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_retain_through_chain_uses_each_members_own_retry_budget(retain_config):
+    """Retain must not flatten a chain's per-member retry budgets.
+
+    The production shape: a saturated local primary with no retries fails over
+    at once to a remote terminal member that keeps a budget of its own. If retain
+    forwarded its operation budget per call, it would win over both members'
+    defaults and the terminal member would get 0 retries too.
+    """
+    from hindsight_api.config import LLMStrategyConfig
+    from hindsight_api.engine.llm_wrapper import LLMProvider
+    from hindsight_api.engine.multi_llm import MultiLLMProvider
+    from hindsight_api.engine.retain.fact_extraction import extract_facts_from_text
+
+    config = retain_config("0")
+    primary = LLMProvider(provider="mock", api_key="", base_url="", model="local", max_retries=0)
+    terminal = LLMProvider(provider="mock", api_key="", base_url="", model="remote", max_retries=2)
+    primary._provider_impl.call = AsyncMock(side_effect=RuntimeError("503 saturated"))
+    terminal._provider_impl.call = AsyncMock(
+        return_value=LLMCallResult(content=_VALID_EXTRACTION_RESPONSE, usage=TokenUsage())
+    )
+    chain = MultiLLMProvider([primary, terminal], LLMStrategyConfig(mode="failover"))
+
+    facts, _chunks, _usage = await extract_facts_from_text(
+        text="Alice visited Paris in 2023.",
+        event_date=datetime(2023, 1, 1, tzinfo=timezone.utc),
+        llm_config=chain,
+        agent_name="test-agent",
+        config=config,
+        context="",
+    )
+
+    assert len(facts) == 1
+    assert primary._provider_impl.call.call_args.kwargs["max_retries"] == 0
+    assert terminal._provider_impl.call.call_args.kwargs["max_retries"] == 2

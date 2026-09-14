@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 
 from .base import (
+    DOC_META_ATTACHMENT_FILENAMES,
     META_ATTACHMENT_IDS,
     META_CHUNK_ID,
     CausalEdgeRecord,
@@ -29,6 +30,8 @@ from .base import (
     StoredMemory,
     build_fact_records,
     build_text_signals,
+    document_attachment_filenames,
+    document_record_metadata,
     source_key,
 )
 
@@ -76,6 +79,7 @@ def set_memories(memories: MemoriesExtension | None) -> None:
 
 
 __all__ = [
+    "DOC_META_ATTACHMENT_FILENAMES",
     "META_ATTACHMENT_IDS",
     "META_CHUNK_ID",
     "CausalEdgeRecord",
@@ -94,6 +98,8 @@ __all__ = [
     "build_fact_records",
     "build_text_signals",
     "create_memories",
+    "document_attachment_filenames",
+    "document_record_metadata",
     "get_memories",
     "set_memories",
     "source_key",

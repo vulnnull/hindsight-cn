@@ -15,7 +15,7 @@ import uuid
 
 import pytest
 
-from hindsight_api.engine.retain.attachment_content import compute_attachment_hash
+from hindsight_api.engine.retain.attachment_content import compute_attachment_hash, short_attachment_id
 
 PNG_BYTES = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
@@ -40,21 +40,27 @@ async def _retain(client, bank_id: str, content, document_id: str):
     assert response.status_code == 200, response.text
 
 
-async def _edges(memory, bank_id: str) -> set[tuple[str, str]]:
-    """The (document_id, attachment_hash) pairs recorded for the bank.
+async def _edges(client, bank_id: str) -> set[tuple[str, str]]:
+    """The (document_id, attachment short id) pairs the bank's documents reference.
 
-    Read directly: the point under test is the derived table itself, which no
-    public read surface exposes as such.
+    Read through the document API rather than the ``document_attachments`` table.
+    The property is "which documents still reference which blob", and that is the
+    same question on every backend -- but only a SQL bank answers it from that
+    table; a store-owned bank derives it from the stored text. Reading the table
+    would test one backend's bookkeeping instead of the behaviour.
     """
-    backend = await memory._get_backend()
-    async with backend.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT document_id, attachment_hash FROM document_attachments WHERE bank_id = $1", bank_id
-        )
-    return {(row["document_id"], row["attachment_hash"]) for row in rows}
+    listed = await client.get(f"/v1/default/banks/{bank_id}/documents", params={"limit": 1000})
+    assert listed.status_code == 200, listed.text
+    pairs: set[tuple[str, str]] = set()
+    for item in listed.json()["items"]:
+        document = await client.get(f"/v1/default/banks/{bank_id}/documents/{item['id']}")
+        assert document.status_code == 200, document.text
+        pairs.update((item["id"], attachment["id"]) for attachment in document.json().get("attachments") or [])
+    return pairs
 
 
 async def _attachment_hashes(memory, bank_id: str) -> set[str]:
+    """The bank's ``attachments`` rows: the blob registry, written at ingress on every backend."""
     backend = await memory._get_backend()
     async with backend.acquire() as conn:
         rows = await conn.fetch("SELECT attachment_hash FROM attachments WHERE bank_id = $1", bank_id)
@@ -79,7 +85,10 @@ async def test_the_edge_is_recorded_for_every_document_that_references_it(api_cl
     await _retain(api_client, bank_id, [{"type": "text", "text": "one"}, _image_block()], "doc-a")
     await _retain(api_client, bank_id, [{"type": "text", "text": "two"}, _image_block()], "doc-b")
 
-    assert await _edges(memory, bank_id) == {("doc-a", png), ("doc-b", png)}
+    assert await _edges(api_client, bank_id) == {
+        ("doc-a", short_attachment_id(png)),
+        ("doc-b", short_attachment_id(png)),
+    }
     # Content-addressed: two documents, one blob.
     assert await _attachment_hashes(memory, bank_id) == {png}
 
@@ -90,11 +99,11 @@ async def test_re_ingesting_without_an_attachment_drops_its_edge(api_client, mem
     bank_id = f"life-{uuid.uuid4().hex[:8]}"
 
     await _retain(api_client, bank_id, [{"type": "text", "text": "before"}, _image_block()], "doc")
-    assert await _edges(memory, bank_id)
+    assert await _edges(api_client, bank_id)
 
     await _retain(api_client, bank_id, "plain text now, no attachment", "doc")
 
-    assert await _edges(memory, bank_id) == set()
+    assert await _edges(api_client, bank_id) == set()
 
 
 @pytest.mark.asyncio
@@ -124,7 +133,7 @@ async def test_a_shared_blob_survives_deleting_one_of_its_documents(api_client, 
 
     assert await _attachment_hashes(memory, bank_id) == {png}
     assert await _blob_exists(memory, bank_id, png)
-    assert await _edges(memory, bank_id) == {("doc-b", png)}
+    assert await _edges(api_client, bank_id) == {("doc-b", short_attachment_id(png))}
 
 
 @pytest.mark.asyncio

@@ -25,7 +25,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import errno
 import logging
+import os
 import time
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -41,6 +43,11 @@ logger = logging.getLogger(__name__)
 
 # Interval between non-blocking flock attempts while another holder has the store.
 _POLL_INTERVAL_SECONDS = 0.05
+
+# Errors that mean the store cannot be written, so no lock file can live beside
+# it. The lock degrades to per-loop-only for these; every other OSError from
+# creating the lock file propagates.
+_UNWRITABLE_STORE_ERRNOS = frozenset({errno.EROFS, errno.EACCES, errno.EPERM})
 
 # One map of store path -> lock per event loop; LoopLocal prunes closed loops (a weak
 # map would not: a lock that has been waited on holds a reference to its loop).
@@ -69,8 +76,35 @@ async def oauth_store_lock(store: Path, *, timeout_seconds: float, label: str) -
             return
 
         lock_path = store.with_suffix(".lock")
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(lock_path, "a+") as lock_file:
+        try:
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            lock_file = open(lock_path, "a+")
+        except OSError as e:
+            # A read-only store (e.g. a Kubernetes Secret volume fed by an external
+            # secret manager) cannot hold a lock file. Degrade to the per-loop lock,
+            # as the no-`fcntl` branch does, so the refresh body — which also reads
+            # credentials another writer published — still runs. Such a writer never
+            # took this lock anyway.
+            #
+            # Anything else propagates: ENOSPC/EMFILE hit a writable store, and
+            # dropping the lock there admits two concurrent rotations of a rotating
+            # token. EACCES is ambiguous — a foreign-owned lock file in a writable
+            # directory raises it too, with a peer holding the lock — so the
+            # directory itself must be unwritable.
+            if e.errno not in _UNWRITABLE_STORE_ERRNOS or os.access(lock_path.parent, os.W_OK):
+                raise
+            logger.debug(
+                f"{label} store is not writable ({type(e).__name__}: {e}); refresh proceeds without a cross-process lock."
+            )
+            lock_file = None
+
+        if lock_file is None:
+            # Outside the `except`, so errors raised by the refresh body are not
+            # chained to the OSError above.
+            yield
+            return
+
+        with lock_file:
             deadline = time.monotonic() + max(1.0, timeout_seconds)
             while True:
                 try:
