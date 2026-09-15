@@ -65,6 +65,8 @@ Hooks into retain/recall/reflect operations for validation and monitoring. Use c
 
 **No built-in implementation** - implement your own based on your requirements.
 
+Validators are not given an extension context (`self.context` raises). Each hook's argument carries what it needs: `ctx.bank_id` and `ctx.request_context`, the latter holding the identity resolved by the tenant extension.
+
 ```bash
 HINDSIGHT_API_OPERATION_VALIDATOR_EXTENSION=mypackage.validators:MyValidator
 ```

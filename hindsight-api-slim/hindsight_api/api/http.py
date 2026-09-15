@@ -19,7 +19,7 @@ from collections.abc import Awaitable
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Any, Literal, TypeVar
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.gzip import GZipMiddleware
@@ -3603,6 +3603,13 @@ class BankTemplateConfig(BaseModel):
     )
     reflect_source_facts_max_tokens: int | None = Field(
         default=None, description="Max tokens of source facts per reflect call"
+    )
+    knowledge_page_default_trigger: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Trigger fields merged over the built-in knowledge-page default when a page is created "
+            '(e.g. {"refresh_cron": "0 * * * *"}). A trigger sent with the create request still wins.'
+        ),
     )
     mental_model_min_refresh_interval_seconds: int | None = Field(
         default=None,
@@ -8447,15 +8454,21 @@ def _register_routes(app: FastAPI):
                     "Set HINDSIGHT_API_ENABLE_DOCUMENT_EXPORT_API=true to enable.",
                 )
             # Only bank-scoped keys are downloadable. Parse the bank id out of the
-            # "banks/{bank_id}/..." key (request validation, so it belongs here); the
-            # engine method then authorizes the caller against that bank and retrieves
-            # the file, so a caller can't fetch another tenant's or bank's archive
-            # (IDOR guard). The unguessable uuid in the key is defence in depth, not
-            # the access control.
+            # "tenants/{schema}/banks/{bank_id}/..." key — or the "banks/{bank_id}/..."
+            # layout written before keys carried the tenant (request validation, so it
+            # belongs here); the engine method then authorizes the caller against that
+            # bank, in their own tenant, and retrieves the file, so a caller can't fetch
+            # another tenant's or bank's archive (IDOR guard). The unguessable uuid in
+            # the key is defence in depth, not the access control.
             parts = key.split("/")
-            if ".." in parts or len(parts) < 2 or parts[0] != "banks" or not parts[1]:
+            if ".." in parts:
                 raise HTTPException(status_code=404, detail="File not found")
-            bank_id = parts[1]
+            if len(parts) > 4 and parts[0] == "tenants" and parts[2] == "banks" and parts[3]:
+                bank_id = unquote(parts[3])
+            elif len(parts) > 2 and parts[0] == "banks" and parts[1]:
+                bank_id = parts[1]
+            else:
+                raise HTTPException(status_code=404, detail="File not found")
 
             data = await app.state.memory.retrieve_bank_file(bank_id, key, request_context)
             if data is None:
@@ -9492,11 +9505,20 @@ def _register_routes(app: FastAPI):
     ):
         """Clear memories for a memory bank, optionally filtered by type."""
         try:
-            await app.state.memory.delete_bank(
+            result = await app.state.memory.delete_bank(
                 bank_id, fact_type=type, delete_bank_profile=False, request_context=request_context
             )
 
-            return DeleteResponse(success=True)
+            # Counted inside the delete's transaction — a client's before/after list diff races
+            # concurrent retains (#4307). Memory units only: unlike api_delete_bank, the bank's
+            # entities and documents survive a clear.
+            deleted = result.get("memory_units_deleted", 0)
+            scope = f" of type '{type}'" if type else ""
+            return DeleteResponse(
+                success=True,
+                message=f"Cleared {deleted} memory unit(s){scope} from bank '{bank_id}'",
+                deleted_count=deleted,
+            )
         except OperationValidationError as e:
             raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):

@@ -393,12 +393,28 @@ class DaemonEmbedManager(EmbedManager):
 
     @staticmethod
     def _run_probe(cmd: list[str], timeout: float = _PROBE_TIMEOUT_S) -> str | None:
-        """Run a short read-only probe command, returning stdout or None."""
+        """Run a short read-only probe command, returning stdout or None.
+
+        The decode is pinned rather than left to the locale. These probes run
+        Windows-native CLIs (`netstat`, `powershell`, `wmic`) that emit localized
+        text in the console code page, while `text=True` alone decodes with
+        `locale.getpreferredencoding(False)` - which is `utf-8` in a UTF-8-mode
+        process. The mismatch raises inside `subprocess`'s own reader thread, where
+        nothing here can catch it: the thread dies, `run()` returns normally with
+        `stdout=None` and returncode 0, and the caller reads "no listeners" from a
+        host that has plenty.
+
+        `errors="replace"` is the half that makes it deterministic; `encoding` alone
+        still raises. Only the localized header carries non-ASCII, so every line the
+        parsers read survives intact and neither needed changing.
+        """
         try:
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=timeout,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )

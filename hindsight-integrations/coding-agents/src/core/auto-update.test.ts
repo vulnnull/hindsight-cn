@@ -3,11 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { log } from "./log";
 import {
   type AutoUpdateOptions,
   CHECK_INTERVAL_MS,
   isNewer,
   maybeAutoUpdate,
+  npmViewVersion,
   selfUpdatable,
   stateFile,
 } from "./auto-update";
@@ -35,6 +37,125 @@ describe("isNewer", () => {
   });
 });
 
+/**
+ * The real lookup, exercised directly — the 0.5.0 406 bug shipped precisely because only the
+ * fetch SEAM was tested and the real URL never was. Here the contract under test is the spawn
+ * protocol itself: which binary, which args, and how each way `npm view` can end maps to a
+ * version or "".
+ */
+describe("npmViewVersion", () => {
+  const asRealSpawn = (m: ReturnType<typeof npmSpawn>): AutoUpdateOptions["spawn"] =>
+    m as unknown as AutoUpdateOptions["spawn"];
+
+  /** A spawn stub whose child feeds `out` on stdout, then closes with `code` — the events the
+   *  implementation listens to. Emits on a microtask so listeners are registered first. */
+  const npmSpawn = (code: number | null, out: string, error?: Error, stdoutError?: Error) =>
+    vi.fn((_bin: string, _args: string[], _o: Record<string, unknown>) => {
+      const listeners: Record<string, Array<(arg: unknown) => void>> = {};
+      queueMicrotask(() => {
+        for (const cb of listeners["stdout:data"] ?? []) cb(out);
+        if (error) for (const cb of listeners["error"] ?? []) cb(error);
+        if (stdoutError) for (const cb of listeners["stdout:error"] ?? []) cb(stdoutError);
+        for (const cb of listeners["close"] ?? []) cb(code);
+      });
+      return {
+        stdout: {
+          setEncoding: (_e: string) => undefined,
+          on: (ev: string, cb: (arg: unknown) => void) => {
+            (listeners[`stdout:${ev}`] ??= []).push(cb);
+          },
+        },
+        on: (ev: string, cb: (arg: unknown) => void) => {
+          (listeners[ev] ??= []).push(cb);
+        },
+      };
+    });
+
+  it("asks npm for the version — the same resolver npx will install through", async () => {
+    const spawn = npmSpawn(0, '"0.6.1"\n');
+    expect(await npmViewVersion("@vectorize-io/hindsight-coding-agents", asRealSpawn(spawn))).toBe(
+      "0.6.1"
+    );
+    const [bin, args, opts] = spawn.mock.calls[0];
+    expect(bin).toBe("npm");
+    // --json, so the version arrives as a quoted string on stdout rather than npm's human
+    // output; a timeout bounds it (the NPM_VIEW_TIMEOUT_MS contract).
+    expect(args).toEqual(["view", "@vectorize-io/hindsight-coding-agents", "version", "--json"]);
+    expect(opts.timeout).toBe(5000);
+  });
+
+  it("reads a failure as no-version, never as an exception", async () => {
+    // non-zero exit (E404, offline, auth failure), with npm's stderr-style error event alongside…
+    expect(await npmViewVersion("@x/y", asRealSpawn(npmSpawn(1, "", new Error("npm ERR!"))))).toBe(
+      ""
+    );
+    // …a timeout kill arriving as close(null)…
+    expect(await npmViewVersion("@x/y", asRealSpawn(npmSpawn(null, "")))).toBe("");
+    // …unparseable stdout (an old npm printing something else)…
+    expect(await npmViewVersion("@x/y", asRealSpawn(npmSpawn(0, "not json")))).toBe("");
+    // …JSON, but not a single version string…
+    expect(await npmViewVersion("@x/y", asRealSpawn(npmSpawn(0, '["0.6.1", "0.6.0"]')))).toBe("");
+    // …a "version" carrying shell metacharacters — the whitelist is what stops it, not
+    // isNewer: parseInt("3 && calc") is 3, so isNewer("1.2.3 && calc", "1.0.0") is true. The
+    // value is headed for an argv entry now and a command line once a Windows shell wrapper
+    // exists; a pre-release, by contrast, is still a release.
+    expect(await npmViewVersion("@x/y", asRealSpawn(npmSpawn(0, '"1.2.3 && calc"')))).toBe("");
+    expect(await npmViewVersion("@x/y", asRealSpawn(npmSpawn(0, '"1.2.3-rc.1"')))).toBe(
+      "1.2.3-rc.1"
+    );
+    // …an error on the stdout pipe itself (EPIPE), which without a listener would be an
+    // uncaught exception in the session-start hook process…
+    expect(
+      await npmViewVersion("@x/y", asRealSpawn(npmSpawn(0, "", undefined, new Error("EPIPE"))))
+    ).toBe("");
+  });
+
+  it("force-settles when close never arrives — a grandchild holding the pipe would stall it", async () => {
+    vi.useFakeTimers();
+    try {
+      // A child that never emits anything: no stdout, no error, no close. `close` waits for
+      // the pipe to drain and would never fire, the spawn timeout only reaches the direct
+      // child, and the update lock would sit held to LOCK_STALE_MS. The hard deadline is
+      // the only way out.
+      const kill = vi.fn();
+      const spawn = vi.fn(() => ({
+        stdout: { setEncoding: (_e: string) => undefined, on: () => undefined },
+        on: () => undefined,
+        kill,
+      }));
+      const p = npmViewVersion("@x/y", spawn as unknown as AutoUpdateOptions["spawn"]);
+      // Genuinely pending before the deadline — not settled by spawn or any early event.
+      expect(await Promise.race([p.then(() => true), Promise.resolve(false)])).toBe(false);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await expect(p).resolves.toBe("");
+      expect(kill).toHaveBeenCalledWith("SIGKILL");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("logs exactly one line per failed lookup — the trailing close event is not a second one", async () => {
+    // Node reports a spawn failure as error FOLLOWED BY close(-2); the stub reproduces that
+    // order. Only the count is asserted, not the wording — the contract is "one lookup, one
+    // line", with the first reason winning so "exited -2" about a process that never ran
+    // cannot be the line an investigator sees.
+    const logSpy = vi.spyOn(log, "info");
+    try {
+      await expect(
+        npmViewVersion("@x/y", asRealSpawn(npmSpawn(-2, "", new Error("spawn npm ENOENT"))))
+      ).resolves.toBe("");
+      await expect(
+        npmViewVersion("@x/y", asRealSpawn(npmSpawn(0, "", undefined, new Error("EPIPE"))))
+      ).resolves.toBe("");
+      // Inside the try: mockRestore() clears the call history, so asserting after the
+      // finally would always see zero.
+      expect(logSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+});
+
 describe("maybeAutoUpdate", () => {
   const dirs: string[] = [];
   const tmp = () => {
@@ -56,32 +177,26 @@ describe("maybeAutoUpdate", () => {
     }));
   const asSpawn = (m: ReturnType<typeof spawnMock>): AutoUpdateOptions["spawn"] =>
     m as unknown as AutoUpdateOptions["spawn"];
-  const asFetch = (m: unknown): AutoUpdateOptions["fetch"] => m as AutoUpdateOptions["fetch"];
 
   /** A staged runtime directory holding `version`, plus the seams the checker needs. */
   const staged = (version: string) => {
     const runtime = tmp();
     writeFileSync(join(runtime, "package.json"), JSON.stringify({ version }));
     const spawn = spawnMock();
-    // Answers like the real registry, which is the point: the previous stub returned `ok: true`
-    // whatever was asked of it, so it happily served a request npmjs.org rejects with 406 —
-    // `accept: application/vnd.npm.install-v1+json` is only valid on the packument (`/<pkg>`), not
-    // on `/<pkg>/latest`. That shipped in 0.5.0 as a silent permanent no-op: the 406 became "" and
-    // read as "no newer version". A stub that encodes the caller's assumption cannot catch that.
-    const fetchOk = (latest: string) =>
-      vi.fn(async (_url: string, init?: { headers?: Record<string, string> }) => {
-        const accept = init?.headers?.accept ?? "";
-        if (accept.includes("vnd.npm.install-v1+json")) return { ok: false, status: 406 };
-        return { ok: true, json: async () => ({ version: latest }) };
-      });
-    return { runtime, spawn, fetchOk };
+    // The seam answers with a version the way the real `npm view` does. The 0.5.0 406 lesson —
+    // a stub that encodes the caller's assumption cannot catch the caller's mistake — now lives
+    // in the seam's SHAPE: it resolves "" for failure, exactly like npmViewVersion does for a
+    // non-zero exit, a timeout kill, or no npm to spawn. A stub that threw instead would test a
+    // path the real code cannot take.
+    const npmViewOk = (latest: string) => vi.fn(async (_pkg: string) => latest);
+    return { runtime, spawn, npmViewOk };
   };
 
   const opts = (
     runtime: string,
     extra: {
       spawn?: ReturnType<typeof spawnMock>;
-      fetch?: unknown;
+      npmView?: (pkg: string) => Promise<string>;
       now?: number;
       lockFile?: string;
       selfUpdatable?: (dir: string) => boolean;
@@ -94,7 +209,7 @@ describe("maybeAutoUpdate", () => {
     // running in parallel would otherwise block each other for LOCK_STALE_MS.
     lockFile: extra.lockFile ?? join(runtime, "update.lock"),
     spawn: extra.spawn ? asSpawn(extra.spawn) : undefined,
-    fetch: asFetch(extra.fetch),
+    npmView: extra.npmView,
     now: extra.now,
     // Default the ownership guards open so each test exercises the behaviour it is about; the
     // guards themselves have their own tests below.
@@ -103,10 +218,10 @@ describe("maybeAutoUpdate", () => {
   });
 
   it("spawns a detached stage-only update when the registry is ahead", async () => {
-    const { runtime, spawn, fetchOk } = staged("0.4.2");
+    const { runtime, spawn, npmViewOk } = staged("0.4.2");
     const started = await maybeAutoUpdate(
       { autoUpdate: true },
-      opts(runtime, { spawn, fetch: fetchOk("0.4.3") })
+      opts(runtime, { spawn, npmView: npmViewOk("0.4.3") })
     );
 
     expect(started).toBe("0.4.3");
@@ -120,77 +235,84 @@ describe("maybeAutoUpdate", () => {
   });
 
   it("does nothing when the staged version is already current", async () => {
-    const { runtime, spawn, fetchOk } = staged("0.4.3");
+    const { runtime, spawn, npmViewOk } = staged("0.4.3");
     expect(
-      await maybeAutoUpdate({ autoUpdate: true }, opts(runtime, { spawn, fetch: fetchOk("0.4.3") }))
+      await maybeAutoUpdate(
+        { autoUpdate: true },
+        opts(runtime, { spawn, npmView: npmViewOk("0.4.3") })
+      )
     ).toBe("");
     expect(spawn).not.toHaveBeenCalled();
   });
 
   it("is off when autoUpdate is false — the flag reaches the registry call, not just the spawn", async () => {
-    const { runtime, spawn, fetchOk } = staged("0.4.2");
-    const fetchImpl = fetchOk("0.4.3");
+    const { runtime, spawn, npmViewOk } = staged("0.4.2");
+    const npmViewImpl = npmViewOk("0.4.3");
     expect(
-      await maybeAutoUpdate({ autoUpdate: false }, opts(runtime, { spawn, fetch: fetchImpl }))
+      await maybeAutoUpdate({ autoUpdate: false }, opts(runtime, { spawn, npmView: npmViewImpl }))
     ).toBe("");
-    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(npmViewImpl).not.toHaveBeenCalled();
     expect(spawn).not.toHaveBeenCalled();
   });
 
   it("never touches a checkout or an npx run — only the staged copy updates itself", async () => {
-    const { runtime, spawn, fetchOk } = staged("0.4.2");
+    const { runtime, spawn, npmViewOk } = staged("0.4.2");
     const checkout = tmp();
     writeFileSync(join(checkout, "package.json"), JSON.stringify({ version: "0.4.2" }));
     expect(
       await maybeAutoUpdate(
         { autoUpdate: true },
-        { ...opts(runtime, { spawn, fetch: fetchOk("0.4.3") }), pkgRoot: checkout }
+        { ...opts(runtime, { spawn, npmView: npmViewOk("0.4.3") }), pkgRoot: checkout }
       )
     ).toBe("");
     expect(spawn).not.toHaveBeenCalled();
   });
 
   it("checks at most once per interval, and stamps the attempt even when it finds nothing", async () => {
-    const { runtime, spawn, fetchOk } = staged("0.4.2");
-    const fetchImpl = fetchOk("0.4.2"); // up to date: nothing spawned, but the check still happened
+    const { runtime, spawn, npmViewOk } = staged("0.4.2");
+    const npmViewImpl = npmViewOk("0.4.2"); // up to date: nothing spawned, but the check still happened
     const t0 = 1_000_000_000;
 
     await maybeAutoUpdate(
       { autoUpdate: true },
-      opts(runtime, { spawn, fetch: fetchImpl, now: t0 })
+      opts(runtime, { spawn, npmView: npmViewImpl, now: t0 })
     );
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(npmViewImpl).toHaveBeenCalledTimes(1);
     expect(JSON.parse(readFileSync(stateFile(runtime), "utf8")).lastCheck).toBe(t0);
 
     // A second session an hour later reads the stamp and does not call out again.
     await maybeAutoUpdate(
       { autoUpdate: true },
-      opts(runtime, { spawn, fetch: fetchImpl, now: t0 + 3_600_000 })
+      opts(runtime, { spawn, npmView: npmViewImpl, now: t0 + 3_600_000 })
     );
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(npmViewImpl).toHaveBeenCalledTimes(1);
 
     // A day later it is due again.
     await maybeAutoUpdate(
       { autoUpdate: true },
-      opts(runtime, { spawn, fetch: fetchImpl, now: t0 + CHECK_INTERVAL_MS })
+      opts(runtime, { spawn, npmView: npmViewImpl, now: t0 + CHECK_INTERVAL_MS })
     );
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(npmViewImpl).toHaveBeenCalledTimes(2);
   });
 
   it("stamps a FAILED check too, so an offline machine asks once a day rather than every session", async () => {
     const { runtime, spawn } = staged("0.4.2");
-    const offline = vi.fn(async () => {
-      throw new Error("ENOTFOUND registry.npmjs.org");
-    });
+    // Real lookup failures — non-zero exit, timeout kill, no npm to spawn — resolve "", the same
+    // answer as "no newer version"; npmViewVersion never rejects, and the module's never-throw
+    // guard is what keeps that equivalence safe.
+    const offline = vi.fn(async (_pkg: string) => "");
     const t0 = 1_000_000_000;
 
     expect(
-      await maybeAutoUpdate({ autoUpdate: true }, opts(runtime, { spawn, fetch: offline, now: t0 }))
+      await maybeAutoUpdate(
+        { autoUpdate: true },
+        opts(runtime, { spawn, npmView: offline, now: t0 })
+      )
     ).toBe("");
     expect(JSON.parse(readFileSync(stateFile(runtime), "utf8")).lastCheck).toBe(t0);
     await maybeAutoUpdate(
       { autoUpdate: true },
-      opts(runtime, { spawn, fetch: offline, now: t0 + 60_000 })
+      opts(runtime, { spawn, npmView: offline, now: t0 + 60_000 })
     );
     expect(offline).toHaveBeenCalledTimes(1);
     expect(spawn).not.toHaveBeenCalled();
@@ -200,7 +322,7 @@ describe("maybeAutoUpdate", () => {
   // all spawn `update`, and two concurrent stageRuntime runs (rmSync dist, then cpSync) can leave a
   // half-written runtime with missing entry points.
   it("lets only ONE of several simultaneous session starts spawn an updater", async () => {
-    const { runtime, fetchOk } = staged("0.4.2");
+    const { runtime, npmViewOk } = staged("0.4.2");
     const lock = join(tmp(), "auto-update.lock");
     const spawns = [spawnMock(), spawnMock(), spawnMock()];
     const now = 1_000_000_000;
@@ -209,7 +331,7 @@ describe("maybeAutoUpdate", () => {
       spawns.map((spawn) =>
         maybeAutoUpdate(
           { autoUpdate: true },
-          opts(runtime, { spawn, fetch: fetchOk("0.4.3"), now, lockFile: lock })
+          opts(runtime, { spawn, npmView: npmViewOk("0.4.3"), now, lockFile: lock })
         )
       )
     );
@@ -219,13 +341,13 @@ describe("maybeAutoUpdate", () => {
   });
 
   it("frees the lock when the check finds nothing, so the next window is not blocked", async () => {
-    const { runtime, spawn, fetchOk } = staged("0.4.2");
+    const { runtime, spawn, npmViewOk } = staged("0.4.2");
     const lock = join(tmp(), "auto-update.lock");
     const t0 = 1_000_000_000;
 
     await maybeAutoUpdate(
       { autoUpdate: true },
-      opts(runtime, { spawn, fetch: fetchOk("0.4.2"), now: t0, lockFile: lock })
+      opts(runtime, { spawn, npmView: npmViewOk("0.4.2"), now: t0, lockFile: lock })
     );
     expect(existsSync(lock)).toBe(false);
 
@@ -235,7 +357,7 @@ describe("maybeAutoUpdate", () => {
         { autoUpdate: true },
         opts(runtime, {
           spawn,
-          fetch: fetchOk("0.4.3"),
+          npmView: npmViewOk("0.4.3"),
           now: t0 + CHECK_INTERVAL_MS,
           lockFile: lock,
         })
@@ -244,7 +366,7 @@ describe("maybeAutoUpdate", () => {
   });
 
   it("treats a lock whose holder is gone as stale rather than waiting out the TTL", async () => {
-    const { runtime, spawn, fetchOk } = staged("0.4.2");
+    const { runtime, spawn, npmViewOk } = staged("0.4.2");
     const lock = join(tmp(), "auto-update.lock");
     // pid 2^22 is above every Linux/macOS pid_max — nothing can be running under it.
     writeFileSync(lock, JSON.stringify({ pid: 4_194_304, ts: Date.now() }));
@@ -252,7 +374,7 @@ describe("maybeAutoUpdate", () => {
     expect(
       await maybeAutoUpdate(
         { autoUpdate: true },
-        opts(runtime, { spawn, fetch: fetchOk("0.4.3"), lockFile: lock })
+        opts(runtime, { spawn, npmView: npmViewOk("0.4.3"), lockFile: lock })
       )
     ).toBe("0.4.3");
   });
@@ -261,46 +383,62 @@ describe("maybeAutoUpdate", () => {
   // version with npm. Re-staging behind their back would leave `npm ls -g` naming a version that
   // is no longer what runs, with no way to reconcile the two.
   it("leaves a runtime alone when it was not staged from an npx download", async () => {
-    const { runtime, spawn, fetchOk } = staged("0.4.2");
-    const fetchImpl = fetchOk("0.4.3");
+    const { runtime, spawn, npmViewOk } = staged("0.4.2");
+    const npmViewImpl = npmViewOk("0.4.3");
     expect(
       await maybeAutoUpdate(
         { autoUpdate: true },
-        opts(runtime, { spawn, fetch: fetchImpl, selfUpdatable: () => false })
+        opts(runtime, { spawn, npmView: npmViewImpl, selfUpdatable: () => false })
       )
     ).toBe("");
-    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(npmViewImpl).not.toHaveBeenCalled();
     expect(spawn).not.toHaveBeenCalled();
   });
 
   it("skips the check entirely when npx is not on PATH — there would be nothing to spawn", async () => {
-    const { runtime, spawn, fetchOk } = staged("0.4.2");
-    const fetchImpl = fetchOk("0.4.3");
+    const { runtime, spawn, npmViewOk } = staged("0.4.2");
+    const npmViewImpl = npmViewOk("0.4.3");
     expect(
       await maybeAutoUpdate(
         { autoUpdate: true },
-        opts(runtime, { spawn, fetch: fetchImpl, binOnPath: (bin) => bin !== "npx" })
+        opts(runtime, { spawn, npmView: npmViewImpl, binOnPath: (bin) => bin !== "npx" })
       )
     ).toBe("");
-    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(npmViewImpl).not.toHaveBeenCalled();
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it("skips the check entirely when npm is not on PATH — there would be no version to look up", async () => {
+    const { runtime, spawn, npmViewOk } = staged("0.4.2");
+    const npmViewImpl = npmViewOk("0.4.3");
+    expect(
+      await maybeAutoUpdate(
+        { autoUpdate: true },
+        opts(runtime, { spawn, npmView: npmViewImpl, binOnPath: (bin) => bin !== "npm" })
+      )
+    ).toBe("");
+    expect(npmViewImpl).not.toHaveBeenCalled();
     expect(spawn).not.toHaveBeenCalled();
   });
 
   it("stamps both refusals, so neither repeats its reason on every session start", async () => {
-    const { runtime, spawn, fetchOk } = staged("0.4.2");
+    const { runtime, spawn, npmViewOk } = staged("0.4.2");
     const t0 = 1_000_000_000;
     await maybeAutoUpdate(
       { autoUpdate: true },
-      opts(runtime, { spawn, fetch: fetchOk("0.4.3"), now: t0, selfUpdatable: () => false })
+      opts(runtime, { spawn, npmView: npmViewOk("0.4.3"), now: t0, selfUpdatable: () => false })
     );
     expect(JSON.parse(readFileSync(stateFile(runtime), "utf8")).lastCheck).toBe(t0);
   });
 
   it("stays out of the survey's own headless session", async () => {
-    const { runtime, spawn, fetchOk } = staged("0.4.2");
+    const { runtime, spawn, npmViewOk } = staged("0.4.2");
     process.env.HINDSIGHT_DISABLE_HOOKS = "1";
     expect(
-      await maybeAutoUpdate({ autoUpdate: true }, opts(runtime, { spawn, fetch: fetchOk("0.4.3") }))
+      await maybeAutoUpdate(
+        { autoUpdate: true },
+        opts(runtime, { spawn, npmView: npmViewOk("0.4.3") })
+      )
     ).toBe("");
     expect(spawn).not.toHaveBeenCalled();
   });
@@ -308,15 +446,16 @@ describe("maybeAutoUpdate", () => {
   it("never guesses when the staged version is unreadable", async () => {
     const runtime = tmp(); // no package.json at all
     const spawn = spawnMock();
-    const fetchImpl = vi.fn(async () => ({ ok: true, json: async () => ({ version: "9.9.9" }) }));
+    const npmViewImpl = vi.fn(async () => "9.9.9");
     expect(
-      await maybeAutoUpdate({ autoUpdate: true }, opts(runtime, { spawn, fetch: fetchImpl }))
+      await maybeAutoUpdate({ autoUpdate: true }, opts(runtime, { spawn, npmView: npmViewImpl }))
     ).toBe("");
+    expect(npmViewImpl).not.toHaveBeenCalled();
     expect(spawn).not.toHaveBeenCalled();
   });
 
   it("survives a spawn that fails asynchronously", async () => {
-    const { runtime, fetchOk } = staged("0.4.2");
+    const { runtime, npmViewOk } = staged("0.4.2");
     const handlers: Record<string, (e: Error) => void> = {};
     const spawn = vi.fn((_bin: string, _args: string[], _o: Record<string, unknown>) => ({
       on: (event: string, cb: (e: Error) => void) => {
@@ -330,7 +469,7 @@ describe("maybeAutoUpdate", () => {
         pkgRoot: runtime,
         runtimeDir: runtime,
         spawn: asSpawn(spawn as never),
-        fetch: asFetch(fetchOk("0.4.3")),
+        npmView: npmViewOk("0.4.3"),
       }
     );
     expect(() => handlers.error?.(new Error("spawn npx ENOENT"))).not.toThrow();

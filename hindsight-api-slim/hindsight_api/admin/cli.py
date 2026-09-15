@@ -19,6 +19,7 @@ import asyncpg
 import typer
 
 from ..config import DEFAULT_DATABASE_SCHEMA, HindsightConfig, load_dotenv_for_entrypoint
+from ..db_url import is_oracle_url
 from ..engine.memories import get_memories
 from ..engine.memory_engine import _current_schema
 from ..engine.retain.bank_utils import _vector_index_clause
@@ -841,6 +842,238 @@ def repair_bank(
         failed_names = [name for r in results for name in r.failed_indexes]
         typer.echo(f"Failed indexes (dropped, retry with a re-run): {', '.join(failed_names)}", err=True)
         raise typer.Exit(1)
+
+
+class RenameBankError(Exception):
+    """A rename-bank precondition failed; nothing was changed."""
+
+
+# FKs whose own columns include bank_id and that cannot be deferred as declared.
+_RIGID_BANK_ID_FKS_SQL = """
+    SELECT c.conrelid::regclass::text AS tbl, c.conname
+    FROM pg_constraint c
+    JOIN pg_namespace n ON n.oid = c.connamespace
+    WHERE c.contype = 'f' AND n.nspname = $1 AND NOT c.condeferrable
+      AND EXISTS (
+          SELECT 1 FROM pg_attribute a
+          WHERE a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey) AND a.attname = 'bank_id'
+      )
+"""
+
+
+async def _set_fks_deferrable(conn: asyncpg.Connection, fks: list[asyncpg.Record], clause: str) -> None:
+    """Flip the given FKs' deferrability in one short transaction.
+
+    ``ALTER CONSTRAINT`` only touches the catalog, but it still takes a table lock
+    and queues behind any open transaction on the table — and everything else
+    queues behind it. ``lock_timeout`` turns a long wait into a loud failure
+    instead of a tenant-wide stall.
+    """
+    async with conn.transaction():
+        await conn.execute("SET LOCAL lock_timeout = '5s'")
+        for fk in fks:
+            await conn.execute(f"ALTER TABLE {fk['tbl']} ALTER CONSTRAINT {_quote_identifier(fk['conname'])} {clause}")
+
+
+async def _rename_bank(
+    conn: asyncpg.Connection, schema: str, old_bank_id: str, new_bank_id: str, *, dry_run: bool
+) -> dict[str, int]:
+    """Move every row of ``old_bank_id`` to ``new_bank_id`` in one transaction.
+
+    ``bank_id`` is the key every bank-scoped table carries, several composite FKs
+    included (``documents(id, bank_id)``, ``mental_models(id, bank_id)``), so no
+    update order satisfies an immediate FK check. The FKs are made DEFERRABLE
+    just for the rename and put back afterwards, each flip in its own short
+    transaction — doing it inside the rename would hold those table locks, and
+    block every bank in the schema, for its whole duration. This is runtime DDL
+    rather than a migration on purpose: rename is a rare admin operation, and the
+    schema stays exactly as the migrations declare it.
+
+    Only FKs this call flipped are put back. If that restore cannot happen (the
+    process dies, or the restore times out on a lock) they stay DEFERRABLE
+    INITIALLY IMMEDIATE, which checks every normal write exactly as before; a
+    later rename will not restore them, since it only flips what it finds
+    NOT DEFERRABLE, so the failure is reported with the constraint names.
+
+    Returns the rows moved per table (tables the bank had no rows in are omitted).
+    """
+    rigid = await conn.fetch(_RIGID_BANK_ID_FKS_SQL, schema)
+    try:
+        await _set_fks_deferrable(conn, rigid, "DEFERRABLE INITIALLY IMMEDIATE")
+    except asyncpg.exceptions.LockNotAvailableError as exc:
+        raise RenameBankError(
+            "could not lock the bank tables within 5s to prepare the rename; retry when fewer long transactions run"
+        ) from exc
+    try:
+        return await _move_bank_rows(conn, schema, old_bank_id, new_bank_id, dry_run=dry_run)
+    finally:
+        # Never raise from here: it would replace the rename's own outcome (success
+        # or its real error) with a failure that leaves every write checked as before.
+        try:
+            await _set_fks_deferrable(conn, rigid, "NOT DEFERRABLE")
+        except Exception as exc:  # noqa: BLE001
+            names = ", ".join(f"{fk['tbl']}.{fk['conname']}" for fk in rigid)
+            typer.echo(
+                f"Warning: could not restore NOT DEFERRABLE on {names} ({exc}). They still enforce every write "
+                "as before; restore with ALTER TABLE ... ALTER CONSTRAINT ... NOT DEFERRABLE.",
+                err=True,
+            )
+
+
+async def _move_bank_rows(
+    conn: asyncpg.Connection, schema: str, old_bank_id: str, new_bank_id: str, *, dry_run: bool
+) -> dict[str, int]:
+    """The rename transaction proper; the bank_id FKs must already be DEFERRABLE.
+
+    Deferring them lets the tables move in any order, and forcing them back to
+    IMMEDIATE before the commit — or before the dry run's rollback — makes a
+    missed table fail the whole rename instead of stranding rows. Tables are read
+    from the catalog, so extension tables and tables added later are covered
+    without a list to maintain.
+
+    The ``FOR UPDATE`` on the bank row serialises the rename against writers:
+    anything inserting a FK child of the bank takes a key-share lock on that row,
+    so it either commits before the rename reads, or waits and then fails its FK
+    check rather than writing under an id that no longer exists.
+    """
+    banks = _fq_table("banks", schema)
+    tx = conn.transaction()
+    await tx.start()
+    try:
+        if not await conn.fetchval(f"SELECT 1 FROM {banks} WHERE bank_id = $1 FOR UPDATE", old_bank_id):
+            raise RenameBankError(f"bank '{old_bank_id}' does not exist in schema '{schema}'")
+        if await conn.fetchval(f"SELECT 1 FROM {banks} WHERE bank_id = $1", new_bank_id):
+            raise RenameBankError(f"bank '{new_bank_id}' already exists in schema '{schema}'")
+        # An operation's task_payload names its bank, so one run after the rename
+        # would work on (and could recreate) the old id.
+        active = await conn.fetchval(
+            f"SELECT count(*) FROM {_fq_table('async_operations', schema)} "
+            "WHERE bank_id = $1 AND status IN ('pending', 'processing')",
+            old_bank_id,
+        )
+        if active:
+            raise RenameBankError(
+                f"bank '{old_bank_id}' has {active} pending or processing operation(s); "
+                "wait for them to finish or cancel them, then retry"
+            )
+        tables = await conn.fetch(
+            """
+            SELECT c.table_name
+            FROM information_schema.columns c
+            JOIN information_schema.tables t
+              ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+            WHERE c.table_schema = $1 AND c.column_name = 'bank_id' AND t.table_type = 'BASE TABLE'
+            ORDER BY c.table_name
+            """,
+            schema,
+        )
+        await conn.execute("SET CONSTRAINTS ALL DEFERRED")
+        moved: dict[str, int] = {}
+        for row in tables:
+            status = await conn.execute(
+                f"UPDATE {_fq_table(row['table_name'], schema)} SET bank_id = $1 WHERE bank_id = $2",
+                new_bank_id,
+                old_bank_id,
+            )
+            count = int(status.split()[-1])
+            if count:
+                moved[row["table_name"]] = count
+        await conn.execute("SET CONSTRAINTS ALL IMMEDIATE")
+    except BaseException:
+        await tx.rollback()
+        raise
+    if dry_run:
+        await tx.rollback()
+    else:
+        await tx.commit()
+    return moved
+
+
+async def _run_rename_bank(
+    db_url: str, schema: str, old_bank_id: str, new_bank_id: str, *, dry_run: bool
+) -> dict[str, int]:
+    """Rename the bank, then rebuild its per-bank vector indexes.
+
+    Those indexes are partial on a ``bank_id`` literal, so after the rename they
+    cover nothing; the reconcile sees the stale predicate and rebuilds them
+    CONCURRENTLY, which is why it runs after the commit, outside the transaction.
+    Until it finishes, recall on the bank runs without its index.
+    """
+    if get_memories().store_owned_for(old_bank_id):
+        raise RenameBankError(f"bank '{old_bank_id}' keeps its memories outside SQL; rename is not supported for it")
+    conn = await _admin_connect(db_url)
+    try:
+        moved = await _rename_bank(conn, schema, old_bank_id, new_bank_id, dry_run=dry_run)
+        index_clause = _vector_index_clause()
+        if not dry_run and index_clause is not None:
+            result = await reconcile_bank_vector_indexes(conn, schema, new_bank_id, index_clause)
+            typer.echo(f"Vector indexes: {result.created} rebuilt, {result.dropped} dropped, {result.failed} failed")
+            if result.failed:
+                typer.echo(f"Re-run `hindsight-admin repair-bank --bank {new_bank_id}` to retry.", err=True)
+        return moved
+    finally:
+        await conn.close()
+
+
+@app.command(name="rename-bank")
+def rename_bank(
+    old_bank_id: str = typer.Option(..., "--from", help="Current bank id."),
+    new_bank_id: str = typer.Option(..., "--to", help="New bank id. Must not exist yet."),
+    schema: str | None = typer.Option(
+        None,
+        "--schema",
+        "-s",
+        help="Database schema the bank lives in. Defaults to the configured base schema.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Run the whole rename, report what would move, then roll back.",
+    ),
+) -> None:
+    """Rename a bank's id in place, keeping every memory, document and mental model.
+
+    One transaction moves every row of the bank to the new id. Stop the bank's
+    clients first: anything still calling the old id gets a 404 or, if it creates
+    banks on demand, a new empty bank under the old id. Refused while the bank
+    has pending or processing operations.
+    """
+    if not new_bank_id.strip() or new_bank_id == old_bank_id:
+        typer.echo("Error: --to must be a non-empty id different from --from.", err=True)
+        raise typer.Exit(2)
+
+    config = HindsightConfig.from_env()
+    if not config.database_url:
+        typer.echo("Error: Database URL not configured.", err=True)
+        typer.echo("Set HINDSIGHT_API_DATABASE_URL environment variable.", err=True)
+        raise typer.Exit(1)
+
+    # The rename flips FK deferrability with PostgreSQL's ALTER CONSTRAINT and runs
+    # over asyncpg; Oracle can only change deferrability by recreating the
+    # constraint. Refuse before connecting rather than fail halfway.
+    if is_oracle_url(config.database_url):
+        typer.echo("Error: rename-bank is PostgreSQL-only; Oracle backends are not supported.", err=True)
+        raise typer.Exit(1)
+
+    target_schema = schema or config.database_schema or DEFAULT_DATABASE_SCHEMA
+    typer.echo(f"Renaming bank '{old_bank_id}' -> '{new_bank_id}' in schema '{target_schema}'...")
+    try:
+        moved = asyncio.run(
+            _run_rename_bank(config.database_url, target_schema, old_bank_id, new_bank_id, dry_run=dry_run)
+        )
+    except RenameBankError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(1) from exc
+
+    for table, count in sorted(moved.items()):
+        typer.echo(f"  {table}: {count}")
+    if dry_run:
+        typer.echo(f"Dry run: {sum(moved.values())} row(s) would move; rolled back.")
+    else:
+        typer.echo(
+            f"Renamed: {sum(moved.values())} row(s) moved. Point clients and API keys at '{new_bank_id}'; "
+            "API servers may serve the old id from cache until bank_info_cache_ttl_seconds elapses."
+        )
 
 
 async def _run_export_bank(db_url: str, bank_id: str, output: Path, schema: str, include_history: bool) -> int:

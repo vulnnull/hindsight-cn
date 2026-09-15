@@ -17,8 +17,62 @@ afterEach(() => {
 
 const item = (payload: unknown) => JSON.stringify({ type: "response_item", payload });
 
+const userEvent = (...content: unknown[]) =>
+  JSON.stringify({
+    type: "event_msg",
+    payload: { type: "item_completed", item: { type: "UserMessage", content } },
+  });
+const userItem = (text: string) =>
+  item({ type: "message", role: "user", content: [{ type: "input_text", text }] });
+const text = (t: string) => ({ type: "text", text: t });
+
+const startup =
+  "<recommended_plugins>\nUse available tools.\n</recommended_plugins>\n" +
+  "<environment_context>\n<cwd>/example</cwd>\n</environment_context>";
+
 describe("readCodexTranscript", () => {
-  it("keeps user/assistant text + compact action turns; drops developer/synthetic/reasoning/outputs/injected", () => {
+  it("takes user turns from UserMessage events: injected role:user items never become turns", () => {
+    writeFileSync(
+      file,
+      [
+        userItem(startup), // Desktop startup: no UserMessage event
+        userItem("What is 2 + 2?"),
+        userEvent(text("What is 2 + 2?")),
+        item({
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "4" }],
+        }),
+        userItem("<turn_aborted>\nThe user interrupted.\n</turn_aborted>"),
+        userItem("The following is the Codex agent history…"), // compaction summary
+        userItem("And 3 + 3?"),
+        userEvent(text("And 3 + 3?")),
+      ].join("\n")
+    );
+    expect(readCodexTranscript(file)).toEqual([
+      { role: "user", content: "What is 2 + 2?" },
+      { role: "assistant", content: "4" },
+      { role: "user", content: "And 3 + 3?" },
+    ]);
+  });
+
+  it("keeps genuine user text even when it is identical to startup markup", () => {
+    writeFileSync(file, [userItem(startup), userEvent(text(startup))].join("\n"));
+    expect(readCodexTranscript(file)).toEqual([{ role: "user", content: startup }]);
+  });
+
+  it("keeps only the text of a UserMessage with images, minus injected memory", () => {
+    writeFileSync(
+      file,
+      userEvent(
+        { type: "local_image", path: "/tmp/x.png" },
+        text("Explain the image. <hindsight_memories>leak</hindsight_memories>")
+      )
+    );
+    expect(readCodexTranscript(file)).toEqual([{ role: "user", content: "Explain the image." }]);
+  });
+
+  it("without UserMessage events (older Codex): keeps user/assistant text + compact action turns; drops developer/synthetic/reasoning/outputs/injected", () => {
     const lines = [
       // non-response_item line: dropped
       JSON.stringify({ type: "session_meta", payload: { cwd: "/repo" } }),

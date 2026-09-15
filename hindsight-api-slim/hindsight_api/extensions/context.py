@@ -85,21 +85,22 @@ class DefaultExtensionContext(ExtensionContext):
         database_url: str,
         memory_engine: "MemoryEngineInterface | None" = None,
         webhook_manager: "WebhookManager | None" = None,
-        current_schema: str | None = None,
     ):
         """
         Initialize the context.
+
+        The context is one object shared by every request, so it deliberately carries no
+        per-request state (tenant schema, bank): that would be last-writer-wins under
+        concurrency. Hooks get the tenant/bank from their own arguments.
 
         Args:
             database_url: SQLAlchemy database URL for migrations.
             memory_engine: Optional MemoryEngine instance for memory operations.
             webhook_manager: Optional WebhookManager for firing webhooks.
-            current_schema: Optional current schema name for tenant context.
         """
         self._database_url = database_url
         self._memory_engine = memory_engine
         self.webhook_manager = webhook_manager
-        self.current_schema = current_schema
 
     async def run_migration(self, schema: str) -> None:
         """Run migrations for a specific schema."""

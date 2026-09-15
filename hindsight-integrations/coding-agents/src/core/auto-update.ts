@@ -6,8 +6,8 @@
  * path was the user remembering to re-run `install`, so a machine could sit several versions
  * behind indefinitely — bugs stayed fixed only for people who happened to re-install.
  *
- * Once per `CHECK_INTERVAL_MS`, at session start, this asks the npm registry for the published
- * version and — when it is newer than the staged one — spawns a DETACHED
+ * Once per `CHECK_INTERVAL_MS`, at session start, this asks npm for the published version and —
+ * when it is newer than the staged one — spawns a DETACHED
  * `npx @vectorize-io/hindsight-coding-agents@<version> update`, which re-stages the runtime and
  * touches no host config (see the `update` branch in installer.ts). Fire-and-forget: the current
  * session keeps running the version it already loaded and the next one starts on the new code.
@@ -19,8 +19,9 @@
  *     from `npm i -g`, from a project dependency, or from a local checkout belongs to whoever
  *     manages that source: updating it behind their back would leave `npm ls -g` reporting a
  *     version that is no longer what runs, or would silently overwrite a developer's built dist.
- *   - it needs `npx` on PATH, since that is how the updater is fetched. Without it there is
- *     nothing to spawn, so it says so once a day rather than failing a spawn each time.
+ *   - it needs `npx` and `npm` on PATH — npx is how the updater is fetched, npm is how the
+ *     version is looked up. Without them there is nothing to spawn or ask, so it says so once a
+ *     day rather than failing a spawn each time.
  *   - it stages only. Rewiring hosts unattended would mean choosing which agents to install for,
  *     and that is the user's call (`install` spells it out for exactly this reason).
  *   - `autoUpdate: false` in ~/.hindsight/coding-agent.json (or HINDSIGHT_AUTO_UPDATE=false) turns
@@ -46,18 +47,27 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Config } from "./config";
-import { log } from "./log";
+import { describeError, log } from "./log";
 import { binOnPath } from "./util";
 
 export const PACKAGE_NAME = "@vectorize-io/hindsight-coding-agents";
 
-/** How often the registry is asked. One session a day pays a few hundred milliseconds; the rest
- *  read a timestamp off disk and move on. */
+/** A version `npm view` may return: digits.digits.digits with an optional pre-release. */
+const RELEASE_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/;
+
+/** How often the registry is asked. One session a day pays ~1.2s (the npm CLI startup behind
+ *  `npm view`, not the request — cold and warm cache measure the same); the rest read a
+ *  timestamp off disk and move on. */
 export const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
-/** Registry call budget. A slow or unreachable registry must not delay a session start, and this
- *  runs before the user has typed anything. */
-const FETCH_TIMEOUT_MS = 5000;
+/** Version-check budget. A slow or unreachable registry must not delay a session start, and this
+ *  runs before the user has typed anything. Bounds the spawned `npm view` — npm CLI startup plus
+ *  the request, measured at ~1.2s where a bare registry fetch takes ~0.9s. */
+const NPM_VIEW_TIMEOUT_MS = 5000;
+
+/** Hard wall past the spawn timeout: `close` waits for stdio to drain, so a grandchild holding
+ *  the pipe could stall the lookup (and hold the update lock) after npm itself is killed. */
+const NPM_VIEW_HARD_DEADLINE_MS = NPM_VIEW_TIMEOUT_MS + 1000;
 
 /** Where the last check's timestamp lives — inside the staged runtime, so it is removed with it. */
 export function stateFile(runtimeDir: string): string {
@@ -252,24 +262,76 @@ function stampCheck(file: string, now: number, latest: string): void {
   }
 }
 
-/** Ask the registry for the published version, or "" if it cannot be determined. */
-async function latestVersion(fetchImpl: typeof fetch): Promise<string> {
-  try {
-    // No `application/vnd.npm.install-v1+json` accept header. That abbreviated-packument media
-    // type is only served for the PACKUMENT (`/<pkg>`); asking for it on `/<pkg>/latest` gets a
-    // hard 406, which this function turned into "" — indistinguishable from "no newer version", so
-    // the runtime silently never updated (the stub in the tests answered `ok: true` regardless of
-    // what was requested, so nothing caught it). `/latest` is the smaller response anyway: one
-    // version's metadata rather than every version's.
-    const r = await fetchImpl(`https://registry.npmjs.org/${PACKAGE_NAME}/latest`, {
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
-    if (!r.ok) return "";
-    const body = (await r.json()) as { version?: string };
-    return typeof body.version === "string" ? body.version : "";
-  } catch {
-    return "";
-  }
+/** Ask npm for the published version, or "" if it cannot be determined.
+ *
+ * `npm view`, not a fetch of registry.npmjs.org: the update this triggers is `npx <pkg>@<v>`,
+ * which resolves through the user's npm config (mirror, proxy, private registry). The hardcoded
+ * fetch disagreed with it — on a mirrored machine it timed out while npx worked, so auto-update
+ * silently never fired. Runs in the caller's cwd on purpose, like the npx spawn, so both read
+ * the same project .npmrc.
+ *
+ * Every failure resolves "" ("no newer version") and logs exactly one info line with the
+ * reason — without it a failed check is indistinguishable from "already current". The reason
+ * rides done() so the settled guard also dedupes the log (a spawn failure is error THEN close).
+ */
+export async function npmViewVersion(
+  pkg: string,
+  spawnImpl: typeof realSpawn = realSpawn
+): Promise<string> {
+  return new Promise((resolve) => {
+    let out = "";
+    let settled = false;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    const done = (v: string, reason?: string) => {
+      if (settled) return;
+      settled = true;
+      if (deadline) clearTimeout(deadline);
+      if (reason) log.info("auto-update", `version check failed: ${reason}`);
+      resolve(v);
+    };
+    try {
+      const child = spawnImpl("npm", ["view", pkg, "version", "--json"], {
+        timeout: NPM_VIEW_TIMEOUT_MS,
+        stdio: ["ignore", "pipe", "ignore"],
+        windowsHide: true,
+      });
+      child.stdout?.setEncoding("utf8");
+      child.stdout?.on("data", (d: string) => {
+        out += d;
+      });
+      // An unhandled pipe 'error' would crash the session-start hook.
+      child.stdout?.on("error", (e) => done("", describeError(e)));
+      // ENOENT / EACCES (incl. Windows, where spawn without a shell can't see npm.cmd).
+      child.on("error", (e) => done("", describeError(e)));
+      // close, not exit: stdout must have fully arrived before the parse.
+      child.on("close", (code, signal) => {
+        if (code !== 0) return done("", `npm view exited ${code ?? signal}`);
+        try {
+          const v = JSON.parse(out.trim()) as unknown;
+          // --json on one field is a quoted string; anything else is not a version to pin.
+          if (typeof v !== "string")
+            return done("", `unparsable npm output: ${out.trim().slice(0, 80)}`);
+          // Whitelist: the value reaches a spawn argv, and isNewer("1.2.3 && calc", ...) is true.
+          if (!RELEASE_RE.test(v)) return done("", `not a release: ${v.slice(0, 40)}`);
+          done(v);
+        } catch {
+          done("", `unparsable npm output: ${out.trim().slice(0, 80)}`);
+        }
+      });
+      // Backstop for a stalled pipe past the kill. Not unref'd: it must keep the process alive
+      // long enough to settle and release the update lock.
+      deadline = setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          /* already dead */
+        }
+        done("", "npm view never exited — hard deadline");
+      }, NPM_VIEW_HARD_DEADLINE_MS);
+    } catch (e) {
+      done("", describeError(e));
+    }
+  });
 }
 
 export interface AutoUpdateOptions {
@@ -283,7 +345,8 @@ export interface AutoUpdateOptions {
   selfUpdatable?: (runtimeDir: string) => boolean;
   binOnPath?: (bin: string) => boolean;
   spawn?: typeof realSpawn;
-  fetch?: typeof fetch;
+  /** Version lookup seam (tests); defaults to the real `npm view`. */
+  npmView?: (pkg: string) => Promise<string>;
   now?: number;
 }
 
@@ -321,10 +384,12 @@ export async function maybeAutoUpdate(
       stampCheck(file, now, "");
       return "";
     }
-    // Probed BEFORE the registry call: with no npx there is nothing to spawn, so asking npm for a
-    // version we could not install anyway is a request for nothing.
-    if (!(opts.binOnPath ?? binOnPath)("npx")) {
-      log.info("auto-update", "npx is not on PATH — skipping the update check");
+    // Probed BEFORE the registry call: with no npx there is nothing to spawn, and with no npm
+    // there is no version to look up — either way, asking npm for a version we could not install
+    // anyway is a request for nothing. npx and npm ship together, so this is usually one verdict.
+    const binOk = opts.binOnPath ?? binOnPath;
+    if (!binOk("npx") || !binOk("npm")) {
+      log.info("auto-update", "npx/npm is not on PATH — skipping the update check");
       stampCheck(file, now, "");
       return "";
     }
@@ -334,7 +399,7 @@ export async function maybeAutoUpdate(
     const lock = opts.lockFile ?? lockFile();
     if (!acquireUpdateLock(lock, now)) return "";
     try {
-      const latest = await latestVersion(opts.fetch ?? fetch);
+      const latest = await (opts.npmView ?? npmViewVersion)(PACKAGE_NAME);
       stampCheck(file, now, latest);
       if (!latest || !isNewer(latest, current)) {
         releaseUpdateLock(lock);

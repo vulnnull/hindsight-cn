@@ -626,3 +626,61 @@ def test_liveness_probes_stay_short(tmp_path, monkeypatch):
     # default client timeout — and below the 4s the two uncapped 2s probes
     # could reach before this change.
     assert daemon_embed_manager.PROBE_CONNECT_TIMEOUT * 3 < 5.0
+
+
+# ── #4344: the probe's decode is pinned, not left to the locale ──────────────
+# `netstat`/`powershell`/`wmic` emit localized text in the console code page. With
+# `text=True` alone the decode uses `locale.getpreferredencoding(False)`, which is
+# `utf-8` in a UTF-8-mode process, and the mismatch raises inside `subprocess`'s own
+# reader thread: the thread dies, `run()` returns with `stdout=None` and returncode 0,
+# and `_windows_listening_pids()` reports no listeners on a host that has plenty.
+
+# A localized zh-CN `netstat -ano -p TCP` answer: cp936 header, ASCII data lines.
+_CP936_NETSTAT = (
+    "\r\n活动连接\r\n\r\n"
+    "  协议  本地地址          外部地址        状态           PID\r\n"
+    "  TCP    127.0.0.1:8642         0.0.0.0:0              LISTENING       4242\r\n"
+    "  TCP    0.0.0.0:445            0.0.0.0:0              LISTENING       4\r\n"
+).encode("cp936")
+
+
+def _emit(payload: bytes) -> list[str]:
+    """A command that writes `payload` to stdout as raw bytes."""
+    import sys as _sys
+
+    return [
+        _sys.executable,
+        "-c",
+        "import sys; sys.stdout.buffer.write(%r); sys.stdout.buffer.flush()" % payload,
+    ]
+
+
+def test_run_probe_reads_output_that_is_not_utf8():
+    """The probe returns the output instead of losing it in a dead reader thread."""
+    output = DaemonEmbedManager._run_probe(_emit(_CP936_NETSTAT))
+
+    assert output is not None
+    # The localized header is replaced rather than raising; the data lines are intact.
+    assert "LISTENING" in output
+    assert "127.0.0.1:8642" in output
+    assert "4242" in output
+
+
+def test_windows_listening_pids_parses_a_localized_netstat(monkeypatch):
+    """The existing parser needs no change: only the header carries non-ASCII."""
+    decoded = _CP936_NETSTAT.decode("utf-8", errors="replace")
+    monkeypatch.setattr(
+        "hindsight_embed.daemon_embed_manager.DaemonEmbedManager._run_probe",
+        staticmethod(lambda cmd, timeout=None: decoded),
+    )
+
+    assert DaemonEmbedManager._windows_listening_pids(8642) == [4242]
+    assert DaemonEmbedManager._windows_listening_pids(445) == [4]
+    assert DaemonEmbedManager._windows_listening_pids(9999) == []
+
+
+def test_run_probe_still_reports_a_failed_command_as_none():
+    """A non-zero exit is still None, so the encoding change did not widen success."""
+    import sys as _sys
+
+    assert DaemonEmbedManager._run_probe([_sys.executable, "-c", "raise SystemExit(3)"]) is None

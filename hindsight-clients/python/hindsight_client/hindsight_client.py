@@ -9,6 +9,9 @@ import asyncio
 import json
 import random
 import warnings
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime
 from importlib import metadata
 from pathlib import Path
@@ -287,6 +290,7 @@ class Hindsight:
         self._retry_rng = random.Random()
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
+        self._retain_suspended: ContextVar[bool] = ContextVar("retain_suspended", default=False)
         if api_key:
             self._api_client.set_default_header("Authorization", f"Bearer {api_key}")
         self._memory_api = memory_api.MemoryApi(self._api_client)
@@ -301,6 +305,40 @@ class Hindsight:
         self._webhooks_api = webhooks_api.WebhooksApi(self._api_client)
         self._monitoring_api = monitoring_api.MonitoringApi(self._api_client)
         self._document_transfer_api = document_transfer_api.DocumentTransferApi(self._api_client)
+
+    # -- Retain suspension ------------------------------------------------------
+
+    @contextmanager
+    def suspend_retains(self) -> Iterator[None]:
+        """Temporarily suppress retains in the current execution context.
+
+        Recall and reflect are unaffected, while ``retain``, ``retain_batch``
+        and ``retain_files`` (and their async variants) send no request and
+        report an empty result — ``items_count=0`` and no operation IDs. This
+        is useful for evaluation runs, replaying a transcript against a
+        populated bank, or any session that must read a bank without adding to
+        it.
+
+        The suspension is local to the current synchronous flow or async task,
+        so concurrent users of the same client are not affected. Scopes may be
+        nested and are restored when the scope exits, including after an
+        exception.
+
+        Scope: this guards the convenience methods only. The low-level
+        accessors (:attr:`memory`, :attr:`files`) call the generated API
+        directly and are deliberately not intercepted.
+
+        ::
+
+            with client.suspend_retains():
+                client.retain(bank_id, "not stored")   # items_count == 0
+                client.recall(bank_id, "still works")  # unaffected
+        """
+        token = self._retain_suspended.set(True)
+        try:
+            yield
+        finally:
+            self._retain_suspended.reset(token)
 
     # -- Low-level API accessors ------------------------------------------------
     # These expose the full, auto-generated API surface for operations not
@@ -557,6 +595,9 @@ class Hindsight:
         Returns:
             FileRetainResponse with operation_ids for tracking progress
         """
+        if self._retain_suspended.get():
+            return FileRetainResponse(operation_ids=[])
+
         file_data = []
         for file_path in files:
             path = Path(file_path)
@@ -1071,6 +1112,9 @@ class Hindsight:
         Returns:
             RetainResponse with success status and item count
         """
+        if self._retain_suspended.get():
+            return RetainResponse(success=True, bank_id=bank_id, items_count=0, var_async=False)
+
         from hindsight_client_api.models.content import Content
         from hindsight_client_api.models.entity_input import EntityInput
         from hindsight_client_api.models.observation_scopes import ObservationScopes
@@ -2449,6 +2493,7 @@ class Hindsight:
         consolidation_llm_parallelism: int | None = None,
         consolidation_max_memories_per_round: int | None = None,
         mental_model_min_refresh_interval_seconds: int | None = None,
+        knowledge_page_default_trigger: dict[str, Any] | None = None,
         enable_text_search: bool | None = None,
         enable_temporal_retrieval: bool | None = None,
         enable_graph_retrieval: bool | None = None,
@@ -2511,6 +2556,7 @@ class Hindsight:
                 consolidation_llm_parallelism=consolidation_llm_parallelism,
                 consolidation_max_memories_per_round=consolidation_max_memories_per_round,
                 mental_model_min_refresh_interval_seconds=mental_model_min_refresh_interval_seconds,
+                knowledge_page_default_trigger=knowledge_page_default_trigger,
                 enable_text_search=enable_text_search,
                 enable_temporal_retrieval=enable_temporal_retrieval,
                 enable_graph_retrieval=enable_graph_retrieval,
@@ -2570,6 +2616,7 @@ class Hindsight:
         consolidation_llm_parallelism: int | None = None,
         consolidation_max_memories_per_round: int | None = None,
         mental_model_min_refresh_interval_seconds: int | None = None,
+        knowledge_page_default_trigger: dict[str, Any] | None = None,
         enable_text_search: bool | None = None,
         enable_temporal_retrieval: bool | None = None,
         enable_graph_retrieval: bool | None = None,
@@ -2639,6 +2686,8 @@ class Hindsight:
             consolidation_llm_parallelism: Concurrent LLM calls during consolidation.
             consolidation_max_memories_per_round: Memories consolidated per round.
             mental_model_min_refresh_interval_seconds: Debounce between mental-model refreshes.
+            knowledge_page_default_trigger: Trigger fields merged over the built-in default for new
+                knowledge pages, e.g. {"refresh_cron": "0 * * * *"}.
             enable_observations: Toggle automatic observation consolidation after retain().
             observations_mission: Controls what gets synthesised into observations.
             enable_text_search: Run the keyword (BM25) retrieval arm during recall. False
@@ -2700,6 +2749,7 @@ class Hindsight:
                 "consolidation_llm_parallelism": consolidation_llm_parallelism,
                 "consolidation_max_memories_per_round": consolidation_max_memories_per_round,
                 "mental_model_min_refresh_interval_seconds": mental_model_min_refresh_interval_seconds,
+                "knowledge_page_default_trigger": knowledge_page_default_trigger,
                 "enable_text_search": enable_text_search,
                 "enable_temporal_retrieval": enable_temporal_retrieval,
                 "enable_graph_retrieval": enable_graph_retrieval,
