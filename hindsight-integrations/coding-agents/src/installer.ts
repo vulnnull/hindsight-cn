@@ -1634,7 +1634,11 @@ const dsh: HarnessInstaller = {
     writeFileSync(path, others ? `${others}\n\n${block}` : block);
     // dsh's skill provider scans the shared agentskills root, the same one Codex reads.
     installSkill(c, "dsh");
-    c.log?.(`dsh: plugin registered in ${path} (applies to every dsh profile)`);
+    // A running `dsh web` hot-loads the new patch entry, so its open sessions gain the hindsight_*
+    // tools mid-conversation — a tool-set change that invalidates the provider prompt cache (#4317).
+    c.log?.(
+      `dsh: plugin registered in ${path} (applies to every dsh profile; start new sessions — ones already open would gain the tools mid-conversation)`
+    );
   },
   uninstall(c) {
     const path = join(dshHome(c), "cordis.patch.yml");

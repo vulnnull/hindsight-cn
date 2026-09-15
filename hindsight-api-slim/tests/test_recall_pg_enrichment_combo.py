@@ -14,6 +14,9 @@ Everything is seeded directly through SQL (no LLM) so the assertions are exact:
 With ``prefer_observations=True`` the raw fact is dropped from the results, so all
 three enrichments have to reach it transitively: chunks via the observation's
 source, source_facts from the source row, entities inherited from the source.
+
+Also asserts that the sources the prefer-observations dedup resolves are reused by
+the source-facts step instead of being read from ``memory_units`` a second time.
 """
 
 import uuid
@@ -103,12 +106,45 @@ async def seeded_combo(memory, request_context):
 
 @pytest.mark.asyncio
 @pytest.mark.memory_backend_incompatible
-async def test_recall_all_enrichments_together_on_default_store(memory, request_context, seeded_combo):
-    """All three enrichment flags at once on PostgresMemories, with prefer_observations."""
+async def test_recall_all_enrichments_together_on_default_store(memory, request_context, seeded_combo, monkeypatch):
+    """All three enrichment flags at once on PostgresMemories, with prefer_observations.
+
+    Verifies enrichment correctness (chunks, source facts, entities) and that the
+    source-facts step does not re-read observation sources the dedup already resolved.
+    """
     bank_id = seeded_combo["bank_id"]
     fact_id = seeded_combo["fact_id"]
     obs_id = seeded_combo["obs_id"]
     chunk_id = seeded_combo["chunk_id"]
+
+    # Record the SQL recall issues: "no redundant round trip" is not observable through the
+    # public read API, so the only way to assert it is to watch the statements themselves.
+    backend = await memory._get_backend()
+    executed_queries: list[str] = []
+    orig_acquire = backend.acquire
+
+    class _InterceptingAcquire:
+        def __init__(self, ctx):
+            self._ctx = ctx
+
+        async def __aenter__(self):
+            conn = await self._ctx.__aenter__()
+            orig_fetch = conn.fetch
+
+            async def logged_fetch(query, *args, **kwargs):
+                executed_queries.append(str(query))
+                return await orig_fetch(query, *args, **kwargs)
+
+            conn.fetch = logged_fetch
+            return conn
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            return await self._ctx.__aexit__(exc_type, exc_val, exc_tb)
+
+    def hooked_acquire(*args, **kwargs):
+        return _InterceptingAcquire(orig_acquire(*args, **kwargs))
+
+    monkeypatch.setattr(backend, "acquire", hooked_acquire)
 
     result = await memory.recall_async(
         bank_id=bank_id,
@@ -140,3 +176,7 @@ async def test_recall_all_enrichments_together_on_default_store(memory, request_
     # entities: inherited by the observation from its source through source_memory_ids
     assert by_id[obs_id].entities and "billing service" in by_id[obs_id].entities
     assert result.entities and "billing service" in result.entities
+
+    assert executed_queries, "query interceptor recorded nothing — the assertion below would pass vacuously"
+    redundant = [q for q in executed_queries if "SELECT id, source_memory_ids FROM" in q]
+    assert redundant == [], f"source-facts step re-read observation sources the dedup resolved: {redundant}"

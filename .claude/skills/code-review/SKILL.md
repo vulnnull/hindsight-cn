@@ -100,7 +100,7 @@ results = await asyncio.gather(*tasks, return_exceptions=True)
 
 ### Bank/Tenant Isolation in Queries
 - **Bank isolation is a hard security invariant: no query may read, count, update, or delete another bank's rows.** Tenant isolation is enforced at the schema level (the resolved `search_path` / `fq_table(...)` qualifier, gated by `_authenticate_tenant`); bank isolation is enforced *within* a schema by a `bank_id` predicate on every statement that touches a multi-bank table.
-- **Every SQL statement against a multi-bank table must be constrained by `bank_id`** — directly in the `WHERE`, or transitively (see below). Multi-bank tables carry a `bank_id` column: `memory_units`, `documents`, `entities`, `entity_links`, `mental_models`, `knowledge_pages`, `memory_links`, `observation_history`, and similar.
+- **Every SQL statement against a multi-bank table must be constrained by `bank_id`** — directly in the `WHERE`, or transitively (see below). Multi-bank tables carry a `bank_id` column: `memory_units`, `documents`, `entities`, `mental_models`, `knowledge_pages`, `memory_links`, `observation_history`, and similar.
 - **The trap: filtering by a caller-supplied, non-globally-unique key without `bank_id`.** Keys like `document_id` and `mental_models.id` are unique only *per bank* (their PK is composite, e.g. `(id, bank_id)`), so the *same* id legally exists in every bank. A statement like `UPDATE memory_units SET tags = $1 WHERE document_id = $2` — no `bank_id` — silently reads/writes **every** bank's rows that share the id. This is the exact defect from #3429/#3430. Adding `AND bank_id = $n` fixes it.
 - **Three ways a statement is legitimately scoped** (accept these; flag anything that fits none):
   1. **Explicit** `WHERE ... AND bank_id = $n`.
@@ -323,7 +323,7 @@ For each changed handler in `hindsight-api-slim/hindsight_api/api/` (e.g. `http.
 
 For **every SQL statement added or changed** in the diff (grep the diff for `conn.fetch`, `conn.fetchrow`, `conn.fetchval`, `conn.execute`, `executemany`, and any raw `SELECT`/`INSERT`/`UPDATE`/`DELETE` f-strings, including multi-line ones), verify it cannot touch another bank's rows — see **Bank/Tenant Isolation in Queries** above.
 
-For each statement against a multi-bank table (`memory_units`, `documents`, `entities`, `entity_links`, `mental_models`, `knowledge_pages`, `memory_links`, `observation_history`, …), confirm it is scoped by one of the three legitimate mechanisms:
+For each statement against a multi-bank table (`memory_units`, `documents`, `entities`, `mental_models`, `knowledge_pages`, `memory_links`, `observation_history`, …), confirm it is scoped by one of the three legitimate mechanisms:
 1. explicit `AND bank_id = $n`;
 2. a globally-unique single-column PK (`*.id` uuid, or the bank-encoded `chunks.chunk_id`) — **not** a composite-PK id like `documents.id`/`document_id` or `mental_models.id`;
 3. transitively, through a globally-unique id set that was itself selected from a bank-scoped query in the same call.

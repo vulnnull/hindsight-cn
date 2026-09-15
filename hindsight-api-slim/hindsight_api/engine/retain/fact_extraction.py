@@ -1033,7 +1033,15 @@ def _iter_jsonl_chunks(text: str, max_chars: int, structured_limit: int) -> Iter
 # multilingual model drifts to English (or, per #181, to an unrelated language entirely)
 # on non-English input. Consolidation carries the equivalent rule, making "preserve the
 # source language" the pipeline-wide default.
-_DEFAULT_LANGUAGE_RULE = """LANGUAGE: MANDATORY — Detect the language of the input text and produce ALL output in that EXACT same language. You are STRICTLY FORBIDDEN from translating or switching to any other language. Every single word of your output must be in the same language as the input. Do NOT output in a different language under any circumstance."""
+#
+# Stated plainly rather than as a "detect the language, then STRICTLY never switch"
+# procedure (discussion #4283). That earlier wording made a separate detection step of it,
+# and gpt-5.6-luna got the step wrong on English coding-agent transcripts — French or
+# Russian facts in ~18% of runs; this one holds English in 30/30. It names no language on
+# purpose: a variant mapping "English input gives English facts, Italian input gives
+# Italian facts" also fixed luna, but pushed gemini-2.5-flash-lite to translate Japanese
+# into English in 10/10 runs (the #181 priming effect). Shorter too: 31 tokens, from 67.
+_DEFAULT_LANGUAGE_RULE = """LANGUAGE: Write every fact in the same language as the input text. Never translate. Names, identifiers, code, and quoted text stay verbatim."""
 
 
 # Base prompt template (shared by concise and custom modes)

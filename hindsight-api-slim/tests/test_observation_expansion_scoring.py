@@ -196,8 +196,11 @@ async def test_per_entity_cap_bounds_hub_traversal(memory, request_context):
                 "Hub",
             )
             # Six facts on one entity with ids we control, so "top 3 by unit_id
-            # descending" is a known set rather than an accident of uuid4().
-            facts = sorted(uuid.UUID(int=i) for i in range(1, 7))
+            # descending" is a known set rather than an accident of uuid4(). The ids
+            # sit under a random prefix because memory_units.id is a global PK: the
+            # literal ids 1..6 collided with a previous run's rows in the shared DB.
+            id_prefix = uuid.uuid4().int & ~0xFFFF
+            facts = sorted(uuid.UUID(int=id_prefix + i) for i in range(1, 7))
             for fid in facts:
                 await conn.execute(
                     f"""

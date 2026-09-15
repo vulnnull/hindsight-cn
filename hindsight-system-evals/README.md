@@ -26,7 +26,7 @@ signal to re-run, not proof of a regression.
 
 ## What it evaluates
 
-Both suites share one corpus and grade twice per question: **correct** (meets
+The knowledge-page and reflect suites share one corpus and grade twice per question: **correct** (meets
 its criteria — can fail on an incomplete answer) and **trap** (asserts the
 specific baited falsehood — the one that matters). The trap is asserted first.
 
@@ -50,6 +50,14 @@ bank covering only 2025-26, reflect extrapolated a number and called it
 "reliably deduced". A failure reports whether every gold fact reached the model
 (from the tool trace), because a retrieval miss and a reasoning miss need
 opposite fixes.
+
+**`test_03` — retain language.** Real fact extraction (observations and
+consolidation off), each input retained `HINDSIGHT_EVAL_RETAIN_REPEATS` times
+(default 6) as separate documents, every document judged. A fact in a language
+other than the input's is the trap. The regression behind it (#4283): English
+coding-agent sessions stored as Spanish, French or Russian facts — about one run
+in six on gpt-5.6-luna. Italian and Japanese inputs guard the other direction, a
+fix that just forces English. It does not use the corpus.
 
 ## The corpus
 

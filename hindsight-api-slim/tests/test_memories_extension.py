@@ -1583,9 +1583,8 @@ async def test_recall_all_enrichments_together_through_store(
     Parametrized over the two ways recall can learn an observation's sources, because both consumers
     of that list are in this one recall:
 
-    - ``refetch``: the result carries none, so the dedup and the chunk walk each re-fetch the
-      observation to read them — an addressed read apiece, which for a store whose reads are round
-      trips is most of what those steps cost;
+    - ``refetch``: the result carries none, so the dedup re-fetches the observation to read them —
+      once, writing them back onto the result for the chunk walk and source-facts block to reuse;
     - ``ids-on-result``: the store carried them on the hydrated result and neither read happens.
 
     The assertions are the same for both. That is the point: the output must not depend on which
@@ -1661,13 +1660,13 @@ async def test_recall_all_enrichments_together_through_store(
         assert result.chunks[chunk_id].chunk_text == body
 
         # source_facts: the raw fact, populated from the store
-        # And the fast path really is one: carrying the sources removes THREE addressed reads
-        # from this single recall — the prefer-observations dedup's, the chunk walk's and the
-        # source-facts block's, each of which re-read an observation hydration had already read.
+        # Reads of the OBSERVATION: with sources on the result, none; without, exactly one — the
+        # dedup's, which writes the sources back onto the result so the chunk walk and the
+        # source-facts block reuse them (before that write-back each re-read it: 5 reads total).
         # Asserted as a count rather than "it was faster", because the point is WHICH reads stopped
-        # happening; the two that remain fetch the observation's SOURCES, memories recall never
-        # retrieved, for their chunk ids and their text.
-        assert store.calls.count("get_memories") == (2 if carries_source_ids else 5), store.calls
+        # happening; the two that always remain fetch the observation's SOURCES, memories recall
+        # never retrieved, for their chunk ids and their text.
+        assert store.calls.count("get_memories") == (2 if carries_source_ids else 3), store.calls
 
         assert result.source_facts and src_id in result.source_facts
         assert result.source_facts[src_id].text == src_text
