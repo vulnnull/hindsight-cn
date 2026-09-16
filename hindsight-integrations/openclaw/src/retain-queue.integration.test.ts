@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import registerPlugin, { type AsyncRetainOperationIdCapability } from "./index.js";
@@ -17,14 +17,19 @@ afterEach(() => {
 
 function makeApi(
   queuePath: string,
-  flushIntervalMs: number
+  flushIntervalMs: number,
+  extraConfig: Record<string, unknown> = {}
 ): {
   api: MoltbotPluginAPI;
   service: () => ServiceConfig;
   agentEnd: () => (event: unknown, ctx?: PluginHookAgentContext) => Promise<void>;
+  sessionEnd: () => (event: unknown, ctx?: PluginHookAgentContext) => Promise<void>;
 } {
   let registeredService: ServiceConfig | undefined;
   let agentEndHandler:
+    | ((event: unknown, ctx?: PluginHookAgentContext) => void | Promise<void>)
+    | undefined;
+  let sessionEndHandler:
     | ((event: unknown, ctx?: PluginHookAgentContext) => void | Promise<void>)
     | undefined;
   const api: MoltbotPluginAPI = {
@@ -41,6 +46,7 @@ function makeApi(
               autoRecall: false,
               autoRetain: true,
               logLevel: "off",
+              ...extraConfig,
             },
           },
         },
@@ -51,6 +57,7 @@ function makeApi(
     },
     on(event, handler) {
       if (event === "agent_end") agentEndHandler = handler;
+      if (event === "session_end") sessionEndHandler = handler;
     },
     logger: {
       info: () => undefined,
@@ -69,6 +76,12 @@ function makeApi(
       if (!agentEndHandler) throw new Error("agent_end not registered");
       return async (event, ctx) => {
         await agentEndHandler?.(event, ctx);
+      };
+    },
+    sessionEnd: () => {
+      if (!sessionEndHandler) throw new Error("session_end not registered");
+      return async (event, ctx) => {
+        await sessionEndHandler?.(event, ctx);
       };
     },
   };
@@ -330,5 +343,135 @@ describe("retain queue idempotent replay", () => {
     // The stopped generation must not resume against a restarted client.
     expect(server.retainBodies).toHaveLength(1);
     expect(readQueue(queuePath)).toHaveLength(1);
+  });
+});
+
+describe("session_end flushes the un-retained tail (#4341)", () => {
+  // The helper that reads the transcript has its own unit tests; this one pins the
+  // wiring, which is where #1726's flush died: the hook fired, the guard above it
+  // saw a payload with no `messages`, and the tail was dropped in silence. Only an
+  // end-to-end retain proves the forced flush now reaches the server.
+  function writeTranscript(sessionId: string, turns: Array<[string, string]>): string {
+    const dir = mkdtempSync(join(tmpdir(), "hindsight-session-end-"));
+    tempDirs.push(dir);
+    const file = join(dir, `${sessionId}.jsonl`);
+    const lines: unknown[] = [
+      { type: "session", id: sessionId, timestamp: "2026-09-12T20:00:00Z" },
+      ...turns.flatMap(([user, assistant]) => [
+        { type: "message", message: { role: "user", content: user } },
+        { type: "message", message: { role: "assistant", content: assistant } },
+      ]),
+    ];
+    writeFileSync(file, lines.map((line) => JSON.stringify(line)).join("\n") + "\n", "utf8");
+    return file;
+  }
+
+  it("retains the turns after the last cadence boundary when the session closes", async () => {
+    const queuePath = makeQueuePath();
+    const server = installFakeServer("supported");
+
+    // retainEveryNTurns: 3 — two turns sit below the cadence boundary, so nothing
+    // has been retained when the session ends.
+    const api = makeApi(queuePath, 1_000, { retainEveryNTurns: 3, retainOverlapTurns: 1 });
+    const service = api.service();
+    await service.start();
+
+    const sessionKey = "agent:main:discord:direct:session-end";
+    const ctx = {
+      agentId: "main",
+      sessionKey,
+      messageProvider: "discord",
+      channelId: "direct:session-end",
+      senderId: "user:integration",
+    } as PluginHookAgentContext;
+
+    await api.agentEnd()(
+      {
+        success: true,
+        messages: [
+          { role: "user", content: "First turn." },
+          { role: "assistant", content: "Noted." },
+        ],
+      },
+      ctx
+    );
+    await api.agentEnd()(
+      {
+        success: true,
+        messages: [
+          { role: "user", content: "The tail nobody retained." },
+          { role: "assistant", content: "Understood." },
+        ],
+      },
+      ctx
+    );
+    expect(server.retainBodies).toHaveLength(0);
+
+    // The real payload: ids, counts and a sessionFile — no messages array, and a
+    // context holding only ids (OpenClaw's buildSessionEndHookPayload()).
+    const sessionFile = writeTranscript("sess-1", [
+      ["First turn.", "Noted."],
+      ["The tail nobody retained.", "Understood."],
+    ]);
+    await api.sessionEnd()(
+      {
+        sessionId: "sess-1",
+        sessionKey,
+        messageCount: 4,
+        durationMs: 12_000,
+        reason: "reset",
+        sessionFile,
+        context: { sessionId: "sess-1", sessionKey, agentId: "main" },
+      },
+      ctx
+    );
+
+    expect(server.retainBodies).toHaveLength(1);
+    expect(JSON.stringify(server.retainBodies[0])).toContain("The tail nobody retained.");
+    await service.stop();
+  });
+
+  it("skips the flush when the event points at no readable transcript", async () => {
+    const queuePath = makeQueuePath();
+    const server = installFakeServer("supported");
+
+    const api = makeApi(queuePath, 1_000, { retainEveryNTurns: 3, retainOverlapTurns: 1 });
+    const service = api.service();
+    await service.start();
+
+    const sessionKey = "agent:main:discord:direct:no-transcript";
+    const ctx = {
+      agentId: "main",
+      sessionKey,
+      messageProvider: "discord",
+      channelId: "direct:no-transcript",
+      senderId: "user:integration",
+    } as PluginHookAgentContext;
+
+    await api.agentEnd()(
+      {
+        success: true,
+        messages: [
+          { role: "user", content: "Only turn." },
+          { role: "assistant", content: "Noted." },
+        ],
+      },
+      ctx
+    );
+
+    await api.sessionEnd()(
+      {
+        sessionId: "sess-2",
+        sessionKey,
+        messageCount: 2,
+        reason: "shutdown",
+        sessionFile: join(tmpdir(), "hindsight-missing", "sess-2.jsonl"),
+        context: { sessionId: "sess-2", sessionKey, agentId: "main" },
+      },
+      ctx
+    );
+
+    expect(server.retainBodies).toHaveLength(0);
+    await service.stop();
   });
 });

@@ -14,6 +14,7 @@ import {
 } from "@vectorize-io/hindsight-client";
 import { RetainQueue } from "./retain-queue.js";
 import { compileSessionPatterns, matchesSessionPattern } from "./session-patterns.js";
+import { parseSessionFile } from "./session-file.js";
 import { createHash, randomUUID } from "crypto";
 import { dirname, join } from "path";
 import * as log from "./logger.js";
@@ -29,6 +30,31 @@ import {
   normalizeEntityLabels,
   normalizeRetainExtractionMode,
 } from "./bank-defaults.js";
+
+/**
+ * Structured payload for a knowledge tool result.
+ *
+ * The SDK returns the payload only as JSON text in `content[0].text`. OpenClaw's
+ * Code Mode hands a tool result's `details` (and nothing else) to the guest as the
+ * structured value, so `details: {}` made every knowledge tool look empty there
+ * (#4308). Parse the text back into an object; a non-object payload is wrapped and
+ * unparseable text yields `{}` as before.
+ */
+export function knowledgeToolDetails(result: unknown): Record<string, unknown> {
+  const content = (result as { content?: unknown })?.content;
+  const first = Array.isArray(content) ? (content[0] as { text?: unknown } | undefined) : undefined;
+  const text = first?.text;
+  if (typeof text !== "string") return {};
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+    return { result: parsed };
+  } catch {
+    return {};
+  }
+}
 
 function loadPackageVersion(): string {
   try {
@@ -446,6 +472,42 @@ export async function flushRetainQueue(
 
 const DEFAULT_RECALL_PROMPT_PREAMBLE =
   "Relevant memories from past conversations (prioritize recent when conflicting). Only use memories that are directly useful to continue this conversation; ignore the rest:";
+
+/**
+ * The messages a retain should work from, for a `session_end` event that carries none.
+ *
+ * OpenClaw's `buildSessionEndHookPayload()` sends `sessionId`, `sessionKey`,
+ * `messageCount`, `durationMs`, `reason`, `sessionFile` and the next session's ids -
+ * no `messages` array, and a `context` holding only ids. The forced flush added for
+ * #1726 therefore ended at its own "no messages" guard on every session close, and the
+ * turns after the last cadence boundary were never retained (#4341).
+ *
+ * The transcript the event points at is the source: one synchronous read, which is what
+ * the shutdown drain's shared 2s budget allows, and extraction still happens
+ * asynchronously in the bank's operation queue. `undefined` when there is no readable
+ * transcript, which leaves the caller's existing guard to skip the flush as before.
+ *
+ * `/new` matters here: OpenClaw emits the previous session's `session_end` lazily, on
+ * the first turn of its successor, so the old messages are gone from the live session
+ * entry by then and the file is the only copy.
+ */
+export function sessionEndMessagesFromTranscript(
+  event: unknown,
+  read: typeof parseSessionFile = parseSessionFile
+): unknown[] | undefined {
+  const payload = (event ?? {}) as Record<string, any>;
+  const sessionFile = typeof payload.sessionFile === "string" ? payload.sessionFile : undefined;
+  if (!sessionFile) return undefined;
+  const agentId = typeof payload.context?.agentId === "string" ? payload.context.agentId : "";
+  try {
+    const messages = read(sessionFile, agentId).messages;
+    return messages.length > 0 ? messages : undefined;
+  } catch {
+    // A missing, truncated or unreadable transcript is not an error worth failing the
+    // session close over; the caller skips the flush exactly as it did before.
+    return undefined;
+  }
+}
 
 export function formatCurrentTimeForRecall(date = new Date()): string {
   const year = date.getUTCFullYear();
@@ -2876,10 +2938,20 @@ ${memoriesFormatted}
           return;
         }
 
-        if (
-          !Array.isArray(event.context?.sessionEntry?.messages ?? event.messages) ||
-          (event.context?.sessionEntry?.messages ?? event.messages ?? []).length === 0
-        ) {
+        // Resolved once: `session_end` carries no transcript, so the forced flush
+        // reads it from the file the event points at (#4341). Without this the guard
+        // below ended every session-close flush before it began.
+        let eventMessages = event.context?.sessionEntry?.messages ?? event.messages;
+        if (force && (!Array.isArray(eventMessages) || eventMessages.length === 0)) {
+          eventMessages = sessionEndMessagesFromTranscript(event);
+          if (Array.isArray(eventMessages)) {
+            debug(
+              `[Hindsight Hook] session_end: read ${eventMessages.length} messages from ${event.sessionFile}`
+            );
+          }
+        }
+
+        if (!Array.isArray(eventMessages) || eventMessages.length === 0) {
           debug("[Hindsight Hook] No messages in event, skipping retention");
           return;
         }
@@ -2891,7 +2963,7 @@ ${memoriesFormatted}
 
         // Chunked retention: skip non-Nth turns and use a sliding window when firing
         const retainEveryN = pluginConfig.retainEveryNTurns ?? 1;
-        const allMessages = event.context?.sessionEntry?.messages ?? event.messages ?? [];
+        const allMessages = eventMessages;
         let messagesToRetain = allMessages;
         let retainFullWindow = false;
 
@@ -3141,12 +3213,13 @@ ${memoriesFormatted}
               if (resolution.identityError) {
                 return {
                   content: [{ type: "text", text: resolution.identityError }],
-                  details: {},
+                  details: { error: resolution.identityError },
                 };
               }
               const config = currentPluginConfig || pluginConfig;
               await ensureBankDefaultsApplied(resolution.bankId, config);
-              return { ...(await t.execute(params)), details: {} };
+              const result = await t.execute(params);
+              return { ...result, details: knowledgeToolDetails(result) };
             },
           }));
         };

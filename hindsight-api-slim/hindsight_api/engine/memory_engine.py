@@ -2682,6 +2682,18 @@ class MemoryEngine(MemoryEngineInterface):
             webhook_manager=None,
         )
 
+        # One context for every extension the engine owns. The tenant extension and the
+        # operation validator are constructed BEFORE the engine and handed to __init__, so
+        # load_extension() never got to set a context on them -- without this, a validator
+        # hook reaching context.get_memory_engine() raises "Extension context not set".
+        # Safe to share: the context holds only process-global handles (db url, engine,
+        # webhook manager) and no per-request state. getattr rather than a bare call
+        # because tests hand in duck-typed extensions that are not Extension subclasses.
+        for _ext in (self._tenant_extension, self._operation_validator):
+            _set_context = getattr(_ext, "set_context", None)
+            if _set_context is not None:
+                _set_context(self._ext_ctx)
+
         loaded = load_extension("MEMORY_DEFENSE", MemoryDefenseExtension, context=self._ext_ctx)
         if loaded is not None:
             self._memory_defense: MemoryDefenseExtension = loaded
@@ -16616,26 +16628,11 @@ class MemoryEngine(MemoryEngineInterface):
 
         # Run reflect with the source query, excluding the mental model being refreshed
         # Skip creating a nested "hindsight.reflect" span since we already have "hindsight.mental_model_refresh"
-        # Build context to guide the reflect agent: tell it what this mental
-        # model is about so it stays on-topic and produces high-quality content.
         mm_name = mental_model.get("name") or mental_model_id
-        refresh_context = (
-            f'You are writing a document called "{mm_name}". '
-            f"ONLY include content that directly answers the topic query. "
-            f"Discard observations that are tangential or off-topic — retrieval may return "
-            f"loosely related content that does not belong in this document.\n\n"
-            f"Quality guidelines:\n"
-            f"- Preserve concrete examples, before/after pairs, and sample sentences "
-            f"from the observations. These teach more than abstract rules.\n"
-            f"- If observations contain illustrative examples (e.g. ✅/❌ pairs, "
-            f"rewrites, sample phrases), include them in your answer.\n"
-            f"- Structure the document around the topic, not around the sources."
-        )
 
         reflect_kwargs: dict[str, Any] = dict(
             bank_id=bank_id,
             query=source_query,
-            context=refresh_context,
             request_context=request_context,
             tags=tag_filtering.tags,
             tags_match=tag_filtering.tags_match,
@@ -16677,6 +16674,11 @@ class MemoryEngine(MemoryEngineInterface):
                 else:
                     created_after = seen_at_raw
                 reflect_kwargs["created_after"] = created_after
+        # Tell the reflect agent what this page is about, and — full vs delta — how to
+        # treat time: see build_mental_model_refresh_context.
+        from .reflect.prompts import build_mental_model_refresh_context
+
+        reflect_kwargs["context"] = build_mental_model_refresh_context(mm_name, delta=created_after is not None)
 
         window = MentalModelRefreshWindow(
             created_after=created_after,
