@@ -2498,6 +2498,8 @@ async def test_restored_operations_log_cannot_re_run_the_source_bank_work(memory
 
 
 @pytest.mark.asyncio
+# Seeds the attachment link with a raw INSERT that needs the document's SQL row.
+@pytest.mark.memory_backend_incompatible
 async def test_attachment_bytes_travel_with_the_bank(memory, request_context):
     """An attachment's bytes ride in the archive and land under the target's own key.
 
@@ -2520,22 +2522,16 @@ async def test_attachment_bytes_travel_with_the_bank(memory, request_context):
                 memory._file_storage,
                 conn,
                 source,
+                "doc-1",
                 [
                     RetainAttachment(
                         attachment_hash="a" * 64,
                         media_type="image/png",
                         data=payload,
                         block_index=0,
+                        filename="diagram.png",
                     )
                 ],
-            )
-            await conn.execute(
-                f"INSERT INTO {fq_table('document_attachments')} (bank_id, document_id, attachment_hash, filename) "
-                f"VALUES ($1, $2, $3, $4)",
-                source,
-                "doc-1",
-                stored[0].attachment_hash,
-                "diagram.png",
             )
             archive = await export_bank(conn, source, file_storage=memory._file_storage)
 
@@ -2544,14 +2540,16 @@ async def test_attachment_bytes_travel_with_the_bank(memory, request_context):
 
         async with acquire_with_retry(backend) as conn:
             row = await conn.fetchrow(
-                f"SELECT storage_key, short_id, media_type FROM {fq_table('attachments')} WHERE bank_id = $1", target
-            )
-            linked = await conn.fetchval(
-                f"SELECT count(*) FROM {fq_table('document_attachments')} WHERE bank_id = $1", target
+                f"SELECT storage_key, short_id, media_type, document_id, filename "
+                f"FROM {fq_table('attachments')} WHERE bank_id = $1",
+                target,
             )
         assert row is not None
         assert row["storage_key"] != stored[0].storage_key
-        assert linked == 1
+        # The row carries its owning document and that document's name for it, so
+        # there is no separate edge table to carry across.
+        assert row["document_id"] == "doc-1"
+        assert row["filename"] == "diagram.png"
         assert bytes(await memory._file_storage.retrieve(row["storage_key"])) == payload
     finally:
         await memory.delete_bank(source, request_context=request_context)
@@ -2595,7 +2593,15 @@ async def test_invalidated_facts_survive_a_bank_copy(memory, request_context):
             }
         assert len(rows) == 1
         assert rows[0]["invalidation_reason"] == "wrong colour"
-        assert rows[0]["document_id"] == "doc-1"
+        # Through the store: one that owns its documents has no SQL row for the column's
+        # foreign key to reference, so it keeps the document elsewhere and leaves the column NULL.
+        from hindsight_api.engine.memories import get_memories
+
+        async with acquire_with_retry(backend) as conn:
+            archived = await get_memories().get_archived_memory(
+                conn=conn, fq_table=fq_table, bank_id=target, unit_id=str(rows[0]["id"])
+            )
+        assert archived is not None and archived.document_id == "doc-1"
         # Fresh unit id: the source row is still there on a same-instance copy.
         assert rows[0]["id"] not in source_ids
     finally:

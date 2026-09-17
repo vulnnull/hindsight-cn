@@ -23,6 +23,8 @@ import pytest
 
 from hindsight_api.engine.reflect import prompts
 from hindsight_api.engine.reflect.prompts import build_final_system_prompt, build_system_prompt_for_tools
+from hindsight_api.engine.response_models import DispositionTraits
+from hindsight_api.engine.search.think_utils import build_disposition_description
 
 BANK = {"name": "TestBank", "mission": ""}
 
@@ -478,8 +480,38 @@ class TestBankProfileBranches:
         assert actual == _assemble(
             _RETRIEVAL_RECALL_ONLY,
             _WORKFLOW_RECALL_ONLY,
-            trailer="\nDisposition: skepticism=3, literalism=2, empathy=4",
+            trailer="\nDisposition: skepticism=3, literalism=2, empathy=4\n"
+            + build_disposition_description(DispositionTraits(skepticism=3, literalism=2, empathy=4)),
         )
+
+    def test_all_neutral_disposition_adds_nothing_beyond_the_trait_line(self):
+        """A bank that never configured the traits keeps the prompt it had before."""
+        actual = build_system_prompt_for_tools(
+            bank_profile={
+                "name": "TestBank",
+                "mission": "",
+                "disposition": {"skepticism": 3, "literalism": 3, "empathy": 3},
+            },
+            has_mental_models=False,
+            include_observations=False,
+        )
+        assert actual == _assemble(
+            _RETRIEVAL_RECALL_ONLY,
+            _WORKFLOW_RECALL_ONLY,
+            trailer="\nDisposition: skepticism=3, literalism=3, empathy=3",
+        )
+
+    def test_disposition_spells_out_what_each_level_means(self):
+        """The numbers alone are metadata; a weaker model needs the behaviour named."""
+        actual = build_system_prompt_for_tools(
+            bank_profile={"name": "TestBank", "mission": "", "disposition": {"skepticism": 5}},
+            has_mental_models=False,
+            include_observations=False,
+        )
+        assert "Disposition: skepticism=5" in actual
+        assert "critically examine all information" in actual
+        # Traits the bank left unset fall back to neutral rather than dropping out.
+        assert "Literalism (moderate)" in actual
 
     def test_no_disposition_omits_trait_line(self):
         actual = build_system_prompt_for_tools(
