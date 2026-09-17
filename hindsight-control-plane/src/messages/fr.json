@@ -120,7 +120,7 @@
     "clearObservationsWarning": "Cela supprimera toutes les connaissances consolidées. Les observations seront régénérées lors de la prochaine consolidation.",
     "clearing": "Effacement en cours...",
     "bankDeleted": "Banque de mémoire supprimée",
-    "bankDeletedDescription": "La banque '{bankName}' a été définitivement supprimée.",
+    "bankDeletedDescription": "La banque {bankName} a été définitivement supprimée.",
     "failedToDeleteBank": "Échec de la suppression de la banque",
     "observationsCleared": "Observations effacées",
     "observationsClearedDefault": "Observations effacées avec succès",
@@ -166,7 +166,24 @@
     "memoryDefense": "Défense de la mémoire",
     "knowledge": "Connaissances",
     "knowledgeDescription": "Pages et modèles mentaux synthétisés à partir des mémoires de cette banque.",
-    "pages": "Pages"
+    "pages": "Pages",
+    "cloneBank": "Cloner la banque",
+    "cloneBankTitle": "Cloner la banque de mémoire",
+    "cloneBankDescription": "Copie cette banque dans une nouvelle. La copie démarre avec les mêmes mémoires puis évolue indépendamment.",
+    "cloneTargetLabel": "Identifiant de la nouvelle banque",
+    "cloneTargetPlaceholder": "ma-banque-copie",
+    "cloning": "Clonage…",
+    "cloneStarted": "Clonage lancé",
+    "cloneSucceeded": "Banque clonée dans {bankName}",
+    "cloneFailed": "Échec du clonage de la banque",
+    "cloneWhatToCopy": "Que copier",
+    "cloneIncludeData": "Mémoires",
+    "cloneIncludeDataHint": "Documents, faits, observations, pièces jointes, l'archive de curation, le journal des opérations, ainsi que les modèles mentaux et pages de connaissances qui en sont issus.",
+    "cloneIncludeBankConfig": "Configuration de la banque",
+    "cloneIncludeBankConfigHint": "Surcharges de configuration, directives et webhooks — la copie appellera les mêmes points de terminaison.",
+    "cloneIncludeHistory": "Historique",
+    "cloneIncludeHistoryHint": "Journal d'audit et traces des requêtes LLM.",
+    "cloneNothingSelected": "Choisissez au moins un élément à copier."
   },
   "bankProfile": {
     "noBankSelected": "Aucune banque sélectionnée",
@@ -589,7 +606,8 @@
       "exportDocuments": "Exporter les documents",
       "importDocuments": "Importer les documents",
       "exportBank": "Exporter la banque",
-      "importBank": "Importer la banque"
+      "importBank": "Importer la banque",
+      "cloneBank": "Cloner la banque"
     },
     "table": {
       "id": "ID d'opération",
@@ -1810,7 +1828,8 @@
         "operationIdRequired": "operation_id est obligatoire",
         "missingRequestData": "Données de requête manquantes",
         "missingBankId": "bank_id manquant",
-        "fileRequired": "Un fichier est requis"
+        "fileRequired": "Un fichier est requis",
+        "targetBankIdRequired": "target_bank_id est obligatoire"
       },
       "generic": {
         "failed": "Échec",
@@ -1823,7 +1842,8 @@
         "update": "Impossible de mettre à jour la banque de mémoire",
         "delete": "Impossible de supprimer la banque de mémoire",
         "exportTemplate": "Impossible d'exporter le modèle de banque de mémoire",
-        "importTemplate": "Impossible d'importer le modèle de banque de mémoire"
+        "importTemplate": "Impossible d'importer le modèle de banque de mémoire",
+        "clone": "Échec du clonage de la banque"
       },
       "bankConfig": {
         "fetch": "Impossible de récupérer la configuration de la banque",

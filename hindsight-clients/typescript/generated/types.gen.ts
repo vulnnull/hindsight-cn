@@ -9510,7 +9510,7 @@ export type ExportBankTransferData = {
     /**
      * Include Bank Config
      *
-     * Carry bank config, mental models, directives
+     * Carry the bank's config overrides, directives and webhooks
      */
     include_bank_config?: boolean;
     /**
@@ -9594,7 +9594,7 @@ export type ImportBankTransferData = {
     /**
      * Include Bank Config
      *
-     * restore mode: carry bank config, mental models, directives (default true)
+     * restore mode: restore the bank's config overrides, directives and webhooks (default true)
      */
     include_bank_config?: boolean | null;
     /**
@@ -9625,6 +9625,71 @@ export type ImportBankTransferResponses = {
 
 export type ImportBankTransferResponse =
   ImportBankTransferResponses[keyof ImportBankTransferResponses];
+
+export type CloneBankData = {
+  body?: never;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+  };
+  query: {
+    /**
+     * Target Bank Id
+     *
+     * Bank to create; must not already exist
+     */
+    target_bank_id: string;
+    /**
+     * Include Data
+     *
+     * Copy the memories, what backs them, and the mental models and knowledge pages synthesized from them
+     */
+    include_data?: boolean;
+    /**
+     * Include Bank Config
+     *
+     * Copy the bank's config overrides, directives and webhooks
+     */
+    include_bank_config?: boolean;
+    /**
+     * Include History
+     *
+     * Copy audit_log and llm_requests
+     */
+    include_history?: boolean;
+  };
+  url: "/v1/default/banks/{bank_id}/clone";
+};
+
+export type CloneBankErrors = {
+  /**
+   * The bank does not exist.
+   */
+  404: unknown;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type CloneBankError = CloneBankErrors[keyof CloneBankErrors];
+
+export type CloneBankResponses = {
+  /**
+   * Successful Response
+   */
+  202: BankTransferSubmitResponse;
+};
+
+export type CloneBankResponse = CloneBankResponses[keyof CloneBankResponses];
 
 export type GetBankAttachmentData = {
   body?: never;

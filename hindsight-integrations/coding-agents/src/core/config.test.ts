@@ -306,6 +306,75 @@ describe("environment fallback", () => {
     );
   });
 
+  it("pages: valid entries kept, unknown names and unusable values dropped with a warning", () => {
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => {});
+    expect(resolveConfig({}).pages).toEqual({});
+    expect(
+      resolveConfig({
+        pages: { "Component map": false, "Key decisions and rationale": { source_query: "why?" } },
+      }).pages
+    ).toEqual({
+      "Component map": false,
+      "Key decisions and rationale": { source_query: "why?" },
+    });
+    expect(warn).not.toHaveBeenCalled();
+
+    // A name matching no seeded page reads as having disabled or reworded something and would
+    // otherwise do nothing at all — the reason this is validated rather than passed through.
+    expect(resolveConfig({ pages: { "Componnet map": false } }).pages).toEqual({});
+    // Values that would travel and become a page whose description is `5`, or blank.
+    expect(
+      resolveConfig({ pages: { "Core concepts": { source_query: 5 } } as never }).pages
+    ).toEqual({});
+    expect(resolveConfig({ pages: { "Core concepts": { source_query: "  " } } }).pages).toEqual({});
+    expect(resolveConfig({ pages: ["Core concepts"] as never }).pages).toEqual({});
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("customPages: source_query required, tags optional, seeded-page names refused", () => {
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => {});
+    expect(resolveConfig({}).customPages).toEqual({});
+    expect(
+      resolveConfig({
+        customPages: {
+          "Security posture": { source_query: "what did we decide about auth?", tags: ["x"] },
+          Roadmap: { source_query: "where is this going?" },
+        },
+      }).customPages
+    ).toEqual({
+      "Security posture": { source_query: "what did we decide about auth?", tags: ["x"] },
+      Roadmap: { source_query: "where is this going?" },
+    });
+    expect(warn).not.toHaveBeenCalled();
+
+    // `pages` rewords a page the plugin owns, `customPages` creates one — choosing for the user
+    // would be a guess, so a seeded name here is refused rather than merged.
+    expect(
+      resolveConfig({ customPages: { "Core concepts": { source_query: "x" } } }).customPages
+    ).toEqual({});
+    expect(resolveConfig({ customPages: { Roadmap: { source_query: "  " } } }).customPages).toEqual(
+      {}
+    );
+    expect(resolveConfig({ customPages: { Roadmap: {} } as never }).customPages).toEqual({});
+    // A stray non-string tag would reach the API as a tag and fail page creation.
+    expect(
+      resolveConfig({ customPages: { Roadmap: { source_query: "q", tags: ["ok", 5] } } as never })
+        .customPages
+    ).toEqual({ Roadmap: { source_query: "q", tags: ["ok"] } });
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("pages: a banks.<id> section replaces the global map rather than merging into it", () => {
+    const base = resolveConfig({
+      pages: { "Component map": false },
+      banks: { b: { pages: { "Core concepts": false } } },
+    });
+    expect(applyBankConfig(base, "b").cfg.pages).toEqual({ "Core concepts": false });
+    expect(applyBankConfig(base, "other").cfg.pages).toEqual({ "Component map": false });
+  });
+
   it("pageSearchLimit: default, override and env fallback", () => {
     expect(resolveConfig({}).pageSearchLimit).toBe(3);
     expect(resolveConfig({ pageSearchLimit: 8 }).pageSearchLimit).toBe(8);

@@ -107,7 +107,7 @@ async def test_existing_empty_bank_still_returns_200(api_client, memory, read_pa
     # so the 404 above distinguishes "missing" from "empty" rather than replacing
     # one indistinguishable answer with another.
     bank_id = f"empty-{uuid.uuid4().hex[:8]}"
-    await memory.get_bank_profile(bank_id=bank_id, request_context=RequestContext())
+    await memory.ensure_bank_profile(bank_id=bank_id, request_context=RequestContext())
     for suffix in read_paths:
         resp = await api_client.get(
             f"{_BANK_PREFIX.format(bank_id=bank_id)}{suffix}", params=_REQUIRED_PARAMS.get(suffix)
@@ -121,5 +121,23 @@ async def test_read_does_not_create_the_bank(api_client, memory):
     # stale bank_id must not silently materialise that bank.
     bank_id = f"nosuch-{uuid.uuid4().hex[:8]}"
     assert (await api_client.get(f"{_BANK_PREFIX.format(bank_id=bank_id)}/stats")).status_code == 404
-    profile = await memory.get_bank_profile(bank_id, request_context=RequestContext(), create_if_missing=False)
+    profile = await memory.get_bank_profile(bank_id, request_context=RequestContext())
     assert profile is None
+
+
+@pytest.mark.asyncio
+async def test_recall_on_missing_bank_returns_404(api_client, memory):
+    # Recall is a POST, so the GET scan above does not reach it — and it was the
+    # last bank-scoped read still answering 200 with empty results for a bank
+    # nobody created, after paying the whole retrieval fan-out (#4442).
+    bank_id = f"nosuch-{uuid.uuid4().hex[:8]}"
+    resp = await api_client.post(f"{_BANK_PREFIX.format(bank_id=bank_id)}/memories/recall", json={"query": "anything"})
+    assert resp.status_code == 404, resp.text
+    assert bank_id in resp.json()["detail"]
+    # Read-only: the probe must not materialise the bank.
+    assert await memory.get_bank_profile(bank_id, request_context=RequestContext()) is None
+
+    existing = f"empty-{uuid.uuid4().hex[:8]}"
+    await memory.ensure_bank_profile(bank_id=existing, request_context=RequestContext())
+    resp = await api_client.post(f"{_BANK_PREFIX.format(bank_id=existing)}/memories/recall", json={"query": "anything"})
+    assert resp.status_code == 200, resp.text

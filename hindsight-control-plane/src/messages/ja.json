@@ -120,7 +120,7 @@
     "clearObservationsWarning": "これにより統合されたすべての知識が削除されます。次回の統合実行時に観察が再生成されます。",
     "clearing": "クリア中...",
     "bankDeleted": "メモリバンクが削除されました",
-    "bankDeletedDescription": "バンク'{bankName}'が完全に削除されました。",
+    "bankDeletedDescription": "バンク{bankName}が完全に削除されました。",
     "failedToDeleteBank": "バンクの削除に失敗しました",
     "observationsCleared": "観察がクリアされました",
     "observationsClearedDefault": "観察が正常にクリアされました",
@@ -166,7 +166,24 @@
     "memoryDefense": "メモリ防御",
     "knowledge": "ナレッジ",
     "knowledgeDescription": "この記憶バンクから合成されたナレッジページとメンタルモデル。",
-    "pages": "ページ"
+    "pages": "ページ",
+    "cloneBank": "バンクを複製",
+    "cloneBankTitle": "メモリバンクを複製",
+    "cloneBankDescription": "このバンクを新しいバンクにコピーします。コピーは同じ記憶から始まり、以後は独立して変化します。",
+    "cloneTargetLabel": "新しいバンク ID",
+    "cloneTargetPlaceholder": "my-bank-copy",
+    "cloning": "複製中…",
+    "cloneStarted": "複製を開始しました",
+    "cloneSucceeded": "バンクを {bankName} に複製しました",
+    "cloneFailed": "バンクの複製に失敗しました",
+    "cloneWhatToCopy": "コピーする範囲",
+    "cloneIncludeData": "記憶",
+    "cloneIncludeDataHint": "ドキュメント、事実、観察、添付ファイル、キュレーション履歴、操作ログ、そしてそこから合成されたメンタルモデルとナレッジページ。",
+    "cloneIncludeBankConfig": "バンク設定",
+    "cloneIncludeBankConfigHint": "設定の上書き、ディレクティブ、Webhook。コピーも同じ Webhook エンドポイントを呼び出します。",
+    "cloneIncludeHistory": "履歴",
+    "cloneIncludeHistoryHint": "監査ログと LLM リクエストのトレース。",
+    "cloneNothingSelected": "コピーする対象を 1 つ以上選んでください。"
   },
   "bankProfile": {
     "noBankSelected": "バンクが選択されていません",
@@ -589,7 +606,8 @@
       "exportDocuments": "ドキュメントのエクスポート",
       "importDocuments": "ドキュメントのインポート",
       "exportBank": "バンクのエクスポート",
-      "importBank": "バンクのインポート"
+      "importBank": "バンクのインポート",
+      "cloneBank": "バンクの複製"
     },
     "table": {
       "id": "操作 ID",
@@ -1810,7 +1828,8 @@
         "operationIdRequired": "operation_id は必須です",
         "missingRequestData": "リクエストデータが不足しています",
         "missingBankId": "bank_id がありません",
-        "fileRequired": "ファイルが必要です"
+        "fileRequired": "ファイルが必要です",
+        "targetBankIdRequired": "target_bank_id は必須です"
       },
       "generic": {
         "failed": "失敗しました",
@@ -1823,7 +1842,8 @@
         "update": "メモリバンクの更新に失敗しました",
         "delete": "メモリバンクの削除に失敗しました",
         "exportTemplate": "メモリバンクテンプレートのエクスポートに失敗しました",
-        "importTemplate": "メモリバンクテンプレートのインポートに失敗しました"
+        "importTemplate": "メモリバンクテンプレートのインポートに失敗しました",
+        "clone": "バンクの複製に失敗しました"
       },
       "bankConfig": {
         "fetch": "バンク設定の取得に失敗しました",

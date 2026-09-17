@@ -730,22 +730,21 @@ def _drop_ids(rows: list[dict], column: str = "id") -> None:
         row.pop(column, None)
 
 
-def _neutralize_live_operations(rows: list[dict]) -> None:
-    """Mark operations that were still in flight at export time as cancelled.
+def _finished_operations(rows: list[dict]) -> list[dict]:
+    """The operations log minus anything still in flight at export time.
 
-    ``async_operations`` is also the task queue: a restored ``pending`` row is
-    work the target's worker will actually *run* — re-firing the source bank's
+    ``async_operations`` is also the task queue, so a restored ``pending`` row is
+    work the target's worker would actually *run* — re-firing the source bank's
     webhooks, re-running its retains — against a bank that never asked for it.
-    The row is kept (it is part of the operations log the caller asked for) with
-    its outcome recorded as what it is: work that did not survive the transfer.
+
+    They were first restored as ``cancelled`` to keep the record, which turned out
+    to be worse than dropping them: a clone runs *inside* one of these operations,
+    so every copy arrived holding a cancelled "clone_bank" row explaining that it
+    had been interrupted — describing, confusingly, the very operation that had
+    just succeeded. In-flight work belongs to the bank that was exported, never to
+    the copy, so the copy's log is the finished work only.
     """
-    for row in rows:
-        if row.get("status") in _LIVE_OPERATION_STATUSES:
-            row["status"] = "cancelled"
-            row["error_message"] = "Cancelled: the operation was still in flight when the bank was exported."
-            # Only live rows carry it, and it is what the partial unique index on
-            # (bank_id, serialization_key) keys on for pending/processing work.
-            row.pop("serialization_key", None)
+    return [row for row in rows if row.get("status") not in _LIVE_OPERATION_STATUSES]
 
 
 async def _restore_attachments(
@@ -829,8 +828,7 @@ async def _restore_operational_rows(
     dropped rather than restored against an id that means nothing here — the
     target re-enqueues its own maintenance as the import writes land.
     """
-    operations = data_rows.get("async_operations", [])
-    _neutralize_live_operations(operations)
+    operations = _finished_operations(data_rows.get("async_operations", []))
     restored_ops = await _restore_rows(
         conn, "async_operations", operations, bank_rows_json_encoding=bank_rows_json_encoding
     )
@@ -1006,6 +1004,13 @@ async def import_bank(
     # child (mental_models, …) trips its bank_id foreign key. See #3270.
     for row in parsed.bank_rows.get("banks", []):
         row.pop("internal_id", None)
+        # A bank's default display name is its id (see create_bank_row_on_conn),
+        # so restoring under a new id would leave the copy showing the *source's*
+        # id as its name — two banks reading as the same one in any list that
+        # shows names. Follow the rename only when the name is that default: a
+        # name someone actually chose is theirs, and is kept.
+        if bank_id != source_bank_id and row.get("name") == source_bank_id:
+            row["name"] = bank_id
 
     async with acquire_with_retry(backend) as conn:
         # Refuse to import into an existing bank — this restores a whole bank, it
@@ -1088,7 +1093,7 @@ async def import_bank(
 
     # Re-embed restored mental models off-connection (the source embedding was
     # stripped on export), so no DB connection is held across the embedding call.
-    mm_rows = parsed.bank_rows.get("mental_models", []) if restoring.bank_config else []
+    mm_rows = parsed.bank_rows.get("mental_models", []) if restoring.data else []
     mm_embeddings = await _regenerate_mental_model_embeddings(embeddings_model, mm_rows)
 
     async with acquire_with_retry(backend) as conn:
@@ -1126,7 +1131,9 @@ async def import_bank(
                 bank_rows_json_encoding=bank_rows_json_encoding,
             )
 
-        if restoring.bank_config:
+            # Synthesized knowledge rides with the memories: the evidence remapped
+            # just above points at the facts the replay has now written, so these
+            # rows are only coherent alongside them.
             result.mental_models_imported = await _restore_rows(
                 conn,
                 "mental_models",
@@ -1151,6 +1158,8 @@ async def import_bank(
             result.knowledge_pages_indexed = await _index_restored_pages(
                 conn, bank_id, parsed.knowledge_pages, mm_embeddings
             )
+
+        if restoring.bank_config:
             result.directives_imported = await _restore_rows(
                 conn,
                 "directives",

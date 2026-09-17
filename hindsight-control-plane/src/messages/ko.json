@@ -120,7 +120,7 @@
     "clearObservationsWarning": "이렇게 하면 통합된 모든 지식이 삭제됩니다. 다음 통합 실행 시 관찰이 재생성됩니다.",
     "clearing": "지우는 중...",
     "bankDeleted": "메모리 뱅크 삭제됨",
-    "bankDeletedDescription": "뱅크 '{bankName}'이(가) 영구적으로 삭제되었습니다.",
+    "bankDeletedDescription": "뱅크 {bankName}이(가) 영구적으로 삭제되었습니다.",
     "failedToDeleteBank": "뱅크 삭제에 실패했습니다",
     "observationsCleared": "관찰이 지워졌습니다",
     "observationsClearedDefault": "관찰이 성공적으로 지워졌습니다",
@@ -166,7 +166,24 @@
     "memoryDefense": "메모리 방어",
     "knowledge": "지식",
     "knowledgeDescription": "이 기억 저장소에서 종합된 지식 페이지와 멘탈 모델입니다.",
-    "pages": "페이지"
+    "pages": "페이지",
+    "cloneBank": "뱅크 복제",
+    "cloneBankTitle": "메모리 뱅크 복제",
+    "cloneBankDescription": "이 뱅크를 새 뱅크로 복사합니다. 복사본은 같은 기억으로 시작하며 이후에는 독립적으로 변합니다.",
+    "cloneTargetLabel": "새 뱅크 ID",
+    "cloneTargetPlaceholder": "my-bank-copy",
+    "cloning": "복제 중…",
+    "cloneStarted": "복제를 시작했습니다",
+    "cloneSucceeded": "뱅크를 {bankName}(으)로 복제했습니다",
+    "cloneFailed": "뱅크 복제에 실패했습니다",
+    "cloneWhatToCopy": "복사할 항목",
+    "cloneIncludeData": "기억",
+    "cloneIncludeDataHint": "문서, 사실, 관찰, 첨부 파일, 큐레이션 보관본, 작업 로그, 그리고 이들로부터 합성된 멘탈 모델과 지식 페이지.",
+    "cloneIncludeBankConfig": "뱅크 설정",
+    "cloneIncludeBankConfigHint": "설정 재정의, 디렉티브, 웹훅 — 복사본도 같은 웹훅 엔드포인트를 호출합니다.",
+    "cloneIncludeHistory": "기록",
+    "cloneIncludeHistoryHint": "감사 로그와 LLM 요청 추적.",
+    "cloneNothingSelected": "복사할 항목을 하나 이상 선택하세요."
   },
   "bankProfile": {
     "noBankSelected": "선택된 뱅크 없음",
@@ -589,7 +606,8 @@
       "exportDocuments": "문서 내보내기",
       "importDocuments": "문서 가져오기",
       "exportBank": "뱅크 내보내기",
-      "importBank": "뱅크 가져오기"
+      "importBank": "뱅크 가져오기",
+      "cloneBank": "뱅크 복제"
     },
     "table": {
       "id": "작업 ID",
@@ -1810,7 +1828,8 @@
         "operationIdRequired": "operation_id는 필수입니다",
         "missingRequestData": "요청 데이터가 누락되었습니다",
         "missingBankId": "bank_id가 누락되었습니다",
-        "fileRequired": "파일이 필요합니다"
+        "fileRequired": "파일이 필요합니다",
+        "targetBankIdRequired": "target_bank_id는 필수입니다"
       },
       "generic": {
         "failed": "실패했습니다",
@@ -1823,7 +1842,8 @@
         "update": "메모리 뱅크를 업데이트하지 못했습니다",
         "delete": "메모리 뱅크를 삭제하지 못했습니다",
         "exportTemplate": "메모리 뱅크 템플릿을 내보내지 못했습니다",
-        "importTemplate": "메모리 뱅크 템플릿을 가져오지 못했습니다"
+        "importTemplate": "메모리 뱅크 템플릿을 가져오지 못했습니다",
+        "clone": "뱅크 복제에 실패했습니다"
       },
       "bankConfig": {
         "fetch": "뱅크 구성을 가져오지 못했습니다",
@@ -1959,7 +1979,7 @@
     "updatedLabel": "업데이트:",
     "close": "닫기",
     "noBody": "이 페이지에 아직 내용이 없습니다.",
-    "deleteConfirm": "'{name}' 및 내부의 모든 항목을 삭제하시겠습니까?",
+    "deleteConfirm": "{name} 및 내부의 모든 항목을 삭제하시겠습니까?",
     "deleteButton": "삭제",
     "cancel": "취소",
     "create": "생성",

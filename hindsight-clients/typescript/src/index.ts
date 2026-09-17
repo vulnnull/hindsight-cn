@@ -116,16 +116,35 @@ export function retryAfterMs(response: Response | undefined): number | null {
 export async function retryOnCapacity<T extends { response?: Response }>(
   send: () => Promise<T>,
   maxAttempts: number,
-  random: () => number = Math.random
+  random: () => number = Math.random,
+  signal?: AbortSignal
 ): Promise<T> {
+  signal?.throwIfAborted();
   let result = await send();
+  signal?.throwIfAborted();
   for (let attempt = 1; attempt < maxAttempts; attempt++) {
     const status = result.response?.status;
     if (status !== 429 && status !== 503) return result;
     const wait = retryAfterMs(result.response) ?? FALLBACK_BACKOFF_MS * 2 ** (attempt - 1);
     // Full jitter: sleep somewhere in [0, wait] so a synchronised burst spreads out.
-    await new Promise((resolve) => setTimeout(resolve, random() * wait));
+    // A cancelled caller must not wait out Retry-After or start another request.
+    // Clean up on either outcome: successful reads should not accumulate listeners.
+    await new Promise<void>((resolve, reject) => {
+      const onAbort = () => {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
+        reject(signal?.reason);
+      };
+      const timer = setTimeout(() => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve();
+      }, random() * wait);
+      signal?.addEventListener("abort", onAbort, { once: true });
+      if (signal?.aborted) onAbort();
+    });
+    signal?.throwIfAborted();
     result = await send();
+    signal?.throwIfAborted();
   }
   return result;
 }
@@ -566,7 +585,9 @@ export class HindsightClient {
           },
           signal: options?.signal,
         }),
-      this.maxAttempts
+      this.maxAttempts,
+      Math.random,
+      options?.signal
     );
 
     return this.validateResponse(response, "recall");
@@ -636,7 +657,9 @@ export class HindsightClient {
           },
           signal: options?.signal,
         }),
-      this.maxAttempts
+      this.maxAttempts,
+      Math.random,
+      options?.signal
     );
 
     return this.validateResponse(response, "reflect");
@@ -1824,6 +1847,47 @@ export class HindsightClient {
       signal: options?.signal,
     });
     const submission = this.validateResponse(response, "importBankTransfer");
+    return submission.operation_id;
+  }
+
+  /**
+   * Copy a bank into a new one, and resolve with the clone operation's id.
+   *
+   * The clone starts with the source's memories as they are at clone time and
+   * evolves independently from then on. It runs server-side as the export and
+   * import back to back, so no archive travels over the wire and no LLM is called;
+   * poll `sdk.getOperationStatus` for progress and the per-component counts.
+   *
+   * `targetBankId` must NOT already exist. Note that webhooks travel with
+   * `includeBankConfig`: a clone made with the defaults will call the source's
+   * webhook endpoints.
+   */
+  async cloneBank(
+    bankId: string,
+    targetBankId: string,
+    options?: {
+      includeData?: boolean;
+      includeBankConfig?: boolean;
+      includeHistory?: boolean;
+      signal?: AbortSignal;
+    }
+  ): Promise<string> {
+    const response = await sdk.cloneBank({
+      client: this.client,
+      path: { bank_id: bankId },
+      query: {
+        target_bank_id: targetBankId,
+        ...(options?.includeData !== undefined ? { include_data: options.includeData } : {}),
+        ...(options?.includeBankConfig !== undefined
+          ? { include_bank_config: options.includeBankConfig }
+          : {}),
+        ...(options?.includeHistory !== undefined
+          ? { include_history: options.includeHistory }
+          : {}),
+      },
+      signal: options?.signal,
+    });
+    const submission = this.validateResponse(response, "cloneBank");
     return submission.operation_id;
   }
 

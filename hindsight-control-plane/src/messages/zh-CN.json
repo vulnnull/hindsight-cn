@@ -166,7 +166,24 @@
     "deleteWillDeleteObservations": "这将删除 {count, plural, other {# 个沉淀认知}}。",
     "knowledge": "知识库",
     "knowledgeDescription": "由本记忆库的记忆综合生成的知识页面和知识摘要。",
-    "pages": "页面"
+    "pages": "页面",
+    "cloneBank": "克隆记忆库",
+    "cloneBankTitle": "克隆记忆库",
+    "cloneBankDescription": "把当前记忆库复制成一个新的。副本从相同的记忆开始，之后各自独立演进。",
+    "cloneTargetLabel": "新记忆库 ID",
+    "cloneTargetPlaceholder": "my-bank-copy",
+    "cloning": "克隆中…",
+    "cloneStarted": "已开始克隆",
+    "cloneSucceeded": "记忆库已克隆为“{bankName}”",
+    "cloneFailed": "克隆记忆库失败",
+    "cloneWhatToCopy": "复制哪些内容",
+    "cloneIncludeData": "记忆",
+    "cloneIncludeDataHint": "文档、事实、观察、附件、整理归档、操作日志，以及由它们合成的知识摘要和知识页。",
+    "cloneIncludeBankConfig": "记忆库配置",
+    "cloneIncludeBankConfigHint": "配置覆盖、指令和 Webhook——副本会调用相同的 Webhook 端点。",
+    "cloneIncludeHistory": "历史",
+    "cloneIncludeHistoryHint": "审计日志和 LLM 请求追踪。",
+    "cloneNothingSelected": "请至少选择一项要复制的内容。"
   },
   "bankProfile": {
     "noBankSelected": "未选择记忆库",
@@ -591,7 +608,8 @@
       "exportDocuments": "导出文档",
       "importDocuments": "导入文档",
       "exportBank": "导出记忆库",
-      "importBank": "导入记忆库"
+      "importBank": "导入记忆库",
+      "cloneBank": "克隆记忆库"
     },
     "table": {
       "id": "操作 ID",
@@ -1838,7 +1856,8 @@
         "operationIdRequired": "operation_id 为必填项",
         "missingRequestData": "缺少请求数据",
         "missingBankId": "缺少 bank_id",
-        "fileRequired": "需要文件"
+        "fileRequired": "需要文件",
+        "targetBankIdRequired": "必须提供 target_bank_id"
       },
       "generic": {
         "failed": "失败",
@@ -1851,7 +1870,8 @@
         "update": "更新记忆库失败",
         "delete": "删除记忆库失败",
         "exportTemplate": "导出记忆库模板失败",
-        "importTemplate": "导入记忆库模板失败"
+        "importTemplate": "导入记忆库模板失败",
+        "clone": "克隆记忆库失败"
       },
       "bankConfig": {
         "fetch": "获取记忆库配置失败",

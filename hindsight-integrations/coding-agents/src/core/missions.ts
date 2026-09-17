@@ -276,16 +276,69 @@ const PAGE_TAXONOMY: readonly KnowledgePage[] = [
   },
 ];
 
+/** The seeded pages' names, in taxonomy order — the keys `RawConfig.pages` accepts. */
+export const PAGE_NAMES: readonly string[] = PAGE_TAXONOMY.map((page) => page.name);
+
 /**
- * The seeded pages for one subject: the taxonomy above with `project` named in every query.
- *
- * A pure function of `project`, so the query text is STABLE for a given subject and `seedPages()`
- * PATCHes once (on the upgrade that introduces the clause) rather than on every deepen run — which
- * holds only while the caller's `project` is itself stable per bank (see `bankProjectName`).
+ * What a config says about ONE seeded page, keyed by its name in `RawConfig.pages`:
+ *   false                   — don't seed it at all
+ *   { source_query: "..." } — seed it, but ask this question instead of the taxonomy's
+ * An absent entry means the taxonomy's own query, which is what every page gets by default.
  */
-export function pagesFor(project: string): KnowledgePage[] {
+export type PageOverride = false | { source_query?: string };
+export type PagesConfig = Record<string, PageOverride>;
+
+/**
+ * A page the USER defines, keyed by its name in `RawConfig.customPages` — as opposed to `pages`,
+ * which only reworks the taxonomy above:
+ *   source_query — the question the page answers (required)
+ *   tags         — which facts feed it, e.g. ["knowledge:decision"]. OPTIONAL: the page trigger
+ *                  matches tags with `all` (see PAGE_TAGS_MATCH), so no tags is no tag constraint
+ *                  rather than an empty page — it synthesizes from everything the bank holds.
+ */
+export interface CustomPage {
+  source_query: string;
+  tags?: string[];
+}
+export type CustomPagesConfig = Record<string, CustomPage>;
+
+/**
+ * The seeded pages for one subject: the taxonomy above with `project` named in every query, minus
+ * the ones `pages` disables and with its custom queries substituted.
+ *
+ * A pure function of its arguments, so the query text is STABLE for a given subject and
+ * `seedPages()` PATCHes once (on the upgrade that introduces the clause) rather than on every
+ * deepen run — which holds only while the caller's `project` is itself stable per bank (see
+ * `bankProjectName`), and while `pages` itself is stable.
+ *
+ * `pageScopeRule` is appended to a CUSTOM query too — a page from `customPages` included. It is
+ * what stops the synthesizer presenting a dependency's decisions as this project's own (#3476), a
+ * failure mode someone rewording or adding a question is not thereby choosing to take on.
+ */
+export function pagesFor(
+  project: string,
+  pages: PagesConfig = {},
+  customPages: CustomPagesConfig = {}
+): KnowledgePage[] {
   const scope = pageScopeRule(project);
-  return PAGE_TAXONOMY.map((page) => ({ ...page, source_query: page.source_query + scope }));
+  // Matched case-insensitively on the same key `seedPages` matches live pages by, so a config
+  // entry and the page it names can't disagree about which page that is.
+  const byName = new Map(
+    Object.entries(pages).map(([name, override]) => [name.trim().toLowerCase(), override])
+  );
+  const out: KnowledgePage[] = [];
+  for (const page of PAGE_TAXONOMY) {
+    const override = byName.get(page.name.toLowerCase());
+    if (override === false) continue;
+    out.push({ ...page, source_query: (override?.source_query || page.source_query) + scope });
+  }
+  // The user's own pages, seeded at the same root and treated exactly like a taxonomy page from
+  // here on: same scoping clause, same drift re-sync, same trigger. Appended last so a taxonomy
+  // page keeps its position, which is the order the seed log and the page roster read in.
+  for (const [name, page] of Object.entries(customPages)) {
+    out.push({ name: name.trim(), source_query: page.source_query + scope, tags: page.tags ?? [] });
+  }
+  return out;
 }
 
 // Refresh policy shared by every page this plugin creates — the seeded taxonomy above and the

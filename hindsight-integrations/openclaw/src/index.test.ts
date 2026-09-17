@@ -5,6 +5,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import {
   knowledgeToolDetails,
+  normalizeAgentBankMap,
   stripMemoryTags,
   extractRecallQuery,
   formatCurrentTimeForRecall,
@@ -1640,6 +1641,57 @@ describe("resolveAndCacheIdentity dispatch-surface gate (#1541)", () => {
 
     expect(skipReason).toBeUndefined();
   });
+
+  // A mapped agent is pinned like a static bank: the surface cannot route its
+  // turn into the wrong bank, so the mismatch must not skip it. The skip is
+  // cached as final, so getting this wrong loses the session for the whole
+  // process. (#3890)
+  it("does not skip a mapped agent whose dispatch surface differs", () => {
+    const { skipReason } = resolveAndCacheIdentity({
+      sessionKey: "agent:inbound:telegram:direct:user-3890",
+      ctx: {
+        sessionKey: "agent:inbound:telegram:direct:user-3890",
+        agentId: "inbound",
+        senderId: "user-3890",
+      },
+      dispatchChannel: "webchat",
+      pluginConfig: { agentBankMap: { inbound: "ps-technology" } },
+    });
+
+    expect(skipReason).toBeUndefined();
+  });
+
+  it("still skips an unmapped agent on the same mismatch", () => {
+    const { skipReason } = resolveAndCacheIdentity({
+      sessionKey: "agent:stranger:telegram:direct:user-3890b",
+      ctx: {
+        sessionKey: "agent:stranger:telegram:direct:user-3890b",
+        agentId: "stranger",
+        senderId: "user-3890b",
+      },
+      dispatchChannel: "webchat",
+      pluginConfig: { agentBankMap: { inbound: "ps-technology" } },
+    });
+
+    expect(skipReason).toEqual({
+      kind: "final",
+      detail: "dispatch surface webchat does not match session provider telegram",
+    });
+  });
+
+  it("still skips operational sessions for a mapped agent", () => {
+    // The map widens allowCliSessions; cron/heartbeat/subagent and temp:
+    // sessions return before that is consulted and must stay skipped.
+    for (const sessionKey of ["agent:inbound:cron:job-1", "temp:inbound:scratch"]) {
+      const { skipReason } = resolveAndCacheIdentity({
+        sessionKey,
+        ctx: { sessionKey, agentId: "inbound" },
+        pluginConfig: { agentBankMap: { inbound: "ps-technology" } },
+      });
+
+      expect(skipReason?.kind).toBe("final");
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1926,6 +1978,9 @@ describe("recallMinScores (#4143)", () => {
       types: undefined,
       preferObservations: undefined,
       minScores: { reranker: 0.3 },
+      // A deadline controller is always created, so the client sees a real signal
+      // even when no service signal was passed in.
+      signal: expect.any(AbortSignal),
     });
   });
 });
@@ -2150,6 +2205,75 @@ describe("resolveBankIdForKnowledgeTools", () => {
 
     expect(resolution.identityError).toBeUndefined();
     expect(resolution.bankId).toBe("shared-team-memory");
+  });
+
+  it("routes a mapped agent to its bank without requiring sender identity (#3890)", () => {
+    // The group session below has no resolvable sender, which is exactly the case
+    // the user-scoped guard rejects. A mapped agent's bank does not depend on the
+    // sender, so the guard must not fire for it.
+    const resolution = resolveBankIdForKnowledgeTools(
+      {
+        agentId: "inbound",
+        sessionKey: "agent:inbound:msteams:group:19:general@thread.tacv2",
+      },
+      { ...userScopedConfig, agentBankMap: { inbound: "ps-technology" } }
+    );
+
+    expect(resolution.identityError).toBeUndefined();
+    expect(resolution.bankId).toBe("ps-technology");
+  });
+
+  it("still guards an unmapped agent under the same config (#3890)", () => {
+    const resolution = resolveBankIdForKnowledgeTools(
+      {
+        agentId: "nemoclaw",
+        sessionKey: "agent:nemoclaw:msteams:group:19:general@thread.tacv2",
+      },
+      { ...userScopedConfig, agentBankMap: { inbound: "ps-technology" } }
+    );
+
+    expect(resolution.identityError).toMatch(/missing stable sender identity/);
+    expect(resolution.bankId).not.toBe("ps-technology");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// normalizeAgentBankMap — config comes from hand-edited JSON (#3890)
+// ---------------------------------------------------------------------------
+
+describe("normalizeAgentBankMap", () => {
+  it("keeps valid entries and trims the bank name", () => {
+    expect(normalizeAgentBankMap({ inbound: " ps-technology ", limpieza: "ps-limpieza" })).toEqual({
+      inbound: "ps-technology",
+      limpieza: "ps-limpieza",
+    });
+  });
+
+  it("drops entries whose bank is blank or not a string", () => {
+    // A blank value would otherwise route that agent to a bank named "".
+    expect(normalizeAgentBankMap({ a: "bank-a", b: "   ", c: 42, d: null })).toEqual({
+      a: "bank-a",
+    });
+  });
+
+  it("treats a map with no usable entry as unset", () => {
+    expect(normalizeAgentBankMap({ a: "", b: "  " })).toBeUndefined();
+    expect(normalizeAgentBankMap({})).toBeUndefined();
+  });
+
+  it("ignores shapes that are not a plain object", () => {
+    expect(normalizeAgentBankMap(undefined)).toBeUndefined();
+    expect(normalizeAgentBankMap(null)).toBeUndefined();
+    expect(normalizeAgentBankMap("inbound=ps-technology")).toBeUndefined();
+    expect(normalizeAgentBankMap([["inbound", "ps-technology"]])).toBeUndefined();
+  });
+
+  it("trims the agent id too, so a padded key is not silently inert", () => {
+    // Keying on the raw " inbound" would keep an entry that can never match a
+    // resolved agent id — and it would not show up in the dropped-entry warning.
+    expect(normalizeAgentBankMap({ " inbound ": "ps-technology" })).toEqual({
+      inbound: "ps-technology",
+    });
   });
 });
 

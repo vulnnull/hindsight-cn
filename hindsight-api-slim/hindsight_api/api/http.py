@@ -3885,7 +3885,6 @@ async def apply_bank_template_manifest(
         await memory.get_bank_profile(
             bank_id,
             request_context=request_context,
-            create_if_missing=False,
         )
         is not None
     )
@@ -5763,12 +5762,13 @@ def _register_routes(app: FastAPI):
 
         # Validate query length to prevent expensive operations on oversized queries
         max_query_tokens = get_config().recall_max_query_tokens
-        query_tokens = count_tokens(request.query)
-        if query_tokens > max_query_tokens:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Query too long: {query_tokens} tokens exceeds maximum of {max_query_tokens}. Please shorten your query.",
-            )
+        if max_query_tokens > 0:  # 0 (or negative) disables the cap
+            query_tokens = count_tokens(request.query)
+            if query_tokens > max_query_tokens:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Query too long: {query_tokens} tokens exceeds maximum of {max_query_tokens}. Please shorten your query.",
+                )
 
         try:
             # Default to all fact types if not specified
@@ -8172,9 +8172,7 @@ def _register_routes(app: FastAPI):
         """Export a bank's config and mental models as a template manifest."""
         try:
             # Read endpoint: do not auto-create on missing bank.
-            profile = await app.state.memory.get_bank_profile(
-                bank_id, request_context=request_context, create_if_missing=False
-            )
+            profile = await app.state.memory.get_bank_profile(bank_id, request_context=request_context)
             if profile is None:
                 raise HTTPException(status_code=404, detail=f"Bank '{bank_id}' not found")
 
@@ -8319,9 +8317,7 @@ def _register_routes(app: FastAPI):
                     detail="Document export API is disabled. "
                     "Set HINDSIGHT_API_ENABLE_DOCUMENT_EXPORT_API=true to enable.",
                 )
-            profile = await app.state.memory.get_bank_profile(
-                bank_id, request_context=request_context, create_if_missing=False
-            )
+            profile = await app.state.memory.get_bank_profile(bank_id, request_context=request_context)
             if profile is None:
                 raise HTTPException(status_code=404, detail=f"Bank '{bank_id}' not found")
 
@@ -8406,11 +8402,15 @@ def _register_routes(app: FastAPI):
     #
     #   include_data        documents, facts, observations, entities and links,
     #                       attachments (bytes included), the curation archive,
-    #                       the operations log and the maintenance queues
-    #   include_bank_config the bank row (per-bank config), mental models and
-    #                       their refresh history, knowledge pages, directives,
-    #                       webhooks
+    #                       the operations log, the maintenance queues, and what
+    #                       the bank synthesized from all of it: mental models,
+    #                       their refresh history and the knowledge-page tree
+    #   include_bank_config the bank row (per-bank config), directives, webhooks
     #   include_history     audit_log and llm_requests
+    #
+    # Mental models and knowledge pages are data, not configuration: their
+    # evidence cites memory units by id, so they are only coherent alongside the
+    # facts they were derived from.
     #
     # The older endpoints stay, and keep their exact request and response shapes.
 
@@ -8422,7 +8422,8 @@ def _register_routes(app: FastAPI):
         description="Submit an async export of a bank as a transfer ZIP archive. Three flags choose what the "
         "archive carries: include_data (documents, facts, observations, attachments and their bytes, the "
         "curation archive, the operations log and the maintenance queues), include_bank_config (bank config, "
-        "mental models and their history, knowledge pages, directives, webhooks) and include_history "
+        "mental models and their history, knowledge pages), include_bank_config (the bank's config "
+        "overrides, directives and webhooks) and include_history "
         "(audit_log, llm_requests). Embeddings and database ids are never carried — importing re-embeds with "
         "the target bank's model and re-resolves entities, so an archive moves between instances configured "
         "with different embedding models. Returns an operation_id; poll "
@@ -8436,7 +8437,9 @@ def _register_routes(app: FastAPI):
     async def api_bank_transfer_export(
         bank_id: str,
         include_data: bool = Query(default=True, description="Carry the memories and everything backing them"),
-        include_bank_config: bool = Query(default=True, description="Carry bank config, mental models, directives"),
+        include_bank_config: bool = Query(
+            default=True, description="Carry the bank's config overrides, directives and webhooks"
+        ),
         include_history: bool = Query(default=False, description="Carry audit_log and llm_requests"),
         document_id: list[str] | None = Query(default=None, description="Document id(s); omit for the whole bank"),
         request_context: RequestContext = Depends(get_request_context),
@@ -8453,9 +8456,7 @@ def _register_routes(app: FastAPI):
                     status_code=400,
                     detail="Nothing to export: set at least one of include_data, include_bank_config, include_history",
                 )
-            profile = await app.state.memory.get_bank_profile(
-                bank_id, request_context=request_context, create_if_missing=False
-            )
+            profile = await app.state.memory.get_bank_profile(bank_id, request_context=request_context)
             if profile is None:
                 raise HTTPException(status_code=404, detail=f"Bank '{bank_id}' not found")
 
@@ -8533,7 +8534,8 @@ def _register_routes(app: FastAPI):
             default=None, description="restore mode: carry the memories and everything backing them (default true)"
         ),
         include_bank_config: bool | None = Query(
-            default=None, description="restore mode: carry bank config, mental models, directives (default true)"
+            default=None,
+            description="restore mode: restore the bank's config overrides, directives and webhooks (default true)",
         ),
         include_history: bool | None = Query(
             default=None, description="restore mode: carry audit_log and llm_requests (default false)"
@@ -8601,6 +8603,89 @@ def _register_routes(app: FastAPI):
             raise
         except Exception as e:
             raise _internal_error(e, f"POST /v1/default/banks/{bank_id}/transfer/import")
+
+    @app.post(
+        "/v1/default/banks/{bank_id}/clone",
+        response_model=BankTransferSubmitResponse,
+        status_code=202,
+        summary="Clone a bank (async)",
+        description="Copy this bank into a new one, in a single call. The clone starts with the source's "
+        "memories as they are at clone time and evolves independently from then on: later retains, "
+        "consolidation and edits on either bank leave the other alone.\n\n"
+        "This is the export and import above run back to back on this instance, so nothing is re-extracted "
+        "and no LLM is called — facts are re-embedded and entities re-resolved, exactly as a restore does. "
+        "The same three flags choose what the clone inherits: include_data (documents, facts, observations, "
+        "attachments, the curation archive, the operations log, and the mental models and knowledge pages "
+        "synthesized from them), include_bank_config (the bank's config overrides, directives and "
+        "**webhooks**) and include_history (audit_log, llm_requests).\n\n"
+        "Note the webhooks: they travel with the bank's configuration, so a clone made with the default "
+        "flags will call the source's webhook endpoints. Pass include_bank_config=false, or delete them on "
+        "the clone, when they point at a per-bank consumer.\n\n"
+        "target_bank_id must not already exist. Returns an operation_id, recorded against the source bank "
+        "(the target does not exist yet); poll GET /v1/default/banks/{bank_id}/operations/{operation_id} for "
+        "status and the per-component counts.",
+        operation_id="clone_bank",
+        tags=["Bank Transfer"],
+        responses=_BANK_NOT_FOUND_RESPONSES,
+    )
+    @audited("clone_bank", request_param=None)
+    async def api_clone_bank(
+        bank_id: str,
+        target_bank_id: str = Query(..., description="Bank to create; must not already exist"),
+        include_data: bool = Query(
+            default=True,
+            description="Copy the memories, what backs them, and the mental models and knowledge pages "
+            "synthesized from them",
+        ),
+        include_bank_config: bool = Query(
+            default=True, description="Copy the bank's config overrides, directives and webhooks"
+        ),
+        include_history: bool = Query(default=False, description="Copy audit_log and llm_requests"),
+        request_context: RequestContext = Depends(get_request_context),
+    ):
+        """Submit an async clone of a bank."""
+        try:
+            # A clone is an export and an import, so it is gated on both flags: with
+            # either half disabled the operator has turned off bulk bank copying.
+            config = get_config()
+            if not (config.enable_document_export_api and config.enable_document_import_api):
+                raise HTTPException(
+                    status_code=404,
+                    detail="Bank clone API is disabled. It requires both "
+                    "HINDSIGHT_API_ENABLE_DOCUMENT_EXPORT_API and HINDSIGHT_API_ENABLE_DOCUMENT_IMPORT_API.",
+                )
+            if not (include_data or include_bank_config or include_history):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Nothing to clone: set at least one of include_data, include_bank_config, include_history",
+                )
+            profile = await app.state.memory.get_bank_profile(bank_id, request_context=request_context)
+            if profile is None:
+                raise HTTPException(status_code=404, detail=f"Bank '{bank_id}' not found")
+
+            from hindsight_api.engine.transfer import TransferScope
+
+            try:
+                submission = await app.state.memory.submit_bank_clone_async(
+                    bank_id,
+                    target_bank_id,
+                    request_context,
+                    scope=TransferScope(
+                        data=include_data,
+                        bank_config=include_bank_config,
+                        history=include_history,
+                    ),
+                )
+            except ValueError as e:
+                # Target already exists, an invalid bank id, or cloning onto itself.
+                raise HTTPException(status_code=400, detail=str(e))
+            return BankTransferSubmitResponse(operation_id=submission["operation_id"])
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
+        except (AuthenticationError, HTTPException):
+            raise
+        except Exception as e:
+            raise _internal_error(e, f"POST /v1/default/banks/{bank_id}/clone")
 
     @app.get(
         "/v1/default/banks/{bank_id}/attachments/{attachment_id}",

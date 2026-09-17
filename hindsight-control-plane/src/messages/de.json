@@ -120,7 +120,7 @@
     "clearObservationsWarning": "Dadurch wird das gesamte konsolidierte Wissen gelöscht. Beobachtungen werden beim nächsten Konsolidierungslauf neu generiert.",
     "clearing": "Wird gelöscht...",
     "bankDeleted": "Speicherbank gelöscht",
-    "bankDeletedDescription": "Die Bank '{bankName}' wurde dauerhaft gelöscht.",
+    "bankDeletedDescription": "Die Bank {bankName} wurde dauerhaft gelöscht.",
     "failedToDeleteBank": "Bank konnte nicht gelöscht werden",
     "observationsCleared": "Beobachtungen gelöscht",
     "observationsClearedDefault": "Beobachtungen erfolgreich gelöscht",
@@ -166,7 +166,24 @@
     "memoryDefense": "Speicherschutz",
     "knowledge": "Wissen",
     "knowledgeDescription": "Wissensseiten und mentale Modelle, synthetisiert aus den Erinnerungen dieser Bank.",
-    "pages": "Seiten"
+    "pages": "Seiten",
+    "cloneBank": "Bank klonen",
+    "cloneBankTitle": "Speicherbank klonen",
+    "cloneBankDescription": "Kopiert diese Bank in eine neue. Die Kopie startet mit denselben Erinnerungen und entwickelt sich danach unabhängig weiter.",
+    "cloneTargetLabel": "Neue Bank-ID",
+    "cloneTargetPlaceholder": "meine-bank-kopie",
+    "cloning": "Wird geklont …",
+    "cloneStarted": "Klonen gestartet",
+    "cloneSucceeded": "Bank nach {bankName} geklont",
+    "cloneFailed": "Klonen der Bank fehlgeschlagen",
+    "cloneWhatToCopy": "Was kopiert wird",
+    "cloneIncludeData": "Erinnerungen",
+    "cloneIncludeDataHint": "Dokumente, Fakten, Beobachtungen, Anhänge, das Kurationsarchiv, das Operationsprotokoll sowie die daraus synthetisierten mentalen Modelle und Wissensseiten.",
+    "cloneIncludeBankConfig": "Bank-Konfiguration",
+    "cloneIncludeBankConfigHint": "Konfigurations-Overrides, Direktiven und Webhooks – die Kopie ruft dieselben Webhook-Endpunkte auf.",
+    "cloneIncludeHistory": "Verlauf",
+    "cloneIncludeHistoryHint": "Audit-Protokoll und LLM-Anfrage-Traces.",
+    "cloneNothingSelected": "Wähle mindestens etwas zum Kopieren aus."
   },
   "bankProfile": {
     "noBankSelected": "Keine Bank ausgewählt",
@@ -589,7 +606,8 @@
       "exportDocuments": "Dokumente exportieren",
       "importDocuments": "Dokumente importieren",
       "exportBank": "Bank exportieren",
-      "importBank": "Bank importieren"
+      "importBank": "Bank importieren",
+      "cloneBank": "Bank klonen"
     },
     "table": {
       "id": "Vorgangs-ID",
@@ -875,7 +893,7 @@
     "actionRefresh": "Aktualisieren",
     "actionDelete": "Löschen",
     "deleteDialogTitle": "Mentales Modell löschen",
-    "deleteDialogDescription": "Möchten Sie '{name}' wirklich löschen?",
+    "deleteDialogDescription": "Möchten Sie {name} wirklich löschen?",
     "deleteDialogWarning": "Diese Aktion kann nicht rückgängig gemacht werden.",
     "deleteDialogCancel": "Abbrechen",
     "deleteDialogConfirm": "Löschen",
@@ -1810,7 +1828,8 @@
         "operationIdRequired": "operation_id ist erforderlich",
         "missingRequestData": "Anfragedaten fehlen",
         "missingBankId": "bank_id fehlt",
-        "fileRequired": "Eine Datei ist erforderlich"
+        "fileRequired": "Eine Datei ist erforderlich",
+        "targetBankIdRequired": "target_bank_id ist erforderlich"
       },
       "generic": {
         "failed": "Fehlgeschlagen",
@@ -1823,7 +1842,8 @@
         "update": "Speicherbank konnte nicht aktualisiert werden",
         "delete": "Speicherbank konnte nicht gelöscht werden",
         "exportTemplate": "Vorlage der Speicherbank konnte nicht exportiert werden",
-        "importTemplate": "Vorlage der Speicherbank konnte nicht importiert werden"
+        "importTemplate": "Vorlage der Speicherbank konnte nicht importiert werden",
+        "clone": "Klonen der Bank fehlgeschlagen"
       },
       "bankConfig": {
         "fetch": "Bankkonfiguration konnte nicht abgerufen werden",

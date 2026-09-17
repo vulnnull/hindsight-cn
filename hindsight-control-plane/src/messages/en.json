@@ -121,7 +121,7 @@
     "clearObservationsWarning": "This will delete all consolidated knowledge. Observations will be regenerated the next time consolidation runs.",
     "clearing": "Clearing...",
     "bankDeleted": "Memory bank deleted",
-    "bankDeletedDescription": "Bank '{bankName}' has been permanently deleted.",
+    "bankDeletedDescription": "Bank {bankName} has been permanently deleted.",
     "failedToDeleteBank": "Failed to delete bank",
     "observationsCleared": "Observations cleared",
     "observationsClearedDefault": "Observations cleared successfully",
@@ -166,7 +166,24 @@
     "deleteWillDeleteObservations": "This will delete {count, plural, one {# observation} other {# observations}}.",
     "knowledge": "Knowledge",
     "knowledgeDescription": "Pages and mental models synthesized from this bank's memories.",
-    "pages": "Pages"
+    "pages": "Pages",
+    "cloneBank": "Clone Bank",
+    "cloneBankTitle": "Clone memory bank",
+    "cloneBankDescription": "Copies this bank into a new one. The copy starts with the same memories and evolves independently from then on.",
+    "cloneTargetLabel": "New bank id",
+    "cloneTargetPlaceholder": "my-bank-copy",
+    "cloning": "Cloning…",
+    "cloneStarted": "Clone started",
+    "cloneSucceeded": "Bank cloned into {bankName}",
+    "cloneFailed": "Failed to clone bank",
+    "cloneWhatToCopy": "What to copy",
+    "cloneIncludeData": "Memories",
+    "cloneIncludeDataHint": "Documents, facts, observations, attachments, the curation archive, the operations log, and the mental models and knowledge pages synthesized from them.",
+    "cloneIncludeBankConfig": "Bank configuration",
+    "cloneIncludeBankConfigHint": "Config overrides, directives and webhooks — the copy will call the same webhook endpoints.",
+    "cloneIncludeHistory": "History",
+    "cloneIncludeHistoryHint": "Audit log and LLM request traces.",
+    "cloneNothingSelected": "Choose at least one thing to copy."
   },
   "bankProfile": {
     "noBankSelected": "No Bank Selected",
@@ -589,7 +606,8 @@
       "exportDocuments": "Export Documents",
       "importDocuments": "Import Documents",
       "exportBank": "Export Bank",
-      "importBank": "Import Bank"
+      "importBank": "Import Bank",
+      "cloneBank": "Clone Bank"
     },
     "table": {
       "id": "Operation ID",
@@ -1810,7 +1828,8 @@
         "operationIdRequired": "operation_id is required",
         "missingRequestData": "Missing request data",
         "missingBankId": "Missing bank_id",
-        "fileRequired": "file is required"
+        "fileRequired": "file is required",
+        "targetBankIdRequired": "target_bank_id is required"
       },
       "generic": {
         "failed": "Failed",
@@ -1823,7 +1842,8 @@
         "update": "Failed to update bank",
         "delete": "Failed to delete bank",
         "exportTemplate": "Failed to export bank template",
-        "importTemplate": "Failed to import bank template"
+        "importTemplate": "Failed to import bank template",
+        "clone": "Failed to clone bank"
       },
       "bankConfig": {
         "fetch": "Failed to fetch bank config",

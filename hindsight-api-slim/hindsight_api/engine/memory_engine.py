@@ -26,7 +26,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterat
 from contextlib import AsyncExitStack, asynccontextmanager, contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, Literal, NoReturn, ParamSpec, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, Literal, NoReturn, ParamSpec, TypeVar, cast
 
 import asyncpg
 from pydantic import ValidationError
@@ -2945,7 +2945,7 @@ class MemoryEngine(MemoryEngineInterface):
         import json
 
         from .memories import get_memories
-        from .transfer import TransferScope, export_bank
+        from .transfer import TransferScope, build_bank_archive, load_bank_export
 
         bank_id = task_dict.get("bank_id")
         operation_id = task_dict.get("operation_id")
@@ -2958,18 +2958,21 @@ class MemoryEngine(MemoryEngineInterface):
         )
 
         backend = await self._get_backend()
-        # One connection for the whole export: a bank is read across a dozen
+        # One connection for the whole read: a bank is read across a dozen
         # queries, and a transaction is what makes them one point in time rather
-        # than a smear of whatever was being written meanwhile.
+        # than a smear of whatever was being written meanwhile. Only the *read*
+        # is in here — building the archive is CPU-bound and runs after the
+        # connection is back in the pool (see build_bank_archive).
         async with acquire_with_retry(backend) as conn:
             async with conn.transaction():
-                archive_bytes = await export_bank(
+                payload = await load_bank_export(
                     conn,
                     bank_id,
                     scope=scope,
                     memories=get_memories(),
                     file_storage=self._file_storage,
                 )
+        archive_bytes = await build_bank_archive(payload)
 
         storage_key = f"banks/{bank_id}/exports/{uuid.uuid4()}/transfer.zip"
         await self._file_storage.store(
@@ -3066,6 +3069,92 @@ class MemoryEngine(MemoryEngineInterface):
             await self._file_storage.delete(storage_key)
         except Exception:
             logger.warning("Failed to delete bank import archive %s", storage_key, exc_info=True)
+
+    async def _handle_clone_bank(self, task_dict: dict[str, Any]):
+        """Handler for async bank-clone tasks: export the source, restore it as a new bank.
+
+        The archive never leaves this process — a clone is both halves of a
+        transfer on one instance, so stashing it in file storage would only add a
+        round trip and a blob to clean up. Everything else is the transfer path
+        exactly as it stands, which is the point: a clone cannot drift from what
+        export/import do.
+        """
+        import json
+
+        from .memories import get_memories
+        from .transfer import TransferScope, build_bank_archive, load_bank_export
+
+        source_bank_id = task_dict.get("bank_id")
+        target_bank_id = task_dict.get("target_bank_id")
+        operation_id = task_dict.get("operation_id")
+        if not source_bank_id or not target_bank_id:
+            raise ValueError("bank_id and target_bank_id are required for clone_bank task")
+        scope = TransferScope(
+            data=task_dict.get("include_data", True),
+            bank_config=task_dict.get("include_bank_config", True),
+            history=task_dict.get("include_history", False),
+        )
+
+        from hindsight_api.models import RequestContext
+
+        context = RequestContext(
+            internal=True,
+            user_initiated=True,
+            tenant_id=task_dict.get("_tenant_id"),
+            api_key_id=task_dict.get("_api_key_id"),
+            retry_count=task_dict.get("_retry_count", 0),
+        )
+
+        backend = await self._get_backend()
+        # One transaction for the whole read: a bank is assembled from a dozen
+        # queries, and without this the clone is a smear of whatever was being
+        # written meanwhile — a fact whose document the copy never got, an
+        # observation citing it. The source stays writable throughout, and the
+        # connection goes back to the pool before the archive is built.
+        async with acquire_with_retry(backend) as conn:
+            async with conn.transaction():
+                payload = await load_bank_export(
+                    conn,
+                    source_bank_id,
+                    scope=scope,
+                    memories=get_memories(),
+                    file_storage=self._file_storage,
+                )
+        archive_bytes = await build_bank_archive(payload)
+
+        result = await self.import_bank_async(
+            archive_bytes,
+            context,
+            target_bank_id=target_bank_id,
+            scope=scope,
+        )
+
+        if operation_id:
+            counts = {
+                "target_bank_id": result.bank_id,
+                "documents_imported": result.documents_imported,
+                "facts_imported": result.facts_imported,
+                "observations_imported": result.observations_imported,
+                "attachments_imported": result.attachments_imported,
+                "operations_imported": result.operations_imported,
+                "maintenance_queue_rows_imported": result.maintenance_queue_rows_imported,
+                "invalidated_memories_imported": result.invalidated_memories_imported,
+                "mental_models_imported": result.mental_models_imported,
+                "mental_model_history_imported": result.mental_model_history_imported,
+                "knowledge_pages_imported": result.knowledge_pages_imported,
+                "directives_imported": result.directives_imported,
+                "webhooks_imported": result.webhooks_imported,
+                "history_rows_imported": result.history_rows_imported,
+                "archive_byte_size": len(archive_bytes),
+            }
+            async with acquire_with_retry(backend) as conn:
+                await conn.execute(
+                    f"UPDATE {fq_table('async_operations')} "
+                    f"SET result_metadata = COALESCE(result_metadata, '{{}}'::jsonb) || $1::jsonb "
+                    f"WHERE operation_id = $2",
+                    json.dumps(counts, default=_json_default),
+                    uuid.UUID(operation_id),
+                )
 
     async def _delete_operation_export_archive(self, result_metadata: Any) -> None:
         """Best-effort delete of an export operation's stored archive.
@@ -3818,6 +3907,8 @@ class MemoryEngine(MemoryEngineInterface):
                     await self._handle_export_bank(task_dict)
                 elif task_type == "import_bank":
                     await self._handle_import_bank(task_dict)
+                elif task_type == "clone_bank":
+                    await self._handle_clone_bank(task_dict)
                 elif task_type == "consolidation":
                     consolidation_result = await self._handle_consolidation(task_dict)
                 elif task_type == "graph_maintenance":
@@ -6832,6 +6923,69 @@ class MemoryEngine(MemoryEngineInterface):
             task_payload=task_payload,
         )
 
+    async def submit_bank_clone_async(
+        self,
+        bank_id: str,
+        target_bank_id: str,
+        request_context: "RequestContext",
+        *,
+        scope: "TransferScope | None" = None,
+    ) -> dict[str, Any]:
+        """Submit an async clone of ``bank_id`` into ``target_bank_id``.
+
+        A clone is the transfer path with both halves on this instance: the source
+        is exported and restored under a new id in one background operation, with
+        no archive for the caller to carry. ``target_bank_id`` must NOT already
+        exist, and the source must — both checked here so the caller gets the
+        error immediately rather than from a failed background task.
+
+        The clone is independent once made: later retains and consolidation on
+        either bank leave the other alone.
+        """
+        from .transfer import TransferScope
+
+        scope = scope or TransferScope()
+        if target_bank_id == bank_id:
+            raise ValueError("A bank cannot be cloned onto itself; choose a different target_bank_id")
+        bank_utils.validate_new_bank_id(target_bank_id)
+
+        await self._authenticate_tenant(request_context)
+        backend = await self._get_backend()
+        if await bank_utils.get_bank_profile_if_exists(backend, target_bank_id) is not None:
+            raise ValueError(
+                f"Target bank '{target_bank_id}' already exists; a clone writes into a fresh bank "
+                f"(it is not a merge). Delete it first, or choose a different target bank id."
+            )
+        if self._operation_validator:
+            from hindsight_api.extensions import CreateBankContext
+
+            await self._validate_operation(
+                self._operation_validator.validate_create_bank(
+                    CreateBankContext(bank_id=target_bank_id, request_context=request_context)
+                )
+            )
+
+        task_payload: dict[str, Any] = {
+            "target_bank_id": target_bank_id,
+            "include_data": scope.data,
+            "include_bank_config": scope.bank_config,
+            "include_history": scope.history,
+        }
+        if request_context.tenant_id:
+            task_payload["_tenant_id"] = request_context.tenant_id
+        if request_context.api_key_id:
+            task_payload["_api_key_id"] = request_context.api_key_id
+
+        # Recorded against the source: it is the bank that exists, and
+        # async_operations has a foreign key to banks. _submit_async_operation
+        # turns a missing source into a clean 404 rather than an FK violation.
+        return await self._submit_async_operation(
+            bank_id,
+            operation_type="clone_bank",
+            task_type="clone_bank",
+            task_payload=task_payload,
+        )
+
     async def retrieve_bank_file(
         self,
         bank_id: str,
@@ -6846,7 +7000,7 @@ class MemoryEngine(MemoryEngineInterface):
         not visible to the caller or the file does not exist — the handler maps
         both to 404 (indistinguishable on purpose, so keys can't be probed).
         """
-        profile = await self.get_bank_profile(bank_id, request_context=request_context, create_if_missing=False)
+        profile = await self.get_bank_profile(bank_id, request_context=request_context)
         if profile is None:
             return None
         # The key must sit under this bank in the caller's own tenant: object
@@ -6946,7 +7100,7 @@ class MemoryEngine(MemoryEngineInterface):
 
         if not attachment_ids:
             return {}
-        profile = await self.get_bank_profile(bank_id, request_context=request_context, create_if_missing=False)
+        profile = await self.get_bank_profile(bank_id, request_context=request_context)
         if profile is None:
             return {}
         backend = await self._get_backend()
@@ -6992,7 +7146,7 @@ class MemoryEngine(MemoryEngineInterface):
                 carried_texts or {},
                 carried_filenames or {},
             )
-        profile = await self.get_bank_profile(bank_id, request_context=request_context, create_if_missing=False)
+        profile = await self.get_bank_profile(bank_id, request_context=request_context)
         if profile is None:
             return {}
         backend = await self._get_backend()
@@ -7053,7 +7207,7 @@ class MemoryEngine(MemoryEngineInterface):
             any(True for _ in iter_placeholder_ids(texts[d] or "")) for d in document_ids
         ):
             return {}
-        profile = await self.get_bank_profile(bank_id, request_context=request_context, create_if_missing=False)
+        profile = await self.get_bank_profile(bank_id, request_context=request_context)
         if profile is None:
             return {}
         for document_id in document_ids:
@@ -7114,7 +7268,7 @@ class MemoryEngine(MemoryEngineInterface):
             }
             if not refs:
                 return {}
-            profile = await self.get_bank_profile(bank_id, request_context=request_context, create_if_missing=False)
+            profile = await self.get_bank_profile(bank_id, request_context=request_context)
             if profile is None:
                 return {}
             backend = await self._get_backend()
@@ -7123,7 +7277,7 @@ class MemoryEngine(MemoryEngineInterface):
             return await _name_store_owned_attachments(
                 store, bank_id, resolved, {chunk_id: document_id for chunk_id, (document_id, _) in refs.items()}
             )
-        profile = await self.get_bank_profile(bank_id, request_context=request_context, create_if_missing=False)
+        profile = await self.get_bank_profile(bank_id, request_context=request_context)
         if profile is None:
             return {}
         backend = await self._get_backend()
@@ -7205,7 +7359,7 @@ class MemoryEngine(MemoryEngineInterface):
             }
             if not refs:
                 return {}
-            profile = await self.get_bank_profile(bank_id, request_context=request_context, create_if_missing=False)
+            profile = await self.get_bank_profile(bank_id, request_context=request_context)
             if profile is None:
                 return {}
             backend = await self._get_backend()
@@ -7216,7 +7370,7 @@ class MemoryEngine(MemoryEngineInterface):
                 store, bank_id, resolved, {unit_id: document_id for unit_id, (document_id, _) in refs.items()}
             )
 
-        profile = await self.get_bank_profile(bank_id, request_context=request_context, create_if_missing=False)
+        profile = await self.get_bank_profile(bank_id, request_context=request_context)
         if profile is None:
             return {}
         wanted_units = list(dict.fromkeys(str(u) for u in unit_ids))
@@ -7811,6 +7965,14 @@ class MemoryEngine(MemoryEngineInterface):
                 f"Must be one of: {', '.join(sorted(VALID_RECALL_FACT_TYPES))}",
                 status_code=422,
             )
+
+        # 404 for a bank nobody created, like every other bank-scoped read (#4175, #4442).
+        # Recall was the one that still answered 200 with empty results — indistinguishable from a
+        # healthy empty bank — after paying the whole retrieval fan-out (dense + BM25 + temporal,
+        # plus one graph arm per fact type, each taking its own pool connection) to return nothing.
+        # Malformed arguments above stay 422, and the profile row is process-cached, so an existing
+        # bank pays no extra query.
+        await self._require_bank_exists(bank_id)
 
         # Validate operation if validator is configured
         if self._operation_validator:
@@ -12410,9 +12572,7 @@ class MemoryEngine(MemoryEngineInterface):
         bank_profile: dict[str, Any] = {}
         directives: list[dict[str, Any]] = []
         if operation == "reflect":
-            bank_profile = (
-                await self.get_bank_profile(bank_id, request_context=request_context, create_if_missing=False)
-            ) or {}
+            bank_profile = (await self.get_bank_profile(bank_id, request_context=request_context)) or {}
             # Untagged reflect: isolation_mode keeps tag-scoped directives out, which
             # matches what a reflect call with no tags would load.
             listed = await self.list_directives(
@@ -13390,7 +13550,7 @@ class MemoryEngine(MemoryEngineInterface):
         ``get_bank_profile`` before any query runs, so the queries below are
         scoped to the authenticated tenant's schema.
         """
-        if await self.get_bank_profile(bank_id, request_context=request_context, create_if_missing=False) is None:
+        if await self.get_bank_profile(bank_id, request_context=request_context) is None:
             return None
 
         from .schema import _is_oracle  # noqa: PLC0415
@@ -13510,7 +13670,7 @@ class MemoryEngine(MemoryEngineInterface):
         Returns None when the bank does not exist (mapped to 404 by the HTTP
         layer). Auth/tenant resolution happen in ``get_bank_profile``.
         """
-        if await self.get_bank_profile(bank_id, request_context=request_context, create_if_missing=False) is None:
+        if await self.get_bank_profile(bank_id, request_context=request_context) is None:
             return None
 
         now = datetime.now(timezone.utc)
@@ -13617,7 +13777,7 @@ class MemoryEngine(MemoryEngineInterface):
         """
         from .audit import AuditLogEntry, AuditLogListResponse
 
-        if await self.get_bank_profile(bank_id, request_context=request_context, create_if_missing=False) is None:
+        if await self.get_bank_profile(bank_id, request_context=request_context) is None:
             return None
 
         where_clauses = ["bank_id = $1"]
@@ -13696,7 +13856,7 @@ class MemoryEngine(MemoryEngineInterface):
         """
         from .audit import AuditLogStatsBucket, AuditLogStatsResponse
 
-        if await self.get_bank_profile(bank_id, request_context=request_context, create_if_missing=False) is None:
+        if await self.get_bank_profile(bank_id, request_context=request_context) is None:
             return None
 
         now = datetime.now(timezone.utc)
@@ -13757,53 +13917,70 @@ class MemoryEngine(MemoryEngineInterface):
 
     # ==================== bank profile Methods ====================
 
-    # Type-checker overloads: when create_if_missing is True (the default),
-    # this method always returns a profile dict — the type checker can rely
-    # on non-None for every existing caller. Only when create_if_missing is
-    # explicitly False does the return become Optional.
-    @overload
     async def get_bank_profile(
         self,
         bank_id: str,
         *,
         request_context: "RequestContext",
-        create_if_missing: Literal[True] = True,
-    ) -> dict[str, Any]: ...
-
-    @overload
-    async def get_bank_profile(
-        self,
-        bank_id: str,
-        *,
-        request_context: "RequestContext",
-        create_if_missing: Literal[False],
-    ) -> dict[str, Any] | None: ...
-
-    async def get_bank_profile(
-        self,
-        bank_id: str,
-        *,
-        request_context: "RequestContext",
-        create_if_missing: bool = True,
     ) -> dict[str, Any] | None:
-        """
-        Get bank profile (name, disposition + mission).
+        """Read a bank's profile (name, disposition + mission), or None if it does not exist.
+
+        Strictly read-only: a bank nobody created stays uncreated, and the caller
+        translates None into a 404. Callers that mean "make this bank exist" want
+        :meth:`ensure_bank_profile` — the two used to be one method behind a
+        ``create_if_missing`` flag, which made a ``get_`` call silently create banks.
 
         Args:
             bank_id: bank IDentifier
             request_context: Request context for authentication.
-            create_if_missing: If True (default), the bank is auto-created
-                with defaults when it does not exist. Pass False from read-
-                only callers (HTTP GET handlers, polling, etc.) so a missing
-                bank surfaces as None rather than being silently created.
-                The caller is then responsible for translating None to a
-                404 (or similar).
 
         Returns:
-            Dict with name, disposition traits, and mission, or None when
-            create_if_missing=False and the bank does not exist.
+            Dict with bank_id, name, disposition traits and mission, or None when
+            the bank does not exist.
         """
         await self._authenticate_tenant(request_context)
+        await self._authorize_bank_profile_read(bank_id, request_context)
+        return await self._get_bank_profile_authenticated(
+            bank_id,
+            request_context=request_context,
+            create_if_missing=False,
+        )
+
+    async def ensure_bank_profile(
+        self,
+        bank_id: str,
+        *,
+        request_context: "RequestContext",
+    ) -> dict[str, Any]:
+        """Return a bank's profile, creating the bank with defaults if it does not exist.
+
+        This is the write-ish half of the old ``get_bank_profile(create_if_missing=True)``:
+        it mirrors retain's lazy bank auto-create, so a caller that is about to write
+        (or a test that needs the bank to exist) gets a profile either way. Read-only
+        callers want :meth:`get_bank_profile`.
+
+        Args:
+            bank_id: bank IDentifier
+            request_context: Request context for authentication.
+
+        Returns:
+            Dict with bank_id, name, disposition traits and mission.
+        """
+        await self._authenticate_tenant(request_context)
+        await self._authorize_bank_profile_read(bank_id, request_context)
+        # The Optional in _get_bank_profile_authenticated's signature is for its read half only:
+        # on the create path it raises rather than returning None, so there is nothing to handle.
+        return cast(
+            dict[str, Any],
+            await self._get_bank_profile_authenticated(
+                bank_id,
+                request_context=request_context,
+                create_if_missing=True,
+            ),
+        )
+
+    async def _authorize_bank_profile_read(self, bank_id: str, request_context: "RequestContext") -> None:
+        """Run the extension's bank-read authorization for a profile read."""
         if self._operation_validator:
             from hindsight_api.extensions import BankReadContext, BankReadOperation
 
@@ -13811,11 +13988,6 @@ class MemoryEngine(MemoryEngineInterface):
                 bank_id=bank_id, operation=BankReadOperation.GET_BANK_PROFILE, request_context=request_context
             )
             await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
-        return await self._get_bank_profile_authenticated(
-            bank_id,
-            request_context=request_context,
-            create_if_missing=create_if_missing,
-        )
 
     async def _get_bank_profile_authenticated(
         self,
@@ -14797,7 +14969,7 @@ class MemoryEngine(MemoryEngineInterface):
         logger.info(f"[REFLECT {reflect_id}] Starting agentic reflect for query: {query[:50]}...{tags_info}")
 
         # Get bank profile for agent identity
-        profile = await self.get_bank_profile(bank_id, request_context=request_context)
+        profile = await self.ensure_bank_profile(bank_id, request_context=request_context)
 
         # NOTE: Mental models are NOT pre-loaded to keep the initial prompt small.
         # The agent can call lookup() to list available models if needed.

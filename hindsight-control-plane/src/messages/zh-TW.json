@@ -120,7 +120,7 @@
     "clearObservationsWarning": "這會刪除所有已整合的知識。下次執行整合時會重新產生觀察。",
     "clearing": "正在清除...",
     "bankDeleted": "記憶庫已刪除",
-    "bankDeletedDescription": "記憶庫 '{bankName}' 已永久刪除。",
+    "bankDeletedDescription": "記憶庫 {bankName} 已永久刪除。",
     "failedToDeleteBank": "刪除記憶庫失敗",
     "observationsCleared": "觀察已清除",
     "observationsClearedDefault": "觀察已成功清除",
@@ -166,7 +166,24 @@
     "memoryDefense": "記憶防護",
     "knowledge": "知識",
     "knowledgeDescription": "由該記憶庫的記憶綜合沉澱出的知識頁與心智模型。",
-    "pages": "知識頁"
+    "pages": "知識頁",
+    "cloneBank": "複製記憶庫",
+    "cloneBankTitle": "複製記憶庫",
+    "cloneBankDescription": "將目前的記憶庫複製成新的一個。副本從相同的記憶開始，之後各自獨立演進。",
+    "cloneTargetLabel": "新記憶庫 ID",
+    "cloneTargetPlaceholder": "my-bank-copy",
+    "cloning": "複製中…",
+    "cloneStarted": "已開始複製",
+    "cloneSucceeded": "記憶庫已複製為「{bankName}」",
+    "cloneFailed": "複製記憶庫失敗",
+    "cloneWhatToCopy": "複製哪些內容",
+    "cloneIncludeData": "記憶",
+    "cloneIncludeDataHint": "文件、事實、觀察、附件、整理封存、操作紀錄，以及由它們合成的心智模型與知識頁。",
+    "cloneIncludeBankConfig": "記憶庫設定",
+    "cloneIncludeBankConfigHint": "設定覆寫、指令與 Webhook——副本會呼叫相同的 Webhook 端點。",
+    "cloneIncludeHistory": "歷史",
+    "cloneIncludeHistoryHint": "稽核紀錄與 LLM 請求追蹤。",
+    "cloneNothingSelected": "請至少選擇一項要複製的內容。"
   },
   "bankProfile": {
     "noBankSelected": "未選擇記憶庫",
@@ -589,7 +606,8 @@
       "exportDocuments": "匯出文件",
       "importDocuments": "匯入文件",
       "exportBank": "匯出記憶庫",
-      "importBank": "匯入記憶庫"
+      "importBank": "匯入記憶庫",
+      "cloneBank": "複製記憶庫"
     },
     "table": {
       "id": "操作 ID",
@@ -1810,7 +1828,8 @@
         "operationIdRequired": "operation_id 為必填欄位",
         "missingRequestData": "缺少請求資料",
         "missingBankId": "缺少 bank_id",
-        "fileRequired": "需要檔案"
+        "fileRequired": "需要檔案",
+        "targetBankIdRequired": "必須提供 target_bank_id"
       },
       "generic": {
         "failed": "失敗",
@@ -1823,7 +1842,8 @@
         "update": "更新記憶庫失敗",
         "delete": "刪除記憶庫失敗",
         "exportTemplate": "匯出記憶庫範本失敗",
-        "importTemplate": "匯入記憶庫範本失敗"
+        "importTemplate": "匯入記憶庫範本失敗",
+        "clone": "複製記憶庫失敗"
       },
       "bankConfig": {
         "fetch": "取得記憶庫設定失敗",

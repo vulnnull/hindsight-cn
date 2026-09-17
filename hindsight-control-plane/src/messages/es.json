@@ -120,7 +120,7 @@
     "clearObservationsWarning": "Esto eliminará todo el conocimiento consolidado. Las observaciones se regenerarán la próxima vez que se ejecute la consolidación.",
     "clearing": "Limpiando...",
     "bankDeleted": "Banco de memoria eliminado",
-    "bankDeletedDescription": "El banco '{bankName}' ha sido eliminado permanentemente.",
+    "bankDeletedDescription": "El banco {bankName} ha sido eliminado permanentemente.",
     "failedToDeleteBank": "Error al eliminar el banco",
     "observationsCleared": "Observaciones limpiadas",
     "observationsClearedDefault": "Observaciones limpiadas exitosamente",
@@ -166,7 +166,24 @@
     "memoryDefense": "Defensa de memoria",
     "knowledge": "Conocimiento",
     "knowledgeDescription": "Páginas y modelos mentales sintetizados a partir de los recuerdos de este banco.",
-    "pages": "Páginas"
+    "pages": "Páginas",
+    "cloneBank": "Clonar banco",
+    "cloneBankTitle": "Clonar banco de memoria",
+    "cloneBankDescription": "Copia este banco en uno nuevo. La copia comienza con las mismas memorias y evoluciona de forma independiente a partir de entonces.",
+    "cloneTargetLabel": "ID del nuevo banco",
+    "cloneTargetPlaceholder": "mi-banco-copia",
+    "cloning": "Clonando…",
+    "cloneStarted": "Clonación iniciada",
+    "cloneSucceeded": "Banco clonado en {bankName}",
+    "cloneFailed": "No se pudo clonar el banco",
+    "cloneWhatToCopy": "Qué copiar",
+    "cloneIncludeData": "Memorias",
+    "cloneIncludeDataHint": "Documentos, hechos, observaciones, adjuntos, el archivo de curación, el registro de operaciones y los modelos mentales y páginas de conocimiento sintetizados a partir de ellos.",
+    "cloneIncludeBankConfig": "Configuración del banco",
+    "cloneIncludeBankConfigHint": "Anulaciones de configuración, directivas y webhooks: la copia llamará a los mismos endpoints.",
+    "cloneIncludeHistory": "Historial",
+    "cloneIncludeHistoryHint": "Registro de auditoría y trazas de peticiones al LLM.",
+    "cloneNothingSelected": "Elige al menos un elemento para copiar."
   },
   "bankProfile": {
     "noBankSelected": "Ningún banco seleccionado",
@@ -589,7 +606,8 @@
       "exportDocuments": "Exportar documentos",
       "importDocuments": "Importar documentos",
       "exportBank": "Exportar banco",
-      "importBank": "Importar banco"
+      "importBank": "Importar banco",
+      "cloneBank": "Clonar banco"
     },
     "table": {
       "id": "ID de operación",
@@ -1810,7 +1828,8 @@
         "operationIdRequired": "operation_id es obligatorio",
         "missingRequestData": "Faltan datos de la solicitud",
         "missingBankId": "Falta bank_id",
-        "fileRequired": "Se requiere un archivo"
+        "fileRequired": "Se requiere un archivo",
+        "targetBankIdRequired": "target_bank_id es obligatorio"
       },
       "generic": {
         "failed": "Error",
@@ -1823,7 +1842,8 @@
         "update": "No se pudo actualizar el banco de memoria",
         "delete": "No se pudo eliminar el banco de memoria",
         "exportTemplate": "No se pudo exportar la plantilla del banco de memoria",
-        "importTemplate": "No se pudo importar la plantilla del banco de memoria"
+        "importTemplate": "No se pudo importar la plantilla del banco de memoria",
+        "clone": "No se pudo clonar el banco"
       },
       "bankConfig": {
         "fetch": "No se pudo obtener la configuración del banco",
