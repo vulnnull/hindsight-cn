@@ -831,7 +831,20 @@
     "invalidatedFactsTitle": "Hechos invalidados",
     "documentUpdating": "Actualizando",
     "lastRefreshed": "Actualizado {time}",
-    "attachmentEditHint": "This document has {count} attachment(s). They appear above as ⟦hs-att:…⟧ tokens — keep a token to keep its attachment; deleting one removes it from the document."
+    "attachmentEditHint": "This document has {count} attachment(s). They appear above as ⟦hs-att:…⟧ tokens — keep a token to keep its attachment; deleting one removes it from the document.",
+    "dateRangeAll": "Todo el tiempo",
+    "dateRangeLastHour": "Última hora",
+    "dateRangeLast24Hours": "Últimas 24 horas",
+    "dateRangeLast7Days": "Últimos 7 días",
+    "dateRangeLast30Days": "Últimos 30 días",
+    "dateRangeAriaLabel": "Filtrar por tiempo",
+    "timeFieldAriaLabel": "Eje temporal",
+    "timeFieldUpdated": "Última actualización",
+    "timeFieldCreated": "Fecha de creación",
+    "dateRangeCustom": "Intervalo personalizado",
+    "dateRangeFrom": "Desde",
+    "dateRangeTo": "Hasta",
+    "dateRangeReversed": "El fin debe ser posterior al inicio"
   },
   "entitiesView": {
     "viewRelations": "Relaciones",
@@ -2003,7 +2016,16 @@
     "editPageTitle": "Editar página",
     "editPageDescription": "Actualice el nombre de la página y la pregunta que la reconstruye.",
     "editSourceQueryHint": "Cambiar esto reconstruye el contenido de la página a partir de tus recuerdos.",
-    "saveChanges": "Guardar cambios"
+    "saveChanges": "Guardar cambios",
+    "advancedSearchTitle": "Búsqueda avanzada",
+    "advancedSearchDescription": "Ejecuta la búsqueda híbrida (BM25 + vectorial) en el servidor y muestra las páginas clasificadas y la respuesta sin procesar.",
+    "advancedQuery": "Consulta",
+    "advancedLimit": "Límite",
+    "advancedRun": "Buscar",
+    "advancedResults": "Resultados",
+    "advancedJson": "JSON sin procesar",
+    "advancedMeta": "{total} resultados · {ms} ms",
+    "advancedIdle": "Ejecuta una búsqueda para ver las páginas clasificadas y la respuesta sin procesar."
   },
   "home": {
     "title": "Home",

@@ -833,7 +833,20 @@
     "invalidatedFactsTitle": "已失效的事实",
     "documentUpdating": "更新中",
     "lastRefreshed": "已刷新 {time}",
-    "attachmentEditHint": "This document has {count} attachment(s). They appear above as ⟦hs-att:…⟧ tokens — keep a token to keep its attachment; deleting one removes it from the document."
+    "attachmentEditHint": "This document has {count} attachment(s). They appear above as ⟦hs-att:…⟧ tokens — keep a token to keep its attachment; deleting one removes it from the document.",
+    "dateRangeAll": "全部时间",
+    "dateRangeLastHour": "最近 1 小时",
+    "dateRangeLast24Hours": "最近 24 小时",
+    "dateRangeLast7Days": "最近 7 天",
+    "dateRangeLast30Days": "最近 30 天",
+    "dateRangeAriaLabel": "按时间筛选",
+    "timeFieldAriaLabel": "时间轴",
+    "timeFieldUpdated": "最后更新",
+    "timeFieldCreated": "首次添加",
+    "dateRangeCustom": "自定义范围",
+    "dateRangeFrom": "从",
+    "dateRangeTo": "至",
+    "dateRangeReversed": "结束时间必须晚于开始时间"
   },
   "entitiesView": {
     "viewRelations": "关系",
@@ -2031,7 +2044,16 @@
     "editPageTitle": "编辑页面",
     "editPageDescription": "更新页面名称、重建它的问题及其标签。",
     "editSourceQueryHint": "更改此项会根据你的记忆重建页面内容。",
-    "saveChanges": "保存更改"
+    "saveChanges": "保存更改",
+    "advancedSearchTitle": "高级搜索",
+    "advancedSearchDescription": "在服务器上运行混合搜索（BM25 + 向量），查看排序后的页面和原始响应。",
+    "advancedQuery": "查询",
+    "advancedLimit": "数量上限",
+    "advancedRun": "搜索",
+    "advancedResults": "结果",
+    "advancedJson": "原始 JSON",
+    "advancedMeta": "{total} 条结果 · {ms} 毫秒",
+    "advancedIdle": "运行搜索即可查看排序后的页面和原始响应。"
   },
   "home": {
     "title": "Home",

@@ -831,7 +831,20 @@
     "invalidatedFactsTitle": "무효화된 사실",
     "documentUpdating": "업데이트 중",
     "lastRefreshed": "새로고침 {time}",
-    "attachmentEditHint": "This document has {count} attachment(s). They appear above as ⟦hs-att:…⟧ tokens — keep a token to keep its attachment; deleting one removes it from the document."
+    "attachmentEditHint": "This document has {count} attachment(s). They appear above as ⟦hs-att:…⟧ tokens — keep a token to keep its attachment; deleting one removes it from the document.",
+    "dateRangeAll": "전체 기간",
+    "dateRangeLastHour": "최근 1시간",
+    "dateRangeLast24Hours": "최근 24시간",
+    "dateRangeLast7Days": "최근 7일",
+    "dateRangeLast30Days": "최근 30일",
+    "dateRangeAriaLabel": "기간으로 필터",
+    "timeFieldAriaLabel": "시간 기준",
+    "timeFieldUpdated": "마지막 업데이트",
+    "timeFieldCreated": "추가된 시점",
+    "dateRangeCustom": "사용자 지정 기간",
+    "dateRangeFrom": "시작",
+    "dateRangeTo": "종료",
+    "dateRangeReversed": "종료는 시작보다 뒤여야 합니다"
   },
   "entitiesView": {
     "viewRelations": "관계",
@@ -2003,7 +2016,16 @@
     "editPageTitle": "페이지 편집",
     "editPageDescription": "페이지 이름 및 페이지를 재구성하는 소스 쿼리를 업데이트합니다.",
     "editSourceQueryHint": "이 항목을 변경하면 기억을 기반으로 페이지 내용이 다시 생성됩니다.",
-    "saveChanges": "변경사항 저장"
+    "saveChanges": "변경사항 저장",
+    "advancedSearchTitle": "고급 검색",
+    "advancedSearchDescription": "서버에서 하이브리드 검색(BM25 + 벡터)을 실행하고 순위가 매겨진 페이지와 원본 응답을 확인합니다.",
+    "advancedQuery": "질의",
+    "advancedLimit": "개수 제한",
+    "advancedRun": "검색",
+    "advancedResults": "결과",
+    "advancedJson": "원본 JSON",
+    "advancedMeta": "결과 {total}개 · {ms} ms",
+    "advancedIdle": "검색을 실행하면 순위가 매겨진 페이지와 원본 응답이 표시됩니다."
   },
   "home": {
     "title": "Home",

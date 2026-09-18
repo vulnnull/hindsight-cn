@@ -33,6 +33,19 @@ API_DIR = REPO_ROOT / "hindsight-api-slim"
 #: with "sorry, too many clients already".
 PG0_INSTANCE = "hindsight-system-evals"
 
+
+def pg0_instance() -> str:
+    """The pg0 instance this server runs on.
+
+    Read per call, NOT once at import: a caller that wants its own database sets
+    ``HINDSIGHT_EVAL_PG0_INSTANCE`` before starting the server, and importing
+    this module is the first thing every caller does — so a module-level default
+    would already have been frozen and the override would silently do nothing.
+    That is not hypothetical: it shipped that way for one run, and the run was
+    seen refreshing mental models belonging to two earlier runs' banks.
+    """
+    return os.getenv("HINDSIGHT_EVAL_PG0_INSTANCE") or PG0_INSTANCE
+
 SERVER_STARTUP_TIMEOUT = 180.0
 
 
@@ -98,6 +111,14 @@ def provider_environment() -> dict[str, str]:
         )
     if base_url := pick("LLM_BASE_URL"):
         env["HINDSIGHT_API_LLM_BASE_URL"] = base_url
+    # Strict structured output changes what the model is even able to emit: every
+    # declared property becomes required, so a field the text gives no value for
+    # still has to carry one. That pressure is where a whole class of extraction
+    # fabrications comes from (#4457), and it is off by default — so an eval that
+    # cannot switch it on cannot reproduce the condition its own suite exists to
+    # measure. Passed through rather than inherited, like everything else here.
+    if strict := pick("LLM_STRICT_SCHEMA"):
+        env["HINDSIGHT_API_LLM_STRICT_SCHEMA"] = strict
     return env
 
 
@@ -114,7 +135,7 @@ def start_eval_server(*, log_path: Path) -> EvalServer:
     env.update(provider_environment())
     env.update(
         {
-            "HINDSIGHT_API_DATABASE_URL": f"pg0://{PG0_INSTANCE}",
+            "HINDSIGHT_API_DATABASE_URL": f"pg0://{pg0_instance()}",
             "HINDSIGHT_API_HOST": "127.0.0.1",
             "HINDSIGHT_API_PORT": str(port),
             "HINDSIGHT_API_LOG_LEVEL": "info",

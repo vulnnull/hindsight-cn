@@ -831,7 +831,20 @@
     "invalidatedFactsTitle": "已失效嘅事實",
     "documentUpdating": "更新緊",
     "lastRefreshed": "已更新 {time}",
-    "attachmentEditHint": "This document has {count} attachment(s). They appear above as ⟦hs-att:…⟧ tokens — keep a token to keep its attachment; deleting one removes it from the document."
+    "attachmentEditHint": "This document has {count} attachment(s). They appear above as ⟦hs-att:…⟧ tokens — keep a token to keep its attachment; deleting one removes it from the document.",
+    "dateRangeAll": "全部時間",
+    "dateRangeLastHour": "最近 1 小時",
+    "dateRangeLast24Hours": "最近 24 小時",
+    "dateRangeLast7Days": "最近 7 天",
+    "dateRangeLast30Days": "最近 30 天",
+    "dateRangeAriaLabel": "按時間篩選",
+    "timeFieldAriaLabel": "時間軸",
+    "timeFieldUpdated": "最後更新",
+    "timeFieldCreated": "首次加入",
+    "dateRangeCustom": "自訂範圍",
+    "dateRangeFrom": "由",
+    "dateRangeTo": "至",
+    "dateRangeReversed": "結束時間必須喺開始之後"
   },
   "entitiesView": {
     "viewRelations": "關係",
@@ -2003,7 +2016,16 @@
     "editPageTitle": "編輯知識頁",
     "editPageDescription": "修改頁面名稱同埋驅動佢內容重構嘅來源查詢。",
     "editSourceQueryHint": "改呢個會根據你嘅記憶重建頁面內容。",
-    "saveChanges": "儲存變更"
+    "saveChanges": "儲存變更",
+    "advancedSearchTitle": "進階搜尋",
+    "advancedSearchDescription": "喺伺服器行混合搜尋（BM25 + 向量），睇排好序嘅頁面同原始回應。",
+    "advancedQuery": "查詢",
+    "advancedLimit": "數量上限",
+    "advancedRun": "搜尋",
+    "advancedResults": "結果",
+    "advancedJson": "原始 JSON",
+    "advancedMeta": "{total} 個結果 · {ms} 毫秒",
+    "advancedIdle": "行一次搜尋就見到排好序嘅頁面同原始回應。"
   },
   "home": {
     "title": "Home",

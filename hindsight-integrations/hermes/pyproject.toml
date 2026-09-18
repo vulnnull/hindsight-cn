@@ -1,0 +1,23 @@
+[project]
+name = "hermes-plugin-hindsight"
+version = "1.0.0"
+description = "Hermes Agent memory provider plugin: hindsight"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+# Installed into the Hermes venv by `hermes plugins install` / `enable` and re-applied after
+# every `hermes update`. Keep upper bounds: Hermes pins its own deps exactly and refuses a
+# plugin whose requirements cannot resolve against them.
+dependencies = [
+    "hindsight-client>=0.6.1,<1",
+    "hindsight-embed>=0.6.1,<1",
+]
+
+# The plugin is loaded from a directory by Hermes, not installed as a distribution.
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

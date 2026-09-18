@@ -750,3 +750,48 @@ async def test_a_store_owned_retain_writes_the_names_onto_the_document_record(
     document = await api_client.get(f"/v1/default/banks/{bank_id}/documents/policy")
     assert document.status_code == 200, document.text
     assert [(a["id"], a["filename"]) for a in document.json()["attachments"]] == [(PDF_ID, "policy-v1.pdf")]
+
+
+@pytest.mark.asyncio
+async def test_a_store_owned_re_ingest_drops_the_attachment_its_text_no_longer_carries(
+    api_client, memory, request_context, restore_default_store
+):
+    """What a document carries is derived from its text, on both backends.
+
+    A bank whose documents live in SQL rewrites the rows from its document write. A store-owned
+    bank makes no such write, so the rewrite had nothing to hang off and never ran: the row -- and
+    the bytes behind it -- outlived every reference to them, and the document went on reporting an
+    attachment its text had stopped carrying.
+    """
+    bank_id = f"so-reingest-{uuid.uuid4().hex[:8]}"
+    store = _CarryingStore(answers_full_recall=True)
+    set_memories(store)
+    assert (await api_client.put(f"/v1/default/banks/{bank_id}", json={})).status_code == 200
+    config = await api_client.patch(
+        f"/v1/default/banks/{bank_id}/config", json={"updates": {"retain_extraction_mode": "chunks"}}
+    )
+    assert config.status_code == 200, config.text
+
+    retained = await api_client.post(
+        f"/v1/default/banks/{bank_id}/memories",
+        json={"items": [_file_item("policy", "policy-v1.pdf")], "async": False},
+    )
+    assert retained.status_code == 200, retained.text
+    carried = await api_client.get(f"/v1/default/banks/{bank_id}/documents/policy")
+    assert [a["id"] for a in carried.json()["attachments"]] == [PDF_ID]
+
+    re_ingested = await api_client.post(
+        f"/v1/default/banks/{bank_id}/memories",
+        json={"items": [{"content": "The policy is now plain text.", "document_id": "policy"}], "async": False},
+    )
+    assert re_ingested.status_code == 200, re_ingested.text
+
+    document = await api_client.get(f"/v1/default/banks/{bank_id}/documents/policy")
+    assert document.status_code == 200, document.text
+    assert not document.json().get("attachments")
+    # The row too, not only what the read renders: the row is what holds the storage key, so a row
+    # left behind is a blob nothing will ever reclaim.
+    backend = await memory._get_backend()
+    async with backend.acquire() as conn:
+        rows = await conn.fetch("SELECT short_id FROM attachments WHERE bank_id = $1", bank_id)
+    assert rows == []

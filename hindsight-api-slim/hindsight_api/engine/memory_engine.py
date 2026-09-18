@@ -126,6 +126,16 @@ _nested_operation_authorized: contextvars.ContextVar[bool] = contextvars.Context
     "nested_operation_authorized", default=False
 )
 
+# Reciprocal Rank Fusion constant for knowledge-page search, and the factor that
+# maps a single arm's raw RRF term (1/(K+rank), max 1/61 at rank 1) onto 0..1.
+# Every arm of search_knowledge_pages scales by this so the `score` it returns is
+# comparable across backends: the raw terms top out around 0.016 and read as "no
+# match" to anyone who assumes a 0..1 relevance scale, and the store-owned path
+# used a different formula again — the same field meant 0.016 or 1.0 for the same
+# top hit depending on which store answered.
+_KNOWLEDGE_RRF_K = 60
+_KNOWLEDGE_RRF_NORM = float(_KNOWLEDGE_RRF_K + 1)
+
 
 @contextmanager
 def _authorize_nested_operations() -> "Iterator[None]":
@@ -594,6 +604,7 @@ from .search.tags import TagGroup, TagsMatch, build_tag_groups_where_clause, bui
 from .search.types import ScoredResult
 from .source_facts import select_source_facts_within_budget
 from .task_backend import TaskBackend
+from .time_filter import DOCUMENT_TIME_FIELDS, build_time_clause, validate_time_window
 
 # Recall ranking strategy: how the per-arm (semantic/bm25/graph/temporal) results are
 # fused and reranked into the final order.
@@ -3321,44 +3332,67 @@ class MemoryEngine(MemoryEngineInterface):
         file_metadata = task_dict.get("_file_metadata")
         if file_metadata and len(contents) == 1:
             doc_id = contents[0].get("document_id")
-            from .memories import get_memories
-
-            _store = get_memories()
-            if doc_id and _store.store_owned_for(bank_id):
-                # A store-owned bank has no SQL `documents` row for the UPDATE below to match, so
-                # the reference goes on the store's document record instead — where the retain
-                # above just wrote it.
-                found = await _store.set_document_file(
-                    bank_id=bank_id,
-                    document_id=doc_id,
-                    storage_key=file_metadata["file_storage_key"],
-                    original_name=file_metadata["file_original_name"],
-                    content_type=file_metadata["file_content_type"],
+            if doc_id and not await self.record_document_file(
+                bank_id,
+                doc_id,
+                storage_key=file_metadata["file_storage_key"],
+                original_name=file_metadata["file_original_name"],
+                content_type=file_metadata["file_content_type"],
+            ):
+                logger.warning(
+                    f"[BATCH_RETAIN_TASK] No document {doc_id} in bank {bank_id} to record its uploaded file on"
                 )
-                if not found:
-                    logger.warning(
-                        f"[BATCH_RETAIN_TASK] No document {doc_id} in bank {bank_id} to record its uploaded file on"
-                    )
-            elif doc_id:
-                backend = await self._get_backend()
-                async with acquire_with_retry(backend) as conn:
-                    await conn.execute(
-                        f"""
-                        UPDATE {fq_table("documents")}
-                        SET file_storage_key = $3,
-                            file_original_name = $4,
-                            file_content_type = $5,
-                            updated_at = NOW()
-                        WHERE id = $1 AND bank_id = $2
-                        """,
-                        doc_id,
-                        bank_id,
-                        file_metadata["file_storage_key"],
-                        file_metadata["file_original_name"],
-                        file_metadata["file_content_type"],
-                    )
 
         logger.info(f"[BATCH_RETAIN_TASK] Completed background batch retain for bank_id={bank_id}")
+
+    async def record_document_file(
+        self,
+        bank_id: str,
+        document_id: str,
+        *,
+        storage_key: str,
+        original_name: str,
+        content_type: str,
+    ) -> bool:
+        """Record on a document the uploaded file it was converted from. ``False`` if it is absent.
+
+        One entry point for both backends, because the reference is learned in the file-convert
+        task — after the retain that wrote the document — and only the document's owner knows
+        where it goes: a SQL ``documents`` row, or the store's own document record. Split across
+        the caller, the two halves drifted: the store-owned branch reported whether the document
+        was found and the SQL branch did not, so a reference written against a document that no
+        longer existed was silently dropped on one backend and logged on the other.
+        """
+        from .memories import get_memories
+
+        store = get_memories()
+        if store.store_owned_for(bank_id):
+            return await store.set_document_file(
+                bank_id=bank_id,
+                document_id=document_id,
+                storage_key=storage_key,
+                original_name=original_name,
+                content_type=content_type,
+            )
+        backend = await self._get_backend()
+        async with acquire_with_retry(backend) as conn:
+            updated = await conn.fetchval(
+                f"""
+                UPDATE {fq_table("documents")}
+                SET file_storage_key = $3,
+                    file_original_name = $4,
+                    file_content_type = $5,
+                    updated_at = NOW()
+                WHERE id = $1 AND bank_id = $2
+                RETURNING id
+                """,
+                document_id,
+                bank_id,
+                storage_key,
+                original_name,
+                content_type,
+            )
+        return updated is not None
 
     async def _handle_file_convert_retain(self, task_dict: dict[str, Any]):
         """
@@ -5906,6 +5940,7 @@ class MemoryEngine(MemoryEngineInterface):
 
         if previous_attachments:
             async with (await self._get_backend()).acquire() as conn:
+                await self._sync_store_owned_document_attachments(conn, bank_id, explicit_doc_ids)
                 await self._reclaim_orphaned_attachments(conn, bank_id, previous_attachments)
 
         # Call post-operation hook if validator is configured
@@ -7429,6 +7464,41 @@ class MemoryEngine(MemoryEngineInterface):
                 list(dict.fromkeys(document_ids)),
             )
         return [row["storage_key"] for row in rows]
+
+    async def _sync_store_owned_document_attachments(self, conn, bank_id: str, document_ids: "Sequence[str]") -> None:
+        """Drop the attachment rows a store-owned bank's documents stopped referencing.
+
+        A bank whose documents live in SQL does this inside the retain, from the one place every
+        document write funnels through (``fact_storage._upsert_document_row``). A store-owned bank
+        writes no such row, and its document writes do not funnel: the streaming session, the
+        delta path, the metadata-only path and the batch flush each write the record themselves.
+        So the rewrite runs here instead — once per retain, after every one of those paths has
+        converged on the stored record, which is also the only place the document's CANONICAL text
+        is known: an append's document is the stored base plus the new turn, not what the caller
+        sent, and which attachments a document carries is derived from that text and nothing else.
+
+        Deliberately gated by the caller on the documents having had attachment rows at all, so a
+        plain-text retain of a plain-text document does not touch Postgres for any of this.
+        """
+        from .memories import get_memories
+        from .retain.fact_storage import sync_document_attachments
+
+        store = get_memories()
+        if not store.store_owned_for(bank_id):
+            return
+        for document_id in dict.fromkeys(document_ids):
+            record = await store.get_document_record(bank_id=bank_id, document_id=document_id, include_text=True)
+            text = (record or {}).get("original_text")
+            if text is None:
+                # Either no record (this retain wrote no document) or a deployment with
+                # `store_document_text` disabled, where the canonical text is not kept and what the
+                # document references cannot be derived. Keeping the rows is the safe side of that
+                # choice: dropping them off a text we cannot read would take away attachments the
+                # document still displays.
+                continue
+            # No filenames: the names are already on the rows, written at the ingress, and this
+            # path has no newer ones to restate — passing none leaves them alone.
+            await sync_document_attachments(conn, bank_id, document_id, text)
 
     async def _drop_orphaned_attachments(self, conn, bank_id: str, document_id: str) -> list[str]:
         """Delete one document's attachment rows; return the blobs nothing names any more.
@@ -10176,9 +10246,18 @@ class MemoryEngine(MemoryEngineInterface):
                     # true for every bank it serves, so using it here reported a successful deletion
                     # for a document that never existed and turned the 404 this endpoint promises
                     # into a 200.
-                    doc_existed = (
-                        await _store.document_content_hash(bank_id=bank_id, document_id=document_id) is not None
-                    )
+                    #
+                    # One read answers both questions: whether the record exists, and where the
+                    # uploaded original the document was converted from lives. The SQL read above
+                    # returns nothing for such a bank — there is no row to hold the key — so
+                    # without taking it off the record here, the file a file retain kept outlived
+                    # the document it belonged to (`set_document_file` puts the key in the
+                    # record's metadata).
+                    from .memories.base import DOC_META_FILE_STORAGE_KEY
+
+                    _record = await _store.get_document_record(bank_id=bank_id, document_id=document_id)
+                    doc_existed = _record is not None
+                    file_storage_key = ((_record or {}).get("metadata") or {}).get(DOC_META_FILE_STORAGE_KEY)
                     await _store.delete_document(conn=conn, fq_table=fq_table, bank_id=bank_id, document_id=document_id)
                     # A store that owns the document store also drops the document RECORD (its
                     # extracted text + chunk bodies; the orphan sweep reclaims the blobs). This is
@@ -12494,6 +12573,7 @@ class MemoryEngine(MemoryEngineInterface):
             "retain_extraction_mode",
             "retain_custom_instructions",
             "retain_extract_causal_links",
+            "retain_optional_fact_dimensions",
             "retain_chunk_size",
             "entity_labels",
             "entities_allow_free_form",
@@ -12698,6 +12778,9 @@ class MemoryEngine(MemoryEngineInterface):
         tags: list[str] | None = None,
         tags_match: TagsMatch = "any",
         created_before: datetime | None = None,
+        time_field: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
         limit: int = 100,
         offset: int = 0,
         request_context: "RequestContext",
@@ -12719,7 +12802,15 @@ class MemoryEngine(MemoryEngineInterface):
                 archive carries no entity links.
             created_before: Keep only units ingested strictly before this instant
                 (``created_at < created_before``). An ingest-age filter for
-                retention / bulk-maintenance sweeps.
+                retention / bulk-maintenance sweeps. Independent of the
+                ``time_field`` window below, which it predates.
+            time_field: Time axis to filter and order by — one of created_at,
+                updated_at, mentioned_at, occurred_start, occurred_end. Supplying
+                it (or either bound) replaces the default ordering with that axis
+                and EXCLUDES units carrying no value on it, so ``total`` counts
+                only dated units. See :mod:`hindsight_api.engine.time_filter`.
+            start_date: Inclusive lower bound on ``time_field``.
+            end_date: Exclusive upper bound on ``time_field`` (half-open window).
             tags: Optional list of tag names to filter by. When omitted, no tag
                 filtering is applied (except tags_match='exact', which then selects
                 the untagged/global scope).
@@ -12772,6 +12863,9 @@ class MemoryEngine(MemoryEngineInterface):
                 tags=tags,
                 tags_match=tags_match,
                 created_before=created_before,
+                time_field=time_field,
+                start_date=start_date,
+                end_date=end_date,
                 limit=limit,
                 offset=offset,
             )
@@ -12829,6 +12923,9 @@ class MemoryEngine(MemoryEngineInterface):
         search_query: str | None = None,
         tags: list[str] | None = None,
         tags_match: "TagsMatch" = "any_strict",
+        time_field: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
         limit: int = 100,
         offset: int = 0,
         request_context: "RequestContext",
@@ -12844,6 +12941,11 @@ class MemoryEngine(MemoryEngineInterface):
             search_query: Search in document ID
             tags: Filter by tags
             tags_match: How to match tags (any, all, any_strict, all_strict)
+            time_field: Time axis to filter and order by — ``created_at`` (when the
+                document first arrived) or ``updated_at`` (its last write, the
+                default ordering). See :mod:`hindsight_api.engine.time_filter`.
+            start_date: Inclusive lower bound on ``time_field``.
+            end_date: Exclusive upper bound on ``time_field`` (half-open window).
             limit: Maximum number of results
             offset: Offset for pagination
             request_context: Request context for authentication.
@@ -12861,6 +12963,13 @@ class MemoryEngine(MemoryEngineInterface):
             await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         await self._require_bank_exists(bank_id)
 
+        # Validated here rather than inside the SQL builder below, because the store-owned branch
+        # never reaches it: without this, an inverted window is a 400 on Postgres and a silently
+        # empty page on a store that owns its documents.
+        validate_time_window(
+            time_field=time_field, start_date=start_date, end_date=end_date, allowed=DOCUMENT_TIME_FIELDS
+        )
+
         # A store that owns its document metadata keeps no rows in the SQL `documents` table, so the
         # query below would return an empty page for it. List from the store's own registry instead.
         from .memories import get_memories
@@ -12871,11 +12980,15 @@ class MemoryEngine(MemoryEngineInterface):
             # unfiltered page — every document, including the untagged ones a strict mode excludes
             # — with a `total` that ignored the filter. The store applies them and counts what
             # matches, the same way the SQL branch below does.
+            # The time window goes WITH the call for the same reason tags do — see above.
             return await _docs_store.list_documents(
                 bank_id=bank_id,
                 search_query=search_query,
                 tags=tags,
                 tags_match=tags_match,
+                time_field=time_field,
+                start_date=start_date,
+                end_date=end_date,
                 limit=limit,
                 offset=offset,
             )
@@ -12902,6 +13015,18 @@ class MemoryEngine(MemoryEngineInterface):
             next_param = built.next_param_offset
             query_params.extend(tags_params)
             param_count = next_param - 1  # next_param is next available; convert to last used
+
+            window = build_time_clause(
+                time_field=time_field,
+                start_date=start_date,
+                end_date=end_date,
+                allowed=DOCUMENT_TIME_FIELDS,
+                default_field="updated_at",
+                param_offset=param_count + 1,
+            )
+            query_conditions.extend(window.conditions)
+            query_params.extend(window.params)
+            param_count = window.next_param_offset - 1
 
             where_clause = "WHERE " + " AND ".join(query_conditions) if query_conditions else ""
             if tags_clause:
@@ -12939,7 +13064,7 @@ class MemoryEngine(MemoryEngineInterface):
                     tags
                 FROM {fq_table("documents")}
                 {where_clause}
-                ORDER BY updated_at DESC, created_at DESC, id
+                ORDER BY {window.order_by or "updated_at DESC, created_at DESC, id"}
                 LIMIT {limit_param} OFFSET {offset_param}
             """,
                 *query_params,
@@ -14916,6 +15041,12 @@ class MemoryEngine(MemoryEngineInterface):
         # crash logging, recall's embedder, or the reflect LLM call (see issue #1875).
         query = sanitize_text(query) or ""
         context = sanitize_text(context)
+
+        # A blank query produces an empty final user message, which providers reject
+        # with a 400 on every retry -- ~8 wasted LLM calls for a guaranteed failure
+        # (#4416). Fail before the agent loop starts.
+        if not query.strip() and not (context or "").strip():
+            raise ValueError("Reflect requires a non-empty query.")
 
         # Use cached LLM config
         if self._reflect_llm_config is None:
@@ -19124,6 +19255,14 @@ class MemoryEngine(MemoryEngineInterface):
         ranked by fused score, each with a short content snippet. Folders are
         excluded.
 
+        ``score`` is normalized to ``0..1``, where 1.0 is the best a page can do
+        on this query: every arm at rank 1. It is a *rank* score, not a relevance
+        one — it says where a page placed, never how well it matched, so it is
+        only meaningful against the other results for the same query. A one-arm
+        search (vector-only, BM25-only) tops out at 1.0 as well; in the fused
+        search a page found by a single arm tops out at 0.5, since the other arm
+        contributes nothing.
+
         The BM25 arm is dispatched on the configured text-search backend
         (:func:`knowledge_bm25_arm`); backends whose ``mental_models`` BM25 index
         is unpopulated (``vchord``) degrade to a vector-only search rather than
@@ -19203,7 +19342,9 @@ class MemoryEngine(MemoryEngineInterface):
                     "name": r["name"],
                     "mental_model_id": r["mental_model_id"],
                     "snippet": (r["snippet"] or "").strip(),
-                    "score": 1.0 / (1 + order[r["mental_model_id"]]),
+                    # Same normalized single-arm RRF curve as the SQL paths below, so a
+                    # store-owned bank's scores mean what a Postgres-ranked bank's do.
+                    "score": _KNOWLEDGE_RRF_NORM / (_KNOWLEDGE_RRF_K + 1 + order[r["mental_model_id"]]),
                     "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
                 }
                 for r in rows
@@ -19243,7 +19384,7 @@ class MemoryEngine(MemoryEngineInterface):
                 sql = f"""
                     SELECT kp.id, kp.name, kp.mental_model_id,
                            LEFT(mm.content, 280) AS snippet, mm.last_refreshed_at AS updated_at,
-                           1.0 / (60 + ROW_NUMBER() OVER (ORDER BY mm.embedding <=> $1::vector)) AS score
+                           {_KNOWLEDGE_RRF_NORM} / ({_KNOWLEDGE_RRF_K} + ROW_NUMBER() OVER (ORDER BY mm.embedding <=> $1::vector)) AS score
                     FROM {join}
                     WHERE kp.bank_id = $2 AND kp.kind = 'page' AND mm.embedding IS NOT NULL
                     ORDER BY mm.embedding <=> $1::vector
@@ -19301,7 +19442,8 @@ class MemoryEngine(MemoryEngineInterface):
                         ),
                         fused AS (
                             SELECT COALESCE(vec.page_id, bm.page_id) AS page_id,
-                                   COALESCE(1.0 / (60 + vec.rnk), 0) + COALESCE(1.0 / (60 + bm.rnk), 0) AS score
+                                   ({_KNOWLEDGE_RRF_NORM} / 2) * (COALESCE(1.0 / ({_KNOWLEDGE_RRF_K} + vec.rnk), 0)
+                                                                + COALESCE(1.0 / ({_KNOWLEDGE_RRF_K} + bm.rnk), 0)) AS score
                             FROM vec FULL OUTER JOIN bm ON vec.page_id = bm.page_id
                         )
                         SELECT kp.id, kp.name, kp.mental_model_id,
@@ -19323,10 +19465,14 @@ class MemoryEngine(MemoryEngineInterface):
                         pg_search_tokenizer=cfg.text_search_extension_pg_search_tokenizer,
                         max_query_terms=cfg.bm25_max_query_terms,
                     )
+                    # Ranked, not raw: each backend's BM25 operator returns its own scale
+                    # (ts_rank_cd, a negated distance, paradedb.score), and those have
+                    # nothing in common with each other or with the fused path above. The
+                    # rank does, so the same normalized RRF curve is applied here too.
                     sql = f"""
                         SELECT kp.id, kp.name, kp.mental_model_id,
                                LEFT(mm.content, 280) AS snippet, mm.last_refreshed_at AS updated_at,
-                               {bm25.score_expr} AS score
+                               {_KNOWLEDGE_RRF_NORM} / ({_KNOWLEDGE_RRF_K} + ROW_NUMBER() OVER (ORDER BY {bm25.order_by})) AS score
                         FROM {join}
                         WHERE kp.bank_id = $1 AND kp.kind = 'page'
                               {bm25.match_filter}

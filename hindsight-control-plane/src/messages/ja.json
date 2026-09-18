@@ -831,7 +831,20 @@
     "invalidatedFactsTitle": "無効化されたファクト",
     "documentUpdating": "更新中",
     "lastRefreshed": "更新 {time}",
-    "attachmentEditHint": "This document has {count} attachment(s). They appear above as ⟦hs-att:…⟧ tokens — keep a token to keep its attachment; deleting one removes it from the document."
+    "attachmentEditHint": "This document has {count} attachment(s). They appear above as ⟦hs-att:…⟧ tokens — keep a token to keep its attachment; deleting one removes it from the document.",
+    "dateRangeAll": "全期間",
+    "dateRangeLastHour": "過去1時間",
+    "dateRangeLast24Hours": "過去24時間",
+    "dateRangeLast7Days": "過去7日間",
+    "dateRangeLast30Days": "過去30日間",
+    "dateRangeAriaLabel": "期間で絞り込み",
+    "timeFieldAriaLabel": "時間軸",
+    "timeFieldUpdated": "最終更新",
+    "timeFieldCreated": "追加日時",
+    "dateRangeCustom": "カスタム期間",
+    "dateRangeFrom": "開始",
+    "dateRangeTo": "終了",
+    "dateRangeReversed": "終了は開始より後にしてください"
   },
   "entitiesView": {
     "viewRelations": "関係",
@@ -2003,7 +2016,16 @@
     "editPageTitle": "ページを編集",
     "editPageDescription": "ページ名と再構築の基準となるソースクエリを更新します。",
     "editSourceQueryHint": "これを変更すると、記憶に基づいてページの内容が再構築されます。",
-    "saveChanges": "変更を保存"
+    "saveChanges": "変更を保存",
+    "advancedSearchTitle": "詳細検索",
+    "advancedSearchDescription": "サーバー側のハイブリッド検索（BM25 + ベクトル）を実行し、順位付けされたページと生のレスポンスを確認します。",
+    "advancedQuery": "クエリ",
+    "advancedLimit": "件数上限",
+    "advancedRun": "検索",
+    "advancedResults": "結果",
+    "advancedJson": "生の JSON",
+    "advancedMeta": "{total} 件 · {ms} ミリ秒",
+    "advancedIdle": "検索を実行すると、順位付けされたページと生のレスポンスが表示されます。"
   },
   "home": {
     "title": "Home",

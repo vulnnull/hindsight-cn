@@ -831,7 +831,20 @@
     "invalidatedFactsTitle": "Ungültige Fakten",
     "documentUpdating": "Wird aktualisiert",
     "lastRefreshed": "Aktualisiert {time}",
-    "attachmentEditHint": "This document has {count} attachment(s). They appear above as ⟦hs-att:…⟧ tokens — keep a token to keep its attachment; deleting one removes it from the document."
+    "attachmentEditHint": "This document has {count} attachment(s). They appear above as ⟦hs-att:…⟧ tokens — keep a token to keep its attachment; deleting one removes it from the document.",
+    "dateRangeAll": "Gesamter Zeitraum",
+    "dateRangeLastHour": "Letzte Stunde",
+    "dateRangeLast24Hours": "Letzte 24 Stunden",
+    "dateRangeLast7Days": "Letzte 7 Tage",
+    "dateRangeLast30Days": "Letzte 30 Tage",
+    "dateRangeAriaLabel": "Nach Zeit filtern",
+    "timeFieldAriaLabel": "Zeitachse",
+    "timeFieldUpdated": "Zuletzt aktualisiert",
+    "timeFieldCreated": "Zuerst hinzugefügt",
+    "dateRangeCustom": "Benutzerdefiniert",
+    "dateRangeFrom": "Von",
+    "dateRangeTo": "Bis",
+    "dateRangeReversed": "Ende muss nach dem Start liegen"
   },
   "entitiesView": {
     "viewRelations": "Beziehungen",
@@ -2003,7 +2016,16 @@
     "editPageTitle": "Seite bearbeiten",
     "editPageDescription": "Aktualisieren Sie den Namen der Seite und die Frage, die sie neu aufbaut.",
     "editSourceQueryHint": "Wenn Sie dies ändern, wird der Inhalt der Seite aus Ihren Erinnerungen neu aufgebaut.",
-    "saveChanges": "Änderungen speichern"
+    "saveChanges": "Änderungen speichern",
+    "advancedSearchTitle": "Erweiterte Suche",
+    "advancedSearchDescription": "Führt die hybride Suche (BM25 + Vektor) auf dem Server aus und zeigt die bewerteten Seiten sowie die Rohantwort.",
+    "advancedQuery": "Suchanfrage",
+    "advancedLimit": "Limit",
+    "advancedRun": "Suchen",
+    "advancedResults": "Ergebnisse",
+    "advancedJson": "Rohes JSON",
+    "advancedMeta": "{total} Ergebnisse · {ms} ms",
+    "advancedIdle": "Starten Sie eine Suche, um bewertete Seiten und die Rohantwort zu sehen."
   },
   "home": {
     "title": "Home",

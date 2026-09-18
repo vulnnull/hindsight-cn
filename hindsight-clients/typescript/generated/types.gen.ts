@@ -2809,6 +2809,8 @@ export type KnowledgePageSearchResult = {
   snippet: string;
   /**
    * Score
+   *
+   * Rank-fusion score in 0..1, where 1.0 means every search arm placed this page first. It reflects where the page ranked for this query, not how well its text matched, so it is only comparable within one result set.
    */
   score: number;
   /**
@@ -6809,6 +6811,30 @@ export type ListMemoriesData = {
      */
     tags_match?: "any" | "all" | "any_strict" | "all_strict" | "exact";
     /**
+     * Time Field
+     *
+     * Time axis to filter and order by. `created_at` / `updated_at` = ingest and last-write time; `mentioned_at` / `occurred_start` / `occurred_end` = event time. Defaults to `created_at` when only `start_date`/`end_date` are given. Filtering and ordering both follow `time_field`, and rows with no value on that column are excluded — so `total` counts only rows carrying that timestamp, and can be 0 on a bank that is not empty.
+     */
+    time_field?:
+      | "created_at"
+      | "updated_at"
+      | "mentioned_at"
+      | "occurred_start"
+      | "occurred_end"
+      | null;
+    /**
+     * Start Date
+     *
+     * Filter from this ISO datetime (inclusive)
+     */
+    start_date?: string | null;
+    /**
+     * End Date
+     *
+     * Filter until this ISO datetime (exclusive)
+     */
+    end_date?: string | null;
+    /**
      * Limit
      */
     limit?: number;
@@ -8454,6 +8480,24 @@ export type ListDocumentsData = {
      * How to match tags: 'any', 'all', 'any_strict', 'all_strict'
      */
     tags_match?: string;
+    /**
+     * Time Field
+     *
+     * Time axis to filter and order by: `created_at` (when the document first arrived) or `updated_at` (its last write, the default ordering). Filtering and ordering both follow `time_field`, and rows with no value on that column are excluded — so `total` counts only rows carrying that timestamp, and can be 0 on a bank that is not empty.
+     */
+    time_field?: "created_at" | "updated_at" | null;
+    /**
+     * Start Date
+     *
+     * Filter from this ISO datetime (inclusive)
+     */
+    start_date?: string | null;
+    /**
+     * End Date
+     *
+     * Filter until this ISO datetime (exclusive)
+     */
+    end_date?: string | null;
     /**
      * Limit
      */
