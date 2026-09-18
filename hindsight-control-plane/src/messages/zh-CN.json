@@ -570,7 +570,19 @@
     "knowledgePageDefaultTriggerDescription": "本记忆库中每个新知识页面的初始刷新设置：何时刷新、如何刷新以及读取哪些内容。已有页面保留各自的设置，创建页面时指定的设置优先。",
     "knowledgePageDefaultTriggerEdit": "自定义",
     "knowledgePageDefaultTriggerDialogHint": "适用于此后创建的知识页面。",
-    "knowledgePageDefaultTriggerDialogTitle": "新知识页面的默认设置"
+    "knowledgePageDefaultTriggerDialogTitle": "新知识页面的默认设置",
+    "reflectObservationsMaxTokensLabel": "观察最大令牌数",
+    "reflectObservationsMaxTokensDescription": "模型未自行指定预算时，反思中观察检索使用的令牌预算。知识摘要的触发器可覆盖它。",
+    "reflectObservationsEntitiesLabel": "观察实体",
+    "reflectObservationsEntitiesDescription": "附加在每条沉淀认知上的规范实体名称。文本使用别名时很有用，但可能占载荷一半以上。",
+    "reflectObservationsEntitiesOn": "包含实体名称",
+    "reflectObservationsEntitiesOff": "跳过实体（更小的上下文）",
+    "reflectDefaultOptionsLabel": "反思默认选项",
+    "reflectDefaultOptionsDescription": "当请求（或知识摘要的触发器）未设置该选项时，本记忆库每次反思所使用的值。显式指定的值仍然优先。",
+    "reflectDefaultOptionsDialogTitle": "反思的默认选项",
+    "reflectDefaultOptionsDialogHint": "适用于本记忆库的每次反思：API、MCP 和知识摘要刷新。",
+    "reflectObservationsMaxTokensChip": "{tokens} 观察令牌",
+    "reflectObservationsMaxTokensChipDefault": "默认观察令牌"
   },
   "bankOperations": {
     "title": "后台操作",
@@ -1028,7 +1040,13 @@
     "triggerFactTypesAll": "所有事实类型",
     "triggerExcludeAllDescription": "刷新时不读取其他知识摘要或知识页面。",
     "triggerSeconds": "秒",
-    "triggerMinIntervalLabel": "最小刷新间隔"
+    "triggerMinIntervalLabel": "最小刷新间隔",
+    "optionsObservationsMaxTokensLabel": "观察最大令牌数",
+    "optionsObservationsMaxTokensDescription": "刷新时观察检索的令牌预算。调低可缩小反思上下文。",
+    "optionsObservationsEntitiesLabel": "观察实体",
+    "optionsObservationsEntitiesDescription": "附加在每条沉淀认知上的规范实体名称，可能占载荷一半以上。",
+    "optionsObservationsEntitiesYes": "是 — 包含实体名称",
+    "optionsObservationsEntitiesNo": "否 — 跳过实体（减小提示词大小）"
   },
   "cronPreview": {
     "invalid": "无效的 cron 表达式",

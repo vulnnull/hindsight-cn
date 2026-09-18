@@ -1403,8 +1403,33 @@ def _entity_map_from_results(
     return out
 
 
+def _is_foreign_key_violation(e: Exception) -> bool:
+    """Return True for a foreign-key violation on either dialect.
+
+    Oracle folds every constraint kind into ``IntegrityError``, so the FK case is
+    picked out by code: ORA-02291, parent key not found. That is the inserting
+    side, which is the side that fails — every FK in the Oracle baseline is
+    ON DELETE CASCADE or SET NULL, so a delete never raises ORA-02292.
+    """
+    if isinstance(e, asyncpg.exceptions.ForeignKeyViolationError):
+        return True
+    if not _is_oracledb_integrity_error(e):
+        return False
+    code = getattr(e.args[0], "code", None) if e.args else None
+    return code == 2291
+
+
 def _is_non_retryable_task_error(e: Exception) -> bool:
     """Classify deterministic task failures that should skip worker retry."""
+    # A foreign-key violation here is a concurrency race, not bad data: a retain
+    # writes unit_entities for units a concurrent delete is removing (see
+    # ``delete_document``, which documents the race it runs in). The row the
+    # write needed is gone *this moment*, not wrong — the retry finds a settled
+    # database and succeeds. Classifying it with its deterministic
+    # IntegrityConstraintViolationError siblings sent those retains terminal at
+    # retry_count=0 and dropped the content silently (issue #4453).
+    if _is_foreign_key_violation(e):
+        return False
     return (
         isinstance(e, asyncpg.exceptions.IntegrityConstraintViolationError)
         or _is_oracledb_integrity_error(e)
@@ -14990,6 +15015,8 @@ class MemoryEngine(MemoryEngineInterface):
         recall_include_chunks: bool | None = None,
         recall_max_tokens_override: int | None = None,
         recall_chunks_max_tokens_override: int | None = None,
+        reflect_search_observations_max_tokens_override: int | None = None,
+        reflect_search_observations_include_entities_override: bool | None = None,
         created_after: datetime | None = None,
         created_before: datetime | None = None,
         answer_as_document: bool = False,
@@ -15160,6 +15187,36 @@ class MemoryEngine(MemoryEngineInterface):
             "reflect_source_facts_max_tokens", DEFAULT_REFLECT_SOURCE_FACTS_MAX_TOKENS
         )
 
+        # Reflect options an operator can default per bank: caller arg (the reflect
+        # request, or the mental model's trigger) → bank reflect_default_options →
+        # the shipped default. Unlike the recall budgets these have no flat config
+        # key of their own — they are reflect's own knobs, so they live together in
+        # one object shaped like the request fields that carry them (#4483).
+        reflect_defaults: dict[str, Any] = config_dict.get("reflect_default_options") or {}
+
+        def _reflect_option(override: Any, key: str, shipped: Any) -> Any:
+            """Resolve one option, treating only None as "not set".
+
+            ``or`` would be wrong on both fields: it reads a configured ``false``
+            (entities off) and a small budget as absent and silently restores the
+            shipped default -- the exact setting the operator asked for.
+            """
+            if override is not None:
+                return override
+            configured = reflect_defaults.get(key)
+            return shipped if configured is None else configured
+
+        effective_observations_max_tokens = _reflect_option(
+            reflect_search_observations_max_tokens_override,
+            "reflect_search_observations_max_tokens",
+            DEFAULT_OBSERVATIONS_TOOL_MAX_TOKENS,
+        )
+        effective_observations_include_entities = _reflect_option(
+            reflect_search_observations_include_entities_override,
+            "reflect_search_observations_include_entities",
+            True,
+        )
+
         # Resolve recall overrides: caller arg (e.g. mental model trigger) → bank config → env default
         effective_recall_include_chunks = (
             recall_include_chunks
@@ -15189,7 +15246,7 @@ class MemoryEngine(MemoryEngineInterface):
         tool_token_limits = ReflectToolTokenLimits(
             recall_max_tokens=effective_recall_max_tokens,
             recall_chunk_max_tokens=effective_recall_chunks_max_tokens,
-            observations_max_tokens=DEFAULT_OBSERVATIONS_TOOL_MAX_TOKENS,
+            observations_max_tokens=effective_observations_max_tokens,
         )
 
         async def search_observations_fn(q: str, max_tokens: int) -> dict[str, Any]:
@@ -15205,6 +15262,7 @@ class MemoryEngine(MemoryEngineInterface):
                 last_consolidated_at=last_consolidated_at,
                 pending_consolidation=pending_consolidation,
                 source_facts_max_tokens=reflect_source_facts_max_tokens,
+                include_entities=effective_observations_include_entities,
                 created_after=created_after,
                 created_before=created_before,
             )
@@ -17097,6 +17155,10 @@ class MemoryEngine(MemoryEngineInterface):
         recall_include_chunks_override = trigger_data.get("include_chunks")
         recall_max_tokens_override = trigger_data.get("recall_max_tokens")
         recall_chunks_max_tokens_override = trigger_data.get("recall_chunks_max_tokens")
+        reflect_search_observations_max_tokens_override = trigger_data.get("reflect_search_observations_max_tokens")
+        reflect_search_observations_include_entities_override = trigger_data.get(
+            "reflect_search_observations_include_entities"
+        )
         requested_mode: RefreshMode = trigger_data.get("mode") or "full"
 
         current_content = (mental_model.get("content") or "").strip()
@@ -17191,6 +17253,8 @@ class MemoryEngine(MemoryEngineInterface):
             recall_include_chunks=recall_include_chunks_override,
             recall_max_tokens_override=recall_max_tokens_override,
             recall_chunks_max_tokens_override=recall_chunks_max_tokens_override,
+            reflect_search_observations_max_tokens_override=reflect_search_observations_max_tokens_override,
+            reflect_search_observations_include_entities_override=reflect_search_observations_include_entities_override,
             # The refresh stores a document, so the agent states its structure and
             # the markdown is rendered from it. The model never writes the markdown
             # that gets persisted, and nothing has to read markdown back to find

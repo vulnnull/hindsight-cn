@@ -1407,8 +1407,8 @@ class JinaMLXCrossEncoder(CrossEncoderModel):
         _ = transformers.AutoTokenizer
 
         try:
-            import mlx.core  # noqa: F401
-            import mlx_lm  # noqa: F401
+            import mlx.core  # noqa: F401  # ty: ignore[unresolved-import]
+            import mlx_lm  # noqa: F401  # ty: ignore[unresolved-import]
         except ImportError as exc:
             # Only swallow "package not installed" errors. Anything else (e.g. a
             # transitive import failure inside mlx_lm) must surface verbatim so
@@ -1417,9 +1417,16 @@ class JinaMLXCrossEncoder(CrossEncoderModel):
             msg = str(exc)
             if "mlx" not in msg and "mlx_lm" not in msg:
                 raise
+            # mlx is Apple's Metal/unified-memory framework, so the local-ml extra
+            # only installs it on macOS arm64 (see pyproject.toml). Missing here
+            # therefore usually means "wrong platform", not "forgot the extra" —
+            # say both, and name the way out.
             raise ImportError(
-                "mlx and mlx-lm are required for JinaMLXCrossEncoder. "
-                "Install with: pip install mlx>=0.31.0 mlx-lm>=0.31.1 safetensors>=0.6.2"
+                "mlx and mlx-lm are required for the 'jina-mlx' reranker, and are only "
+                "installed on Apple Silicon — mlx is Apple's Metal framework, and its "
+                "Linux build is CPU-only and slower than the 'local' provider. Set "
+                "HINDSIGHT_API_RERANKER_PROVIDER=local (or a hosted provider), or install "
+                "them yourself: pip install mlx>=0.31.0 mlx-lm>=0.31.1 safetensors>=0.6.2"
             ) from exc
 
         loop = asyncio.get_event_loop()

@@ -618,6 +618,10 @@ export class HindsightClient {
       excludeMentalModels?: boolean;
       /** Exclude specific mental models by ID from reflection. */
       excludeMentalModelIds?: string[];
+      /** Token budget for the agent's search_observations calls. Omit to use the bank's reflect_default_options, then the shipped default. */
+      reflectSearchObservationsMaxTokens?: number;
+      /** Whether search_observations attaches resolved entity names, which can be over half the tool payload. Omit to use the bank default (enabled). */
+      reflectSearchObservationsIncludeEntities?: boolean;
       /** If true, the response includes a 'based_on' field listing the memories, mental models, and directives used. */
       includeFacts?: boolean;
       /** If true, the response includes a 'trace' field with the tool calls and LLM calls made during reflection (trace.tool_calls / trace.llm_calls). */
@@ -653,6 +657,9 @@ export class HindsightClient {
             fact_types: options?.factTypes,
             exclude_mental_models: options?.excludeMentalModels,
             exclude_mental_model_ids: options?.excludeMentalModelIds,
+            reflect_search_observations_max_tokens: options?.reflectSearchObservationsMaxTokens,
+            reflect_search_observations_include_entities:
+              options?.reflectSearchObservationsIncludeEntities,
             include,
           },
           signal: options?.signal,
@@ -921,6 +928,8 @@ export class HindsightClient {
       mentalModelMinRefreshIntervalSeconds?: number;
       /** Trigger fields merged over the built-in default for new knowledge pages. */
       knowledgePageDefaultTrigger?: Record<string, unknown>;
+      /** Default reflect options for this bank, applied whenever a reflect request (or a mental model's trigger) leaves the option unset: reflect_search_observations_max_tokens, reflect_search_observations_include_entities. */
+      reflectDefaultOptions?: Record<string, unknown>;
       /** Token budget for source facts during reflect. -1 disables. */
       reflectSourceFactsMaxTokens?: number;
       /** Token budget for facts returned by recall. */
@@ -1020,6 +1029,8 @@ export class HindsightClient {
         options.mentalModelMinRefreshIntervalSeconds;
     if (options.knowledgePageDefaultTrigger !== undefined)
       updates.knowledge_page_default_trigger = options.knowledgePageDefaultTrigger;
+    if (options.reflectDefaultOptions !== undefined)
+      updates.reflect_default_options = options.reflectDefaultOptions;
     if (options.reflectSourceFactsMaxTokens !== undefined)
       updates.reflect_source_facts_max_tokens = options.reflectSourceFactsMaxTokens;
     if (options.recallMaxTokens !== undefined) updates.recall_max_tokens = options.recallMaxTokens;
