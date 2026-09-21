@@ -56,18 +56,17 @@ def _config(*, mode: str, causal: bool, optional_dimensions: bool) -> MagicMock:
 
 def _fact_definition(mode: str, causal: bool, optional_dimensions: bool) -> dict:
     """The strict-subset schema for the per-fact object, as a provider sees it."""
-    _, response_schema = _build_extraction_prompt_and_schema(
+    response_schema = _build_extraction_prompt_and_schema(
         _config(mode=mode, causal=causal, optional_dimensions=optional_dimensions)
-    )
+    ).response_schema
     definitions = strict_json_schema(response_schema)["$defs"].values()
     return next(d for d in definitions if "when" in d.get("properties", {}))
 
 
 def _prompt(mode: str, causal: bool, optional_dimensions: bool) -> str:
-    prompt, _ = _build_extraction_prompt_and_schema(
+    return _build_extraction_prompt_and_schema(
         _config(mode=mode, causal=causal, optional_dimensions=optional_dimensions)
-    )
-    return prompt
+    ).system_prompt
 
 
 def test_the_flag_is_off_by_default():

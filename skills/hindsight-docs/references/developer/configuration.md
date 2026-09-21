@@ -1163,7 +1163,7 @@ ZeroEntropy's `zembed-1` supports Matryoshka dimensions: `2560`, `1280`, `640`, 
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HINDSIGHT_API_RERANKER_PROVIDER` | Provider: `local`, `tei`, `cohere`, `openrouter`, `zeroentropy`, `siliconflow`, `alibaba`, `google`, `flashrank`, `litellm`, `litellm-sdk`, `jina-mlx`, or `rrf` | `local` |
+| `HINDSIGHT_API_RERANKER_PROVIDER` | Provider: `local`, `tei`, `cohere`, `openrouter`, `zeroentropy`, `siliconflow`, `typesafe`, `alibaba`, `google`, `flashrank`, `litellm`, `litellm-sdk`, `jina-mlx`, or `rrf` | `local` |
 | `HINDSIGHT_API_RERANKER_MAX_RETRIES` | Retries after the first attempt when a remote rerank call fails transiently (5xx, timeout, connection error, `429` quota). `0` disables retrying. Applies to every remote provider except `tei`, which has its own retry loop; the in-process providers (`local`, `flashrank`, `jina-mlx`, `rrf`) are unaffected. 4xx auth/validation errors are never retried. | `3` |
 | `HINDSIGHT_API_RERANKER_INITIAL_BACKOFF` | Initial backoff in seconds between rerank retries (doubles per attempt, with jitter) | `0.5` |
 | `HINDSIGHT_API_RERANKER_MAX_BACKOFF` | Cap on the backoff between rerank retries, in seconds | `4.0` |
@@ -1205,6 +1205,12 @@ ZeroEntropy's `zembed-1` supports Matryoshka dimensions: `2560`, `1280`, `640`, 
 | `HINDSIGHT_API_RERANKER_SILICONFLOW_MODEL` | SiliconFlow rerank model (e.g., `BAAI/bge-reranker-v2-m3`) | `BAAI/bge-reranker-v2-m3` |
 | `HINDSIGHT_API_RERANKER_SILICONFLOW_BASE_URL` | Base URL for the SiliconFlow `/rerank` endpoint | `https://api.siliconflow.cn/v1` |
 | `HINDSIGHT_API_RERANKER_SILICONFLOW_TIMEOUT` | HTTP request timeout for SiliconFlow reranker (seconds). | `60.0` |
+| `HINDSIGHT_API_RERANKER_TYPESAFE_API_KEY` | TypeSafe API key for reranking | - |
+| `HINDSIGHT_API_RERANKER_TYPESAFE_MODEL` | TypeSafe model used to judge relevance | `jev-latest` |
+| `HINDSIGHT_API_RERANKER_TYPESAFE_BASE_URL` | Base URL for the TypeSafe API | `https://api.typesafe.ai` |
+| `HINDSIGHT_API_RERANKER_TYPESAFE_TIMEOUT` | HTTP request timeout for the TypeSafe reranker (seconds). | `60.0` |
+| `HINDSIGHT_API_RERANKER_TYPESAFE_MAX_CONCURRENT` | Maximum in-flight TypeSafe requests. | `24` |
+| `HINDSIGHT_API_RERANKER_TYPESAFE_PRUNE_CANDIDATES` | Ask a second question that cuts the ranked list where relevance ends, returning only the relevant candidates. Shrinks what recall returns — see the note below. | `false` |
 | `HINDSIGHT_API_RERANKER_ALIBABA_API_KEY` | Alibaba Cloud DashScope API key for reranking | - |
 | `HINDSIGHT_API_RERANKER_ALIBABA_MODEL` | DashScope rerank model | `qwen3-rerank` |
 | `HINDSIGHT_API_RERANKER_ALIBABA_TIMEOUT` | HTTP request timeout for the Alibaba Cloud DashScope reranker (seconds). | `60.0` |
@@ -1358,6 +1364,12 @@ export HINDSIGHT_API_RERANKER_SILICONFLOW_API_KEY=your-api-key
 export HINDSIGHT_API_RERANKER_SILICONFLOW_MODEL=BAAI/bge-reranker-v2-m3
 # export HINDSIGHT_API_RERANKER_SILICONFLOW_BASE_URL=https://api.siliconflow.cn/v1  # default
 
+# TypeSafe - relevance judged by a typed-decision model (Jev), not a /rerank endpoint
+export HINDSIGHT_API_RERANKER_PROVIDER=typesafe
+export HINDSIGHT_API_RERANKER_TYPESAFE_API_KEY=your-api-key
+# export HINDSIGHT_API_RERANKER_TYPESAFE_MODEL=jev-latest              # default
+# export HINDSIGHT_API_RERANKER_TYPESAFE_PRUNE_CANDIDATES=true          # also prune irrelevant candidates
+
 # Alibaba Cloud DashScope - qwen3-rerank via Cohere-compatible /reranks endpoint
 export HINDSIGHT_API_RERANKER_PROVIDER=alibaba
 export HINDSIGHT_API_RERANKER_ALIBABA_API_KEY=your-dashscope-api-key  # or set DASHSCOPE_API_KEY
@@ -1398,6 +1410,45 @@ Both support the same providers:
 - **Voyage AI** (`voyage/rerank-2`)
 - **Jina AI** (`jina_ai/jina-reranker-v2`)
 - **AWS Bedrock** (`bedrock/...`)
+
+#### TypeSafe
+
+TypeSafe is not a `/rerank` endpoint. It evaluates typed *questions* against a *state*,
+and this provider asks two of them.
+
+**Rank — one question for the whole pool.** A Choice returns a probability for every
+option, summing to 1, so Hindsight makes the candidates the options and reads the
+ranking straight off the answer: one call, however many candidates. Judged together the
+model only has to say which candidate beats which, rather than pin each one to an
+absolute scale in isolation — on a 200-question LoCoMo set that scored recall@1 0.94
+against 0.87 for one call per candidate, at a thirtieth of the calls.
+
+A Choice accepts at most 255 options, so a larger pool is ranked in rounds and the
+winners are then ranked against each other. Probabilities are normalised within a
+single call, so rounds cannot simply be concatenated.
+
+**Cut — `HINDSIGHT_API_RERANKER_TYPESAFE_PRUNE_CANDIDATES=true`.** A second question, a
+Score over the ranked shortlist, asks how far down the list relevance extends; whatever
+falls past that point is left out. Recall then returns the relevant candidates in order
+and nothing else. No threshold is tuned — the model picks the depth.
+
+A Score is used rather than adding a "none of these" option to the Choice because Score
+levels are *ordered*, which is what a cut point needs. As a Choice option, "none of
+these" is just another rival for the probability mass, and it wins outright on hard
+queries: 35 of 200 questions came back completely empty, against none with the Score.
+
+There is deliberately no "nothing is relevant" level, so at least one candidate always
+survives. Recall runs on a pool retrieval already judged plausible, and one weak memory
+the caller can dismiss beats silence.
+
+The flag is off by default because it meaningfully shrinks what recall returns. Turn it
+on when the consumer is an LLM prompt (reflect, for instance) and every irrelevant
+memory is wasted context.
+
+**Scores are positions, not confidences.** A Choice probability is a share of one pool:
+0.7 means "the best of these", not "relevant", and two pools are not comparable. The
+provider therefore hands back rank positions, and exactly `0.0` for anything past the
+cut.
 
 #### Jina MLX (Apple Silicon)
 
@@ -1476,6 +1527,34 @@ For advanced authentication (JWT, OAuth, multi-tenant schemas), implement a cust
 | `HINDSIGHT_API_TOKENIZER_ENCODING` | Vocabulary used for every token count and chunk boundary (recall budgets, chunk sizes, prompt fitting, embedding truncation). `o200k_base` matches current OpenAI models and counts non-Latin text far closer to what they actually charge; `cl100k_base` reproduces the counts Hindsight produced before this default changed. Server-level: token budgets are only comparable between banks if they are all counted the same way. Other bundled vocabulary: `o200k_harmony`. | `o200k_base` |
 | `HINDSIGHT_API_MODEL_INIT_TIMEOUT` | Wall-clock cap (seconds) on startup model/connection initialization. If embeddings, the cross-encoder, or LLM verification block (e.g. an offline model download or an unreachable provider), the server fails fast with a clear error instead of hanging forever. Increase if a legitimate first-time model download needs more time. | `300` |
 | `HINDSIGHT_API_STARTUP_WAIT_SECONDS` | **Docker image only.** How long the container waits for the API to answer `/health` before it stops and restarts. Raising `HINDSIGHT_API_MODEL_INIT_TIMEOUT` above the default raises this wait too, so a slow first-time model download is not cut short; set this to override the wait on its own. | `300`, or `HINDSIGHT_API_MODEL_INIT_TIMEOUT` + 30s when that is longer |
+
+### Egress proxy
+
+Outbound calls (LLM providers and gateways, remote embeddings and rerankers, document
+parsers, the Supabase tenant extension) follow the standard proxy environment variables —
+`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`. There is no Hindsight-specific proxy setting: set
+these on the process (pod env, systemd unit, shell) before it starts.
+
+Three things to know:
+
+- **The proxy URL itself must be `http://`.** On the API's own HTTP calls (embeddings,
+  rerankers, parsers, gateways reached directly) an `https://` proxy URL is ignored with a
+  warning, and `ALL_PROXY` / SOCKS is dropped. Provider SDKs that bring their own HTTP client
+  (OpenAI, Anthropic) do read `ALL_PROXY`, so don't rely on it either way — set `HTTP_PROXY`
+  and `HTTPS_PROXY`.
+- **Put local endpoints in `NO_PROXY`.** Nothing is exempted automatically — not even
+  `localhost` or `127.0.0.1`. A deployment that sets `HTTP_PROXY` and also runs a local
+  Ollama, LM Studio, llama.cpp or TEI must list those hosts in `NO_PROXY`, or their calls
+  are sent to the proxy. This includes the llama.cpp server Hindsight spawns itself: the
+  readiness probe is always direct, but the completions that follow go through the OpenAI
+  SDK and will honour the proxy.
+- **Credentials in `~/.netrc` are applied too**, to the destination host, not just the proxy.
+  A netrc entry matching a provider host does not override the `Authorization` header
+  Hindsight sends — the call fails outright with `Cannot combine AUTHORIZATION header with
+  AUTH argument`. Remove the entry, or point `NETRC` at a file without it.
+
+Webhook delivery is the one caller that ignores all of this on purpose: its SSRF guard
+validates the address it resolved, and a proxy would contact one that was never checked.
 
 ### Retrieval
 

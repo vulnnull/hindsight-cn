@@ -16,6 +16,7 @@ import time
 from contextlib import AbstractAsyncContextManager, nullcontext
 from typing import Any, Callable
 
+from hindsight_api.engine.cache_affinity import apply_opencode_session
 from hindsight_api.engine.llm_interface import LLM_TOOL_CHOICE_AUTO, LLMInterface, LLMToolChoice
 from hindsight_api.engine.llm_trace import LLMResponseUsage, stash_response_usage
 from hindsight_api.engine.llm_transport import build_sdk_timeout, describe_transport_error
@@ -341,6 +342,10 @@ class AnthropicLLM(LLMInterface):
         if self._extra_body:
             call_params["extra_body"] = self._extra_body
 
+        # opencode-go's /v1/messages requires x-opencode-session (#4071), reached
+        # via provider=anthropic + an opencode.ai base URL; the host check decides.
+        apply_opencode_session(call_params, base_url=self.base_url)
+
         last_exception = None
 
         for attempt in range(max_retries + 1):
@@ -606,6 +611,8 @@ class AnthropicLLM(LLMInterface):
 
         if self._extra_body:
             call_params["extra_body"] = self._extra_body
+
+        apply_opencode_session(call_params, base_url=self.base_url)
 
         last_exception = None
         for attempt in range(max_retries + 1):

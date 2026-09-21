@@ -95,6 +95,51 @@ def _local_runtime_hint(reason: str | None) -> str:
     return ""
 
 
+_local_runtime_install_attempted = False
+
+
+def _ensure_local_runtime() -> tuple[bool, str | None]:
+    """``_check_local_runtime``, self-installing ``hindsight-all`` once if that is what's missing.
+
+    ``plugin.yaml`` can only declare the cloud-sized ``hindsight-client`` — declaring
+    ``hindsight-all`` there would push the whole local-ML stack onto cloud-mode users, who never
+    need it. That left the embedded package to a special case in Hermes core
+    (``hermes_cli/memory_setup.py::_provider_pip_dependencies``, keyed on the literal provider name),
+    which is core-side logic this plugin cannot carry with it out of the Hermes tree. Installing it
+    here keeps embedded mode working without that: on a `plugins install` that never ran
+    `hermes memory setup`, after a venv rebuild stripped the package (#70636), and on a restored
+    backup or hand-written config.
+
+    Only fires for the configured provider, so a stale ``local_embedded`` in ``config.json`` cannot
+    make a dashboard availability probe pull the ML stack down. Only fires when the hint recognises
+    the reason as a missing package: an import that fails for another cause (older CPUs raise inside
+    NumPy) is not something reinstalling can fix. Once per process, and ``install_specs`` enforces
+    ``security.allow_lazy_installs`` and sealed-venv policy for us.
+    """
+    global _local_runtime_install_attempted
+    available, reason = _check_local_runtime()
+    if available or _local_runtime_install_attempted or not _local_runtime_hint(reason):
+        return available, reason
+
+    from plugins.memory import _get_active_memory_provider
+
+    if _get_active_memory_provider() != "hindsight":
+        return available, reason
+
+    _local_runtime_install_attempted = True
+    logger.warning("Hindsight local_embedded runtime is missing (%s); installing hindsight-all...", reason)
+    from tools.lazy_deps import install_specs
+
+    outcome = install_specs(["hindsight-all"], timeout=600)
+    if not outcome.ok:
+        logger.warning(
+            "Could not install hindsight-all automatically: %s",
+            outcome.reason or (outcome.stderr or "").strip() or "install error",
+        )
+        return available, reason
+    return _check_local_runtime()
+
+
 def _load_simple_env(path) -> dict[str, str]:
     """Parse a KEY=VALUE env file (comments/blank lines ignored). utf-8-sig: also used
     on the Hermes .env during post_setup, where a Notepad BOM would stick to the first key."""

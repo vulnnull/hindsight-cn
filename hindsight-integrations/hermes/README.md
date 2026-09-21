@@ -2,16 +2,37 @@
 
 Long-term memory with knowledge graph, entity resolution, and multi-strategy retrieval. Supports cloud, local embedded, and local external modes.
 
-A [Hermes Agent](https://github.com/NousResearch/hermes-agent) memory-provider plugin. It used to ship inside Hermes as `plugins/memory/hindsight/`; Nous Research moved every memory provider out of the core tree and handed this one over, so it now lives here and is maintained by the Hindsight team.
+A [Hermes Agent](https://github.com/NousResearch/hermes-agent) memory-provider plugin. It used to ship inside Hermes as `plugins/memory/hindsight/`; Nous Research moved every memory provider out of the core tree and handed this one over, so it now lives here and is maintained by the Hindsight team. This directory is the live source, and the Hermes catalog entry points here.
 
 ## Install
 
 ```bash
-hermes plugins install vectorize-io/hermes-plugin-hindsight
-hermes plugins enable hindsight
+hermes plugins install vectorize-io/hindsight/hindsight-integrations/hermes
+hermes memory setup    # select "hindsight"
 ```
 
 Dependencies in `pyproject.toml` are installed into the Hermes venv automatically and survive `hermes update`.
+
+`hermes plugins enable` is *not* what activates a memory provider — Hermes treats providers as
+`kind: exclusive` and its plugin-enable gate deliberately skips them. A provider is activated by
+`memory.provider: <name>` in `config.yaml`, which `hermes memory setup` writes. Setup also installs
+the mode-dependent extras (`local_embedded` needs `hindsight-all`, not just the client), so
+`plugins install` on its own leaves the provider reporting "not available" in embedded mode.
+
+While Hermes still bundles `plugins/memory/hindsight/`, **the bundled copy wins** — provider lookup
+is bundled → `~/.hermes/plugins/` → project → entry point, first hit wins, so installing this plugin
+alongside the bundled one is inert. When Hermes drops the bundled copy, `hermes update` migrates
+existing users automatically via `hermes_cli/memory_provider_migration.py`, which resolves the
+provider name against the Hermes plugin catalog. Submitting that entry is **our** job per the
+handoff notes, which makes `plugin-catalog-entry.yaml` (to be PR'd into `NousResearch/hermes-agent`
+as `plugin-catalog/hindsight.yaml`) a hard prerequisite of their removal — see the comments in that
+file.
+
+`local_embedded` mode needs `hindsight-all`, which `pyproject.toml` deliberately does not declare
+(it would push the local-ML stack onto cloud-mode users). The setup wizard installs it, and
+`embedded.py::_ensure_local_runtime` self-installs it on the availability check as a backstop, so
+embedded mode no longer depends on the `if provider_name == "hindsight"` special case in Hermes
+core's `memory_setup.py` — which leaves the tree when the bundled provider does.
 
 ## Requirements
 

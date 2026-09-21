@@ -117,7 +117,7 @@ def _install_hermes_stubs(hermes_home: Path) -> None:
     module("utils", read_json_or_empty=_read_json_or_empty, atomic_json_write=_atomic_json_write)
     # plugins.memory.config_schema stays Hermes-owned (the desktop panel needs core's type).
     module("plugins")
-    module("plugins.memory")
+    module("plugins.memory", _get_active_memory_provider=lambda: "hindsight")
     module(
         "plugins.memory.config_schema",
         KIND_SECRET="secret",

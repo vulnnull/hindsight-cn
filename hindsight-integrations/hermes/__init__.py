@@ -38,6 +38,7 @@ from .embedded import (
     _check_local_runtime,
     _embedded_llm_api_key,
     _embedded_profile_env_path,
+    _ensure_local_runtime,
     _export_port_health_grace_timeout,
     _load_simple_env,
     _local_runtime_hint,
@@ -435,7 +436,10 @@ class HindsightMemoryProvider(MemoryProvider):
             cfg = _load_config()
             mode = cfg.get("mode", "cloud")
             if mode in _LOCAL_MODES:
-                return _check_local_runtime()[0]
+                # The availability gate is the only place worth self-healing from: agent_init drops
+                # the provider outright when this returns False, and every other runtime probe below
+                # runs after it has already passed.
+                return _ensure_local_runtime()[0]
             return mode == "local_external" or bool(
                 _cloud_api_key(cfg) or cfg.get("api_url") or get_secret("HINDSIGHT_API_URL", "")
             )
