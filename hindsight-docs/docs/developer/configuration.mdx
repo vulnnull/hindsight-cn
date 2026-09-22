@@ -1,3 +1,7 @@
+import CodeSnippet from '@site/src/components/CodeSnippet';
+import configurationPy from '!!raw-loader!@site/examples/api/configuration.py';
+import configurationSh from '!!raw-loader!@site/examples/api/configuration.sh';
+
 # Configuration
 
 Complete reference for configuring Hindsight services through environment variables.
@@ -1669,18 +1673,7 @@ pays for LLM work whose output recall no longer uses:
 Configured together, the bank behaves like a conventional vector store: chunks in, hybrid
 search out, no LLM on either path. Set both sides in one call:
 
-```bash
-curl -X PUT "$HINDSIGHT_API_URL/v1/default/banks/my-bank" \
-  -H "Authorization: Bearer $HINDSIGHT_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "retain_extraction_mode": "chunks",
-    "enable_observations": false,
-    "enable_temporal_retrieval": false,
-    "enable_graph_retrieval": false,
-    "enable_reranking": false
-  }'
-```
+<CodeSnippet code={configurationSh} section="plain-retrieval-bank" language="bash" />
 
 The trade-off is the point of the product: no extracted facts, entities, or links means no
 graph or temporal structure to retrieve, and no mental models to reflect over. Use it for
@@ -1751,7 +1744,7 @@ Anthropic has distinct image and document blocks, OpenAI has `image_url` and fil
 parts — so carrying your own distinction through means the conversion never has to
 guess from the media type alone.
 
-This is distinct from [`POST /files/retain`](#file-conversion), which converts a
+This is distinct from [`POST /files/retain`](#file-processing), which converts a
 whole file to markdown as its **own** document — still the right tool for scanned
 PDFs and office documents when you want them parsed rather than looked at, but it
 separates the content from the prose around it.
@@ -1814,7 +1807,7 @@ Two things will refuse the retain outright, both with `422`, rather than droppin
 attachments silently:
 
 - The retain LLM is not vision-capable, or Hindsight cannot tell that it is. See
-  [`HINDSIGHT_API_LLM_VISION`](#llm-configuration).
+  [`HINDSIGHT_API_LLM_VISION`](#llm-provider).
 - `HINDSIGHT_API_RETAIN_BATCH_ENABLED=true`. The batch path builds provider
   request bodies directly and never sees the interleaved content.
 
@@ -1995,13 +1988,7 @@ Configure strategies via the bank config API:
 
 Then specify the strategy at retain time:
 
-```python
-# Uses default strategy ("conversations")
-client.retain(bank_id, items=[{"content": "Alice joined the team today"}])
-
-# Explicitly use document strategy
-client.retain(bank_id, items=[{"content": "...document text..."}], strategy="documents")
-```
+<CodeSnippet code={configurationPy} section="retain-strategy" language="python" />
 
 If no `strategy` is specified in a retain call, `retain_default_strategy` is used. If neither is set, the bank/global config applies directly.
 
@@ -2039,8 +2026,8 @@ Configuration for the file upload and conversion pipeline (used by `POST /v1/def
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `HINDSIGHT_API_ENABLE_FILE_UPLOAD_API` | Enable the file upload API endpoint | `true` |
-| `HINDSIGHT_API_ENABLE_DOCUMENT_EXPORT_API` | Enable the [document export](./api/memory-banks.mdx#document-export--import) endpoint (`GET /document-transfer`) | `true` |
-| `HINDSIGHT_API_ENABLE_DOCUMENT_IMPORT_API` | Enable the [document import](./api/memory-banks.mdx#document-export--import) endpoint (`POST /document-transfer`) | `true` |
+| `HINDSIGHT_API_ENABLE_DOCUMENT_EXPORT_API` | Enable the [document export](./api/memory-banks.mdx#document-export--import-superseded) endpoint (`GET /document-transfer`) | `true` |
+| `HINDSIGHT_API_ENABLE_DOCUMENT_IMPORT_API` | Enable the [document import](./api/memory-banks.mdx#document-export--import-superseded) endpoint (`POST /document-transfer`) | `true` |
 | `HINDSIGHT_API_FILE_PARSER` | Server-side default parser or fallback chain (comma-separated, e.g. `iris,markitdown`) | `markitdown` |
 | `HINDSIGHT_API_FILE_PARSER_ALLOWLIST` | Comma-separated list of parsers clients are allowed to request. If not set, all registered parsers are allowed. | — |
 | `HINDSIGHT_API_FILE_CONVERSION_MAX_BATCH_SIZE` | Max files per upload request | `10` |
@@ -2370,7 +2357,7 @@ These knobs control the recall tool the reflect agent runs (including when refre
 
 #### Disposition
 
-Disposition traits control how the bank reasons during reflect operations. Each trait is on a scale of 1–5. These are hierarchical — they can be overridden per bank via the [config API](./configuration.md#hierarchical-configuration).
+Disposition traits control how the bank reasons during reflect operations. Each trait is on a scale of 1–5. These are hierarchical — they can be overridden per bank via the [config API](#hierarchical-configuration).
 
 | Variable | Description | Default |
 |----------|-------------|---------|
@@ -2407,12 +2394,7 @@ Available tool names: `retain`, `recall`, `reflect`, `list_banks`, `create_bank`
 
 This can also be overridden per bank via the [config API](#hierarchical-configuration):
 
-```bash
-# Restrict a specific bank to read-only MCP access
-curl -X PATCH http://localhost:8888/v1/default/banks/my-bank/config \
-  -H "Content-Type: application/json" \
-  -d '{"updates": {"mcp_enabled_tools": ["recall"]}}'
-```
+<CodeSnippet code={configurationSh} section="mcp-tools-per-bank" language="bash" />
 
 When a bank-level `mcp_enabled_tools` is set, tools not in the list return a clear error when invoked (they still appear in the tools list for MCP protocol compatibility).
 
@@ -2917,26 +2899,7 @@ class CustomTenantExtension(TenantExtension):
 
 #### Examples
 
-```bash
-# Update retention settings for a bank
-curl -X PATCH http://localhost:8888/v1/default/banks/my-bank/config \
-  -H "Content-Type: application/json" \
-  -d '{
-    "updates": {
-      "retain_chunk_size": 4000,
-      "retain_extraction_mode": "custom",
-      "retain_custom_instructions": "Focus on technical details and implementation specifics"
-    }
-  }'
-
-# Note: retain_extraction_mode must be "custom" to use retain_custom_instructions
-
-# View resolved config (respects permissions)
-curl http://localhost:8888/v1/default/banks/my-bank/config
-
-# Reset to defaults
-curl -X DELETE http://localhost:8888/v1/default/banks/my-bank/config
-```
+<CodeSnippet code={configurationSh} section="bank-config-examples" language="bash" />
 
 **Security Notes:**
 - Credentials (API keys, base URLs) are never returned in responses
