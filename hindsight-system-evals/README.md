@@ -178,9 +178,11 @@ uv run run-amb --dataset beam --split 100k --api-url https://api.dev.example
 cd "$(uv run python -c 'import os;print(os.path.expanduser("~/.cache/hindsight/amb"))')" && uv run amb splits --dataset locomo
 ```
 
-AMB is cloned at the **exact ref in `AMB_REF`** (override with `--amb-ref`, or
-`AMB_REF=`), because unpinned, a movement in the numbers is unattributable:
-benchmark drift and engine drift look identical. Bumping the pin is a one-line PR.
+AMB tracks the ref in `AMB_REF` — `main`, so a fix merged in AMB reaches the next
+run without a PR here (override with `--amb-ref`, or `AMB_REF=`, to replay an old
+number). Every run prints the AMB commit it resolved to: benchmark drift and engine
+drift look identical in the numbers, so that commit is what makes a movement
+attributable.
 It needs `GEMINI_API_KEY` — AMB judges and answers with Gemini through the API
 key, not through our VertexAI service account. AMB pins its own interpreter
 (`.python-version`, 3.12) and uv honours it; `--python` / `AMB_PYTHON` override
@@ -229,8 +231,19 @@ If your shell exports `PYTEST_ADDOPTS` with `-n` (the repo `.env` does), unset
 it: xdist is not installed here, and parallel evals against one server would
 compete for it anyway.
 
-The server runs on its own pg0 instance (`hindsight-system-evals`), so a run does
-not compete for connections with a developer's server or with the system tests.
+The server runs on a **fresh** pg0 instance per run (`hindsight-system-evals-<id>`),
+dropped when the session ends. Its own, so a run does not compete for connections
+with a developer's server or with the system tests — and a new one, because a
+reused database still holds the previous run's banks *and their queued refresh
+and consolidation tasks*. The worker claims those within seconds of starting and
+bills them to your provider key: one run spent 5.9M tokens on four banks it never
+created, against 0.8M of its own.
+
+Set `HINDSIGHT_EVAL_PG0_INSTANCE` to pick the instance yourself (the coding-agents
+runner does, one per run); one you named is yours, and is left in place.
+
+A crash can leave an instance behind. `pg0 list` shows them, `pg0 drop <name>`
+removes one.
 
 ## Debugging a failure
 

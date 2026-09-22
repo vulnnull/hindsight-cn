@@ -7,6 +7,7 @@ import json
 import logging
 import unicodedata
 import uuid
+from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, TypedDict
@@ -20,8 +21,11 @@ from ..memory_engine import fq_table, get_current_schema
 from ..response_models import DispositionTraits
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from ..db.base import DatabaseConnection
     from ..db.ops import DataAccessOps
+    from ..memories.base import BankWritePage, BankWriteTime
 
 logger = logging.getLogger(__name__)
 
@@ -688,6 +692,260 @@ async def list_banks(pool, *, search_query: str | None = None) -> list:
     return result
 
 
+@dataclass
+class BankPage:
+    """One page of bank rows, plus how many banks matched before paging."""
+
+    banks: list[dict]
+    total: int
+
+
+async def list_banks_page(pool, *, limit: int, offset: int, search_query: str | None = None) -> BankPage:
+    """One page of banks, most recently written first, WITHOUT ranking every bank to find it.
+
+    :func:`list_banks` reads the whole tenant because the order depends on a value only the store
+    has: it asks for every bank's write time, sorts, and throws away all but a page. That is
+    O(total banks) per request — 60-75 s on a tenant with 27,315 banks, and the endpoint's entire
+    cost. The work is not the sorting, it is fetching N sort keys to produce 100 rows.
+
+    A store that can hand back its banks ALREADY ordered removes the need to. The page is then a
+    merge of two streams that are each already sorted:
+
+      * the store's banks, newest-written first, cursor-paged;
+      * this tenant's banks by ``created_at``, newest first, off a SQL index.
+
+    A bank the store has never recorded (never written, or written but not yet folded) comes from
+    the second stream and keeps the same fallback key :func:`list_banks` gives it — its creation
+    time — so the two agree about where such a bank belongs. Merging two sorted streams costs the
+    page, not the tenant.
+
+    That agreement assumes a tenant's memories all live in one place: whichever store answers here
+    owns every bank in it. A tenant with BOTH store-owned and Postgres-owned banks would break it,
+    because a Postgres-owned bank is absent from the store stream and would then be placed by its
+    creation time while :func:`list_banks` places it by its newest document or fact write. No
+    deployment mixes the two; a deployment that starts to must key the creation stream off those
+    same two columns rather than off `created_at`.
+
+    Falls back to :func:`list_banks` whenever the merge cannot be trusted to page correctly:
+
+      * a store that returns no ordering of its own. Then the write times are SQL columns, the
+        ordering is already one indexed query, and there is nothing a store stream could add — a
+        merge against an empty stream would silently reorder such a tenant by CREATION time;
+      * a search, which matches on ``bank_id`` and ``name``. Those live only in SQL, so the store
+        cannot apply it and its stream would be the wrong set. A search narrows to few rows anyway,
+        which is where ranking them all is cheap.
+
+    The first of those is decided by ASKING the store for a page, not by reading a capability flag
+    off it. ``store_owned`` is the wrong question and answers it wrongly: a router whose banks live
+    in different backends declares ``store_owned = False`` at the class level and answers per bank
+    through ``store_owned_for``, so a flag check sends an entirely store-owned tenant down the
+    ranking path — correct output, and the whole cost this exists to remove. What the merge actually
+    needs to know is whether there is an ordering to merge, and the page it is about to consume is
+    the answer.
+
+    ``total`` counts the banks matching the search, before paging.
+    """
+    from ..memories import get_memories
+
+    store = get_memories()
+
+    async def _ranked() -> BankPage:
+        banks = await list_banks(pool, search_query=search_query)
+        return BankPage(banks=banks[offset : offset + limit], total=len(banks))
+
+    if search_query:
+        return await _ranked()
+
+    # How many rows the merge must produce before it can cut the page. Offset paging over an
+    # ordered walk necessarily reaches the offset — but it reaches it by walking the ORDER, not by
+    # ranking the tenant, so page 1 (the page that is actually requested) costs one page.
+    want = offset + limit
+    if want <= 0:
+        return BankPage(banks=[], total=await _count_banks(pool))
+
+    try:
+        # The store's first page decides the path AND seeds the merge, so asking costs nothing
+        # extra: an empty page means this store has no ordering to contribute.
+        first = await store.list_banks_by_write(limit=_STORE_PAGE)
+        if not first.banks:
+            return await _ranked()
+        ordered_ids = await _merge_ordered_bank_ids(pool, store, want, first)
+    except Exception as e:  # noqa: BLE001 - the list must render even if the ordering cannot
+        logger.warning(f"Could not page banks by write time ({e}); ranking the tenant instead")
+        return await _ranked()
+
+    rows = await _bank_rows(pool, ordered_ids[offset : offset + limit])
+    # The store's own write and ingestion times, for the PAGE — the live read is what each row
+    # SHOWS, while the ORDER above came from the store's catalog (as of that bank's last fold), so
+    # a just-written bank shows the right time while sitting one slot low until it folds.
+    #
+    # Only on this path. :func:`list_banks` already fills these for every bank it ranks, because it
+    # SORTS by them, so overlaying them again for the callers that fall back would be a second
+    # round trip to the store for an answer already in hand.
+    await _apply_store_last_write(rows, {})
+    return BankPage(banks=rows, total=await _count_banks(pool))
+
+
+#: Banks per store page. The merge consumes one page for a page-1 request however large the tenant.
+_STORE_PAGE = 100
+
+
+async def _merge_ordered_bank_ids(pool, store, want: int, first: "BankWritePage") -> list[str]:
+    """The first `want` bank ids, newest-written first, merging the store's order with SQL's.
+
+    Both inputs are already sorted, so this takes whichever head is newer and never sorts anything.
+    A bank the store names is emitted at its WRITE time; the same bank reached later through the
+    creation-ordered stream is skipped, because it has already been placed at the better key.
+
+    That skip relies on a write never predating its bank's creation, which is what makes the store
+    stream win the race for any bank it knows. A bank the store does NOT know is placed by creation
+    time — the same fallback :func:`list_banks` uses, so the two orders agree. The one shape that
+    breaks the invariant is an import or transfer, which stamps `created_at` now while the store
+    carries the source's older write time: such a bank sorts by its arrival here and by its original
+    write on the ranking path.
+
+    Closed explicitly: the merge stops as soon as the page is full, leaving the store stream
+    suspended at a `yield`, and an async generator finalised by the garbage collector instead
+    complains about it at shutdown.
+    """
+    created = await _banks_by_created(pool, want)
+
+    out: list[str] = []
+    seen: set[str] = set()
+    async with aclosing(_store_write_stream(store, first)) as store_pages:
+        s_head = await anext(store_pages, None)
+        c_idx = 0
+        while len(out) < want:
+            c_head = created[c_idx] if c_idx < len(created) else None
+            # Whichever head is newer, with the store winning a tie — a bank it knows is placed at
+            # its write time, which is the better key. Each branch tests its own head for None
+            # rather than breaking out first, so the types narrow and a head is never read after it
+            # has run out.
+            if s_head is not None and (c_head is None or s_head.last_write_at >= c_head.last_write_at):
+                bank_id = s_head.bank_id
+                s_head = await anext(store_pages, None)
+            elif c_head is not None:
+                bank_id = c_head.bank_id
+                c_idx += 1
+            else:
+                break
+            if bank_id in seen:
+                continue
+            seen.add(bank_id)
+            out.append(bank_id)
+    return out
+
+
+async def _store_write_stream(store, first: "BankWritePage") -> "AsyncIterator[BankWriteTime]":
+    """The store's banks as one continuous newest-written-first stream, page by page.
+
+    A generator rather than a list so the merge pulls only the pages it needs: a page-1 request
+    consumes one store page however many banks the tenant has.
+
+    The first page is handed in because the caller already fetched it to decide whether this store
+    orders at all; re-fetching it here would pay for that decision twice.
+    """
+    from ..memories.base import BankWriteTime
+
+    page = first
+    while True:
+        for bank in page.banks:
+            yield BankWriteTime(bank_id=bank.bank_id, last_write_at=_as_utc(bank.last_write_at))
+        if not page.next_page_token:
+            return
+        page = await store.list_banks_by_write(limit=_STORE_PAGE, page_token=page.next_page_token)
+
+
+async def _banks_by_created(pool, want: int) -> "list[BankWriteTime]":
+    """The `want` most recently CREATED banks, newest first — the other half of the merge.
+
+    Bounded by `want`: this is the stream that places banks the store has no write time for, and
+    only the head of it can reach the page.
+    """
+    from ..memories.base import BankWriteTime
+
+    banks_table = fq_table("banks")
+    async with acquire_with_retry(pool) as conn:
+        rows = await conn.fetch(
+            # `bank_id` breaks ties: banks created in one batch share a `created_at`, and without a
+            # tiebreaker Postgres may order them differently for the page-1 LIMIT than for the
+            # page-2 one, which shows up as a bank on both pages or on neither.
+            f"SELECT bank_id, created_at FROM {banks_table} ORDER BY created_at DESC NULLS LAST, bank_id DESC LIMIT $1",
+            want,
+        )
+    return [BankWriteTime(bank_id=r["bank_id"], last_write_at=_as_utc(r["created_at"]) or _UNIX_EPOCH) for r in rows]
+
+
+async def _count_banks(pool) -> int:
+    banks_table = fq_table("banks")
+    async with acquire_with_retry(pool) as conn:
+        row = await conn.fetchrow(f"SELECT COUNT(*) AS n FROM {banks_table}")
+    return int(row["n"]) if row else 0
+
+
+async def _bank_rows(pool, bank_ids: "list[str]") -> list:
+    """The page's rows, in the order `bank_ids` gives — one query, by id.
+
+    This is the join that FILLS a page rather than deciding one, which is the whole difference: it
+    reads the rows that will be shown, not every row in the tenant. `fact_count` is left at 0 and
+    filled by the page overlays, exactly as :func:`list_banks` leaves it.
+    """
+    if not bank_ids:
+        return []
+    banks_table = fq_table("banks")
+    docs_table = fq_table("documents")
+    mu_table = fq_table("memory_units")
+    async with acquire_with_retry(pool) as conn:
+        rows = await conn.fetch(
+            f"""
+            SELECT b.bank_id, b.name, b.disposition, b.mission, b.created_at, b.updated_at,
+                   d.last_document_at, d.last_document_write_at,
+                   -- Same two terms :func:`list_banks` takes the newest of, so the two paths agree
+                   -- about a bank's `last_write_at`. Correlated off
+                   -- `idx_memory_units_bank_updated_at` and over the PAGE's ids only, so it is one
+                   -- index entry per returned row rather than the tenant-wide GROUP BY this
+                   -- endpoint used to pay for. Store-owned banks have no rows here and get their
+                   -- real time from the store overlay a moment later.
+                   (SELECT MAX(m.updated_at) FROM {mu_table} m WHERE m.bank_id = b.bank_id) AS last_fact_at
+            FROM {banks_table} b
+            LEFT JOIN (
+                SELECT bank_id,
+                       MAX(created_at) AS last_document_at,
+                       MAX(updated_at) AS last_document_write_at
+                FROM {docs_table}
+                WHERE bank_id = ANY($1::text[])
+                GROUP BY bank_id
+            ) d ON d.bank_id = b.bank_id
+            WHERE b.bank_id = ANY($1::text[])
+            """,
+            bank_ids,
+        )
+    by_id = {}
+    for row in rows:
+        disposition_data = row["disposition"]
+        if isinstance(disposition_data, str):
+            disposition_data = json.loads(disposition_data)
+        created_at = _as_utc(row["created_at"])
+        updated_at = _as_utc(row["updated_at"])
+        last_doc = _as_utc(row["last_document_at"])
+        write_times = [t for t in (_as_utc(row["last_document_write_at"]), _as_utc(row["last_fact_at"])) if t]
+        last_write = max(write_times) if write_times else None
+        by_id[row["bank_id"]] = {
+            "bank_id": row["bank_id"],
+            "name": row["name"],
+            "disposition": disposition_data,
+            "mission": row["mission"] or "",
+            "created_at": created_at.isoformat() if created_at else None,
+            "updated_at": updated_at.isoformat() if updated_at else None,
+            "fact_count": 0,
+            "last_document_at": last_doc.isoformat() if last_doc else None,
+            "last_write_at": last_write.isoformat() if last_write else None,
+        }
+    # In the store's order, and only rows that still exist: a bank deleted between the ordering and
+    # this read drops out rather than surfacing as a blank row.
+    return [by_id[b] for b in bank_ids if b in by_id]
+
+
 async def _apply_store_last_write(banks: list[dict], sort_keys: "dict[str, datetime]") -> None:
     """Fill `last_write_at` (and the sort key) from the store, for banks SQL cannot answer for.
 
@@ -787,11 +1045,28 @@ async def apply_sql_fact_counts(pool, banks: list[dict]) -> None:
     listing 365 banks aggregated millions of rows whatever the page size (#4468). Scoped to
     the page the count is a bounded index range per bank instead.
 
-    Banks whose memories live outside SQL have no rows here and stay at 0;
-    :func:`apply_store_fact_counts` runs after this one and overwrites them with the store's
-    live count.
+    Banks whose memories live outside SQL are NOT asked about at all. They have no rows here, so
+    the count would be 0, and :func:`apply_store_fact_counts` overwrites it a moment later with the
+    store's live number — the query is pure waste for them, and not a cheap one: counting 100
+    store-owned banks against a `memory_units` holding millions of another tenant's rows measured
+    **12.8 s** of a 13.5 s bank list, for a hundred zeroes that were then discarded.
+
+    A mixed page is the reason this is per bank rather than an early return: a tenant can have both
+    kinds, and the SQL-owned ones still need their count from here.
     """
     if not banks:
+        return
+    from ..memories import get_memories
+
+    store = get_memories()
+    # Zeroed up front so a store-owned bank still carries a number if the store cannot be reached
+    # for its real one — which is what this function left behind for them before it stopped asking.
+    sql_owned = set()
+    for bank in banks:
+        bank["fact_count"] = 0
+        if not store.store_owned_for(bank["bank_id"]):
+            sql_owned.add(bank["bank_id"])
+    if not sql_owned:
         return
     async with acquire_with_retry(pool) as conn:
         rows = await conn.fetch(
@@ -801,8 +1076,11 @@ async def apply_sql_fact_counts(pool, banks: list[dict]) -> None:
             WHERE bank_id = ANY($1)
             GROUP BY bank_id
             """,
-            [bank["bank_id"] for bank in banks],
+            list(sql_owned),
         )
     counts = {row["bank_id"]: row["fact_count"] for row in rows}
+    # Only the SQL-owned ones: a store-owned bank keeps the zero above for `apply_store_fact_counts`
+    # to replace, rather than being re-zeroed here by a query that never asked about it.
     for bank in banks:
-        bank["fact_count"] = counts.get(bank["bank_id"], 0)
+        if bank["bank_id"] in sql_owned:
+            bank["fact_count"] = counts.get(bank["bank_id"], 0)
