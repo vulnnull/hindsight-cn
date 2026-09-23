@@ -1095,7 +1095,10 @@
     "optionsObservationsEntitiesLabel": "观察实体",
     "optionsObservationsEntitiesDescription": "附加在每条沉淀认知上的规范实体名称，可能占载荷一半以上。",
     "optionsObservationsEntitiesYes": "是 — 包含实体名称",
-    "optionsObservationsEntitiesNo": "否 — 跳过实体（减小提示词大小）"
+    "optionsObservationsEntitiesNo": "否 — 跳过实体（减小提示词大小）",
+    "nextRefreshPaused": "刷新失败后已暂停",
+    "nextRefreshRetrying": "重试中，下次尝试{time}",
+    "nextRefreshRunning": "正在刷新"
   },
   "cronPreview": {
     "invalid": "无效的 cron 表达式",
@@ -1767,7 +1770,10 @@
     "noErrors": "没有失败的刷新。",
     "errorsIntro": "拒绝写入的刷新，按时间倒序排列。它们都没有改动已存储的内容。失败的刷新会自动重试几次；之后模型将保留最后一个有效版本，直到再次被触发。",
     "errorsPresent": "此知识摘要有失败的刷新",
-    "failureReasonUnexpected": "意外错误"
+    "failureReasonUnexpected": "意外错误",
+    "refreshPaused": "刷新已暂停",
+    "errorsPausedNotice": "该模型不再自动刷新：这些失败之后，自动刷新已暂停。手动刷新可重试，成功后会恢复自动刷新。",
+    "noHistoryOnlyFailures": "尚无版本——迄今每次刷新都失败了。请查看“错误”标签页。"
   },
   "constellation": {
     "instructions": "滚动缩放 · 拖拽平移 · 悬停探索 · 点击选择",
@@ -2192,6 +2198,10 @@
     "inSync": "已同步",
     "staleAutoTitle": "此模型范围内有新记忆 — 它会自动刷新",
     "staleManualTitle": "此模型范围内有新记忆 — 请刷新以同步",
-    "inSyncTitle": "此模型范围内没有新记忆"
+    "inSyncTitle": "此模型范围内没有新记忆",
+    "paused": "已暂停",
+    "pausedTitle": "上次刷新失败，该模型不再自动刷新——手动刷新可恢复",
+    "retrying": "重试中",
+    "retryingTitle": "上次尝试失败，已排队下一次尝试——只有这次也失败才会停止自动刷新"
   }
 }

@@ -391,12 +391,35 @@ def _correction_prompt(error: Exception, rejected: list[RejectedOperation]) -> s
     return "\n".join(lines)
 
 
+def _unreachable_correction_prompt(skipped: list[dict[str, Any]], document: StructuredDocument) -> str:
+    """The follow-up turn when every operation pointed at something the document lacks."""
+    lines = [
+        "That reply could not be used: every operation refers to a section or block "
+        "that is not in the document, so nothing you sent has been applied.",
+        "",
+        "What failed:",
+    ]
+    for entry in skipped:
+        op = {k: v for k, v in entry.items() if k != "reason"}
+        lines.append(f"- {entry.get('reason')}; you sent: {json.dumps(op, ensure_ascii=False, default=str)[:600]}")
+    lines += ["", "The document's sections are:"]
+    lines += [f"- {section.id}: {section.heading}" for section in document.sections]
+    lines += [
+        "",
+        "Send the COMPLETE list again, with every section_id and block_id copied "
+        "exactly from the document above, as a single JSON object with one key, "
+        "``operations``. Emit no prose outside the JSON object.",
+    ]
+    return "\n".join(lines)
+
+
 async def request_delta_operations(
     llm: ConfiguredLLMProvider,
     *,
     system_prompt: str,
     user_prompt: str,
     scope: str,
+    document: StructuredDocument | None = None,
     **call_kwargs: Any,
 ) -> DeltaOperationList:
     """Ask the model for an operation list, and once more with the errors if it is refused.
@@ -419,15 +442,33 @@ async def request_delta_operations(
     The retry APPENDS to the first request and never rewrites it, so the system
     prompt and the whole document stay a byte-identical prefix and the provider's
     prompt cache still covers them on the second call.
+
+    ``document``, when given, also refuses a reply that parses but cannot land:
+    every operation names a section or block the document does not have (#4206).
+    The retry quotes those references and lists the real section ids. Only the
+    refresh's edit pass passes it — for the retraction pass, touching nothing is a
+    legitimate answer.
     """
     messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
     first = await llm.call(messages=messages, scope=scope, **call_kwargs)
     try:
-        return parse_delta_operation_list(first.content)
+        op_list = parse_delta_operation_list(first.content)
     except (ValueError, TypeError) as exc:  # DeltaOperationsInvalidError and JSON errors are ValueErrors
         rejected = exc.rejected if isinstance(exc, DeltaOperationsInvalidError) else []
         logger.warning("[STRUCTURED_DELTA] %s reply refused (%s); asking again with the errors", scope, exc)
         correction = _correction_prompt(exc, rejected)
+    else:
+        if document is None or not op_list.operations:
+            return op_list
+        outcome = apply_operations(document, op_list.operations)
+        if outcome.applied:
+            return op_list
+        logger.warning(
+            "[STRUCTURED_DELTA] %s reply refused (all %d op(s) reference missing sections/blocks); asking again",
+            scope,
+            len(outcome.skipped),
+        )
+        correction = _unreachable_correction_prompt(outcome.skipped, document)
     retry_messages = [
         *messages,
         {"role": "assistant", "content": first.content or ""},

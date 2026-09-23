@@ -81,6 +81,42 @@ a 9B — so a green run means "extraction is sound on this model", not "the
 regression cannot return". The test that fails on that is
 `hindsight-api-slim/tests/test_fact_extraction_nullable_dimensions.py`.
 
+**`test_05` — refresh cost.** Not a quality grade: a baseline of what a
+knowledge-page refresh spends. Every LLM call the refresh makes is read back from
+`/llm-requests` — input, cached and output tokens, and the prompt — for a full
+rebuild and for a delta after a small wave of new facts. Behind it: on real
+project banks a refresh sent 30–90k-token synthesis prompts, because a tool's
+`max_tokens` counts fact text only and the JSON around each fact is 3–4× larger
+(#4566). That missed the 30s call deadline (#4568), ended searches before
+`recall` ran (#4563), and billed metered keys all night (#4532).
+
+It runs against a **frozen bank**, `fixtures/refresh-cost-bank.zip`: 900 facts
+generated from a seed as one fictional product's history, consolidated by a real
+model, with the six pages a coding agent seeds. Seeding that live would cost a
+consolidation pass per run and start each run from a different bank. Rebuild it
+only on purpose — every earlier baseline then measured a different bank:
+
+```bash
+uv run python -m hindsight_system_evals.refresh_cost build
+# measure a candidate archive before replacing the committed one
+HINDSIGHT_EVAL_REFRESH_COST_FIXTURE=/tmp/new.zip uv run pytest evals/test_05_refresh_cost.py
+```
+
+`--cost-output DIR` writes `refresh-cost.json` (every call, every prompt), a
+summary table, and each refresh's synthesis prompt on its own. The table ends in
+USD at the model's list price (`PRICES` in `refresh_cost.py`), including what
+explicit Gemini caching costs to create and store — those are not LLM calls and
+never reach the trace, so they are estimated from the cached tokens. Each refresh
+also records its page size, distinct specifics and citations, a floor under any
+cost cut. The model is not frozen, so compare medians over a few runs, not one.
+
+To A/B a server setting, `HINDSIGHT_EVAL_SET_<X>=v` reaches the server as
+`HINDSIGHT_API_<X>=v` (the server's environment is otherwise wiped):
+
+```bash
+HINDSIGHT_EVAL_SET_REFLECT_PROMPT_CACHE_ENABLED=true uv run pytest evals/test_05_refresh_cost.py
+```
+
 ## The corpus
 
 `hindsight_system_evals/corpus.py` generates facts and their gold labels

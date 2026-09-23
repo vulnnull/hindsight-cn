@@ -64,7 +64,7 @@ if TYPE_CHECKING:
     from opentelemetry.trace import Span
 
 from fastapi.routing import APIRoute
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from hindsight_api import MemoryEngine
 from hindsight_api.config import RETAIN_EXTRACTION_MODES
@@ -230,6 +230,7 @@ from hindsight_api.engine.reflect import ReflectNoAnswerError, ReflectToolCallEr
 from hindsight_api.engine.response_models import (
     VALID_RECALL_FACT_TYPES,
     ConsolidationStrategiesPreview,
+    ConsolidationStrategySpec,
     DryRunExtractionResult,
     MemoryFact,
     MinScores,
@@ -2232,13 +2233,40 @@ class ObservationScope(BaseModel):
     count: int = Field(description="Number of observations that live under this scope")
 
 
+def _bank_template_config_from_overrides(overrides: dict[str, Any]) -> "BankTemplateConfig | None":
+    """Build the exportable config from a bank's stored overrides.
+
+    Drops any field the template model rejects instead of failing the export. A
+    bank can hold a value the model no longer accepts — stored before a field was
+    typed, or written by an older version — and an export that raised there would
+    make the whole bank un-exportable with a 500, for one field nothing reads.
+    Skipping it (with a warning) still exports everything else, and importing the
+    result simply leaves that field unset.
+    """
+    filtered = {k: v for k, v in overrides.items() if k in BankTemplateConfig.model_fields}
+    while filtered:
+        try:
+            return BankTemplateConfig(**filtered)
+        except ValidationError as e:
+            invalid = {str(err["loc"][0]) for err in e.errors() if err.get("loc")} & set(filtered)
+            if not invalid:
+                raise
+            logger.warning(
+                "Bank template export: dropping stored config field(s) the template model rejects: %s",
+                ", ".join(sorted(invalid)),
+            )
+            for field in invalid:
+                filtered.pop(field, None)
+    return None
+
+
 class ConsolidationStrategiesPreviewRequest(BaseModel):
     """A draft consolidation_strategies value to preview against existing scopes."""
 
-    # Same free-form shape as the consolidation_strategies config field: the
-    # preview must accept exactly what the editor is about to save, malformed
-    # entries included, and report them as inactive rather than reject them.
-    strategies: list[dict[str, Any]] = Field(description="Draft consolidation_strategies value")
+    # Same shape as the consolidation_strategies config field, so the editor can
+    # preview exactly what it is about to save. Incomplete drafts are fine (a rule
+    # with no tags yet); the preview reports those strategies as inactive.
+    strategies: list[ConsolidationStrategySpec] = Field(description="Draft consolidation_strategies value")
     sample_limit: int = Field(default=5, ge=0, le=50, description="Example scopes returned per rule")
 
 
@@ -3312,6 +3340,16 @@ class MentalModelResponse(BaseModel):
             "against the model's own scope. Null for a model no refresh has stamped yet."
         ),
     )
+    last_refresh_failed_at: str | None = Field(
+        default=None,
+        description=(
+            "When this model's most recent refresh failed, in ISO format, or null when the last one "
+            "succeeded. While this is set the automatic triggers (`refresh_after_consolidation`, "
+            "`refresh_cron`) skip the model — a refresh that cannot succeed is not retried on every "
+            "tick. An explicit refresh still runs, and a successful one clears this. The failure "
+            "itself, with its reason, is in the model's history."
+        ),
+    )
     created_at: str | None = None
     reflect_response: dict | None = Field(
         default=None,
@@ -3367,6 +3405,12 @@ class KnowledgeNode(BaseModel):
         "That is the same check a scheduled refresh runs before spending an LLM call, so a flagged page "
         "is one a refresh would actually rewrite. Deletions are not observed: removing an in-scope memory "
         "leaves no write behind, so it does not raise this flag.",
+    )
+    last_refresh_failed_at: str | None = Field(
+        default=None,
+        description="Pages only: when this page's most recent refresh failed, in ISO format, or null "
+        "when the last one succeeded. While it is set the page does not rebuild itself on its "
+        "trigger — see the same field on the mental model. An explicit refresh still runs.",
     )
     trigger: MentalModelTrigger | None = Field(
         default=None,
@@ -3519,6 +3563,7 @@ def _knowledge_node_model(node: dict[str, Any]) -> KnowledgeNode:
         tags=list(node.get("tags") or []) if is_page else [],
         timestamp=(node.get("last_refreshed_at") if is_page else node.get("updated_at")),
         is_stale=node.get("is_stale") if is_page else None,
+        last_refresh_failed_at=node.get("last_refresh_failed_at") if is_page else None,
         trigger=node.get("trigger") if is_page else None,
     )
 
@@ -3718,18 +3763,16 @@ class BankTemplateConfig(BaseModel):
             "matching rule wins; unmatched scopes fall back to max_observations_per_scope."
         ),
     )
-    consolidation_strategies: list[dict[str, Any]] | None = Field(
+    consolidation_strategies: list[ConsolidationStrategySpec] | None = Field(
         default=None,
         description=(
             "Per-scope consolidation settings: "
             '[{"scopes": [{"tags": ["company:*"]}], "observations_mission": "Record only generalized '
-            'trends.", "max_observations_per_scope": 20}]. Each strategy lists the scopes '
-            "it claims — a scope is a list of fnmatch tag-globs, and a consolidation pass "
-            "is claimed when any of the strategy's patterns matches its tags. Each pattern is "
-            '{"tags": [...], "tags_match": ...}; "tags_match" is "all" (default) — the scope has '
-            'every tag in the pattern, other tags allowed — or "exact" — the scope has '
-            "exactly the pattern's tags and no others. A strategy may set any of "
-            "observations_mission, max_observations_per_scope, "
+            'trends.", "max_observations_per_scope": 20}]. Each strategy lists the rules it claims '
+            "scopes with — a rule's tags are fnmatch globs that must all be on the scope, and its "
+            '"tags_match" decides whether the scope may carry others ("all", the default) or not '
+            '("exact"). The rules are alternatives: any one matching claims the scope. A strategy may '
+            "set any of observations_mission, max_observations_per_scope, "
             "consolidation_source_facts_max_tokens and "
             "consolidation_source_facts_max_tokens_per_observation; each is optional. "
             "Exactly one strategy applies to a scope: the first in the list that claims it. "
@@ -5478,7 +5521,18 @@ def _register_routes(app: FastAPI):
         from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
         worker_metrics = getattr(app.state, "worker_metrics", None)
-        metrics_data = worker_metrics.render() if worker_metrics is not None else generate_latest()
+        # Render off the event loop. generate_latest() (and WorkerMetrics.render, which also does
+        # blocking file I/O) are synchronous, and serialization cost scales with metric cardinality
+        # -- on a large registry it takes seconds. Awaiting it inline blocks the asyncio loop for
+        # that whole duration, so /health, WebSocket handshakes, and every other request this worker
+        # is handling stall until the scrape completes. Offloading to a worker thread doesn't make
+        # the render free -- it is pure Python, so it holds the GIL and only yields every
+        # sys.getswitchinterval() -- but the loop is descheduled in 5ms slices instead of frozen for
+        # the whole render, which is the difference between degraded and dead. Both paths are safe
+        # to call off-thread (generate_latest is designed to be scraped off-thread, and
+        # WorkerMetrics.render only reads a registry + per-worker snapshot files).
+        render = worker_metrics.render if worker_metrics is not None else generate_latest
+        metrics_data = await asyncio.to_thread(render)
         return Response(content=metrics_data, media_type=CONTENT_TYPE_LATEST)
 
     @app.get(
@@ -8353,10 +8407,7 @@ def _register_routes(app: FastAPI):
             # right after a config edit must not carry the values that edit replaced.
             bank_overrides = await app.state.memory._config_resolver._load_bank_config(bank_id, cached=False)
 
-            # Filter to only BankTemplateConfig fields (exclude credentials, static fields)
-            template_config_fields = set(BankTemplateConfig.model_fields.keys())
-            filtered_overrides = {k: v for k, v in bank_overrides.items() if k in template_config_fields}
-            bank_config = BankTemplateConfig(**filtered_overrides) if filtered_overrides else None
+            bank_config = _bank_template_config_from_overrides(bank_overrides)
 
             # Get mental models (limit=None — an export that stopped at the
             # default page size would silently drop the rest of the bank).
@@ -9063,7 +9114,7 @@ def _register_routes(app: FastAPI):
         try:
             return await app.state.memory.preview_consolidation_strategies(
                 bank_id,
-                request.strategies,
+                [strategy.model_dump() for strategy in request.strategies],
                 sample_limit=request.sample_limit,
                 request_context=request_context,
             )

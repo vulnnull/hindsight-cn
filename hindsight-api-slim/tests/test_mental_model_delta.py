@@ -116,7 +116,7 @@ def patch_llm_call(monkeypatch):
             calls.append({"messages": messages, **kwargs})
             return LLMCallResult(content=canned, usage=TokenUsage())
 
-        monkeypatch.setattr(memory._reflect_llm_config, "call", fake_call)
+        monkeypatch.setattr(memory._mental_model_refresh_llm_config, "call", fake_call)
         return calls
 
     return _install
@@ -610,6 +610,61 @@ class TestDeltaRefreshPlumbing:
 
         await memory.delete_bank(bank_id, request_context=request_context)
 
+    async def test_failed_refresh_after_query_change_keeps_the_full_rewrite_armed(
+        self,
+        memory: MemoryEngine,
+        request_context: RequestContext,
+        patch_reflect,
+        patch_llm_call,
+    ):
+        """#4579: a failed refresh used to record the new query as processed, so the
+        retry ran as a delta against the old query's document and never caught up.
+        A failure now leaves the recorded query alone and the retry runs full."""
+        from hindsight_api.engine.memory_engine import MentalModelRefreshError
+
+        bank_id = f"test-delta-query-change-fail-{uuid.uuid4().hex[:8]}"
+        await memory.ensure_bank_profile(bank_id, request_context=request_context)
+        mm = await memory.create_mental_model(
+            bank_id=bank_id,
+            name="Team Info",
+            source_query="Tell me about the team",
+            content="# Team\n\nBaseline.",
+            trigger={"mode": "delta"},
+            request_context=request_context,
+        )
+        patch_reflect(memory, text="# Team\n\nFirst pass.")
+        patch_llm_call(memory, returns="unused-first")
+        await memory.refresh_mental_model(bank_id=bank_id, mental_model_id=mm["id"], request_context=request_context)
+        await memory.update_mental_model(
+            bank_id=bank_id,
+            mental_model_id=mm["id"],
+            source_query="Tell me about customers instead",
+            request_context=request_context,
+        )
+
+        patch_reflect(
+            memory, text="", facts=[{"id": "obs-new", "text": "some fact", "type": "observation", "context": None}]
+        )
+        with pytest.raises(MentalModelRefreshError):
+            await memory.refresh_mental_model(
+                bank_id=bank_id, mental_model_id=mm["id"], request_context=request_context
+            )
+        async with memory._pool.acquire() as conn:
+            stored_query = await conn.fetchval(
+                "SELECT last_refreshed_source_query FROM mental_models WHERE id = $1", mm["id"]
+            )
+        assert stored_query == "Tell me about the team"
+
+        patch_reflect(memory, text="# Customers\n\nBrand new topic.")
+        llm_calls = patch_llm_call(memory, returns="should-not-be-called")
+        refreshed = await memory.refresh_mental_model(
+            bank_id=bank_id, mental_model_id=mm["id"], request_context=request_context
+        )
+        assert refreshed["content"] == "# Customers\n\nBrand new topic.\n"
+        assert len(llm_calls) == 0, "The retry must still be the full rewrite the query change armed"
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
     @pytest.mark.memory_backend_incompatible
     async def test_delta_no_new_facts_advances_watermark_to_newest_processed(
         self,
@@ -1066,7 +1121,7 @@ class TestDeltaRefreshPlumbing:
             return LLMCallResult(content=DeltaOperationList(), usage=TokenUsage())
 
         # First (seeding) refresh — value captured here is overwritten by the second.
-        monkeypatch.setattr(memory._reflect_llm_config, "call", capturing_call)
+        monkeypatch.setattr(memory._mental_model_refresh_llm_config, "call", capturing_call)
         await memory.refresh_mental_model(bank_id=bank_id, mental_model_id=mm["id"], request_context=request_context)
 
         # Second refresh with a genuine new fact so the delta call actually fires.
@@ -1271,7 +1326,7 @@ class TestDeltaRefreshPlumbing:
 
             return LLMCallResult(content=DeltaOperationList(), usage=TokenUsage())
 
-        monkeypatch.setattr(memory._reflect_llm_config, "call", ok_call)
+        monkeypatch.setattr(memory._mental_model_refresh_llm_config, "call", ok_call)
         seeded = await memory.refresh_mental_model(
             bank_id=bank_id, mental_model_id=mm["id"], request_context=request_context
         )
@@ -1291,7 +1346,7 @@ class TestDeltaRefreshPlumbing:
         async def boom(*, messages, **kwargs):
             raise RuntimeError("simulated provider 500")
 
-        monkeypatch.setattr(memory._reflect_llm_config, "call", boom)
+        monkeypatch.setattr(memory._mental_model_refresh_llm_config, "call", boom)
 
         from hindsight_api.engine.memory_engine import MentalModelRefreshError
 
@@ -1668,7 +1723,7 @@ class TestDeltaRefreshPlumbing:
         async def boom(*, messages, **kwargs):
             raise RuntimeError("simulated empty/invalid JSON from provider")
 
-        monkeypatch.setattr(memory._reflect_llm_config, "call", boom)
+        monkeypatch.setattr(memory._mental_model_refresh_llm_config, "call", boom)
 
         from hindsight_api.engine.memory_engine import MentalModelRefreshError
 

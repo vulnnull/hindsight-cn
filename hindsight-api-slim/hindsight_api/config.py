@@ -1874,6 +1874,14 @@ DEFAULT_REFLECT_MAX_ITERATIONS = 10  # Max tool call iterations before forcing r
 # Step-by-step context caching for the reflect tool loop (Gemini). On by default;
 # requires the global prompt cache (HINDSIGHT_API_LLM_PROMPT_CACHE_ENABLED) to also
 # be on. Set false to force reflect to run uncached even when prompt caching is on.
+#
+# Worth knowing before tuning it: Gemini bills an explicit cache's CREATION at the
+# full input rate, plus storage per token-hour, and the rolling cache each step
+# builds is read by exactly one later call. Measured on the refresh-cost eval, that
+# came to ~4.6% MORE than sending the same tokens uncached (and cache creation alone
+# was 38% of the bill on gemini-3.8-flash), while Gemini's implicit caching gives the
+# same read discount with no create or storage fee. Left on pending a cache that is
+# read more than once — `false` is the cheaper setting on Gemini today.
 DEFAULT_REFLECT_PROMPT_CACHE_ENABLED = True
 DEFAULT_REFLECT_MAX_CONTEXT_TOKENS = 100_000  # Max accumulated context tokens before forcing final prompt
 DEFAULT_REFLECT_WALL_TIMEOUT = 300  # Wall-clock timeout in seconds for the entire reflect operation (5 minutes)

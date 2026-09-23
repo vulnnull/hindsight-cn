@@ -20,6 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, ClassVar, Dict, List, Optional
 from typing_extensions import Annotated
+from hindsight_client_api.models.consolidation_strategy_spec import ConsolidationStrategySpec
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -27,7 +28,7 @@ class ConsolidationStrategiesPreviewRequest(BaseModel):
     """
     A draft consolidation_strategies value to preview against existing scopes.
     """ # noqa: E501
-    strategies: List[Dict[str, Any]] = Field(description="Draft consolidation_strategies value")
+    strategies: List[ConsolidationStrategySpec] = Field(description="Draft consolidation_strategies value")
     sample_limit: Optional[Annotated[int, Field(le=50, strict=True, ge=0)]] = Field(default=5, description="Example scopes returned per rule")
     __properties: ClassVar[List[str]] = ["strategies", "sample_limit"]
 
@@ -70,6 +71,13 @@ class ConsolidationStrategiesPreviewRequest(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of each item in strategies (list)
+        _items = []
+        if self.strategies:
+            for _item_strategies in self.strategies:
+                if _item_strategies:
+                    _items.append(_item_strategies.to_dict())
+            _dict['strategies'] = _items
         return _dict
 
     @classmethod
@@ -82,7 +90,7 @@ class ConsolidationStrategiesPreviewRequest(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "strategies": obj.get("strategies"),
+            "strategies": [ConsolidationStrategySpec.from_dict(_item) for _item in obj["strategies"]] if obj.get("strategies") is not None else None,
             "sample_limit": obj.get("sample_limit") if obj.get("sample_limit") is not None else 5
         })
         return _obj

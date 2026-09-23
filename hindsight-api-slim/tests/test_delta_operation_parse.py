@@ -305,3 +305,28 @@ async def test_request_delta_operations_retries_unparseable_json_too():
     op_list = await request_delta_operations(llm, system_prompt="sys", user_prompt="usr", scope="test")
     assert len(op_list.operations) == 1
     assert len(llm.calls) == 2
+
+
+_DOC = StructuredDocument(sections=[Section(id="prefs", heading="Preferences", blocks=[Block(id="b1", text="x")])])
+_UNKNOWN_SECTION = '{"operations": [{"op": "append_block", "section_id": "gone", "text": "ok"}]}'
+_KNOWN_SECTION = '{"operations": [{"op": "append_block", "section_id": "prefs", "text": "ok"}]}'
+
+
+async def test_request_delta_operations_asks_again_when_no_op_reaches_the_document():
+    """#4206: a well-formed reply whose every op names a missing section used to fail
+    the refresh and be retried with the same prompt. It now gets the same one retry,
+    quoting the bad reference and listing the sections that do exist."""
+    llm = _ScriptedLLM(_UNKNOWN_SECTION, _KNOWN_SECTION)
+    op_list = await request_delta_operations(llm, system_prompt="sys", user_prompt="usr", scope="test", document=_DOC)
+    assert op_list.operations[0].section_id == "prefs"
+    assert len(llm.calls) == 2
+    correction = llm.calls[1][3]["content"]
+    assert "unknown section_id: gone" in correction
+    assert "- prefs: Preferences" in correction
+
+
+async def test_request_delta_operations_leaves_unreachable_ops_alone_without_a_document():
+    """The retraction pass passes no document: touching nothing is a valid answer there."""
+    llm = _ScriptedLLM(_UNKNOWN_SECTION)
+    await request_delta_operations(llm, system_prompt="sys", user_prompt="usr", scope="test")
+    assert len(llm.calls) == 1

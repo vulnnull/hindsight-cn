@@ -102,7 +102,7 @@ def patch_delta_llm(monkeypatch):
             # `call` returns the envelope; `returns` is the payload the test canned.
             return LLMCallResult(content=returns, usage=TokenUsage())
 
-        monkeypatch.setattr(memory._reflect_llm_config, "call", fake_call)
+        monkeypatch.setattr(memory._mental_model_refresh_llm_config, "call", fake_call)
         return calls
 
     return _install

@@ -2132,3 +2132,151 @@ class TestReflectIncrementalCache:
         assert len(provider.deleted_sessions) == 1
         assert provider.deleted_sessions[0].startswith("reflect:")
         assert provider.deleted_sessions[0] == provider.created[0][0]
+
+
+class TestReflectShortIdAliases:
+    """The model reads short aliases (presentation.py); what it cites must come back as real ids."""
+
+    @pytest.mark.asyncio
+    async def test_done_citations_written_as_aliases_resolve_to_real_ids(self):
+        functions = {
+            "search_observations_fn": AsyncMock(
+                return_value={"observations": [{"id": "obs-uuid-1", "text": "an observation"}]}
+            ),
+            "recall_fn": AsyncMock(return_value={"memories": [{"id": "mem-uuid-1", "text": "a fact"}]}),
+            "search_mental_models_fn": AsyncMock(return_value={"mental_models": []}),
+            "expand_fn": AsyncMock(return_value={"memories": []}),
+        }
+
+        def _tc(cid, name):
+            return LLMToolCallResult(
+                tool_calls=[LLMToolCall(id=cid, name=name, arguments={"query": "q"})], finish_reason="tool_calls"
+            )
+
+        provider = _StepCacheProvider(
+            scripted=[
+                _tc("0", "search_observations"),
+                _tc("1", "recall"),
+                LLMToolCallResult(
+                    tool_calls=[
+                        LLMToolCall(
+                            id="2",
+                            name="done",
+                            arguments={"answer": "A", "memory_ids": ["f1"], "observation_ids": ["o1"]},
+                        )
+                    ],
+                    finish_reason="tool_calls",
+                ),
+            ]
+        )
+
+        result = await run_reflect_agent(
+            llm_config=provider,
+            bank_id="alias-bank",
+            query="q",
+            bank_profile={"name": "T", "mission": "M"},
+            has_mental_models=False,
+            include_observations=True,
+            include_recall=True,
+            budget="high",
+            max_iterations=8,
+            **functions,
+        )
+
+        assert result.used_memory_ids == ["mem-uuid-1"]
+        assert result.used_observation_ids == ["obs-uuid-1"]
+        # The raw record stays in the trace; only the prompt carried the alias.
+        assert result.tool_trace[1].output["memories"][0]["id"] == "mem-uuid-1"
+
+
+class TestReflectFinishesThroughDone:
+    """A model that stops with prose is asked for ``done`` in the same conversation.
+
+    Measured on the refresh-cost eval: only ~29% of refreshes ever called ``done``
+    on their own, so the answer was written twice — once as prose that reflect
+    drops, then again from a standalone synthesis prompt that re-renders every
+    tool result and re-pays for it. Asking here reuses the prefix the provider
+    already holds and returns the structured document a page wants.
+    """
+
+    @staticmethod
+    def _functions():
+        return {
+            "search_observations_fn": AsyncMock(return_value={"observations": [{"id": "obs-1", "text": "o"}]}),
+            "recall_fn": AsyncMock(return_value={"memories": [{"id": "mem-1", "text": "m"}]}),
+            "search_mental_models_fn": AsyncMock(return_value={"mental_models": []}),
+            "expand_fn": AsyncMock(return_value={"memories": []}),
+        }
+
+    @staticmethod
+    def _searches():
+        return [
+            LLMToolCallResult(
+                tool_calls=[LLMToolCall(id=str(i), name=name, arguments={"query": "q"})], finish_reason="tool_calls"
+            )
+            for i, name in enumerate(("search_observations", "recall"))
+        ]
+
+    @pytest.mark.asyncio
+    async def test_prose_stop_is_asked_to_say_it_through_done(self):
+        provider = _StepCacheProvider(
+            scripted=[
+                *self._searches(),
+                # The model stops with prose instead of calling done.
+                LLMToolCallResult(content="here is the answer", finish_reason="stop"),
+                LLMToolCallResult(
+                    tool_calls=[LLMToolCall(id="9", name="done", arguments={"answer": "A", "memory_ids": ["f1"]})],
+                    finish_reason="tool_calls",
+                ),
+            ]
+        )
+
+        result = await run_reflect_agent(
+            llm_config=provider,
+            bank_id="b",
+            query="q",
+            bank_profile={"name": "T", "mission": "M"},
+            has_mental_models=False,
+            budget="high",
+            max_iterations=8,
+            **self._functions(),
+        )
+
+        assert result.text == "A"
+        assert result.used_memory_ids == ["mem-1"], "aliases in the closing done call must resolve"
+        # The closing call continues the same conversation (one message more than
+        # the turn before it) and pins ``done``, rather than rebuilding a synthesis
+        # prompt that would re-send every tool result as text.
+        closing, previous = provider.calls[-1], provider.calls[-2]
+        assert closing["tool_choice"].function_name == "done"
+        assert closing["n_messages"] == previous["n_messages"] + 1
+
+    @pytest.mark.asyncio
+    async def test_a_provider_that_will_not_call_done_falls_back_to_the_standalone_prompt(self):
+        provider = _StepCacheProvider(
+            scripted=[
+                *self._searches(),
+                LLMToolCallResult(content="here is the answer", finish_reason="stop"),
+                # Asked for done, the provider returns prose again.
+                LLMToolCallResult(content="still prose", finish_reason="stop"),
+            ]
+        )
+        provider.call = AsyncMock(
+            return_value=LLMCallResult(
+                content="synthesized", usage=TokenUsage(input_tokens=1, output_tokens=1, total_tokens=2)
+            )
+        )
+
+        result = await run_reflect_agent(
+            llm_config=provider,
+            bank_id="b",
+            query="q",
+            bank_profile={"name": "T", "mission": "M"},
+            has_mental_models=False,
+            budget="high",
+            max_iterations=8,
+            **self._functions(),
+        )
+
+        assert result.text == "synthesized"
+        provider.call.assert_awaited()

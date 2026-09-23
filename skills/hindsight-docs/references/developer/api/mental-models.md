@@ -215,6 +215,10 @@ When `refresh_after_consolidation` is enabled, the mental model will be re-gener
 
 When `refresh_cron` is set, Hindsight checks the schedule on the server's mental-model refresh tick and refreshes the model only if memories in its scope have changed since the last refresh. `refresh_cron` and `refresh_after_consolidation` are mutually exclusive, so a model refreshes either after consolidation or on a fixed UTC schedule, not both.
 
+`last_refresh_failed_at` on the model (and on a page in the knowledge tree) carries when that happened, so a list view can show which models have stopped refreshing themselves without reading each one's history.
+
+**A failed refresh pauses the automatic ones.** A failed refresh is retried by the worker (`HINDSIGHT_API_WORKER_MAX_RETRIES`, 3 by default) and then stops. Neither `refresh_after_consolidation` nor `refresh_cron` queues that model again until a refresh succeeds, so a refresh that cannot work (a prompt too large for the model, an empty account, a delta that will not apply) costs a few attempts instead of an LLM bill every tick. The failure shows in the model's [history](#history). Fix the cause and refresh the model yourself: a successful refresh resumes the automatic ones. A refresh cut off by `HINDSIGHT_API_REFLECT_WALL_TIMEOUT`, which bounds a whole refresh the same way it bounds a reflect, counts as a failure too.
+
 ### Rate-limiting automatic refreshes
 
 A refresh is a full reflect run: retrieval plus an agentic LLM loop. With
@@ -339,13 +343,13 @@ Hindsight keeps an authoritative **structured** representation of the document �
 
 Anything no operation mentions is copied through untouched, so unchanged prose is preserved rather than regenerated and checked. This matters because "preserve the unchanged content" is only a soft constraint on an LLM — generating the next token from a gestalt of the input is what it intrinsically does, so instructed-to-preserve prose drifts over many refreshes.
 
-Sections and blocks are addressed by id, never by position, so an operation cannot land on the wrong one by miscounting. Failure modes are conservative by design: an operation referencing a section or block that doesn't exist — or a block that lives in a different section than the one it names — is **dropped** rather than guessed at, and the rest of the operations still apply. The refresh records which ones were dropped and why, so you can see that part of that round's new information didn't make it into the document.
+Sections and blocks are addressed by id, never by position, so an operation cannot land on the wrong one by miscounting. Failure modes are conservative by design: an operation referencing a section or block that doesn't exist — or a block that lives in a different section than the one it names — is **dropped** rather than guessed at, and the rest of the operations still apply. When *every* operation points at something missing, the model is asked once more, shown the ids it got wrong and the sections the document actually has. The refresh records which ones were dropped and why, so you can see that part of that round's new information didn't make it into the document.
 
 Delta mode falls back to a full regeneration automatically in two cases:
 1. The mental model has no existing content yet (nothing to anchor edits on).
 2. The `source_query` has changed since the last refresh (the topic has shifted; the existing structure may no longer apply).
 
-**A delta refresh never replaces the document with a partial one.** Because delta retrieval only reads memories newer than the last refresh, an answer written from that window covers just the recent slice of the topic — it is material for editing the document, not a replacement for it. So when the edits can't be made at all — the provider call fails, the response can't be read, or every single operation is rejected — the existing content stays exactly as it is and the refresh **fails** instead of completing. Nothing is lost, the refresh's time window is not advanced, and a retry sees the same memories again. The same holds for an empty answer: a populated document is never overwritten with an empty one.
+**A delta refresh never replaces the document with a partial one.** Because delta retrieval only reads memories newer than the last refresh, an answer written from that window covers just the recent slice of the topic — it is material for editing the document, not a replacement for it. So when the edits can't be made at all — the provider call fails, the response can't be read, or every single operation is rejected — the existing content stays exactly as it is and the refresh **fails** instead of completing. Nothing is lost, the refresh's time window is not advanced, and a retry sees the same memories again. The same holds for an empty answer: a populated document is never overwritten with an empty one. A delta refresh is never turned into a full rewrite behind your back: if a model's delta refreshes keep failing, switch its `mode` to `full`.
 
 | Use Case | Recommended Mode | Why |
 |----------|-----------------|-----|

@@ -2348,13 +2348,18 @@ async def _trigger_mental_model_refreshes(
             # skip_if_in_flight: a consolidation chain fires this every round and
             # overlapping consolidations can run on the same bank, so a model still
             # pending/processing a refresh must not be enqueued a second time (#3411).
-            await memory_engine.submit_async_refresh_mental_model(
+            result = await memory_engine.submit_async_refresh_mental_model(
                 bank_id=bank_id,
                 mental_model_id=mental_model_id,
                 request_context=request_context,
                 skip_if_in_flight=True,
                 automatic=True,
             )
+            if result.get("paused"):
+                logger.info(
+                    f"[CONSOLIDATION] Skipped refresh for mental model {mental_model_id}: its last refresh failed"
+                )
+                continue
             refreshed_count += 1
             logger.info(
                 f"[CONSOLIDATION] Triggered refresh for mental model {mental_model_id} "

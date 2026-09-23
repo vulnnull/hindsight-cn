@@ -439,6 +439,22 @@ class TestTree:
         assert single_calls == 0, "no per-page fallback for plain flat-tag scopes"
 
 
+class TestKnowledgeTreeOrder:
+    """The tree is sorted in Python because knowledge_pages.name is a CLOB on Oracle."""
+
+    def test_sorts_by_sort_order_then_name_with_nulls_last(self):
+        from hindsight_api.engine.memory_engine import _knowledge_tree_sort_key
+
+        rows = [
+            {"sort_order": None, "name": "a"},
+            {"sort_order": 2, "name": "b"},
+            {"sort_order": 1, "name": "z"},
+            {"sort_order": 1, "name": "m"},
+        ]
+        ordered = [(r["sort_order"], r["name"]) for r in sorted(rows, key=_knowledge_tree_sort_key)]
+        assert ordered == [(1, "m"), (1, "z"), (2, "b"), (None, "a")]
+
+
 class TestWatermarkRule:
     """The pure rule behind every "may need refresh" badge."""
 
@@ -457,6 +473,15 @@ class TestWatermarkRule:
     def test_a_write_after_the_refresh_may_need_one(self):
         refreshed = datetime.now(timezone.utc)
         assert _may_need_refresh(refreshed, refreshed + timedelta(microseconds=1)) is True
+
+    def test_naive_timestamps_compare_as_utc(self):
+        # Oracle TIMESTAMP columns come back naive; the watermark may be aware.
+        refreshed = datetime.now(timezone.utc)
+        naive = refreshed.replace(tzinfo=None)
+        assert _may_need_refresh(naive, refreshed) is False
+        assert _may_need_refresh(naive, refreshed + timedelta(seconds=1)) is True
+        assert _may_need_refresh(refreshed, naive - timedelta(seconds=1)) is False
+        assert _may_need_refresh(naive, naive + timedelta(seconds=1)) is True
 
 
 class TestSearch:

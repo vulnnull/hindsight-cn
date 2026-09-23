@@ -55,6 +55,51 @@ def _vector_index_clause() -> str | None:
     return index_using_clause(ext)
 
 
+def bank_indexes_are_store_owned(bank_id: str) -> bool:
+    """Whether ``bank_id``'s memories live outside SQL, so it can never have rows to index.
+
+    A store-owned bank writes no ``memory_units`` rows at all, so its three partial
+    indexes can only ever be empty — and an empty index is not free. Postgres plans
+    against every index on a relation, so 3 x banks empty indexes on the shared
+    ``memory_units`` tax every OTHER statement that so much as names the table: a
+    tenant with 27,315 store-owned banks carried 82,795 of them and paid ~975 ms of
+    planning for a query over zero rows (#4615). #4326 took the same decision for the
+    whole-table reconcile — dimension resize, global vector and text indexes — but it
+    does not reach the per-bank loops, which are built from the engine, not migrations.
+
+    Asked per bank, not per deployment: a router can keep some banks in SQL and some
+    in a store (:meth:`MemoriesExtension.store_owned_for`), and getting this backwards
+    is silent — an SQL-owned bank without its index still recalls, just without ANN.
+
+    **Raises rather than guessing when the store cannot answer**, because the two
+    callers want opposite fallbacks and only they know which:
+
+    * :func:`create_bank_vector_indexes` catches and builds. One bank's three unused
+      indexes cost almost nothing, and a bank that turns out to be SQL-owned without
+      them silently loses ANN. It also runs inside the bank-create transaction, where
+      an escaping exception would fail an ordinary first retain.
+    * :func:`~..vector_index_health.plan_bank_vector_indexes` lets it propagate. Its
+      fallback is the destructive one: a transient router blip partway through
+      ``repair-bank --all`` would classify every bank it failed on as SQL-backed and
+      rebuild all three indexes for each — re-arming #4615 at full scale, from a
+      command that then exits 0 and reads as a successful repair. Propagating instead
+      makes the submit-time pre-check log a warning and queue nothing, and makes
+      ``repair-bank`` report that schema skipped and exit non-zero — loud, and scoped
+      to the schema, rather than quietly rebuilding. (The maintenance job itself does
+      not catch it, so it would fail the operation into worker retry; the submit gate
+      is what keeps the job from being queued in that state at all.)
+    """
+    # Local import, like the other five get_memories call sites in this module. At
+    # module scope it closes a cycle: engine.memories -> memories.base ->
+    # hindsight_api.extensions -> extensions.mcp -> `from hindsight_api import
+    # MemoryEngine`, which is still partially initialised, so importing
+    # hindsight_api.admin.cli dies on ImportError. (An earlier version of this comment
+    # blamed engine.memories importing from engine.retain — it does not.)
+    from ..memories import get_memories
+
+    return get_memories().store_owned_for(bank_id)
+
+
 async def create_bank_vector_indexes(
     conn: "DatabaseConnection", bank_id: str, internal_id: str, *, ops: "DataAccessOps"
 ) -> None:
@@ -81,6 +126,10 @@ async def create_bank_vector_indexes(
     Oracle uses a single global vector index created during migrations, and does
     not support partial (WHERE-clause) vector indexes.
 
+    A bank whose memories a custom store owns is the third no-op, and the only one
+    decided per bank rather than per deployment: it has no memory_units rows to index
+    (see :func:`bank_indexes_are_store_owned`).
+
     bank_id is escaped for SQL literal safety (apostrophes doubled).
 
     ``ops`` is required rather than defaulting to None: it is only dereferenced
@@ -94,6 +143,25 @@ async def create_bank_vector_indexes(
     index_clause = _vector_index_clause()
     if index_clause is None:
         logger.debug("Skipping per-bank vector indexes for configured backend")
+        return
+
+    # Checked in the callee rather than at each caller because import restores a bank
+    # around the fresh-INSERT gate and calls this directly (#2645). Last of the three
+    # gates: the only one that reaches outside this process, so the two local ones
+    # answer first. Catching is the safe direction HERE and only here — see
+    # bank_indexes_are_store_owned for why the reconcile chooses the opposite.
+    try:
+        store_owned = bank_indexes_are_store_owned(bank_id)
+    except Exception as e:  # noqa: BLE001 — a store that cannot answer must not fail bank creation
+        logger.warning(
+            "Store cannot say whether bank %s is store-owned (%s); building its vector indexes as SQL-backed. "
+            "If this bank's memories live in the store, those indexes are empty and can be dropped.",
+            bank_id,
+            e,
+        )
+        store_owned = False
+    if store_owned:
+        logger.debug("Skipping per-bank vector indexes for store-owned bank %s", bank_id)
         return
 
     await ops.create_bank_vector_indexes(
@@ -327,12 +395,13 @@ async def create_bank_if_missing(pool, bank_id: str) -> bool:
     """
 
     # Retried as a whole transaction. With the size threshold off (the default)
-    # a fresh bank builds its per-(bank, fact_type) partial vector indexes with a
-    # plain CREATE INDEX — it must, since this runs inside the bank-create tx and
-    # CONCURRENTLY cannot — and that CREATE takes a ShareLock on the shared
-    # memory_units table, which can deadlock with concurrent writers. Even with
-    # no DDL to issue, the lazy create can lose a deadlock (40P01 / ORA-00060) to
-    # a concurrent writer touching the same bank row. The body is idempotent
+    # a fresh SQL-owned bank builds its per-(bank, fact_type) partial vector
+    # indexes with a plain CREATE INDEX — it must, since this runs inside the
+    # bank-create tx and CONCURRENTLY cannot — and that CREATE takes a ShareLock
+    # on the shared memory_units table, which can deadlock with concurrent
+    # writers. Even with no DDL to issue, the lazy create can lose a deadlock
+    # (40P01 / ORA-00060) to a concurrent writer touching the same bank row.
+    # The body is idempotent
     # (INSERT ... ON CONFLICT DO NOTHING + CREATE INDEX IF NOT EXISTS), so
     # retrying the whole tx stays correct and cheap.
     async def _create() -> bool:

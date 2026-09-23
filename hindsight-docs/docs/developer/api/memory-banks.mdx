@@ -709,6 +709,73 @@ In `restore` mode the operation is recorded against `{bank_id}` — the bank in 
 
 A restore carries the operations log as history, not as work: anything still in flight when the bank was exported is left behind, so a copied bank never re-runs the original's queued retains or re-fires its webhooks. In-flight work belongs to the bank that was exported — and a clone runs *inside* one such operation, so carrying them would put the clone's own unfinished record in the copy.
 
+### Import facts extracted outside Hindsight
+
+An archive doesn't have to come from an export. If you run your own extraction pipeline, build the archive yourself and import it with `mode=merge`: your chunks and facts are stored as given — no LLM call, no re-chunking — while Hindsight still re-embeds the facts, resolves their entities against the bank, builds the semantic, temporal, entity and causal links, and — like a retain — fires `retain.completed` webhooks and auto-consolidation when the bank has them enabled.
+
+The archive is a ZIP with a `manifest.json` and one JSON file per document under `documents/`:
+
+```text
+import.zip
+├── manifest.json            {"schema_version": 1, "source_bank_id": "external"}
+└── documents/
+    └── session-2026-09-22.json
+```
+
+A document file:
+
+```json
+{
+  "id": "session-2026-09-22",
+  "original_text": "Full original session text...",
+  "tags": ["source:pi"],
+  "chunks": [{ "chunk_index": 0, "chunk_text": "Caller-defined source region..." }],
+  "facts": [
+    {
+      "text": "The user prefers lightweight local speech recognition models.",
+      "fact_type": "experience",
+      "chunk_index": 0,
+      "context": "Discussion of local speech recognition",
+      "mentioned_at": "2026-09-22T18:34:00Z",
+      "occurred_start": "2026-09-22T18:34:00Z",
+      "occurred_end": "2026-09-22T18:34:00Z",
+      "entities": ["Parakeet"],
+      "metadata": { "source_turn": "143" },
+      "tags": ["source:pi"],
+      "observation_scopes": "shared",
+      "causal_relations": []
+    }
+  ]
+}
+```
+
+| Fact field | Description |
+|------------|-------------|
+| `text` | Required. The memory, as it will be recalled. |
+| `fact_type` | Required. `world` or `experience`. |
+| `chunk_index` | Optional. The chunk in `chunks` this fact came from. |
+| `context`, `metadata`, `tags`, `observation_scopes` | Optional. Same meaning as on a retain item, set per fact. |
+| `mentioned_at`, `occurred_start`, `occurred_end` | Optional ISO 8601 dates. With none of them set, the fact is dated at import time. |
+| `entities` | Optional entity names, resolved against the bank's existing entities. |
+| `causal_relations` | Optional. `[{"relation_type": "caused_by", "target_fact_index": N}]`, where `N` is the position of another fact in the same document's `facts` list. |
+
+Metadata and dates live on each fact; a document carries no metadata or timestamp of its own. Re-sending a document id follows `document_conflict` (`replace` to overwrite it).
+
+<Tabs>
+<TabItem value="python" label="Python">
+<CodeSnippet code={memoryBanksPy} section="transfer-import-external" language="python" />
+</TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={memoryBanksMjs} section="transfer-import-external" language="javascript" />
+</TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={memoryBanksSh} section="transfer-import-external" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={memoryBanksGo} section="transfer-import-external" language="go" />
+</TabItem>
+</Tabs>
+
 ### Clone a bank
 
 `POST /v1/default/banks/{bank_id}/clone` — copy a bank into a new one in a single call, without handling an archive yourself. This is the export and import above run back to back on this instance: nothing is re-extracted and no LLM is called, so the clone's facts are exactly the source's, re-embedded with the same model.

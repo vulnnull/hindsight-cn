@@ -1052,6 +1052,202 @@ In `restore` mode the operation is recorded against `{bank_id}` — the bank in 
 
 A restore carries the operations log as history, not as work: anything still in flight when the bank was exported is left behind, so a copied bank never re-runs the original's queued retains or re-fires its webhooks. In-flight work belongs to the bank that was exported — and a clone runs *inside* one such operation, so carrying them would put the clone's own unfinished record in the copy.
 
+### Import facts extracted outside Hindsight
+
+An archive doesn't have to come from an export. If you run your own extraction pipeline, build the archive yourself and import it with `mode=merge`: your chunks and facts are stored as given — no LLM call, no re-chunking — while Hindsight still re-embeds the facts, resolves their entities against the bank, builds the semantic, temporal, entity and causal links, and — like a retain — fires `retain.completed` webhooks and auto-consolidation when the bank has them enabled.
+
+The archive is a ZIP with a `manifest.json` and one JSON file per document under `documents/`:
+
+```text
+import.zip
+├── manifest.json            {"schema_version": 1, "source_bank_id": "external"}
+└── documents/
+    └── session-2026-09-22.json
+```
+
+A document file:
+
+```json
+{
+  "id": "session-2026-09-22",
+  "original_text": "Full original session text...",
+  "tags": ["source:pi"],
+  "chunks": [{ "chunk_index": 0, "chunk_text": "Caller-defined source region..." }],
+  "facts": [
+    {
+      "text": "The user prefers lightweight local speech recognition models.",
+      "fact_type": "experience",
+      "chunk_index": 0,
+      "context": "Discussion of local speech recognition",
+      "mentioned_at": "2026-09-22T18:34:00Z",
+      "occurred_start": "2026-09-22T18:34:00Z",
+      "occurred_end": "2026-09-22T18:34:00Z",
+      "entities": ["Parakeet"],
+      "metadata": { "source_turn": "143" },
+      "tags": ["source:pi"],
+      "observation_scopes": "shared",
+      "causal_relations": []
+    }
+  ]
+}
+```
+
+| Fact field | Description |
+|------------|-------------|
+| `text` | Required. The memory, as it will be recalled. |
+| `fact_type` | Required. `world` or `experience`. |
+| `chunk_index` | Optional. The chunk in `chunks` this fact came from. |
+| `context`, `metadata`, `tags`, `observation_scopes` | Optional. Same meaning as on a retain item, set per fact. |
+| `mentioned_at`, `occurred_start`, `occurred_end` | Optional ISO 8601 dates. With none of them set, the fact is dated at import time. |
+| `entities` | Optional entity names, resolved against the bank's existing entities. |
+| `causal_relations` | Optional. `[{"relation_type": "caused_by", "target_fact_index": N}]`, where `N` is the position of another fact in the same document's `facts` list. |
+
+Metadata and dates live on each fact; a document carries no metadata or timestamp of its own. Re-sending a document id follows `document_conflict` (`replace` to overwrite it).
+
+### Python
+
+```python
+import io
+import json
+import zipfile
+
+doc = {
+    "id": "session-2026-09-22",
+    "original_text": "Full original session text...",
+    "chunks": [{"chunk_index": 0, "chunk_text": "Caller-defined source region..."}],
+    "facts": [
+        {
+            "text": "The user prefers lightweight local speech recognition models.",
+            "fact_type": "experience",
+            "chunk_index": 0,
+            "mentioned_at": "2026-09-22T18:34:00Z",
+            "entities": ["Parakeet"],
+        }
+    ],
+}
+buf = io.BytesIO()
+with zipfile.ZipFile(buf, "w") as z:
+    z.writestr("manifest.json", json.dumps({"schema_version": 1, "source_bank_id": "external"}))
+    z.writestr(f"documents/{doc['id']}.json", json.dumps(doc))
+
+submission = await client.bank_transfer.import_bank_transfer(
+    "transfer-py-other",
+    ("import.zip", buf.getvalue()),
+    mode="merge",
+    document_conflict="replace",
+)
+```
+
+### Node.js
+
+```javascript
+import { crc32 } from 'node:zlib';
+
+// Minimal uncompressed ZIP writer (Node has none built in); a library like jszip works too.
+function zip(files) {
+    const locals = [], centrals = [];
+    let offset = 0;
+    for (const [name, text] of Object.entries(files)) {
+        const n = Buffer.from(name), d = Buffer.from(text), crc = crc32(d);
+        const local = Buffer.alloc(30);
+        local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(0x21, 12);
+        local.writeUInt32LE(crc, 14); local.writeUInt32LE(d.length, 18); local.writeUInt32LE(d.length, 22);
+        local.writeUInt16LE(n.length, 26);
+        const central = Buffer.alloc(46);
+        central.writeUInt32LE(0x02014b50, 0); central.writeUInt16LE(20, 4); central.writeUInt16LE(20, 6);
+        central.writeUInt16LE(0x21, 14); central.writeUInt32LE(crc, 16); central.writeUInt32LE(d.length, 20);
+        central.writeUInt32LE(d.length, 24); central.writeUInt16LE(n.length, 28); central.writeUInt32LE(offset, 42);
+        locals.push(local, n, d);
+        centrals.push(central, n);
+        offset += 30 + n.length + d.length;
+    }
+    const dir = Buffer.concat(centrals), end = Buffer.alloc(22);
+    const count = Object.keys(files).length;
+    end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(count, 8); end.writeUInt16LE(count, 10);
+    end.writeUInt32LE(dir.length, 12); end.writeUInt32LE(offset, 16);
+    return Buffer.concat([...locals, dir, end]);
+}
+
+const doc = {
+    id: 'session-2026-09-22',
+    original_text: 'Full original session text...',
+    chunks: [{ chunk_index: 0, chunk_text: 'Caller-defined source region...' }],
+    facts: [{
+        text: 'The user prefers lightweight local speech recognition models.',
+        fact_type: 'experience',
+        chunk_index: 0,
+        mentioned_at: '2026-09-22T18:34:00Z',
+        entities: ['Parakeet'],
+    }],
+};
+const archiveZip = zip({
+    'manifest.json': JSON.stringify({ schema_version: 1, source_bank_id: 'external' }),
+    [`documents/${doc.id}.json`]: JSON.stringify(doc),
+});
+
+const { data: external } = await sdk.importBankTransfer({
+    client: apiClient,
+    path: { bank_id: 'transfer-js-other' },
+    query: { mode: 'merge', document_conflict: 'replace' },
+    body: { file: new Blob([archiveZip]) },
+});
+```
+
+### CLI
+
+```bash
+mkdir -p external/documents
+echo '{"schema_version": 1, "source_bank_id": "external"}' > external/manifest.json
+cat > external/documents/session-2026-09-22.json <<'JSON'
+{
+  "id": "session-2026-09-22",
+  "original_text": "Full original session text...",
+  "chunks": [{"chunk_index": 0, "chunk_text": "Caller-defined source region..."}],
+  "facts": [{
+    "text": "The user prefers lightweight local speech recognition models.",
+    "fact_type": "experience",
+    "chunk_index": 0,
+    "mentioned_at": "2026-09-22T18:34:00Z",
+    "entities": ["Parakeet"]
+  }]
+}
+JSON
+(cd external && zip -qr ../import.zip manifest.json documents)
+
+curl --fail-with-body -H "Authorization: Bearer $API_KEY" -F "file=@import.zip" \
+  "$HINDSIGHT_URL/v1/default/banks/transfer-other-bank/transfer/import?mode=merge&document_conflict=replace"
+```
+
+### Go
+
+```go
+doc := map[string]any{
+	"id":            "session-2026-09-22",
+	"original_text": "Full original session text...",
+	"chunks":        []map[string]any{{"chunk_index": 0, "chunk_text": "Caller-defined source region..."}},
+	"facts": []map[string]any{{
+		"text":         "The user prefers lightweight local speech recognition models.",
+		"fact_type":    "experience",
+		"chunk_index":  0,
+		"mentioned_at": "2026-09-22T18:34:00Z",
+		"entities":     []string{"Parakeet"},
+	}},
+}
+zipPath := filepath.Join(os.TempDir(), "import.zip")
+out, _ := os.Create(zipPath)
+zw := zip.NewWriter(out)
+w, _ := zw.Create("manifest.json")
+json.NewEncoder(w).Encode(map[string]any{"schema_version": 1, "source_bank_id": "external"})
+w, _ = zw.Create("documents/session-2026-09-22.json")
+json.NewEncoder(w).Encode(doc)
+zw.Close()
+out.Close()
+
+file, _ = os.Open(zipPath)
+external, _, err := client.BankTransferAPI.ImportBankTransfer(ctx, "transfer-go-other").
+	File(file).Mode("merge").DocumentConflict("replace").Execute()
+```
+
 ### Clone a bank
 
 `POST /v1/default/banks/{bank_id}/clone` — copy a bank into a new one in a single call, without handling an archive yourself. This is the export and import above run back to back on this instance: nothing is re-extracted and no LLM is called, so the clone's facts are exactly the source's, re-embedded with the same model.
