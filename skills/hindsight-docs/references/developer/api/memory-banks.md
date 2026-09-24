@@ -55,6 +55,28 @@ client.BanksAPI.CreateOrUpdateBank(ctx, "my-bank").
 	CreateBankRequest(hindsight.CreateBankRequest{}).Execute()
 ```
 
+## Aliases {#aliases}
+
+An **alias** is an extra id a bank answers to. Every endpoint that accepts a bank id accepts its aliases too, so an alias is a second way in to the same bank — nothing is copied, moved or duplicated.
+
+This exists because a bank's id is the key on all of its data, so changing it means rewriting every row and cutting all clients over at once (that is [`rename-bank`](../admin-cli.md#rename-bank), and it needs downtime). An alias lets you do the same migration in phases: add the new id, move clients across a few at a time while both ids work, and stop when nothing calls the old one.
+
+```
+POST   /v1/default/banks/{bank_id}/aliases     {"alias": "new-id"}
+GET    /v1/default/banks/{bank_id}/aliases
+DELETE /v1/default/banks/{bank_id}/aliases/{alias}
+```
+
+**What to know:**
+
+- **A bank can have several aliases**, so more than one old id can be retired at a time.
+- **A name is unique across banks and aliases.** Adding one that already names a bank or another alias returns `409`, so an alias can never reach two banks.
+- **An alias never replaces the bank's own id.** The real id keeps working and is what every response reports, including responses to requests made through an alias. Removing a bank's real id is not possible — that is what `rename-bank` is for.
+- **Deleting an alias only closes that door.** The bank and its memories are untouched, and callers still using the removed id get exactly what they got before it existed.
+- **Deleting a bank removes its aliases**, freeing those names for reuse.
+- **Aliases are not carried by export, import or clone.** They describe which ids reach a bank on *this* deployment, so a copy does not inherit them — add them to the target deliberately.
+- **A change takes a few seconds to reach every API replica.** See [`HINDSIGHT_API_BANK_ALIAS_CACHE_TTL_SECONDS`](../configuration.md#bank-alias-cache).
+
 ## Bank Configuration
 
 Each memory bank can be configured independently per operation. Configuration can be set via the [bank config API](#updating-configuration), the Control Plane UI, or [server-wide environment variables](../configuration.md).

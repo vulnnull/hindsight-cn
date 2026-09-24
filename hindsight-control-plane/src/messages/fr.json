@@ -57,7 +57,8 @@
       "switchTitle": "Changer de banque de mémoire",
       "returnTo": "Retourner à {bank}",
       "copyName": "Copier le nom",
-      "copied": "Copié dans le presse-papiers"
+      "copied": "Copié dans le presse-papiers",
+      "viaAlias": "via {aliases}"
     },
     "viewOnGitHub": "Voir sur GitHub"
   },
@@ -251,6 +252,20 @@
     "create": "Créer",
     "save": "Enregistrer"
   },
+  "bankAliases": {
+    "title": "Alias",
+    "description": "Identifiants supplémentaires menant aussi à <name>{bankId}</name>, pour basculer les clients vers un nouvel identifiant sans interruption.",
+    "placeholder": "Nouvel identifiant",
+    "add": "Ajouter",
+    "removeAria": "Supprimer l'alias {alias}",
+    "removeTitle": "Supprimer l'alias {alias} ?",
+    "removeConfirm": "Toute application encore connectée via {alias} cessera immédiatement de fonctionner. Seul cet identifiant disparaît : {bankId} et ses souvenirs restent intacts, et vous pouvez rajouter l'alias.",
+    "remove": "Supprimer l'alias",
+    "cancel": "Annuler",
+    "loadFailed": "Échec du chargement des alias",
+    "addFailed": "Échec de l'ajout de l'alias",
+    "removeFailed": "Échec de la suppression de l'alias"
+  },
   "bankStats": {
     "memoryStore": "Mémoire",
     "memories": "Souvenirs",
@@ -427,8 +442,8 @@
     "empathyDescription": "Importance accordée au contexte émotionnel",
     "empathyLowLabel": "Détaché",
     "empathyHighLabel": "Empathique",
-    "mcpToolsTitle": "Outils MCP",
-    "mcpToolsDescription": "Restreindre les outils MCP exposés aux agents par cette banque",
+    "clientsTitle": "Clients",
+    "clientsDescription": "Ce que les applications et les agents peuvent atteindre sur cette banque.",
     "mcpFailedToSave": "Échec de l'enregistrement des paramètres MCP",
     "auditEnabledLabel": "Activer la journalisation d'audit",
     "auditEnabledDescription": "Enregistrer les opérations retain, recall et reflect de cette banque. Remplace la valeur par défaut du serveur pour cette banque uniquement.",
@@ -578,7 +593,7 @@
     "memoryDefenseEnterpriseFeatureSizeAnomaly": "Anomalie de taille : rejette les charges utiles anormalement volumineuses",
     "memoryDefenseEnterpriseFeatureProtectedKeys": "Espaces de noms de tags protégés : applique des tags d'identité immuables",
     "memoryDefenseEnterpriseCta": "Demander une démo",
-    "recallTitle": "Pipeline de rappel",
+    "recallTitle": "Rappel",
     "recallDescription": "Les étapes de récupération exécutées lors du rappel pour cette banque",
     "recallServerDefault": "Valeur par défaut du serveur",
     "recallFailedToSave": "Échec de l'enregistrement des paramètres du pipeline de rappel",
@@ -1935,6 +1950,11 @@
         "fetch": "Impossible de récupérer la configuration de la banque",
         "update": "Impossible de mettre à jour la configuration de la banque",
         "reset": "Impossible de réinitialiser la configuration de la banque"
+      },
+      "bankAliases": {
+        "list": "Échec de la liste des alias de la banque",
+        "create": "Échec de la création de l'alias de la banque",
+        "delete": "Échec de la suppression de l'alias de la banque"
       },
       "memories": {
         "list": "Impossible de lister les unités de mémoire",

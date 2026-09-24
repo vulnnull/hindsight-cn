@@ -618,6 +618,7 @@ from .mental_model_refresh import (
 from .multi_llm import MultiLLMProvider
 from .query_analyzer import QueryAnalyzer
 from .reflect import (
+    DEFAULT_MENTAL_MODELS_READ_MAX_TOKENS,
     DEFAULT_OBSERVATIONS_TOOL_MAX_TOKENS,
     ReflectNoAnswerError,
     ReflectToolExecutionError,
@@ -632,7 +633,13 @@ from .reflect.retractions import (
     prune_based_on,
 )
 from .reflect.structured_doc import StructuredDocument
-from .reflect.tools import tool_expand, tool_recall, tool_search_mental_models, tool_search_observations
+from .reflect.tools import (
+    tool_expand,
+    tool_read_mental_models,
+    tool_recall,
+    tool_search_mental_models,
+    tool_search_observations,
+)
 from .response_models import (
     VALID_RECALL_FACT_TYPES,
     ConsolidationStrategiesPreview,
@@ -2963,10 +2970,20 @@ class MemoryEngine(MemoryEngineInterface):
         if request_context.mcp_authenticated:
             return _current_schema.get()
 
+        # Already authenticated on this request: reuse the schema rather than asking
+        # the tenant extension again. One request can reach the engine through
+        # several entry points (alias resolution on the route class, `precheck_for`,
+        # then the endpoint's own call), and each extra round trip is a real
+        # identity lookup for a caller that was already identified.
+        if request_context.authenticated_schema is not None:
+            _current_schema.set(request_context.authenticated_schema)
+            return request_context.authenticated_schema
+
         # Authenticate through tenant extension (always set, may be default no-auth extension)
         tenant_context = await self._tenant_extension.authenticate(request_context)
 
         _current_schema.set(tenant_context.schema_name)
+        request_context.authenticated_schema = tenant_context.schema_name
         return tenant_context.schema_name
 
     async def _handle_import_documents(self, task_dict: dict[str, Any]):
@@ -15372,6 +15389,15 @@ class MemoryEngine(MemoryEngineInterface):
                     last_memory_write_at=last_memory_write_at,
                 )
 
+        async def read_mental_models_fn(page_ids: list[str], max_tokens: int) -> dict[str, Any]:
+            # Honours the same exclusion the search does: a refresh excludes the page
+            # it is regenerating, and a read that ignored that would let the page be
+            # rebuilt from its own previous text.
+            excluded = set(exclude_mental_model_ids or [])
+            wanted = [pid for pid in page_ids if pid not in excluded]
+            async with backend.acquire() as conn:
+                return await tool_read_mental_models(conn, bank_id, wanted, max_tokens=max_tokens)
+
         # Get reflect source facts config (hierarchical: env → tenant → bank)
         config_dict = await self._config_resolver.get_bank_config(bank_id, request_context)
         reflect_source_facts_max_tokens = config_dict.get(
@@ -15438,6 +15464,7 @@ class MemoryEngine(MemoryEngineInterface):
             recall_max_tokens=effective_recall_max_tokens,
             recall_chunk_max_tokens=effective_recall_chunks_max_tokens,
             observations_max_tokens=effective_observations_max_tokens,
+            mental_models_read_max_tokens=DEFAULT_MENTAL_MODELS_READ_MAX_TOKENS,
         )
 
         async def search_observations_fn(q: str, max_tokens: int) -> dict[str, Any]:
@@ -15547,6 +15574,7 @@ class MemoryEngine(MemoryEngineInterface):
                         query=query,
                         bank_profile=profile,
                         search_mental_models_fn=search_mental_models_fn,
+                        read_mental_models_fn=read_mental_models_fn,
                         search_observations_fn=search_observations_fn,
                         recall_fn=recall_fn,
                         expand_fn=expand_fn,
@@ -15664,6 +15692,17 @@ class MemoryEngine(MemoryEngineInterface):
             )
             based_on["mental-models"] = []
             seen_model_ids: set[str] = set()
+            # A search now returns the best-ranked page whole and the others as a
+            # snippet, so a citation built from the search output alone would carry
+            # the truncated text (or, for the pages the model then read, nothing at
+            # all). Collect what `read_mental_models` returned first and prefer it.
+            read_contents: dict[str, str] = {
+                str(read_model["id"]): read_model.get("content", "")
+                for trace_call in agent_result.tool_trace
+                if trace_call.tool == "read_mental_models"
+                for read_model in trace_call.output.get("mental_models", [])
+                if read_model.get("id")
+            }
             for tc in agent_result.tool_trace:
                 if tc.tool == "get_mental_model":
                     # Single model lookup (with full details)
@@ -15699,7 +15738,9 @@ class MemoryEngine(MemoryEngineInterface):
                             seen_model_ids.add(model_id)
                             # Add to based_on as MemoryFact with type "mental-models"
                             model_name = model.get("name", "")
-                            model_content = model.get("content", "")
+                            model_content = (
+                                read_contents.get(model_id) or model.get("content") or model.get("snippet", "")
+                            )
                             based_on["mental-models"].append(
                                 MemoryFact(
                                     id=model_id,
@@ -19822,6 +19863,12 @@ class MemoryEngine(MemoryEngineInterface):
         moving = not isinstance(parent_id, KeepParentSentinel)
         new_parent: str | None = parent_id if not isinstance(parent_id, KeepParentSentinel) else None
         page_options = source_query is not None or tags is not None or max_tokens is not None or trigger is not None
+        if name is None and not moving and not page_options:
+            # Nothing to change — so there is no write operation to authorize, and
+            # falling through would read the node out of the bank and return its
+            # metadata to a caller the validator never got to judge. A body of
+            # explicit nulls ("not supplied", per the contract above) lands here.
+            raise ValueError("Provide name, parent_id, source_query, tags, max_tokens, and/or trigger to update")
         if self._operation_validator and not _nested_operation_authorized.get():
             from hindsight_api.extensions import BankWriteContext, BankWriteOperation
 
@@ -20395,6 +20442,129 @@ class MemoryEngine(MemoryEngineInterface):
             result["structured_content"] = structured_content
 
         return result
+
+    # =========================================================================
+    # Bank aliases - extra ids a bank answers to
+    # =========================================================================
+
+    async def resolve_bank_alias(self, bank_id: str, *, request_context: "RequestContext") -> str:
+        """Return the canonical id for ``bank_id``, which may be one of a bank's aliases.
+
+        The one entry point for alias resolution, called by the HTTP route class and
+        the MCP tools before either hands the id onward. It lives here rather than in
+        those layers because the lookup is a database read, and because it has to run
+        after ``_authenticate_tenant`` — aliases are per-schema, and the schema comes
+        from authenticating the caller.
+
+        An id that names a real bank, or names nothing at all, comes back unchanged,
+        so this is safe to call on every request.
+
+        Args:
+            bank_id: The id the caller used, possibly an alias
+            request_context: Request context for authentication
+
+        Returns:
+            The bank's own id.
+        """
+        await self._authenticate_tenant(request_context)
+        from . import bank_aliases
+
+        return await bank_aliases.resolve(await self._get_backend(), bank_id)
+
+    async def list_bank_aliases(
+        self,
+        bank_id: str,
+        *,
+        request_context: "RequestContext",
+    ) -> list[str]:
+        """Every extra id this bank answers to, oldest first.
+
+        Args:
+            bank_id: Bank identifier (may itself have been reached via an alias;
+                by this point it is always the canonical one)
+            request_context: Request context for authentication
+
+        Returns:
+            The bank's aliases, which is empty for a bank that has none.
+        """
+        await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext, BankReadOperation
+
+            ctx = BankReadContext(
+                bank_id=bank_id, operation=BankReadOperation.LIST_BANK_ALIASES, request_context=request_context
+            )
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
+        await self._require_bank_exists(bank_id)
+        from . import bank_aliases
+
+        return await bank_aliases.list_aliases(await self._get_backend(), bank_id)
+
+    async def create_bank_alias(
+        self,
+        bank_id: str,
+        alias: str,
+        *,
+        request_context: "RequestContext",
+    ) -> None:
+        """Make ``alias`` another id this bank answers to.
+
+        Its own write operation rather than part of ``UPDATE_BANK``: this decides
+        which bank a given id reaches, so an extension that grants bank edits must
+        not thereby grant re-routing.
+
+        Args:
+            bank_id: Bank identifier
+            alias: The extra id. Same rules as a bank id, and must not already be
+                taken by a bank or another alias.
+            request_context: Request context for authentication
+
+        Raises:
+            OperationValidationError: 409 when the name is taken, 400 when it is
+                not a usable id.
+        """
+        await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext, BankWriteOperation
+
+            ctx = BankWriteContext(
+                bank_id=bank_id, operation=BankWriteOperation.CREATE_BANK_ALIAS, request_context=request_context
+            )
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
+        await self._require_bank_exists(bank_id)
+        from . import bank_aliases
+
+        await bank_aliases.create_alias(await self._get_backend(), bank_id, alias)
+
+    async def delete_bank_alias(
+        self,
+        bank_id: str,
+        alias: str,
+        *,
+        request_context: "RequestContext",
+    ) -> bool:
+        """Stop ``alias`` reaching this bank. The bank and its memories are untouched.
+
+        Args:
+            bank_id: Bank identifier
+            alias: The alias to detach
+            request_context: Request context for authentication
+
+        Returns:
+            False when the bank has no such alias, which the caller turns into a 404.
+        """
+        await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext, BankWriteOperation
+
+            ctx = BankWriteContext(
+                bank_id=bank_id, operation=BankWriteOperation.DELETE_BANK_ALIAS, request_context=request_context
+            )
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
+        await self._require_bank_exists(bank_id)
+        from . import bank_aliases
+
+        return await bank_aliases.delete_alias(await self._get_backend(), bank_id, alias)
 
     # =========================================================================
     # Directives - Hard rules injected into prompts

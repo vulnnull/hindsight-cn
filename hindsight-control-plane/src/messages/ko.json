@@ -57,7 +57,8 @@
       "switchTitle": "메모리 뱅크 전환",
       "returnTo": "{bank}로 돌아가기",
       "copyName": "이름 복사",
-      "copied": "클립보드에 복사됨"
+      "copied": "클립보드에 복사됨",
+      "viaAlias": "{aliases} 경유"
     },
     "viewOnGitHub": "GitHub에서 보기"
   },
@@ -251,6 +252,20 @@
     "create": "생성",
     "save": "저장"
   },
+  "bankAliases": {
+    "title": "별칭",
+    "description": "<name>{bankId}</name>에 함께 연결되는 추가 ID로, 중단 없이 호출자를 새 ID로 옮길 수 있습니다.",
+    "placeholder": "새 ID",
+    "add": "추가",
+    "removeAria": "별칭 {alias} 제거",
+    "removeTitle": "별칭 {alias}을(를) 제거할까요?",
+    "removeConfirm": "{alias}을(를) 통해 연결된 모든 애플리케이션이 즉시 동작을 멈춥니다. 사라지는 것은 이 ID뿐이며, {bankId}과(와) 그 기억은 그대로 남고 별칭은 다시 추가할 수 있습니다.",
+    "remove": "별칭 제거",
+    "cancel": "취소",
+    "loadFailed": "별칭을 불러오지 못했습니다",
+    "addFailed": "별칭을 추가하지 못했습니다",
+    "removeFailed": "별칭을 제거하지 못했습니다"
+  },
   "bankStats": {
     "memoryStore": "메모리 저장소",
     "memories": "메모리",
@@ -427,8 +442,8 @@
     "empathyDescription": "감정적 맥락에 얼마나 비중을 둘지",
     "empathyLowLabel": "분리됨",
     "empathyHighLabel": "공감적",
-    "mcpToolsTitle": "MCP 도구",
-    "mcpToolsDescription": "이 뱅크가 에이전트에 노출하는 MCP 도구 제한",
+    "clientsTitle": "클라이언트",
+    "clientsDescription": "앱과 에이전트가 이 뱅크에서 이용할 수 있는 것입니다.",
     "mcpFailedToSave": "MCP 설정 저장에 실패했습니다",
     "auditEnabledLabel": "감사 로깅 활성화",
     "auditEnabledDescription": "이 뱅크의 retain, recall, reflect 작업을 기록합니다. 이 뱅크에만 서버 기본값을 재정의합니다.",
@@ -578,7 +593,7 @@
     "memoryDefenseEnterpriseFeatureSizeAnomaly": "크기 이상: 의심스럽게 큰 페이로드 거부",
     "memoryDefenseEnterpriseFeatureProtectedKeys": "보호된 태그 네임스페이스: 변경 불가능한 ID 태그 적용",
     "memoryDefenseEnterpriseCta": "데모 요청",
-    "recallTitle": "리콜 파이프라인",
+    "recallTitle": "리콜",
     "recallDescription": "이 뱅크의 리콜 시 실행되는 검색 단계",
     "recallServerDefault": "서버 기본값",
     "recallFailedToSave": "리콜 파이프라인 설정을 저장하지 못했습니다",
@@ -1935,6 +1950,11 @@
         "fetch": "뱅크 구성을 가져오지 못했습니다",
         "update": "뱅크 구성을 업데이트하지 못했습니다",
         "reset": "뱅크 구성을 재설정하지 못했습니다"
+      },
+      "bankAliases": {
+        "list": "뱅크 별칭 목록을 가져오지 못했습니다",
+        "create": "뱅크 별칭을 만들지 못했습니다",
+        "delete": "뱅크 별칭을 삭제하지 못했습니다"
       },
       "memories": {
         "list": "메모리 유닛 목록을 가져오지 못했습니다",

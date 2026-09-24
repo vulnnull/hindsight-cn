@@ -32,6 +32,9 @@ import type {
   CloneBankData,
   CloneBankErrors,
   CloneBankResponses,
+  CreateBankAliasData,
+  CreateBankAliasErrors,
+  CreateBankAliasResponses,
   CreateDirectiveData,
   CreateDirectiveErrors,
   CreateDirectiveResponses,
@@ -50,6 +53,9 @@ import type {
   CreateWebhookData,
   CreateWebhookErrors,
   CreateWebhookResponses,
+  DeleteBankAliasData,
+  DeleteBankAliasErrors,
+  DeleteBankAliasResponses,
   DeleteBankData,
   DeleteBankErrors,
   DeleteBankResponses,
@@ -174,6 +180,9 @@ import type {
   ListAuditLogsData,
   ListAuditLogsErrors,
   ListAuditLogsResponses,
+  ListBankAliasesData,
+  ListBankAliasesErrors,
+  ListBankAliasesResponses,
   ListBanksData,
   ListBanksErrors,
   ListBanksResponses,
@@ -1233,6 +1242,51 @@ export const addBankBackground = <ThrowOnError extends boolean = false>(
       "Content-Type": "application/json",
       ...options.headers,
     },
+  });
+
+/**
+ * List the bank's aliases
+ *
+ * Extra bank ids that reach this bank. Every endpoint accepts an alias wherever it accepts a bank id, so callers can be moved onto a new id in phases while the old one keeps working.
+ */
+export const listBankAliases = <ThrowOnError extends boolean = false>(
+  options: Options<ListBankAliasesData, ThrowOnError>
+) =>
+  (options.client ?? client).get<ListBankAliasesResponses, ListBankAliasesErrors, ThrowOnError>({
+    url: "/v1/default/banks/{bank_id}/aliases",
+    ...options,
+  });
+
+/**
+ * Add an alias to the bank
+ *
+ * Give the bank another id to answer to. Nothing is copied or moved: the bank keeps its own id and all of its data, and the alias is only a second way to reach it — which is what makes it a zero-downtime alternative to renaming.
+ *
+ * Returns 409 if the name is already a bank or another alias.
+ */
+export const createBankAlias = <ThrowOnError extends boolean = false>(
+  options: Options<CreateBankAliasData, ThrowOnError>
+) =>
+  (options.client ?? client).post<CreateBankAliasResponses, CreateBankAliasErrors, ThrowOnError>({
+    url: "/v1/default/banks/{bank_id}/aliases",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Remove an alias from the bank
+ *
+ * Stop an id reaching this bank. The bank and its memories are untouched; only the extra name goes away, and callers still using it get the same 404 (or new empty bank) they would have got before it existed.
+ */
+export const deleteBankAlias = <ThrowOnError extends boolean = false>(
+  options: Options<DeleteBankAliasData, ThrowOnError>
+) =>
+  (options.client ?? client).delete<DeleteBankAliasResponses, DeleteBankAliasErrors, ThrowOnError>({
+    url: "/v1/default/banks/{bank_id}/aliases/{alias}",
+    ...options,
   });
 
 /**

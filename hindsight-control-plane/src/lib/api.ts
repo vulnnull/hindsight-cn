@@ -1331,6 +1331,37 @@ export class ControlPlaneClient {
   }
 
   /**
+   * List the extra ids this bank also answers to.
+   *
+   * `bank_id` in the response is the bank's own id, which an alias never
+   * replaces — so a request made *through* an alias still reports the real one.
+   */
+  async listBankAliases(bankId: string) {
+    return this.fetchApi<{ bank_id: string; aliases: string[] }>(bankApi(bankId, "/aliases"));
+  }
+
+  /**
+   * Add an id that also reaches this bank. Rejected with 409 if the name is
+   * already a bank or another alias.
+   */
+  async createBankAlias(bankId: string, alias: string) {
+    return this.fetchApi<{ bank_id: string; aliases: string[] }>(bankApi(bankId, "/aliases"), {
+      method: "POST",
+      body: JSON.stringify({ alias }),
+    });
+  }
+
+  /**
+   * Stop an id reaching this bank. The bank and its memories are untouched.
+   */
+  async deleteBankAlias(bankId: string, alias: string) {
+    return this.fetchApi<{ bank_id: string; aliases: string[] }>(
+      bankApi(bankId, `/aliases/${encodeURIComponent(alias)}`),
+      { method: "DELETE" }
+    );
+  }
+
+  /**
    * List directives for a bank
    */
   async listDirectives(

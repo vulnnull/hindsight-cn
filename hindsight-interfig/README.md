@@ -39,15 +39,35 @@ Figures wider than their container shrink to fit (down to half size, then scroll
 
 The docs site sets the `--fig-*` colors for its light and dark themes in `hindsight-docs/src/css/custom.css` (search for `interfig`).
 
+## One animated SVG (GitHub, PRs, blog posts)
+
+`npm run svg -- <figure|spec.json> [out.svg]` renders a figure as a single self-contained animated SVG:
+no scripts, no fonts to fetch, ~50–170 kB. GitHub renders it in a README, a PR or an issue — `<video>`
+only plays from GitHub's own asset host, and a GIF of the same figure is 5–10x bigger and blurry.
+
+```bash
+npm run svg -- what-hindsight-does            # a figure from figures/
+npm run svg -- - out.svg < my-figure.json     # a spec on stdin: nothing is left on disk
+npm run svg -- --spec out.svg                 # print the spec the SVG carries, to edit and re-render
+```
+
+It reads the same spec and the same layout code as the React player, so the two cannot drift. What the
+SVG gives up: no hover, no tabs, no pause — every step plays in one loop — and a `MiniGraph` becomes
+its links as text. Use it for GitHub and posts; the docs site keeps the interactive figure.
+
+The `/figure` skill (`.claude/skills/figure/`) wraps this for agents: write a JSON spec, run the
+command, drop the SVG into a PR, an issue or a blog post.
+
 ## Clips for social
 
 `npm run export` records every figure, one clip per step, into `~/Downloads/interfig-clips` (outside the repo —
-they are throwaway social assets; `--out <dir>` picks another folder) as `<figure>-<step>.mp4` — H.264, sized to the figure, the step label and narration kept, the buttons hidden.
+they are throwaway social assets; `--out <dir>` picks another folder) as `<figure>-<step>.mp4` — H.264, sized to the figure, the step label and narration kept, the buttons hidden. Beside each clip it writes a `.md` of the same name holding that step's narration as bullets, ready to paste into a post.
 
 ```bash
 npm run export                                  # everything
 npm run export -- what-hindsight-does tempr     # only these figures
 npm run export -- --2x                          # play at 2x: half as long, same frames
+npm run export -- --square                      # pad to 1:1, for feeds that crop to a square
 npm run export -- --dark --gif                  # dark theme, and GIFs beside the MP4s
 ```
 

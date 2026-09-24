@@ -174,6 +174,10 @@ _KNOWLEDGE_PAGE: dict[str, Any] = {
 def mock_memory():
     """Create a mock MemoryEngine with all MCP tool methods."""
     memory = MagicMock()
+    # Tools given an explicit `bank_id=` resolve it through the engine (the session
+    # bank is resolved at the transport edge instead, so most tools never call this).
+    # A bank reached by its own id resolves to itself.
+    memory.resolve_bank_alias = AsyncMock(side_effect=lambda bank_id, **_: bank_id)
 
     # Mental model methods — simulate engine detail filtering
     async def _list_mental_models(**kwargs):
@@ -2360,6 +2364,7 @@ class TestKnowledgeBaseTools:
 def mock_memory_with_resolver():
     """Create a mock MemoryEngine with config resolver for bank filtering tests."""
     memory = MagicMock()
+    memory.resolve_bank_alias = AsyncMock(side_effect=lambda bank_id, **_: bank_id)
     memory.retain_batch_async = AsyncMock()
     memory.recall_async = AsyncMock(
         return_value=MagicMock(

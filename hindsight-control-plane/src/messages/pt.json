@@ -57,7 +57,8 @@
       "switchTitle": "Trocar banco de memória",
       "returnTo": "Voltar para {bank}",
       "copyName": "Copiar nome",
-      "copied": "Copiado para a área de transferência"
+      "copied": "Copiado para a área de transferência",
+      "viaAlias": "via {aliases}"
     },
     "viewOnGitHub": "Ver no GitHub"
   },
@@ -251,6 +252,20 @@
     "create": "Criar",
     "save": "Salvar"
   },
+  "bankAliases": {
+    "title": "Aliases",
+    "description": "IDs adicionais que também chegam a <name>{bankId}</name>, para migrar chamadores para um ID novo sem indisponibilidade.",
+    "placeholder": "Novo ID",
+    "add": "Adicionar",
+    "removeAria": "Remover o alias {alias}",
+    "removeTitle": "Remover o alias {alias}?",
+    "removeConfirm": "Todos os aplicativos ainda conectados por {alias} vão parar de funcionar imediatamente. Só este ID desaparece — {bankId} e suas memórias ficam intactos, e você pode adicionar o alias de volta.",
+    "remove": "Remover alias",
+    "cancel": "Cancelar",
+    "loadFailed": "Falha ao carregar os aliases",
+    "addFailed": "Falha ao adicionar o alias",
+    "removeFailed": "Falha ao remover o alias"
+  },
   "bankStats": {
     "memoryStore": "Armazenamento de memória",
     "memories": "Memórias",
@@ -427,8 +442,8 @@
     "empathyDescription": "O quanto ponderar o contexto emocional",
     "empathyLowLabel": "Distante",
     "empathyHighLabel": "Empático",
-    "mcpToolsTitle": "Ferramentas MCP",
-    "mcpToolsDescription": "Restrinja quais ferramentas MCP este banco expõe aos agentes",
+    "clientsTitle": "Clientes",
+    "clientsDescription": "O que aplicativos e agentes podem alcançar neste banco.",
     "mcpFailedToSave": "Falha ao salvar configurações MCP",
     "auditEnabledLabel": "Ativar registo de auditoria",
     "auditEnabledDescription": "Registar as operações de retain, recall e reflect deste banco. Substitui a predefinição do servidor apenas para este banco.",
@@ -578,7 +593,7 @@
     "memoryDefenseEnterpriseFeatureSizeAnomaly": "Anomalia de tamanho: rejeita cargas suspeitamente grandes",
     "memoryDefenseEnterpriseFeatureProtectedKeys": "Namespaces de tags protegidos: aplica tags de identidade imutáveis",
     "memoryDefenseEnterpriseCta": "Solicitar uma demonstração",
-    "recallTitle": "Pipeline de recall",
+    "recallTitle": "Recall",
     "recallDescription": "Quais etapas de recuperação são executadas durante o recall neste banco",
     "recallServerDefault": "Padrão do servidor",
     "recallFailedToSave": "Falha ao salvar as configurações do pipeline de recall",
@@ -1935,6 +1950,11 @@
         "fetch": "Falha ao buscar configuração do banco",
         "update": "Falha ao atualizar configuração do banco",
         "reset": "Falha ao redefinir configuração do banco"
+      },
+      "bankAliases": {
+        "list": "Falha ao listar os aliases do banco",
+        "create": "Falha ao criar o alias do banco",
+        "delete": "Falha ao excluir o alias do banco"
       },
       "memories": {
         "list": "Falha ao listar unidades de memória",

@@ -16,6 +16,8 @@ export interface BankInfo {
   fact_count: number;
   last_document_at: string | null;
   last_write_at: string | null;
+  /** Aliases that matched the active search — why this bank is in the results. */
+  matched_aliases: string[];
 }
 
 interface BankContextType {
@@ -52,6 +54,7 @@ function toBankInfo(bank: any): BankInfo {
     fact_count: bank.fact_count ?? 0,
     last_document_at: bank.last_document_at ?? null,
     last_write_at: bank.last_write_at ?? null,
+    matched_aliases: bank.matched_aliases ?? [],
   };
 }
 

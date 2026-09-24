@@ -1249,6 +1249,50 @@ impl ApiClient {
         })
     }
 
+    // --- Bank Alias Methods ---
+
+    pub fn list_bank_aliases(&self, bank_id: &str, _verbose: bool) -> Result<types::BankAliasesResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.list_bank_aliases(bank_id, None).humanized().await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    pub fn create_bank_alias(
+        &self,
+        bank_id: &str,
+        alias: &str,
+        _verbose: bool,
+    ) -> Result<types::BankAliasesResponse> {
+        self.runtime.block_on(async {
+            let request = types::CreateBankAliasRequest {
+                alias: alias.to_string(),
+            };
+            let response = self
+                .client
+                .create_bank_alias(bank_id, None, &request)
+                .humanized()
+                .await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    pub fn delete_bank_alias(
+        &self,
+        bank_id: &str,
+        alias: &str,
+        _verbose: bool,
+    ) -> Result<types::BankAliasesResponse> {
+        self.runtime.block_on(async {
+            let response = self
+                .client
+                .delete_bank_alias(bank_id, alias, None)
+                .humanized()
+                .await?;
+            Ok(response.into_inner())
+        })
+    }
+
     // --- Consolidation Methods ---
 
     pub fn trigger_consolidation(

@@ -79,6 +79,7 @@ import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { AlertCircle, Plus, Trash2, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
+import { IdChip } from "@/components/ui/facet-chip";
 import { Spinner } from "@/components/ui/spinner";
 import { Card } from "@/components/ui/card";
 
@@ -1244,13 +1245,14 @@ export function BankConfigView() {
 
         {/* MCP Tools Section */}
         <ConfigSection
-          title={t("mcpToolsTitle")}
-          description={t("mcpToolsDescription")}
+          title={t("clientsTitle")}
+          description={t("clientsDescription")}
           error={mcpError}
           dirty={mcpDirty}
           saving={mcpSaving}
           onSave={saveMCP}
         >
+          <BankAliasRows bankId={bankId} />
           <FieldRow label={t("restrictToolsLabel")} description={t("restrictToolsDescription")}>
             <div className="flex items-center gap-2 justify-end">
               <Switch
@@ -1888,7 +1890,8 @@ function ConfigSection({
   error: string | null;
   dirty: boolean;
   saving: boolean;
-  onSave: () => void;
+  /** Omit for a section whose controls apply immediately — it then has no Save footer. */
+  onSave?: () => void;
   /** Rendered opposite the heading — used by Retain for the prompt tester. */
   action?: ReactNode;
 }) {
@@ -1912,20 +1915,158 @@ function ConfigSection({
             </Alert>
           </div>
         )}
-        <div className="px-6 py-4 flex justify-end border-t border-border/40">
-          <Button size="sm" disabled={!dirty || saving} onClick={onSave}>
-            {saving ? (
-              <>
-                <Spinner size="sm" className="mr-2" />
-                {t("saving")}
-              </>
-            ) : (
-              t("saveChanges")
-            )}
-          </Button>
-        </div>
+        {onSave && (
+          <div className="px-6 py-4 flex justify-end border-t border-border/40">
+            <Button size="sm" disabled={!dirty || saving} onClick={onSave}>
+              {saving ? (
+                <>
+                  <Spinner size="sm" className="mr-2" />
+                  {t("saving")}
+                </>
+              ) : (
+                t("saveChanges")
+              )}
+            </Button>
+          </div>
+        )}
       </Card>
     </section>
+  );
+}
+
+// ─── BankAliasRows (the ids that reach this bank) ────────────────────────────
+
+/**
+ * The bank's aliases — extra ids that reach it, beside its own.
+ *
+ * Rows rather than a section of its own: it lives inside Access, next to the MCP
+ * tool list, because both answer "how do clients get at this bank" — one is which
+ * ids reach it, the other is what they may call once they do.
+ *
+ * Unlike its neighbours these rows are NOT part of the section's form: each add
+ * and remove is its own request, applied immediately, so the section's Save
+ * button neither covers nor waits for them. Its own errors therefore render here
+ * instead of in the section's error slot.
+ */
+function BankAliasRows({ bankId }: { bankId: string | null }) {
+  const t = useTranslations("bankAliases");
+  const [aliases, setAliases] = useState<string[]>([]);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Removal is the one destructive action here: the id stops routing the moment
+  // it commits, so anything still calling it starts failing.
+  const [pendingRemove, setPendingRemove] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!bankId) return;
+    client
+      .listBankAliases(bankId)
+      .then((d) => setAliases(d.aliases ?? []))
+      .catch((e) => {
+        console.error("Failed to load bank aliases:", e);
+        setError(t("loadFailed"));
+      });
+  }, [bankId, t]);
+
+  const add = async () => {
+    const alias = draft.trim();
+    if (!alias || !bankId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      // The response carries the whole list, so the chips show the server's view
+      // rather than a locally appended guess.
+      setAliases((await client.createBankAlias(bankId, alias)).aliases ?? []);
+      setDraft("");
+    } catch (e) {
+      // Usually the name is already taken (409); that message names it.
+      setError(e instanceof Error ? e.message : t("addFailed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (alias: string) => {
+    if (!bankId) return;
+    setError(null);
+    try {
+      setAliases((await client.deleteBankAlias(bankId, alias)).aliases ?? []);
+    } catch (e) {
+      console.error("Failed to remove bank alias:", e);
+      setError(t("removeFailed"));
+    } finally {
+      setPendingRemove(null);
+    }
+  };
+
+  if (!bankId) return null;
+
+  return (
+    <>
+      <FieldRow
+        label={t("title")}
+        description={t.rich("description", {
+          bankId,
+          // Italic, not the code style used for the aliases themselves: this one
+          // names the bank you are already looking at, rather than an id to type.
+          name: (chunks) => <em>{chunks}</em>,
+        })}
+      >
+        <div className="flex gap-2">
+          <Input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                add();
+              }
+            }}
+            placeholder={t("placeholder")}
+            className="h-8 text-sm"
+            disabled={busy}
+          />
+          <Button size="sm" variant="outline" onClick={add} disabled={busy || !draft.trim()}>
+            {t("add")}
+          </Button>
+        </div>
+      </FieldRow>
+      {(aliases.length > 0 || error) && (
+        <div className="px-6 py-3 flex flex-wrap items-center gap-1.5">
+          {aliases.map((alias) => (
+            <IdChip
+              key={alias}
+              id={alias}
+              size="xs"
+              onRemove={() => setPendingRemove(alias)}
+              removeLabel={t("removeAria", { alias })}
+            />
+          ))}
+          {error && <p className="text-xs text-destructive">{error}</p>}
+        </div>
+      )}
+
+      <AlertDialog
+        open={pendingRemove !== null}
+        onOpenChange={(open) => !open && setPendingRemove(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("removeTitle", { alias: pendingRemove ?? "" })}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("removeConfirm", { alias: pendingRemove ?? "", bankId })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => pendingRemove && remove(pendingRemove)}>
+              {t("remove")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
 

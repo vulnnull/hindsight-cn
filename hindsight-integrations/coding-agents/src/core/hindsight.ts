@@ -175,6 +175,35 @@ export class KnowledgePagesUnavailableError extends Error {
   }
 }
 
+/**
+ * Does this 404 mean the server has no knowledge-base API, rather than "that bank does not exist yet"?
+ *
+ * The two are indistinguishable by status, and conflating them latched the knowledge-page capability
+ * off for the whole process on the FIRST session in a new bank — the bank is minted by the first
+ * retain, so a session-start page read always precedes it (#4607).
+ *
+ * It matches the ENDPOINT-missing shape (FastAPI answers an unrouted path with exactly
+ * `{"detail":"Not Found"}`), deliberately NOT the bank-missing wording. Matching the bank error
+ * instead would hang the fix on a message the API is free to rephrase, and the day it did, #4607
+ * would come back with no test failing. This way a reworded bank error simply fails to match: the
+ * capability stays unknown and the next call retries, which is the safe direction to be wrong in.
+ */
+async function isEndpointMissing(r: Response): Promise<boolean> {
+  try {
+    // Consumes the body, which is safe: every 404 caller below returns without reading it.
+    const j = (await r.json()) as { detail?: unknown };
+    return (
+      String(j?.detail ?? "")
+        .trim()
+        .toLowerCase() === "not found"
+    );
+  } catch {
+    // No JSON body at all (a proxy's HTML 404, a bare gateway response). Our API always answers
+    // bank-not-found in JSON, so this is not it — latch, as this code did before the fix.
+    return true;
+  }
+}
+
 const TERMINAL = new Set(["completed", "failed", "cancelled", "error"]);
 
 /** Default cap on concurrent retain-related requests; configurable via `maxParallelRetains`. */
@@ -653,16 +682,30 @@ export class HindsightClient {
   }
 
   /**
+   * Latch `knowledgePagesSupported = false` iff this response really means the endpoint is absent.
+   * Returns whether it latched. A bank-not-found 404 is NOT a capability verdict — it is the
+   * expected answer before the bank's first retain — so it must never cache a negative (#4607).
+   *
+   * Only 404 is tested: `req` throws on every other non-ok status it was not told to tolerate, so
+   * the 405/501 this used to check for never reach a caller in the first place.
+   */
+  private async pagesUnsupported(r: Response): Promise<boolean> {
+    if (r.status !== 404 || !(await isEndpointMissing(r))) return false;
+    this.knowledgePagesSupported = false;
+    return true;
+  }
+
+  /**
    * The bank's knowledge-base tree (folders + pages, nested). The tree carries names, source
    * queries and staleness but NOT synthesized content, so it is cheap enough to poll.
    */
   async tree(): Promise<KnowledgeNode[]> {
     if (this.knowledgePagesSupported === false) throw new KnowledgePagesUnavailableError();
     const r = await this.req("GET", this.bankUrl("/knowledge-base/tree"));
-    if ([404, 405, 501].includes(r.status)) {
-      this.knowledgePagesSupported = false;
-      throw new KnowledgePagesUnavailableError();
-    }
+    if (await this.pagesUnsupported(r)) throw new KnowledgePagesUnavailableError();
+    // Bank not created yet: it genuinely has no pages, and the capability stays UNKNOWN so the
+    // next call (after the first retain mints the bank) asks again instead of short-circuiting.
+    if (r.status === 404) return [];
     this.knowledgePagesSupported = true;
     try {
       return ((await r.json()) as { roots?: KnowledgeNode[] }).roots ?? [];
@@ -732,6 +775,11 @@ export class HindsightClient {
       [],
       opts.timeoutMs
     );
+    // Routed through the same check as every other page endpoint. Without it a server with no
+    // knowledge-base API parsed its own 404 body into zero hits and reported "nothing matched"
+    // forever, which reads as an empty bank rather than a missing feature.
+    if (await this.pagesUnsupported(r)) throw new KnowledgePagesUnavailableError();
+    if (r.status === 404) return []; // bank not created yet — no pages to match
     const j = (await r.json()) as {
       results?: { id: string; name: string; snippet?: string; score?: number }[];
     };
@@ -779,6 +827,7 @@ export class HindsightClient {
     }
     let created = 0;
     let updated = 0;
+    let vanished = 0; // deleted under us mid-run — neither re-synced nor unchanged
     for (const page of pages) {
       const hit = existing.get(page.name.toLowerCase());
       const body = {
@@ -794,11 +843,14 @@ export class HindsightClient {
         // 409 = another deepen run seeded this name between our tree read and this POST. That is
         // the outcome we wanted anyway, so tolerate it rather than failing the whole run.
         const r = await this.req("POST", this.bankUrl("/knowledge-base/pages"), body, [409]);
-        if ([404, 405, 501].includes(r.status)) {
-          this.knowledgePagesSupported = false;
+        if (await this.pagesUnsupported(r)) {
           this.log(
             `[bank] knowledge pages unavailable on ${this.apiUrl}; continuing without pages`
           );
+          return;
+        }
+        if (r.status === 404) {
+          this.log(`[bank] ${this.bank} does not exist yet; pages seed on the next session`);
           return;
         }
         if (r.status !== 409) created++;
@@ -836,12 +888,17 @@ export class HindsightClient {
           this.bankUrl(`/knowledge-base/nodes/${encodeURIComponent(hit.id)}`),
           patch
         );
-        if ([404, 405, 501].includes(r.status)) {
-          this.knowledgePagesSupported = false;
+        if (await this.pagesUnsupported(r)) {
           this.log(
             `[bank] knowledge pages unavailable on ${this.apiUrl}; continuing without pages`
           );
           return;
+        }
+        // The node vanished under us (a concurrent delete). Skip it — the remaining pages are
+        // still worth syncing, and the run's summary line is still worth logging.
+        if (r.status === 404) {
+          vanished++;
+          continue;
         }
         updated++;
       }
@@ -850,7 +907,8 @@ export class HindsightClient {
     this.log(
       `[bank] knowledge pages seeded on ${this.bank} (scoped to ${this.project ?? this.bank}): ` +
         `${created} created, ${updated} re-synced, ` +
-        `${pages.length - created - updated} unchanged` +
+        `${pages.length - created - updated - vanished} unchanged` +
+        (vanished ? `, ${vanished} deleted under us` : "") +
         (initiatives ? `, ${initiatives} initiative pages re-synced` : "")
     );
   }
@@ -885,7 +943,14 @@ export class HindsightClient {
         this.bankUrl(`/knowledge-base/nodes/${encodeURIComponent(page.id)}`),
         { trigger: pageTriggerPatch(desired) }
       );
-      if ([404, 405, 501].includes(r.status)) break;
+      // 404 only: `req` throws on every other non-ok status it was not told to tolerate, so the
+      // 405/501 this used to test for never arrive (see `pagesUnsupported`). No latch here — a
+      // node that has gone missing says nothing about the server's capabilities, and nothing about
+      // the pages after it either, so skip it rather than abandoning the rest of the re-sync (this
+      // `break`ed while the status still carried a server-wide meaning). If it is the BANK that
+      // went rather than one node, this costs one wasted PATCH per initiative page instead of one
+      // total — bounded by the folder's size, and the next session re-syncs from scratch anyway.
+      if (r.status === 404) continue;
       updated++;
     }
     return updated;

@@ -144,6 +144,14 @@ hindsight-admin repair-bank --bank acme-prod
 
 ### rename-bank
 
+:::tip Consider an alias instead
+
+A rename requires stopping the bank's clients, because the old id stops working the moment it commits. If what you want is to move callers onto a new id, **[bank aliases](./api/memory-banks.mdx#aliases)** do that with no downtime and no row rewrite: the bank answers to both ids until you are done.
+
+Reach for `rename-bank` when the old id must genuinely stop existing — an alias never removes one.
+
+:::
+
 Change a bank's id in place. Every memory, document, entity, mental model and knowledge page is kept exactly as it is. Nothing is re-extracted or re-embedded, and no LLM calls are made.
 
 ```bash

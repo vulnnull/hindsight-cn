@@ -11,6 +11,8 @@ declare global {
     startExport: (step: number) => void;
     /** The step labels, so the recorder can name the files and know how many clips to make. */
     exportSteps: string[];
+    /** The figure's title and, per step, the narration it speaks — the recorder writes it beside the clip. */
+    exportNarration: { title: string; steps: { label: string; says: string[] }[] };
   }
 }
 
@@ -20,6 +22,14 @@ export function ExportPage({ figure, dark }: { figure: Figure; dark: boolean }) 
   useEffect(() => {
     window.exportSteps = (figure.props.steps ?? []).map((s, i) => (typeof s.label === 'string' ? s.label : `step-${i + 1}`));
     window.startExport = setStep;
+    window.exportNarration = {
+      title: figure.title,
+      steps: (figure.props.steps ?? []).map((s, i) => ({
+        label: window.exportSteps[i],
+        // A beat can be a bare hop or an array of them; only the object form carries a `say`.
+        says: s.flow.flatMap((b) => (typeof b === 'object' && !Array.isArray(b) && 'say' in b && typeof b.say === 'string' ? [b.say] : [])),
+      })),
+    };
   }, [figure]);
 
   const c = dark ? DARK.bg : '#fff';

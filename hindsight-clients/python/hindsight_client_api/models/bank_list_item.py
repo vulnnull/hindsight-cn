@@ -17,7 +17,7 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from hindsight_client_api.models.disposition_traits import DispositionTraits
 from typing import Optional, Set
@@ -36,7 +36,8 @@ class BankListItem(BaseModel):
     fact_count: Optional[StrictInt] = 0
     last_document_at: Optional[StrictStr] = None
     last_write_at: Optional[StrictStr] = None
-    __properties: ClassVar[List[str]] = ["bank_id", "name", "disposition", "mission", "created_at", "updated_at", "fact_count", "last_document_at", "last_write_at"]
+    matched_aliases: Optional[List[StrictStr]] = Field(default=None, description="Aliases of this bank that matched the search `q`. Empty when no search was made, or when the bank matched on its own id or name — so a non-empty value explains a result whose `bank_id` does not contain the search text.")
+    __properties: ClassVar[List[str]] = ["bank_id", "name", "disposition", "mission", "created_at", "updated_at", "fact_count", "last_document_at", "last_write_at", "matched_aliases"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -130,7 +131,8 @@ class BankListItem(BaseModel):
             "updated_at": obj.get("updated_at"),
             "fact_count": obj.get("fact_count") if obj.get("fact_count") is not None else 0,
             "last_document_at": obj.get("last_document_at"),
-            "last_write_at": obj.get("last_write_at")
+            "last_write_at": obj.get("last_write_at"),
+            "matched_aliases": obj.get("matched_aliases")
         })
         return _obj
 

@@ -57,7 +57,8 @@
       "switchTitle": "メモリバンクを切り替え",
       "returnTo": "{bank}に戻る",
       "copyName": "名前をコピー",
-      "copied": "クリップボードにコピーしました"
+      "copied": "クリップボードにコピーしました",
+      "viaAlias": "{aliases} 経由"
     },
     "viewOnGitHub": "GitHubで表示"
   },
@@ -251,6 +252,20 @@
     "create": "作成",
     "save": "保存"
   },
+  "bankAliases": {
+    "title": "エイリアス",
+    "description": "<name>{bankId}</name> に到達する追加の ID です。ダウンタイムなしで呼び出し元を新しい ID へ移行できます。",
+    "placeholder": "新しい ID",
+    "add": "追加",
+    "removeAria": "エイリアス {alias} を削除",
+    "removeTitle": "エイリアス {alias} を削除しますか?",
+    "removeConfirm": "{alias} 経由で接続しているアプリケーションは、すべて直ちに動作しなくなります。なくなるのはこの ID だけで、{bankId} とその記憶はそのまま残り、エイリアスは後から追加し直せます。",
+    "remove": "エイリアスを削除",
+    "cancel": "キャンセル",
+    "loadFailed": "エイリアスを読み込めませんでした",
+    "addFailed": "エイリアスを追加できませんでした",
+    "removeFailed": "エイリアスを削除できませんでした"
+  },
   "bankStats": {
     "memoryStore": "メモリストア",
     "memories": "メモリ",
@@ -427,8 +442,8 @@
     "empathyDescription": "感情的な文脈をどれだけ重視するか",
     "empathyLowLabel": "客観的",
     "empathyHighLabel": "共感的",
-    "mcpToolsTitle": "MCPツール",
-    "mcpToolsDescription": "このバンクがエージェントに公開するMCPツールを制限",
+    "clientsTitle": "クライアント",
+    "clientsDescription": "アプリやエージェントがこのバンクで利用できるものです。",
     "mcpFailedToSave": "MCP設定の保存に失敗しました",
     "auditEnabledLabel": "監査ログを有効化",
     "auditEnabledDescription": "このバンクの retain、recall、reflect の各操作を記録します。このバンクに限りサーバーの既定値を上書きします。",
@@ -578,7 +593,7 @@
     "memoryDefenseEnterpriseFeatureSizeAnomaly": "サイズ異常:疑わしく大きいペイロードを拒否",
     "memoryDefenseEnterpriseFeatureProtectedKeys": "保護されたタグ名前空間:不変のアイデンティティタグを強制",
     "memoryDefenseEnterpriseCta": "デモをリクエスト",
-    "recallTitle": "リコールパイプライン",
+    "recallTitle": "リコール",
     "recallDescription": "このバンクのリコール時に実行される検索ステージ",
     "recallServerDefault": "サーバーのデフォルト",
     "recallFailedToSave": "リコールパイプラインの設定を保存できませんでした",
@@ -1935,6 +1950,11 @@
         "fetch": "バンク設定の取得に失敗しました",
         "update": "バンク設定の更新に失敗しました",
         "reset": "バンク設定のリセットに失敗しました"
+      },
+      "bankAliases": {
+        "list": "バンクのエイリアス一覧を取得できませんでした",
+        "create": "バンクのエイリアスを作成できませんでした",
+        "delete": "バンクのエイリアスを削除できませんでした"
       },
       "memories": {
         "list": "メモリユニットの一覧取得に失敗しました",

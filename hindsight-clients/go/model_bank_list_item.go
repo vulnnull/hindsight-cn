@@ -30,6 +30,8 @@ type BankListItem struct {
 	FactCount *int32 `json:"fact_count,omitempty"`
 	LastDocumentAt NullableString `json:"last_document_at,omitempty"`
 	LastWriteAt NullableString `json:"last_write_at,omitempty"`
+	// Aliases of this bank that matched the search `q`. Empty when no search was made, or when the bank matched on its own id or name — so a non-empty value explains a result whose `bank_id` does not contain the search text.
+	MatchedAliases []string `json:"matched_aliases,omitempty"`
 }
 
 type _BankListItem BankListItem
@@ -389,6 +391,38 @@ func (o *BankListItem) UnsetLastWriteAt() {
 	o.LastWriteAt.Unset()
 }
 
+// GetMatchedAliases returns the MatchedAliases field value if set, zero value otherwise.
+func (o *BankListItem) GetMatchedAliases() []string {
+	if o == nil || IsNil(o.MatchedAliases) {
+		var ret []string
+		return ret
+	}
+	return o.MatchedAliases
+}
+
+// GetMatchedAliasesOk returns a tuple with the MatchedAliases field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *BankListItem) GetMatchedAliasesOk() ([]string, bool) {
+	if o == nil || IsNil(o.MatchedAliases) {
+		return nil, false
+	}
+	return o.MatchedAliases, true
+}
+
+// HasMatchedAliases returns a boolean if a field has been set.
+func (o *BankListItem) HasMatchedAliases() bool {
+	if o != nil && !IsNil(o.MatchedAliases) {
+		return true
+	}
+
+	return false
+}
+
+// SetMatchedAliases gets a reference to the given []string and assigns it to the MatchedAliases field.
+func (o *BankListItem) SetMatchedAliases(v []string) {
+	o.MatchedAliases = v
+}
+
 func (o BankListItem) MarshalJSON() ([]byte, error) {
 	toSerialize,err := o.ToMap()
 	if err != nil {
@@ -421,6 +455,9 @@ func (o BankListItem) ToMap() (map[string]interface{}, error) {
 	}
 	if o.LastWriteAt.IsSet() {
 		toSerialize["last_write_at"] = o.LastWriteAt.Get()
+	}
+	if !IsNil(o.MatchedAliases) {
+		toSerialize["matched_aliases"] = o.MatchedAliases
 	}
 	return toSerialize, nil
 }

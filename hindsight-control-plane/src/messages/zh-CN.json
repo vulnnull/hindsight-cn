@@ -57,7 +57,8 @@
       "switchTitle": "切换记忆库",
       "returnTo": "返回 {bank}",
       "copyName": "复制名称",
-      "copied": "已复制到剪贴板"
+      "copied": "已复制到剪贴板",
+      "viaAlias": "通过 {aliases}"
     },
     "viewOnGitHub": "在 GitHub 查看"
   },
@@ -631,7 +632,9 @@
     "consolidationStrategyMaxObservationsDescription": "这些范围中每个范围可保存的观察数上限。",
     "consolidationStrategyMissionDescription": "这些范围中的观察应记录的内容。",
     "consolidationStrategySourceFactsDescription": "对这些范围，每次整合调用传入的源事实最大令牌数。",
-    "consolidationStrategySourceFactsPerObservationDescription": "在这些范围中，每条沉淀认知考虑的源事实最大令牌数。"
+    "consolidationStrategySourceFactsPerObservationDescription": "在这些范围中，每条沉淀认知考虑的源事实最大令牌数。",
+    "clientsTitle": "客户端",
+    "clientsDescription": "应用和智能体在该记忆库上可以访问的内容。"
   },
   "bankOperations": {
     "title": "后台操作",
@@ -2075,6 +2078,11 @@
         "updateNode": "Failed to update node",
         "deleteNode": "Failed to delete node",
         "search": "搜索知识库失败"
+      },
+      "bankAliases": {
+        "list": "获取记忆库别名列表失败",
+        "create": "创建记忆库别名失败",
+        "delete": "删除记忆库别名失败"
       }
     }
   },
@@ -2203,5 +2211,19 @@
     "pausedTitle": "上次刷新失败，该模型不再自动刷新——手动刷新可恢复",
     "retrying": "重试中",
     "retryingTitle": "上次尝试失败，已排队下一次尝试——只有这次也失败才会停止自动刷新"
+  },
+  "bankAliases": {
+    "title": "别名",
+    "description": "同样可以访问 <name>{bankId}</name> 的额外 ID，可让调用方在不停机的情况下迁移到新 ID。",
+    "placeholder": "新 ID",
+    "add": "添加",
+    "removeAria": "删除别名 {alias}",
+    "removeTitle": "要删除别名 {alias} 吗？",
+    "removeConfirm": "所有仍通过 {alias} 连接的应用会立即停止工作。消失的只是这个 ID —— {bankId} 及其记忆不受影响，之后也可以重新添加该别名。",
+    "remove": "删除别名",
+    "cancel": "取消",
+    "loadFailed": "加载别名失败",
+    "addFailed": "添加别名失败",
+    "removeFailed": "删除别名失败"
   }
 }

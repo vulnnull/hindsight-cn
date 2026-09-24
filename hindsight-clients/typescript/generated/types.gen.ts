@@ -194,6 +194,26 @@ export type BackgroundResponse = {
 };
 
 /**
+ * BankAliasesResponse
+ *
+ * Response model for a bank's aliases.
+ */
+export type BankAliasesResponse = {
+  /**
+   * Bank Id
+   *
+   * The bank's own id, which an alias never replaces
+   */
+  bank_id: string;
+  /**
+   * Aliases
+   *
+   * Extra ids that also reach this bank, oldest first
+   */
+  aliases: Array<string>;
+};
+
+/**
  * BankConfigResponse
  *
  * Response model for bank configuration.
@@ -282,6 +302,12 @@ export type BankListItem = {
    * When anything was last written to this bank: a document retained (including appends to an existing document) or a fact stored. Null if the bank is empty.
    */
   last_write_at?: string | null;
+  /**
+   * Matched Aliases
+   *
+   * Aliases of this bank that matched the search `q`. Empty when no search was made, or when the bank matched on its own id or name — so a non-empty value explains a result whose `bank_id` does not contain the search text.
+   */
+  matched_aliases?: Array<string>;
 };
 
 /**
@@ -1387,6 +1413,20 @@ export type ConsolidationStrategySpec = {
    * Consolidation Source Facts Max Tokens Per Observation
    */
   consolidation_source_facts_max_tokens_per_observation?: number | null;
+};
+
+/**
+ * CreateBankAliasRequest
+ *
+ * Request model for adding an alias to a bank.
+ */
+export type CreateBankAliasRequest = {
+  /**
+   * Alias
+   *
+   * The extra bank id. Same rules as a bank id (non-empty, at most 192 bytes of UTF-8, no control characters), and it must not already name a bank or another alias.
+   */
+  alias: string;
 };
 
 /**
@@ -9480,6 +9520,118 @@ export type AddBankBackgroundResponses = {
 
 export type AddBankBackgroundResponse =
   AddBankBackgroundResponses[keyof AddBankBackgroundResponses];
+
+export type ListBankAliasesData = {
+  body?: never;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+  };
+  query?: never;
+  url: "/v1/default/banks/{bank_id}/aliases";
+};
+
+export type ListBankAliasesErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ListBankAliasesError = ListBankAliasesErrors[keyof ListBankAliasesErrors];
+
+export type ListBankAliasesResponses = {
+  /**
+   * Successful Response
+   */
+  200: BankAliasesResponse;
+};
+
+export type ListBankAliasesResponse = ListBankAliasesResponses[keyof ListBankAliasesResponses];
+
+export type CreateBankAliasData = {
+  body: CreateBankAliasRequest;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+  };
+  query?: never;
+  url: "/v1/default/banks/{bank_id}/aliases";
+};
+
+export type CreateBankAliasErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type CreateBankAliasError = CreateBankAliasErrors[keyof CreateBankAliasErrors];
+
+export type CreateBankAliasResponses = {
+  /**
+   * Successful Response
+   */
+  201: BankAliasesResponse;
+};
+
+export type CreateBankAliasResponse = CreateBankAliasResponses[keyof CreateBankAliasResponses];
+
+export type DeleteBankAliasData = {
+  body?: never;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+    /**
+     * Alias
+     */
+    alias: string;
+  };
+  query?: never;
+  url: "/v1/default/banks/{bank_id}/aliases/{alias}";
+};
+
+export type DeleteBankAliasErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type DeleteBankAliasError = DeleteBankAliasErrors[keyof DeleteBankAliasErrors];
+
+export type DeleteBankAliasResponses = {
+  /**
+   * Successful Response
+   */
+  200: BankAliasesResponse;
+};
+
+export type DeleteBankAliasResponse = DeleteBankAliasResponses[keyof DeleteBankAliasResponses];
 
 export type DeleteBankData = {
   body?: never;

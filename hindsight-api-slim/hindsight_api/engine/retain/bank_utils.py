@@ -363,6 +363,19 @@ async def create_bank_row_on_conn(conn: "DatabaseConnection", bank_id: str, *, o
     # known without a RETURNING round-trip: the index names derive from it, both
     # for the eager create below and for the maintenance operation when a
     # threshold is set.
+    # A bank must not be born under a name that already routes somewhere else: the
+    # alias would be dead the moment this commits, since resolution prefers a real
+    # bank. The mirror of the NOT EXISTS in `bank_aliases.create_alias` -- the two
+    # tables cannot be covered by one constraint, so each write path checks the
+    # other. Only on the create path, which already ran an existence probe, so the
+    # common "bank exists" case pays nothing.
+    from .. import bank_aliases
+
+    if await bank_aliases.alias_exists_on_conn(conn, bank_id):
+        from hindsight_api.extensions import OperationValidationError
+
+        raise OperationValidationError(f"'{bank_id}' is an alias of another bank", status_code=409)
+
     internal_id = uuid.uuid4()
     inserted = await conn.fetchval(
         f"""
@@ -638,6 +651,25 @@ def _as_utc(ts: datetime | None) -> datetime | None:
     return ts if ts.tzinfo is not None else ts.replace(tzinfo=UTC)
 
 
+def _aliases_explaining(
+    bank_id: str, name: str | None, search_query: str | None, matched: dict[str, list[str]]
+) -> list[str]:
+    """The aliases worth reporting for one search hit — often none.
+
+    This answers "why is this row in my results", so it is empty whenever the row
+    already explains itself: a bank whose own id or name contains the search text
+    needs no footnote, and searching "acme" would otherwise tag the acme row with
+    every acme-* alias it happens to own. Only a bank reached *purely* through an
+    alias gets one.
+    """
+    if not search_query:
+        return []
+    needle = search_query.upper()
+    if needle in bank_id.upper() or needle in (name or "").upper():
+        return []
+    return matched.get(bank_id, [])
+
+
 async def list_banks(pool, *, search_query: str | None = None) -> list:
     """
     List banks with summary stats, optionally narrowed by a search string.
@@ -659,7 +691,7 @@ async def list_banks(pool, *, search_query: str | None = None) -> list:
 
     Args:
         pool: Database connection pool
-        search_query: Case-insensitive substring matched against bank ID and name
+        search_query: Case-insensitive substring matched against bank ID, name and aliases
 
     Returns:
         List of dicts with bank info and stats (fact_count, last_document_at, last_write_at),
@@ -675,8 +707,15 @@ async def list_banks(pool, *, search_query: str | None = None) -> list:
     where_clause = ""
     params: list[str] = []
     if search_query:
-        where_clause = "WHERE (UPPER(b.bank_id) LIKE UPPER($1) OR UPPER(COALESCE(b.name, '')) LIKE UPPER($2))"
-        params = [f"%{search_query}%", f"%{search_query}%"]
+        # Aliases are matched too, so searching the id a caller actually uses finds
+        # the bank it reaches. Mid-migration that is the only id someone may know:
+        # without this, the new id is live in the API but invisible in the picker.
+        where_clause = (
+            "WHERE (UPPER(b.bank_id) LIKE UPPER($1) OR UPPER(COALESCE(b.name, '')) LIKE UPPER($2) "
+            f"OR EXISTS (SELECT 1 FROM {fq_table('bank_aliases')} a "
+            "WHERE a.bank_id = b.bank_id AND UPPER(a.alias) LIKE UPPER($3)))"
+        )
+        params = [f"%{search_query}%", f"%{search_query}%", f"%{search_query}%"]
 
     async with acquire_with_retry(pool) as conn:
         rows = await conn.fetch(
@@ -708,6 +747,20 @@ async def list_banks(pool, *, search_query: str | None = None) -> list:
             """,
             *params,
         )
+
+        # Which alias made a bank match, so a result found by an id the bank does not
+        # itself carry can say so — otherwise searching "acme-prod" silently returns
+        # "acme" and the hit looks wrong. A separate small query rather than an
+        # aggregate in the one above: array aggregation is spelled differently on
+        # PostgreSQL and Oracle, and this runs only when a search was typed.
+        matched_aliases: dict[str, list[str]] = {}
+        if search_query:
+            for alias_row in await conn.fetch(
+                f"SELECT bank_id, alias FROM {fq_table('bank_aliases')} "
+                "WHERE UPPER(alias) LIKE UPPER($1) ORDER BY alias",
+                f"%{search_query}%",
+            ):
+                matched_aliases.setdefault(alias_row["bank_id"], []).append(alias_row["alias"])
 
         result = []
         # Banks are ordered by last write in Python rather than SQL: GREATEST() has
@@ -742,6 +795,10 @@ async def list_banks(pool, *, search_query: str | None = None) -> list:
                     "fact_count": 0,
                     "last_document_at": last_doc.isoformat() if last_doc else None,
                     "last_write_at": last_write.isoformat() if last_write else None,
+                    # Empty unless this search matched one of the bank's aliases. Not
+                    # the bank's full alias list: it answers "why is this row here",
+                    # which is only a question when something was searched for.
+                    "matched_aliases": _aliases_explaining(row["bank_id"], row["name"], search_query, matched_aliases),
                 }
             )
 

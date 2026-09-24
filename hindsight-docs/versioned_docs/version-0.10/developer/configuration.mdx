@@ -2481,6 +2481,17 @@ This ensures `shadow-*` banks are always consolidated before others, even if the
 | `HINDSIGHT_API_BANK_STATS_CACHE_TTL_SECONDS` | Time-to-live (seconds) for the `get_bank_stats` result cache. `0` disables caching, so every call runs the query. | `60` |
 | `HINDSIGHT_API_BANK_STATS_CACHE_MAX_ENTRIES` | Maximum number of cached `(schema, bank)` entries before LRU eviction. Bounds memory in deployments with many banks. | `1024` |
 
+#### Bank alias cache
+
+A [bank alias](./api/memory-banks.mdx#aliases) is an extra id a bank answers to, resolved to the bank's real id on the way in. That lookup happens on every bank-scoped request, so it is cached per `(schema, alias)` — misses included, since most requests name a real bank and would otherwise pay a query that can only answer "not an alias".
+
+The TTL is therefore how long a **newly added alias stays invisible**, and a **removed one keeps routing**, on API replicas other than the one that made the change. Lower it if you add aliases and cut traffic over to them in the same breath; raise it to save reads if your aliases are long-lived.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HINDSIGHT_API_BANK_ALIAS_CACHE_TTL_SECONDS` | Time-to-live (seconds) for alias→bank resolution. `0` disables caching, so every request resolves against the database. | `10` |
+| `HINDSIGHT_API_BANK_ALIAS_CACHE_MAX_ENTRIES` | Maximum number of cached `(schema, alias)` entries before LRU eviction. | `2048` |
+
 #### Native thread pools
 
 When local embeddings or reranking run in-process, the underlying BLAS/ML libraries (OpenBLAS, OpenMP, MKL) each spawn a worker pool sized to the host CPU count. Because Hindsight already parallelizes across requests via its own thread-pool executors, those native pools oversubscribe the CPU — on a many-core host the process can accumulate well over 100 native threads. This inflates memory and, under contention, can degrade throughput. Hindsight therefore bounds each native pool to **16 threads** (or the number of *available* CPUs, whichever is smaller) by default, capping runaway growth on large hosts while leaving within-call parallelism intact.

@@ -57,7 +57,8 @@
       "switchTitle": "切換記憶庫",
       "returnTo": "返回 {bank}",
       "copyName": "複製名稱",
-      "copied": "已複製到剪貼簿"
+      "copied": "已複製到剪貼簿",
+      "viaAlias": "透過 {aliases}"
     },
     "viewOnGitHub": "在 GitHub 上檢視"
   },
@@ -251,6 +252,20 @@
     "create": "建立",
     "save": "儲存"
   },
+  "bankAliases": {
+    "title": "別名",
+    "description": "同樣可以存取 <name>{bankId}</name> 的額外 ID，可讓呼叫方在不停機的情況下遷移到新 ID。",
+    "placeholder": "新 ID",
+    "add": "新增",
+    "removeAria": "移除別名 {alias}",
+    "removeTitle": "要移除別名 {alias} 嗎？",
+    "removeConfirm": "所有仍透過 {alias} 連線的應用會立即停止運作。消失的只是這個 ID —— {bankId} 及其記憶不受影響，之後也可以重新加回該別名。",
+    "remove": "移除別名",
+    "cancel": "取消",
+    "loadFailed": "載入別名失敗",
+    "addFailed": "新增別名失敗",
+    "removeFailed": "移除別名失敗"
+  },
   "bankStats": {
     "memoryStore": "記憶儲存",
     "memories": "記憶",
@@ -427,8 +442,8 @@
     "empathyDescription": "對情感背景的權重程度",
     "empathyLowLabel": "抽離",
     "empathyHighLabel": "共情",
-    "mcpToolsTitle": "MCP 工具",
-    "mcpToolsDescription": "限制此記憶庫向代理公開的 MCP 工具",
+    "clientsTitle": "用戶端",
+    "clientsDescription": "應用與代理在此記憶庫上可以存取的內容。",
     "mcpFailedToSave": "無法儲存 MCP 設定",
     "auditEnabledLabel": "啟用稽核日誌",
     "auditEnabledDescription": "記錄此記憶庫的 retain、recall 與 reflect 操作。僅針對此記憶庫覆寫伺服器預設值。",
@@ -578,7 +593,7 @@
     "memoryDefenseEnterpriseFeatureSizeAnomaly": "大小異常:拒絕可疑的過大負載",
     "memoryDefenseEnterpriseFeatureProtectedKeys": "受保護的標籤命名空間:強制使用不可變的身份標籤",
     "memoryDefenseEnterpriseCta": "申請示範",
-    "recallTitle": "召回流程",
+    "recallTitle": "召回",
     "recallDescription": "此記憶庫召回時執行的檢索階段",
     "recallServerDefault": "伺服器預設值",
     "recallFailedToSave": "儲存召回流程設定失敗",
@@ -1935,6 +1950,11 @@
         "fetch": "取得記憶庫設定失敗",
         "update": "更新記憶庫設定失敗",
         "reset": "重設記憶庫設定失敗"
+      },
+      "bankAliases": {
+        "list": "取得記憶庫別名清單失敗",
+        "create": "建立記憶庫別名失敗",
+        "delete": "刪除記憶庫別名失敗"
       },
       "memories": {
         "list": "列出記憶單元失敗",

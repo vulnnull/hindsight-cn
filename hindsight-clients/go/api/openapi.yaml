@@ -3264,6 +3264,137 @@ paths:
       summary: Add/merge memory bank background (removed — use PATCH .../config)
       tags:
       - Banks
+  /v1/default/banks/{bank_id}/aliases:
+    get:
+      description: "Extra bank ids that reach this bank. Every endpoint accepts an\
+        \ alias wherever it accepts a bank id, so callers can be moved onto a new\
+        \ id in phases while the old one keeps working."
+      operationId: list_bank_aliases
+      parameters:
+      - explode: false
+        in: path
+        name: bank_id
+        required: true
+        schema:
+          title: Bank Id
+          type: string
+        style: simple
+      - explode: false
+        in: header
+        name: authorization
+        required: false
+        schema:
+          nullable: true
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BankAliasesResponse'
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: List the bank's aliases
+      tags:
+      - Banks
+    post:
+      description: |-
+        Give the bank another id to answer to. Nothing is copied or moved: the bank keeps its own id and all of its data, and the alias is only a second way to reach it — which is what makes it a zero-downtime alternative to renaming.
+
+        Returns 409 if the name is already a bank or another alias.
+      operationId: create_bank_alias
+      parameters:
+      - explode: false
+        in: path
+        name: bank_id
+        required: true
+        schema:
+          title: Bank Id
+          type: string
+        style: simple
+      - explode: false
+        in: header
+        name: authorization
+        required: false
+        schema:
+          nullable: true
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBankAliasRequest'
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BankAliasesResponse'
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Add an alias to the bank
+      tags:
+      - Banks
+  /v1/default/banks/{bank_id}/aliases/{alias}:
+    delete:
+      description: "Stop an id reaching this bank. The bank and its memories are untouched;\
+        \ only the extra name goes away, and callers still using it get the same 404\
+        \ (or new empty bank) they would have got before it existed."
+      operationId: delete_bank_alias
+      parameters:
+      - explode: false
+        in: path
+        name: bank_id
+        required: true
+        schema:
+          title: Bank Id
+          type: string
+        style: simple
+      - explode: false
+        in: path
+        name: alias
+        required: true
+        schema:
+          title: Alias
+          type: string
+        style: simple
+      - explode: false
+        in: header
+        name: authorization
+        required: false
+        schema:
+          nullable: true
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BankAliasesResponse'
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Remove an alias from the bank
+      tags:
+      - Banks
   /v1/default/banks/{bank_id}:
     delete:
       description: "Delete an entire memory bank including all memories, entities,\
@@ -5556,6 +5687,27 @@ components:
       required:
       - mission
       title: BackgroundResponse
+    BankAliasesResponse:
+      description: Response model for a bank's aliases.
+      example:
+        aliases:
+        - user-123
+        - legacy-user123
+        bank_id: user123
+      properties:
+        bank_id:
+          description: "The bank's own id, which an alias never replaces"
+          title: Bank Id
+          type: string
+        aliases:
+          description: "Extra ids that also reach this bank, oldest first"
+          items:
+            type: string
+          type: array
+      required:
+      - aliases
+      - bank_id
+      title: BankAliasesResponse
     BankConfigResponse:
       description: Response model for bank configuration.
       example:
@@ -5630,6 +5782,14 @@ components:
         last_write_at:
           nullable: true
           type: string
+        matched_aliases:
+          description: "Aliases of this bank that matched the search `q`. Empty when\
+            \ no search was made, or when the bank matched on its own id or name —\
+            \ so a non-empty value explains a result whose `bank_id` does not contain\
+            \ the search text."
+          items:
+            type: string
+          type: array
       required:
       - bank_id
       - disposition
@@ -6735,6 +6895,20 @@ components:
           nullable: true
           type: integer
       title: ConsolidationStrategySpec
+    CreateBankAliasRequest:
+      description: Request model for adding an alias to a bank.
+      example:
+        alias: user-123
+      properties:
+        alias:
+          description: "The extra bank id. Same rules as a bank id (non-empty, at\
+            \ most 192 bytes of UTF-8, no control characters), and it must not already\
+            \ name a bank or another alias."
+          title: Alias
+          type: string
+      required:
+      - alias
+      title: CreateBankAliasRequest
     CreateBankRequest:
       description: Request model for creating/updating a bank.
       example:

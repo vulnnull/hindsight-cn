@@ -1770,6 +1770,61 @@ class TestAuthorizationWriteDenied:
         # Rejected before touching the backing mental model — a single write hook.
         assert _write_ops(validator) == [BankWriteOperation.UPDATE_KNOWLEDGE_PAGE]
 
+    @pytest.mark.parametrize(
+        "body",
+        [
+            # The empty body too: that check moved from the handler into the
+            # engine, and nothing pinned it there before.
+            {},
+            {"source_query": None},
+            {"tags": None},
+            {"max_tokens": None},
+            {"trigger": None},
+            {"name": None, "source_query": None},
+        ],
+    )
+    async def test_explicit_null_patch_is_rejected_before_any_read(
+        self, api_client, kb_bank, memory, monkeypatch, body
+    ):
+        """A null page field means "not supplied", so the patch changes nothing.
+
+        It used to slip past the "nothing to update" check, run no write
+        validator at all, and still hand back the node's metadata — a read of
+        another tenant's tree for anyone the validator would have denied.
+        """
+        bank_id, ids = kb_bank
+        validator = _kb_validator(reject_write=BankWriteOperation.UPDATE_KNOWLEDGE_PAGE)
+        monkeypatch.setattr(memory, "_operation_validator", validator)
+        resp = await api_client.patch(
+            f"/v1/default/banks/{_enc(bank_id)}/knowledge-base/nodes/{ids.orders}",
+            json=body,
+        )
+        assert resp.status_code == 400, resp.text
+        assert "Orders" not in resp.text
+        assert _write_ops(validator) == []
+
+    @pytest.mark.parametrize("body", [{"tags": []}, {"max_tokens": 0}, {"name": ""}])
+    async def test_empty_but_supplied_values_still_authorize(self, api_client, kb_bank, memory, monkeypatch, body):
+        """The near misses of the guard above: supplied-but-empty is a real change.
+
+        `tags: []` in particular is the documented fix for a page whose tags match
+        no memory, so the guard has to test "is not None", never truthiness — a
+        falsy value must still reach the validator rather than be dismissed as a
+        no-op.
+        """
+        bank_id, ids = kb_bank
+        operation = (
+            BankWriteOperation.RENAME_KNOWLEDGE_NODE if "name" in body else BankWriteOperation.UPDATE_KNOWLEDGE_PAGE
+        )
+        validator = _kb_validator(reject_write=operation)
+        monkeypatch.setattr(memory, "_operation_validator", validator)
+        resp = await api_client.patch(
+            f"/v1/default/banks/{_enc(bank_id)}/knowledge-base/nodes/{ids.orders}",
+            json=body,
+        )
+        assert resp.status_code == 403, resp.text
+        assert _write_ops(validator) == [operation]
+
     async def test_delete_denied(self, api_client, kb_bank, memory, monkeypatch):
         bank_id, ids = kb_bank
         validator = _kb_validator(reject_write=BankWriteOperation.DELETE_KNOWLEDGE_NODE)

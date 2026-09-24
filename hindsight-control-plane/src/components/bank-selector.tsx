@@ -750,6 +750,19 @@ function BankSelectorInner() {
                           >
                             {bank.name || bank.bank_id}
                           </span>
+                          {/* Only set when the search matched an alias rather than this
+                              bank's own id or name, which is exactly when the row would
+                              otherwise look like it does not match what was typed. */}
+                          {bank.matched_aliases.length > 0 && (
+                            <span
+                              className="shrink-0 truncate max-w-[40%] font-mono text-[11px] text-muted-foreground/70"
+                              title={tNavBank("viaAlias", {
+                                aliases: bank.matched_aliases.join(", "),
+                              })}
+                            >
+                              {tNavBank("viaAlias", { aliases: bank.matched_aliases.join(", ") })}
+                            </span>
+                          )}
                           <button
                             type="button"
                             aria-label={tNavBank("copyName")}

@@ -534,6 +534,88 @@ pub fn delete(
     }
 }
 
+/// List the extra ids a bank answers to
+pub fn alias_list(
+    client: &ApiClient,
+    bank_id: &str,
+    verbose: bool,
+    output_format: OutputFormat,
+) -> Result<()> {
+    let result = client.list_bank_aliases(bank_id, verbose)?;
+
+    if output_format == OutputFormat::Pretty {
+        // `result.bank_id` rather than the argument: the request may have been made
+        // through one of the aliases, and the response names the bank it reached.
+        if result.aliases.is_empty() {
+            ui::print_info(&format!(
+                "Bank '{}' has no aliases; it is reachable only by its own id",
+                result.bank_id
+            ));
+        } else {
+            println!("Aliases that also reach '{}':", result.bank_id);
+            for alias in &result.aliases {
+                println!("  {}", alias);
+            }
+        }
+    } else {
+        output::print_output(&result, output_format)?;
+    }
+    Ok(())
+}
+
+/// Add an id that also reaches this bank
+pub fn alias_add(
+    client: &ApiClient,
+    bank_id: &str,
+    alias: &str,
+    verbose: bool,
+    output_format: OutputFormat,
+) -> Result<()> {
+    let result = client.create_bank_alias(bank_id, alias, verbose)?;
+
+    if output_format == OutputFormat::Pretty {
+        ui::print_success(&format!("'{}' now reaches bank '{}'", alias, result.bank_id));
+    } else {
+        output::print_output(&result, output_format)?;
+    }
+    Ok(())
+}
+
+/// Stop an id reaching this bank
+pub fn alias_remove(
+    client: &ApiClient,
+    bank_id: &str,
+    alias: &str,
+    yes: bool,
+    verbose: bool,
+    output_format: OutputFormat,
+) -> Result<()> {
+    // Prompted like `bank delete` even though nothing is destroyed here: the id stops
+    // routing the moment this commits, so anything still calling it starts failing.
+    if !yes && output_format == OutputFormat::Pretty {
+        let message = format!(
+            "Remove alias '{}'? Every client still calling it will stop reaching bank '{}'.",
+            alias, bank_id
+        );
+        if !ui::prompt_confirmation(&message)? {
+            ui::print_info("Operation cancelled");
+            return Ok(());
+        }
+    }
+
+    let result = client.delete_bank_alias(bank_id, alias, verbose)?;
+
+    if output_format == OutputFormat::Pretty {
+        ui::print_success(&format!(
+            "'{}' no longer reaches bank '{}'",
+            alias, result.bank_id
+        ));
+    } else {
+        output::print_output(&result, output_format)?;
+    }
+    Ok(())
+}
+
 /// Trigger consolidation to create/update observations
 pub fn consolidate(
     client: &ApiClient,

@@ -57,7 +57,8 @@
       "switchTitle": "Cambiar banco de memoria",
       "returnTo": "Volver a {bank}",
       "copyName": "Copiar nombre",
-      "copied": "Copiado al portapapeles"
+      "copied": "Copiado al portapapeles",
+      "viaAlias": "vía {aliases}"
     },
     "viewOnGitHub": "Ver en GitHub"
   },
@@ -251,6 +252,20 @@
     "create": "Crear",
     "save": "Guardar"
   },
+  "bankAliases": {
+    "title": "Alias",
+    "description": "IDs adicionales que también llegan a <name>{bankId}</name>, para migrar a los clientes a un ID nuevo sin interrupciones.",
+    "placeholder": "Nuevo ID",
+    "add": "Añadir",
+    "removeAria": "Eliminar el alias {alias}",
+    "removeTitle": "¿Eliminar el alias {alias}?",
+    "removeConfirm": "Todas las aplicaciones que sigan conectadas mediante {alias} dejarán de funcionar de inmediato. Solo desaparece este ID: {bankId} y sus recuerdos quedan intactos, y puedes volver a añadir el alias.",
+    "remove": "Eliminar alias",
+    "cancel": "Cancelar",
+    "loadFailed": "No se pudieron cargar los alias",
+    "addFailed": "No se pudo añadir el alias",
+    "removeFailed": "No se pudo eliminar el alias"
+  },
   "bankStats": {
     "memoryStore": "Almacén de memoria",
     "memories": "Memorias",
@@ -427,8 +442,8 @@
     "empathyDescription": "Cuánto peso dar al contexto emocional",
     "empathyLowLabel": "Distante",
     "empathyHighLabel": "Empático",
-    "mcpToolsTitle": "Herramientas MCP",
-    "mcpToolsDescription": "Restringe qué herramientas MCP expone este banco a los agentes",
+    "clientsTitle": "Clientes",
+    "clientsDescription": "A qué pueden llegar las aplicaciones y los agentes en este banco.",
     "mcpFailedToSave": "Error al guardar la configuración de MCP",
     "auditEnabledLabel": "Activar registro de auditoría",
     "auditEnabledDescription": "Registrar las operaciones de retain, recall y reflect de este banco. Anula el valor predeterminado del servidor solo para este banco.",
@@ -578,7 +593,7 @@
     "memoryDefenseEnterpriseFeatureSizeAnomaly": "Anomalía de tamaño: rechaza cargas útiles sospechosamente grandes",
     "memoryDefenseEnterpriseFeatureProtectedKeys": "Espacios de nombres de etiquetas protegidos: aplica etiquetas de identidad inmutables",
     "memoryDefenseEnterpriseCta": "Solicitar una demo",
-    "recallTitle": "Canalización de recuperación",
+    "recallTitle": "Recuperación",
     "recallDescription": "Qué etapas de recuperación se ejecutan durante el recall en este banco",
     "recallServerDefault": "Valor predeterminado del servidor",
     "recallFailedToSave": "No se pudo guardar la configuración de la canalización de recuperación",
@@ -1935,6 +1950,11 @@
         "fetch": "No se pudo obtener la configuración del banco",
         "update": "No se pudo actualizar la configuración del banco",
         "reset": "No se pudo restablecer la configuración del banco"
+      },
+      "bankAliases": {
+        "list": "No se pudieron listar los alias del banco",
+        "create": "No se pudo crear el alias del banco",
+        "delete": "No se pudo eliminar el alias del banco"
       },
       "memories": {
         "list": "No se pudieron listar las unidades de memoria",

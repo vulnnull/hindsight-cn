@@ -54,9 +54,10 @@ process_file() {
     render_figures "$src_file" "$dest_file"
 }
 
-# Interactive figures (<Flow {...x.props} />) become their step-by-step narration.
+# Figures become their step-by-step narration: an interactive one (<Flow {...x.props} />) from its
+# source file, an animated SVG from the spec the image itself carries.
 render_figures() {
-    if grep -q '<Flow ' "$2"; then
+    if grep -qE '<Flow |\.svg\)' "$2"; then
         python3 "$ROOT_DIR/scripts/docs_skill_figures.py" "$1" "$2"
     fi
 }

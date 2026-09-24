@@ -57,6 +57,8 @@ app = typer.Typer(name="hindsight-admin", help="Hindsight administrative command
 # are intentionally absent — admin backup/restore is PostgreSQL-only.
 BACKUP_TABLES = [
     "banks",
+    # After "banks" for the same reason as "attachments" below: it FKs to it.
+    "bank_aliases",
     # After "banks": attachments references it, so restore's forward COPY needs
     # the parent present, and the reversed TRUNCATE must clear the child first.
     "attachments",
