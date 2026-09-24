@@ -152,7 +152,59 @@ def _authorize_nested_operations() -> "Iterator[None]":
         _nested_operation_authorized.reset(token)
 
 
-MENTAL_MODEL_PENDING_CONTENT = "Generating content..."
+#: What a page's body was set to at creation before pages were created empty. Only
+#: ever read, never written: an upgraded bank still holds rows carrying it, and every
+#: check that asks "has this page been written yet?" has to treat it as unwritten —
+#: the delta baseline, the sibling readability query, the refresh outcome's
+#: populated_content, and read metering.
+_LEGACY_PENDING_PLACEHOLDER = "Generating content..."
+
+
+def _is_unwritten_body(content: str | None) -> bool:
+    """Has nothing been written into this page's body yet?
+
+    Empty is the state a page is created in; the legacy placeholder is the state
+    an upgraded bank's pages were created in before that. Both mean the same
+    thing to every caller that has to decide whether a page carries anything.
+
+    Whitespace counts as unwritten, which the emptiness checks this replaced did
+    not all do consistently — a body of spaces was skipped by some and priced at
+    zero by others. Only an explicit ``update_mental_model(content="   ")`` can
+    produce one: a refresh that synthesizes nothing but whitespace is rejected
+    before it is stored.
+    """
+    return not content or content.strip() in ("", _LEGACY_PENDING_PLACEHOLDER)
+
+
+def _knowledge_snippet(content: str | None) -> str:
+    """The snippet a search result shows, including when the page has no body.
+
+    An empty body is a real state a searcher has to act on, and the empty string
+    does not convey it: a page titled for the topic with nothing under it reads as
+    "matched, but the snippet came back blank", which is how an agent concludes the
+    topic is uncovered and creates a second page for one that already exists.
+
+    Produced HERE, at the read boundary, never stored as the page body. Stored text
+    is embedded and BM25-indexed, which is exactly what made a brand-new page
+    searchable as its own placeholder before this — the reader needs the signal, the
+    index must never carry it.
+
+    One wording for every empty page, deliberately. "Generating..." would be the more
+    useful message but there is nothing to found it on: ``last_refreshed_at`` is NOT
+    NULL DEFAULT now(), so it is stamped at creation and a page that has never
+    refreshed is indistinguishable here from one that refreshed and found nothing to
+    say. Promising content that may never come is worse than describing the state
+    that is actually observable.
+
+    The wording itself lives with the other read-time page rendering, so searching for
+    a page and reading it tell the reader the same thing in the same words.
+    """
+    # Imported here rather than at module scope: ``hindsight_api.api`` pulls in
+    # MemoryEngine, so a top-level import of anything under it would close a cycle.
+    from ..api.page_markdown import EMPTY_PAGE_NOTICE
+
+    return (content or "").strip() or EMPTY_PAGE_NOTICE
+
 
 # ``mental_model_history`` holds two kinds of row in one JSONB blob: the version
 # snapshots a successful refresh writes, and the failure records a refused one
@@ -4718,11 +4770,13 @@ class MemoryEngine(MemoryEngineInterface):
         based_on = reflect_response.get("based_on") or {}
         outcome = RefreshMentalModelOutcomeMetadata(
             content_len=len(content),
-            # The pending placeholder completes wire-successful but carries no
-            # real synthesis — a length check alone would read it as populated.
-            # Reflect's own failure stubs are gone: a run with no answer now
-            # raises (#2959), so no refresh reaches here carrying one.
-            populated_content=bool(stripped) and stripped != MENTAL_MODEL_PENDING_CONTENT,
+            # Whitespace-only is not synthesis, and neither is the legacy placeholder
+            # an upgraded bank may still be holding: a skipped refresh preserves that
+            # body, and a length check alone would report it as populated — which is
+            # what this field exists to tell apart. Reflect's own failure stubs are
+            # gone: a run with no answer now raises (#2959), so no refresh reaches
+            # here carrying one.
+            populated_content=bool(stripped) and stripped != _LEGACY_PENDING_PLACEHOLDER,
             based_on_counts={fact_type: len(facts or []) for fact_type, facts in based_on.items()},
             delta_ops_applied=len(reflect_response.get("delta_operations_applied") or []),
             delta_ops_skipped=len(reflect_response.get("delta_operations_skipped") or []),
@@ -14677,13 +14731,14 @@ class MemoryEngine(MemoryEngineInterface):
 
         Items carrying no content are skipped: nothing was delivered, so there
         is nothing to report. That covers a model that has never been refreshed,
-        one still generating its first content, and every detail level that
-        drops the column — so "report what was delivered" is read off the items
-        themselves rather than inferred from the caller's ``detail`` argument.
+        one an upgraded bank still holds the legacy placeholder for, and every
+        detail level that drops the column — so "report what was delivered" is
+        read off the items themselves rather than inferred from the caller's
+        ``detail`` argument.
         """
         for item in items:
             content = item.get("content")
-            if not content or content.strip() == MENTAL_MODEL_PENDING_CONTENT:
+            if _is_unwritten_body(content):
                 continue
             await self._record_mental_model_read(bank_id, str(item["id"]), content, request_context=request_context)
 
@@ -14699,6 +14754,17 @@ class MemoryEngine(MemoryEngineInterface):
 
         Best-effort by design: the caller already has the content, so a failure
         here must not turn a served read into an error.
+
+        An unwritten body prices at zero rather than by its length. That is the
+        legacy placeholder an upgraded bank still holds: nobody wrote it, so
+        billing for it would charge for text the deployment never asked for. It
+        is sized here, where every read route converges, so the same page costs
+        the same whether it arrived through a get or a list.
+
+        Zero tokens, not a skipped hook. A gated read that reports no completion
+        is the shape this hook exists to prevent — a deployment could authorize a
+        read it then never records — so the pairing holds even when the answer is
+        "nothing was delivered".
         """
         if not self._operation_validator:
             return
@@ -14710,7 +14776,7 @@ class MemoryEngine(MemoryEngineInterface):
                     bank_id=bank_id,
                     mental_model_id=mental_model_id,
                     request_context=request_context,
-                    output_tokens=len(content) // 4 if content else 0,
+                    output_tokens=0 if _is_unwritten_body(content) else len(content or "") // 4,
                     success=True,
                 )
             )
@@ -17222,10 +17288,16 @@ class MemoryEngine(MemoryEngineInterface):
         excluded, not its full ``exclude_mental_model_ids`` list: over-counting keeps a
         refresh running, which is the safe direction to be wrong in.
 
-        A sibling still holding the ``Generating content...`` placeholder does not
-        count. That is exactly the state a bank's default pages are all in while they
-        wait on each other, and treating it as content would defeat the emptiness check
-        for the case it was written for (#3875).
+        A sibling that has not yet been refreshed does not count. That is exactly the
+        state a bank's default pages are all in while they wait on each other, and
+        treating it as content would defeat the emptiness check for the case it was
+        written for (#3875).
+
+        Which is why the legacy placeholder is excluded too, not just the empty body
+        that pages carry now. A bank upgraded from a version that wrote
+        ``Generating content...`` still holds those rows, and they are unrefreshed
+        pages by any other measure — counting them because the column happens to be
+        non-empty would re-open #3875 for exactly the banks the check protects.
         """
         backend = await self._get_backend()
         async with acquire_with_retry(backend) as conn:
@@ -17234,10 +17306,10 @@ class MemoryEngine(MemoryEngineInterface):
                 f"WHERE bank_id = $1 AND id <> $2 AND LENGTH(TRIM(content)) > 0 AND content NOT LIKE $3",
                 bank_id,
                 excluding_id,
-                # Prefix match, not equality: the placeholder is stored as written but read
-                # back through the structured render, which ends it with a newline. It
-                # carries no LIKE wildcard of its own, so the pattern needs no escaping.
-                f"{MENTAL_MODEL_PENDING_CONTENT}%",
+                # Prefix match, not equality: the placeholder was stored as written but
+                # read back through the structured render, which ends it with a newline.
+                # It carries no LIKE wildcard of its own, so it needs no escaping.
+                f"{_LEGACY_PENDING_PLACEHOLDER}%",
             )
         return bool(other_documents)
 
@@ -17294,7 +17366,15 @@ class MemoryEngine(MemoryEngineInterface):
         use_delta = False
         mode_fallback_reason: ModeFallbackReason | None = None
         stored_structured_content: dict[str, Any] | None = None
-        has_delta_baseline = bool(current_content) and current_content != MENTAL_MODEL_PENDING_CONTENT
+        # The legacy placeholder is not a baseline. Pages are created empty now, but a
+        # page created before that change still holds the literal string and has never
+        # refreshed — and a never-refreshed page has no last_refreshed_source_query, so
+        # the check below turns delta ON. Treating the placeholder as content would send
+        # that first refresh down the delta path, where ops that do not apply fail it
+        # (refresh_failed_delta_not_applied) and preserve the placeholder, leaving the
+        # page stuck on it forever. Cheaper than a migration; delete once no bank can
+        # still hold one.
+        has_delta_baseline = bool(current_content) and current_content != _LEGACY_PENDING_PLACEHOLDER
         if requested_mode == "delta" and not has_delta_baseline:
             mode_fallback_reason = "no_baseline_content"
         elif requested_mode == "delta":
@@ -19551,7 +19631,7 @@ class MemoryEngine(MemoryEngineInterface):
                     "id": r["id"],
                     "name": r["name"],
                     "mental_model_id": r["mental_model_id"],
-                    "snippet": (r["snippet"] or "").strip(),
+                    "snippet": _knowledge_snippet(r["snippet"]),
                     # Same normalized single-arm RRF curve as the SQL paths below, so a
                     # store-owned bank's scores mean what a Postgres-ranked bank's do.
                     "score": _KNOWLEDGE_RRF_NORM / (_KNOWLEDGE_RRF_K + 1 + order[r["mental_model_id"]]),
@@ -19696,7 +19776,7 @@ class MemoryEngine(MemoryEngineInterface):
                 "id": r["id"],
                 "name": r["name"],
                 "mental_model_id": r["mental_model_id"],
-                "snippet": (r["snippet"] or "").strip(),
+                "snippet": _knowledge_snippet(r["snippet"]),
                 "score": float(r["score"]) if r["score"] is not None else 0.0,
                 "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
             }

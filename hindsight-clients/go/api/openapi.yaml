@@ -8357,7 +8357,11 @@ components:
           nullable: true
           type: string
         markdown:
-          description: "The full markdown document: YAML frontmatter + markdown body."
+          description: "The full markdown document: YAML frontmatter + markdown body.\
+            \ A page with no body yet renders 'No content yet.' as its body rather\
+            \ than frontmatter alone, which reads as a page that failed to render.\
+            \ The notice is added here on the way out; the stored body in `body` stays\
+            \ empty, and the export bundle keeps the bare document."
           title: Markdown
           type: string
       required:
@@ -8416,6 +8420,11 @@ components:
           nullable: true
           type: string
         snippet:
+          description: "The page's opening text. A page whose body is still empty\
+            \ says so in words — 'No content yet.' — rather than coming back blank,\
+            \ so a caller can tell an unwritten page from a page whose snippet simply\
+            \ did not render. The marker is produced on the way out; the stored body\
+            \ stays empty and out of the search index."
           title: Snippet
           type: string
         score:

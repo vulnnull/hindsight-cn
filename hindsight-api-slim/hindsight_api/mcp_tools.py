@@ -1872,7 +1872,7 @@ def _register_create_mental_model(mcp: FastMCP, memory: MemoryEngine, config: MC
             bank_id=target_bank,
             name=name,
             source_query=source_query,
-            content="Generating content...",
+            content="",
             mental_model_id=mental_model_id,
             tags=tags,
             max_tokens=max_tokens,
@@ -2479,7 +2479,7 @@ async def _do_get_knowledge_page(
         "description": node.get("source_query"),
         "tags": page.display_tags,
         "timestamp": node.get("last_refreshed_at") or node.get("created_at"),
-        "markdown": page_markdown.render_document(node),
+        "markdown": page_markdown.render_document(node, notice_when_empty=True),
     }
 
 
@@ -2511,7 +2511,7 @@ async def _do_create_knowledge_page(
         bank_id=target_bank,
         name=name,
         source_query=source_query,
-        content="Generating content...",
+        content="",
         parent_id=parent_id,
         tags=tags or None,
         max_tokens=max_tokens,
