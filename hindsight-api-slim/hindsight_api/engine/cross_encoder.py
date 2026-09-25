@@ -7,6 +7,7 @@ Configuration via environment variables - see hindsight_api.config for all env v
 """
 
 import asyncio
+import contextvars
 import logging
 import warnings
 from abc import ABC, abstractmethod
@@ -55,6 +56,15 @@ from .remote_retry import RetryPolicy, acall_with_retry
 from .tei_retry import TEI_KEEPALIVE_EXPIRY_SECONDS, is_retryable_tei_transport_error, tei_retry_delay
 
 logger = logging.getLogger(__name__)
+
+# Which member produced the scores for the predict() running in this task.
+# MultiCrossEncoder._active is shared by every request on the chain, so reading
+# it after await rerank can observe a neighbour's failover. This is set in the
+# same task that is about to return those scores, and rerank() copies it onto
+# the result before yielding.
+_served_provider: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "hindsight_rerank_served_provider", default=None
+)
 
 
 class CrossEncoderModel(ABC):
@@ -1925,11 +1935,9 @@ class MultiCrossEncoder(CrossEncoderModel):
     def provider_name(self) -> str:
         """The provider of the member that last served a request (primary before any).
 
-        Callers use this to detect a passthrough reranker, so it has to track the
-        member actually serving rather than name the chain: a chain that has
-        degraded to its ``rrf`` member is passthrough. Concurrent requests share it,
-        so a request that fails over can briefly mislabel a neighbour — this only
-        tunes downstream scoring, never correctness.
+        This shared cursor is for diagnostics only: concurrent requests can move
+        it after another request received its scores. Recall uses the provider
+        captured on RerankResult to decide passthrough scoring and response metadata.
         """
         return self._members[self._active].provider_name
 
@@ -1997,6 +2005,9 @@ class MultiCrossEncoder(CrossEncoderModel):
                     member.provider_name,
                 )
             self._active = index
+            # Record the member for this task before returning. A later read of
+            # provider_name follows _active and can name a different request.
+            _served_provider.set(member.provider_name)
             return scores
         # All members failed; surface the last error (loop ran at least once).
         assert last_exc is not None

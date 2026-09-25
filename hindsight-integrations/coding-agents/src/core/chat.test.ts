@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { RateLimitedError, type HindsightClient } from "./hindsight";
-import { ingestChats, renderSessionJsonl, retainLiveSession, type TransportTurn } from "./chat";
+import {
+  DEFAULT_RETAIN_CONTEXT,
+  ingestChats,
+  renderSessionJsonl,
+  retainLiveSession,
+  type TransportTurn,
+} from "./chat";
 import { PENDING_MAX_AGE_MS, memoryCursorStore, type RetainCursorStore } from "./retain-cursor";
 
 describe("renderSessionJsonl", () => {
@@ -65,7 +71,7 @@ describe("retainLiveSession", () => {
       timestamp: "2026-01-01T00:00:00Z",
     });
     expect(parsed[1]).toEqual({ role: "user", content: "hi", timestamp: "2026-01-01T00:00:00Z" });
-    expect(context).toBe("coding agent session");
+    expect(context).toBe(DEFAULT_RETAIN_CONTEXT);
     expect(documentId).toBe("conversation:s2");
     expect(tags).toEqual(["source:chat"]);
     expect(strategy).toBe("conversation");
@@ -75,6 +81,39 @@ describe("retainLiveSession", () => {
       session_id: "s2",
       ref_id: "conversation:s2",
     });
+  });
+
+  it("sends the stamp's resolved context instead of the default when one is configured", async () => {
+    // The default says nothing about authorship, so extraction can record an assistant's
+    // proposal as the user's decision. This is the path a deployment uses to state the boundary.
+    const retain = vi.fn().mockResolvedValue(undefined);
+    const client = { retain } as unknown as HindsightClient;
+    const turns: TransportTurn[] = [
+      { role: "user", content: "hi", timestamp: "2026-01-01T00:00:00Z" },
+    ];
+    const configured = "Assistant turns are agent-generated and not the user's decisions.";
+
+    await retainLiveSession(client, "s3", turns, "2026-01-01T00:00:00Z", undefined, {
+      stamp: { tags: [], metadata: {}, context: configured },
+    });
+
+    const [, context] = retain.mock.calls[0];
+    expect(context).toBe(configured);
+  });
+
+  it("keeps the default when a stamp carries tags but no context", async () => {
+    const retain = vi.fn().mockResolvedValue(undefined);
+    const client = { retain } as unknown as HindsightClient;
+    const turns: TransportTurn[] = [
+      { role: "user", content: "hi", timestamp: "2026-01-01T00:00:00Z" },
+    ];
+
+    await retainLiveSession(client, "s4", turns, "2026-01-01T00:00:00Z", undefined, {
+      stamp: { tags: ["project:x"], metadata: {} },
+    });
+
+    const [, context] = retain.mock.calls[0];
+    expect(context).toBe(DEFAULT_RETAIN_CONTEXT);
   });
 });
 
@@ -103,6 +142,74 @@ describe("ingestChats", () => {
       chat: "s-import",
       ref_id: "chat:s-import",
     });
+  });
+
+  it("dates a backfilled document from the session's own source timestamps, not the import clock", async () => {
+    const retain = vi.fn().mockResolvedValue(undefined);
+    const client = { retain } as unknown as HindsightClient;
+
+    const importedAt = Date.now();
+    await ingestChats(client, [
+      {
+        id: "s-hist",
+        turns: [
+          { role: "user", text: "pick the storage engine", timestamp: "2026-01-05T09:00:00Z" },
+          { role: "assistant", text: "RocksDB.", timestamp: "2026-01-05T09:00:05Z" },
+        ],
+      },
+    ]);
+
+    const [content, , , , , opts] = retain.mock.calls[0];
+    // The document/Event Date is the conversation's own first timestamp…
+    expect(opts.timestamp).toBe("2026-01-05T09:00:00Z");
+    // …and the REF-ID system turn that heads the transcript carries the same anchor.
+    expect(JSON.parse(content.split("\n")[0]) as TransportTurn).toEqual({
+      role: "system",
+      content: "REF-ID: chat:s-hist",
+      timestamp: "2026-01-05T09:00:00Z",
+    });
+    // The regression: an import in September must not date a January session to September.
+    expect(Date.parse(opts.timestamp)).toBeLessThan(importedAt - 60_000);
+  });
+
+  it("keeps the synthetic import-time anchor when no turn carries a usable timestamp", async () => {
+    const retain = vi.fn().mockResolvedValue(undefined);
+    const client = { retain } as unknown as HindsightClient;
+
+    const importedAt = Date.now();
+    await ingestChats(client, [
+      {
+        id: "s-clockless",
+        turns: [{ role: "user", text: "no clocks here", timestamp: "not-a-date" }],
+      },
+    ]);
+
+    const [, , , , , opts] = retain.mock.calls[0];
+    // Unparseable source values are ignored rather than trusted, so the stagger still applies.
+    expect(Date.parse(opts.timestamp)).toBeGreaterThanOrEqual(importedAt - 1000);
+  });
+
+  it("anchors a timestamp-less turn to the session's own clock instead of the import clock", async () => {
+    const retain = vi.fn().mockResolvedValue(undefined);
+    const client = { retain } as unknown as HindsightClient;
+
+    await ingestChats(client, [
+      {
+        id: "s-mixed",
+        turns: [
+          { role: "user", text: "dated", timestamp: "2026-01-05T09:00:00Z" },
+          { role: "action", text: "undated follow-up" },
+        ],
+      },
+    ]);
+
+    const [content] = retain.mock.calls[0];
+    const turns = content.split("\n").map((line: string) => JSON.parse(line) as TransportTurn);
+    // The dated turn keeps its source value verbatim…
+    expect(turns[1].timestamp).toBe("2026-01-05T09:00:00Z");
+    // …and the undated one sits on the SESSION's timeline, not the import's. Index 0 is the REF-ID
+    // system turn, so the action turn is index 2: fallback offset is `(j + 1)` minutes for j = 1.
+    expect(turns[2].timestamp).toBe("2026-01-05T09:02:00.000Z");
   });
 });
 

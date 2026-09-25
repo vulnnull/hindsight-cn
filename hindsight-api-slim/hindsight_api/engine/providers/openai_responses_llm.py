@@ -43,7 +43,7 @@ from openai import APIConnectionError, APIStatusError, AsyncOpenAI
 
 from hindsight_api.config import get_config
 from hindsight_api.engine.bank_attribution import apply_bank_attribution
-from hindsight_api.engine.cache_affinity import apply_opencode_session
+from hindsight_api.engine.cache_affinity import apply_opencode_session, is_opencode_host
 from hindsight_api.engine.llm_interface import (
     LLM_TOOL_CHOICE_AUTO,
     LLMInterface,
@@ -241,9 +241,9 @@ class OpenAIResponsesLLM(LLMInterface):
         )
 
     def _supports_reasoning_model(self) -> bool:
-        """Whether the model is an OpenAI reasoning model (gpt-5.x, o1, o3)."""
+        """Whether the model is an OpenAI reasoning model (gpt-5.x, gpt-6, o1, o3)."""
         model_lower = self.model.lower()
-        return any(x in model_lower for x in ["gpt-5", "o1", "o3"])
+        return any(x in model_lower for x in ["gpt-5", "gpt-6", "o1", "o3"])
 
     def supports_vision(self) -> bool:
         """OpenAI's own Responses API — every model it serves reads images."""
@@ -570,6 +570,16 @@ class OpenAIResponsesLLM(LLMInterface):
             request_tool_choice = None
         else:
             request_tool_choice = tool_choice.mode.value
+
+        # OpenCode Go's /v1/responses rejects every tool_choice except the default
+        # with HTTP 400 ('only "auto" is supported'), so reflect's required/named
+        # choices failed every turn. Omit the field there. A named choice stays
+        # practically forced: its tools list was already narrowed to that one tool.
+        # Keyed on the host, not the provider name — deployments reach it as
+        # ``openai-responses`` with a custom base_url, and native OpenAI on the
+        # same provider name does honour these values.
+        if is_opencode_host(self.base_url) and tool_choice.mode is not LLMToolChoiceMode.AUTO:
+            request_tool_choice = None
 
         params: dict[str, Any] = {
             "model": self.model,

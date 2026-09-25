@@ -33,7 +33,8 @@ _SNIPPET_CHARS = 280
 #: Retrieval plumbing that the reflect agent never reads, dropped from tool
 #: results before they reach the model.
 #:
-#: These are scoring and provenance internals, not evidence: the agent cites by
+#: These are scores and internal pointers, not evidence the agent can reason with
+#: (provenance it CAN reason with is kept -- see ``metadata`` below): the agent cites by
 #: ``id``, ``based_on`` re-reads the cited memories' provenance from the store
 #: (``MemoryEngine._evidence_as_stored``), and the expand tool takes
 #: ``memory_ids`` and resolves chunks server-side -- so nothing downstream needs
@@ -46,7 +47,22 @@ _SNIPPET_CHARS = 280
 #: the surface text ("Bob" in the text vs canonical "Robert Smith"). Reflect's
 #: recalls don't populate it today (``include_entities`` defaults to False), but
 #: trimming it would bake in dropping the names if that ever flips on.
-_UNREAD_RESULT_FIELDS = ("scores", "metadata", "chunk_id", "document_id")
+#:
+#: ``metadata`` used to be dropped here too, and that made a document's own
+#: metadata unusable for reasoning: a bank that stamps where each document came
+#: from (``{"source": "guide"}`` on the handbook, ``{"source": "conversation"}``
+#: on a transcript) had no way to tell reflect which to believe, because the
+#: model never saw the stamp. Once extraction has flattened both into plain
+#: assertions -- "a pull request needs two approvals" and "one approval is enough
+#: for small ones" -- provenance is the ONLY thing left that separates a policy
+#: from someone's opinion, and recency picks the wrong one because the chatter is
+#: newer. So it is sent now, and an operator can rank the sources in the bank's
+#: reflect mission with no new configuration at all.
+#:
+#: The cost is paid only by banks that write metadata: ``_prune_nulls`` drops an
+#: empty bag, so a bank that stamps nothing sends nothing, and a bank that stamps
+#: a lot pays for what it chose to stamp.
+_UNREAD_RESULT_FIELDS = ("scores", "chunk_id", "document_id")
 
 
 def _drop_unread_fields(d: dict[str, Any]) -> dict[str, Any]:

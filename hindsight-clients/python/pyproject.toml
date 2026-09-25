@@ -15,6 +15,7 @@ dependencies = [
   "aiohttp-retry (>=2.8.3)",
   "pydantic (>=2)",
   "typing-extensions (>=4.7.1)",
+  "yarl (>=1.9,<2.0)",
 ]
 
 [project.optional-dependencies]

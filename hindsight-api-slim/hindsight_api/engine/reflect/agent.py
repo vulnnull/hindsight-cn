@@ -186,9 +186,11 @@ class ReflectToolCallError(RuntimeError):
     calling and silently drop the tool definitions from the request (e.g. litellm's
     Vertex AI gpt-oss MaaS path strips ``tools``/``tool_choice`` when the model is
     flagged as not supporting them). The model then answers in free text that may
-    mimic a ``done`` payload. Rather than salvage that untooled text -- and risk
-    surfacing raw tool-call JSON as the answer -- we fail loudly so the caller can
-    switch to a tool-calling-capable model/transport.
+    mimic a ``done`` payload. Other endpoints support tools but ignore the forced
+    tool choice for some prompts only (#4557). Rather than salvage that untooled
+    text -- and risk surfacing raw tool-call JSON as the answer -- we fail loudly,
+    naming the requested tool choice and the response's finish reason so the
+    operator can tell the two cases apart.
     """
 
 
@@ -1237,20 +1239,29 @@ async def _run_reflect_agent_inner(
             # means one of two things:
             #   * the model already gathered evidence via earlier tool calls and is
             #     now stopping -- fine, synthesize a clean final answer below;
-            #   * the transport can't produce tool calls at all, so it only ever
-            #     returns free text (e.g. litellm strips tools on the Vertex gpt-oss
-            #     MaaS path). In that case ``saw_tool_call`` is still False.
+            #   * no usable tool call has been produced yet. The endpoint may have
+            #     ignored this prompt's tool choice, or lack tool support altogether
+            #     (e.g. litellm strips tools on the Vertex gpt-oss MaaS path).
             # We no longer salvage that free text as the answer -- it can be a raw
             # done()-payload with sibling id fields leaking into user-visible text.
-            # Fail loudly instead so the caller picks a tool-calling-capable model.
+            # Fail loudly with request/response diagnostics instead.
             if not saw_tool_call:
                 snippet = (result.content or "").strip()
                 if len(snippet) > 500:
                     snippet = snippet[:500] + "..."
                 detail = f" Response: {snippet!r}" if snippet else " The model returned no content."
+                # A single text-only response does not prove the model lacks tool
+                # support: some endpoints ignore a forced choice for short prompts.
+                # Report the requested choice and normalized response so operators can probe the
+                # failing contract, including truncation, without changing providers.
+                requested_choice = iter_tool_choice.function_name or iter_tool_choice.mode.value
                 raise ReflectToolCallError(
                     f"Reflect requires a tool-calling model, but {llm_config.provider}/{llm_config.model} "
-                    f"produced no usable tool call (the transport may not support function calling)." + detail
+                    "produced no usable tool call during initial tool selection "
+                    f"(iteration={iteration + 1}, tool_choice={requested_choice!r}, "
+                    f"finish_reason={result.finish_reason!r}). "
+                    "Check tool-choice handling for this prompt on the configured endpoint; "
+                    "a successful tool call for another prompt does not establish compatibility." + detail
                 )
             # Model tool-called earlier and is now stopping with prose.
             return await _finish(iteration + 1)
@@ -1733,24 +1744,38 @@ async def _process_done_tool(
     # markdown is rendered from it. The rendered text still flows on as ``text``
     # so every consumer (structured-output extraction, the length rewrite, the
     # HTTP response) is unchanged -- what changes is that nobody has to read the
-    # model's markdown back to find out what it meant.
+    # model's markdown back to find out what it meant. A string-encoded
+    # ``document`` argument is decoded first: models on OpenAI-compatible
+    # transports sometimes double-encode nested tool arguments (same class as
+    # #899's MCP coercion).
     document: StructuredDocument | None = None
     raw_document = args.get("document")
+    if isinstance(raw_document, str):
+        try:
+            raw_document = json.loads(raw_document)
+        except json.JSONDecodeError:
+            raw_document = None
     if isinstance(raw_document, dict):
         document = document_from_sections(raw_document)
         answer = render_document(document).strip()
     else:
         answer = args.get("answer", "").strip()
     if not answer:
-        # The model called ``done`` with nothing in it -- typically its output was
-        # cut off mid-tool-call by the completion cap, so the answer field arrived
-        # empty even though the evidence was gathered. Fail instead of standing in
+        # The model called ``done`` with nothing usable in it -- no ``answer``
+        # field and no decodable ``document`` object. Typically its output was
+        # cut off mid-tool-call by the completion cap (finish_reason "length"),
+        # but the same signature also comes from a well-formed completion whose
+        # ``document`` argument never parsed to an object, so truncation is one
+        # possible cause, not the only one. Fail instead of standing in
         # a placeholder: it is non-empty, so every downstream emptiness guard reads
         # it as a real answer and stores it over working content (#2959).
         raise ReflectNoAnswerError(
             f"Reflect's done tool returned no answer (iteration {iterations}, "
-            f"{total_tools_called} tool call(s) made). The model's output may have been "
-            "truncated before the answer field was written."
+            f"{total_tools_called} tool call(s) made): the done call carried no usable "
+            "answer and no decodable document object. If the model's output was cut off "
+            "mid-tool-call, the answer field may have arrived empty; a document argument "
+            "that is not a JSON object (e.g. a string-encoded document) produces the "
+            "same signature."
         )
 
     final_usage = usage

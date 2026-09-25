@@ -316,7 +316,8 @@
     "timeFieldMentionedShort": "提及时间",
     "timeFieldMentionedLong": "事实提及的时间（事件时间）",
     "timeFieldOccurredShort": "发生时间",
-    "timeFieldOccurredLong": "底层事件开始的时间"
+    "timeFieldOccurredLong": "底层事件开始的时间",
+    "causal": "因果"
   },
   "bankConfig": {
     "noBankSelected": "未选择记忆库",

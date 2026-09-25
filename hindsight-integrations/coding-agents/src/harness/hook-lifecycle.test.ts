@@ -8,6 +8,27 @@ import { DEFAULT_REFLECT_TIMEOUT_MS } from "../core/config";
 const HOOK_HARNESS_NAMES = Object.keys(HOOK_HARNESSES) as HookHarnessName[];
 
 describe("HOOK_HARNESSES lifecycle contract", () => {
+  it("uses the hook working directory when Devin omits its project variable", () => {
+    const devin = HOOK_HARNESSES["devin-cli"];
+    const original = process.env.DEVIN_PROJECT_DIR;
+    const event = { session_id: "s1", prompt: "hello" };
+
+    try {
+      for (const value of ["/explicit/project", "", undefined]) {
+        if (value === undefined) delete process.env.DEVIN_PROJECT_DIR;
+        else process.env.DEVIN_PROJECT_DIR = value;
+
+        const expected = value || process.cwd();
+        expect(devin.sessionStart.parse(event).cwd).toBe(expected);
+        expect(devin.prompt.parse(event).cwd).toBe(expected);
+        expect(devin.retain.parse(event).cwd).toBe(expected);
+      }
+    } finally {
+      if (original === undefined) delete process.env.DEVIN_PROJECT_DIR;
+      else process.env.DEVIN_PROJECT_DIR = original;
+    }
+  });
+
   it("declares every lifecycle once for every hook-based harness", () => {
     for (const harness of HOOK_HARNESS_NAMES) {
       expect(Object.keys(HOOK_HARNESSES[harness].install).sort()).toEqual([

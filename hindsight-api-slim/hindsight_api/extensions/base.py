@@ -64,8 +64,21 @@ class Extension(ABC):
             )
         return self._context
 
-    def alembic_version_locations(self) -> list[str]:
+    @classmethod
+    def alembic_version_locations(cls) -> list[str]:
         """Directories of Alembic revisions this extension owns.
+
+        A **classmethod**, and that is load-bearing rather than tidiness. The
+        directories an extension ships are a static property of its package, so
+        answering needs no instance — and the migration runner must not build one.
+        Constructing an extension runs its ``__init__``, and a constructor is
+        entitled to process-wide side effects: publishing a cache as a module-level
+        singleton, registering a client, claiming a lock. Such a constructor is
+        written assuming the application builds the extension ONCE, and an extra
+        construction during migrations silently breaks that assumption — the
+        instance serving requests keeps the object it built with, while the global
+        now points at a newer one, so the two halves of a subsystem stop agreeing.
+        Asking the class costs nothing and cannot do that.
 
         An extension that keeps state of its own — tables, or data in a store it
         fronts — needs that state migrated on the same lifecycle as core's, and

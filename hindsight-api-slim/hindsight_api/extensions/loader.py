@@ -23,6 +23,52 @@ class ExtensionLoadError(Exception):
     pass
 
 
+def _resolve_extension_class(ext_path: str, base_class: type[T]) -> type[T]:
+    """Import and validate the class named by ``module.path:ClassName``, no instance.
+
+    Split out so a caller that only needs the class does not have to construct one:
+    a constructor may have process-wide side effects, and running it to answer a
+    question about the package is how those get run more times than their author
+    expected.
+    """
+    if ":" not in ext_path:
+        raise ExtensionLoadError(f"Invalid extension path '{ext_path}'. Expected format: 'module.path:ClassName'")
+
+    module_path, class_name = ext_path.rsplit(":", 1)
+
+    try:
+        module = importlib.import_module(module_path)
+    except ImportError as e:
+        raise ExtensionLoadError(f"Failed to import extension module '{module_path}': {e}") from e
+
+    try:
+        ext_class = getattr(module, class_name)
+    except AttributeError as e:
+        raise ExtensionLoadError(f"Extension class '{class_name}' not found in module '{module_path}'") from e
+
+    if not isinstance(ext_class, type) or not issubclass(ext_class, base_class):
+        raise ExtensionLoadError(f"Extension class '{ext_class.__name__}' must inherit from '{base_class.__name__}'")
+
+    return ext_class
+
+
+def resolve_configured_extension_class(
+    prefix: str,
+    base_class: type[T],
+    env_prefix: str = "HINDSIGHT_API",
+) -> "type[T] | None":
+    """The configured extension CLASS for ``prefix``, without instantiating it.
+
+    ``None`` when nothing is configured, exactly as :func:`load_extension` returns
+    ``None``. Use this for anything that asks an extension about itself rather than
+    asking it to do work.
+    """
+    ext_path = os.getenv(f"{env_prefix}_{prefix}_EXTENSION")
+    if not ext_path:
+        return None
+    return _resolve_extension_class(ext_path, base_class)
+
+
 def load_extension(
     prefix: str,
     base_class: type[T],
@@ -66,27 +112,7 @@ def load_extension(
 
     logger.info(f"Loading extension from {env_var}={ext_path}")
 
-    # Parse "module.path:ClassName"
-    if ":" not in ext_path:
-        raise ExtensionLoadError(f"Invalid extension path '{ext_path}'. Expected format: 'module.path:ClassName'")
-
-    module_path, class_name = ext_path.rsplit(":", 1)
-
-    # Import the module
-    try:
-        module = importlib.import_module(module_path)
-    except ImportError as e:
-        raise ExtensionLoadError(f"Failed to import extension module '{module_path}': {e}") from e
-
-    # Get the class
-    try:
-        ext_class = getattr(module, class_name)
-    except AttributeError as e:
-        raise ExtensionLoadError(f"Extension class '{class_name}' not found in module '{module_path}'") from e
-
-    # Validate inheritance
-    if not isinstance(ext_class, type) or not issubclass(ext_class, base_class):
-        raise ExtensionLoadError(f"Extension class '{ext_class.__name__}' must inherit from '{base_class.__name__}'")
+    ext_class = _resolve_extension_class(ext_path, base_class)
 
     # Collect configuration from environment variables
     config = _collect_config(env_prefix, prefix)
@@ -177,14 +203,19 @@ def collect_alembic_version_locations(env_prefix: str = "HINDSIGHT_API") -> list
     for kind in EXTENSION_KINDS:
         try:
             base = getattr(importlib.import_module(kind.module_path), kind.class_name)
-            ext = load_extension(kind.prefix, base, env_prefix=env_prefix)
+            # The CLASS, never an instance. Constructing an extension to ask which
+            # directories it ships runs its `__init__`, and a constructor may publish
+            # process-wide state written on the assumption the application builds it
+            # once; a second construction here would leave the instance serving
+            # requests and that global pointing at different objects.
+            ext_class = resolve_configured_extension_class(kind.prefix, base, env_prefix=env_prefix)
         except Exception as e:  # noqa: BLE001 - a broken extension must not block migrations
             logger.warning("Could not load %s extension to collect migrations: %s", kind.prefix, e)
             continue
-        if ext is None:
+        if ext_class is None:
             continue
         try:
-            locations = ext.alembic_version_locations()
+            locations = ext_class.alembic_version_locations()
         except Exception as e:  # noqa: BLE001 - same reason
             logger.warning("%s extension failed to report its migrations: %s", kind.prefix, e)
             continue

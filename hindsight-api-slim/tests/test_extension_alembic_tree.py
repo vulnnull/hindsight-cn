@@ -86,8 +86,9 @@ class _ProbeExtension(TenantExtension):
 
     location: str = ""
 
-    def alembic_version_locations(self) -> list[str]:
-        return [type(self).location]
+    @classmethod
+    def alembic_version_locations(cls) -> list[str]:
+        return [cls.location]
 
     async def authenticate(self, context):  # pragma: no cover - never called
         raise NotImplementedError
@@ -196,3 +197,60 @@ def _table_exists(conn, schema: str, table: str) -> bool:
 def _version_rows(conn, schema: str) -> set[str]:
     rows = conn.execute(text(f'SELECT version_num FROM "{schema}".alembic_version')).fetchall()
     return {r[0] for r in rows}
+
+
+#: Counts constructions of :class:`_CountingExtension`. Module level because the
+#: loader resolves an extension by "module:ClassName" and can only see module
+#: attributes, so the class it constructs has to live here too.
+_CONSTRUCTIONS: list[int] = []
+
+
+class _CountingExtension(TenantExtension):
+    """Records every time it is constructed, and answers from the class."""
+
+    location: str = ""
+
+    def __init__(self, config=None):
+        _CONSTRUCTIONS.append(1)
+        super().__init__(config)
+
+    @classmethod
+    def alembic_version_locations(cls) -> list[str]:
+        return [cls.location]
+
+    async def authenticate(self, context):  # pragma: no cover - never called
+        raise NotImplementedError
+
+    async def list_tenants(self):  # pragma: no cover - never called
+        return []
+
+
+def test_collecting_locations_never_constructs_the_extension(monkeypatch, extension_tree):
+    """The migration runner asks the CLASS, and must not build an instance.
+
+    A constructor is entitled to process-wide side effects — publishing a cache as
+    a module-level singleton is the case that motivated this — and such a
+    constructor is written assuming the application builds the extension once. An
+    extra construction during migrations leaves the instance serving requests
+    holding the object it built with while the global points at a newer one, and the
+    two halves of that subsystem stop agreeing.
+
+    The symptom then has nothing to do with migrations, which is what makes it
+    expensive to find: a revoked API key kept authenticating, because the revoke
+    path evicted one cache while request auth read the other.
+
+    So this asserts the mechanism rather than any symptom: collecting must not run
+    `__init__` even once.
+    """
+    _CountingExtension.location = str(extension_tree)
+    _CONSTRUCTIONS.clear()
+    monkeypatch.setenv("HINDSIGHT_API_TENANT_EXTENSION", f"{__name__}:_CountingExtension")
+
+    found = collect_alembic_version_locations()
+
+    assert found == [str(extension_tree.resolve())], "the tree was not collected"
+    assert _CONSTRUCTIONS == [], (
+        f"the extension was constructed {len(_CONSTRUCTIONS)} time(s) while collecting its "
+        "migration locations; a constructor with process-wide side effects runs again and the "
+        "application's own instance stops agreeing with it"
+    )

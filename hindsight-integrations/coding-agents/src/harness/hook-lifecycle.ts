@@ -189,7 +189,10 @@ const copilotPrompt: HookSpec = {
   }),
 };
 
-const devinCwd = (): string | undefined => process.env.DEVIN_PROJECT_DIR;
+// Devin does not set DEVIN_PROJECT_DIR in every spawn context. It still launches hooks from the
+// project dir, so fall back to the process cwd; env-only resolution tagged those sessions
+// `project:unknown` (#4756).
+const devinCwd = (): string => process.env.DEVIN_PROJECT_DIR || process.cwd();
 const devinPrompt: HookSpec = {
   harness: "devin-cli",
   requireCwd: true,

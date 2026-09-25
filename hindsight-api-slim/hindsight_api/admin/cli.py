@@ -8,7 +8,9 @@ import asyncio
 import io
 import json
 import logging
+import os
 import struct
+import uuid
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -25,7 +27,7 @@ from ..engine.memory_engine import _current_schema
 from ..engine.retain.bank_utils import _vector_index_clause, bank_indexes_are_store_owned
 from ..engine.schema import fq_table_explicit as _fq_table
 from ..engine.storage import bank_storage_prefix, create_file_storage
-from ..engine.transfer import TransferScope, export_bank
+from ..engine.transfer import TransferScope, stream_export_bank
 from ..engine.vector_index_health import (
     BankIndexResult,
     drop_orphaned_bank_indexes,
@@ -1322,20 +1324,31 @@ async def _run_export_bank(db_url: str, bank_id: str, output: Path, schema: str,
         # contextvar); set it so the raw connection targets the right schema.
         _current_schema.set(schema)
         # _admin_connect registers JSON codecs, so row dumps already contain
-        # decoded Python values (including JSON scalar strings).
-        data = await export_bank(
-            conn,
-            bank_id,
-            scope=TransferScope(data=True, bank_config=True, history=include_history),
-            bank_rows_json_encoding="decoded",
-            memories=get_memories(),
-            file_storage=_admin_file_storage(conn, schema),
-        )
+        total_bytes = 0
+        tmp_output = output.with_suffix(f"{output.suffix}.tmp.{uuid.uuid4().hex[:8]}")
+        try:
+            with tmp_output.open("wb") as fp:
+                async for chunk in stream_export_bank(
+                    conn,
+                    bank_id,
+                    scope=TransferScope(data=True, bank_config=True, history=include_history),
+                    bank_rows_json_encoding="decoded",
+                    memories=get_memories(),
+                    file_storage=_admin_file_storage(conn, schema),
+                ):
+                    fp.write(chunk)
+                    total_bytes += len(chunk)
+                fp.flush()
+            os.replace(tmp_output, output)
+        finally:
+            if tmp_output.exists():
+                try:
+                    tmp_output.unlink()
+                except OSError:
+                    pass
+        return total_bytes
     finally:
         await conn.close()
-
-    output.write_bytes(data)
-    return len(data)
 
 
 @app.command(name="export-bank")

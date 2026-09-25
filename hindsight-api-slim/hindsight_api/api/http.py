@@ -23,7 +23,7 @@ from urllib.parse import quote, unquote
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from hindsight_api.api import page_markdown
 from hindsight_api.api.admission import AdmissionAbandoned, AdmissionRejected, build_controller_from_config
@@ -3645,6 +3645,7 @@ class KnowledgePageSearchResult(BaseModel):
     id: str
     name: str
     mental_model_id: str | None = None
+    source_query: str | None = Field(default=None, description="The question the page answers.")
     snippet: str = Field(
         description=(
             "The page's opening text. A page whose body is still empty says so in words — "
@@ -9292,14 +9293,18 @@ def _register_routes(app: FastAPI):
             else:
                 raise HTTPException(status_code=404, detail="File not found")
 
-            data = await app.state.memory.retrieve_bank_file(bank_id, key, request_context)
-            if data is None:
+            file_info = await app.state.memory.retrieve_bank_file_stream(bank_id, key, request_context)
+            if file_info is None:
                 raise HTTPException(status_code=404, detail="File not found")
 
-            return Response(
-                content=data,
+            headers = {"Content-Disposition": f'attachment; filename="{bank_id}-documents.zip"'}
+            if file_info.size is not None:
+                headers["Content-Length"] = str(file_info.size)
+
+            return StreamingResponse(
+                file_info.stream,
                 media_type="application/zip",
-                headers={"Content-Disposition": f'attachment; filename="{bank_id}-documents.zip"'},
+                headers=headers,
             )
         except OperationValidationError as e:
             raise HTTPException(status_code=e.status_code, detail=e.reason)

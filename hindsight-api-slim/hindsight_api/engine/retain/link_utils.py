@@ -33,6 +33,21 @@ _NIL_ENTITY_UUID = "00000000-0000-0000-0000-000000000000"
 # leaves inside a candidate entity name.
 _WHITESPACE_RUN_RE = re.compile(r"\s+")
 
+# Longest candidate entity name intake will accept. `entities.canonical_name` is
+# unbounded TEXT, but `idx_entities_bank_name` is a btree on (bank_id,
+# canonical_name) and a btree tuple cannot exceed ~2704 bytes, so a longer name
+# fails the INSERT with ProgramLimitExceededError — and takes the whole retain
+# with it, not just the one entity. 512 characters stays under that limit even at
+# 4 bytes per character plus a long bank_id. Real names never get close: on a
+# production bank set of ~11M entities the median was 13 characters and p99.9 was
+# 96; everything past a few hundred was an extraction artifact — SVG path data,
+# base64, a fragment of serialized JSON.
+# This cap counts characters, which is what the PostgreSQL btree needs. Oracle
+# declares canonical_name as VARCHAR2(512) — byte-counted — so a multibyte name
+# under this cap can still be rejected there; that is a narrower, pre-existing
+# limit of the Oracle schema, not something this cap is sized for.
+_MAX_ENTITY_NAME_CHARS = 512
+
 
 def _normalize_entity_name(name: str) -> str:
     """Collapse internal whitespace runs to a single space and strip the ends.
@@ -277,6 +292,8 @@ def _prepare_entities_for_resolution(
     Candidate names are whitespace-normalized here (see ``_normalize_entity_name``)
     and names that are empty afterwards are dropped, so no downstream stage has to
     cope with an entity whose canonical name is blank or spans several lines.
+    Names longer than ``_MAX_ENTITY_NAME_CHARS`` are dropped too: they are always
+    extraction artifacts, and storing one fails the retain on the btree index.
     Both happen before the flat list and ``entity_to_unit`` are derived, keeping
     the resolver's positional invariant (output index-aligned with input) intact.
 
@@ -289,6 +306,7 @@ def _prepare_entities_for_resolution(
     substep_start = time.time()
     all_entities = []
     dropped_empty = 0
+    dropped_oversized = 0
     for entity_list in llm_entities:
         formatted_entities = []
         # Normalization can make two candidates that reached here as distinct
@@ -312,6 +330,12 @@ def _prepare_entities_for_resolution(
                 # guard of its own.
                 dropped_empty += 1
                 continue
+            if len(normalized_text) > _MAX_ENTITY_NAME_CHARS:
+                # Dropped rather than truncated: a truncated SVG path or base64 run
+                # would become a real registry entity that is trigram-indexed and can
+                # fuzzy-merge with other truncated junk. The fact itself still retains.
+                dropped_oversized += 1
+                continue
 
             resolve = _entity_resolve_flag(ent)
             kept = seen_in_fact.get(normalized_text.lower())
@@ -333,6 +357,13 @@ def _prepare_entities_for_resolution(
             log_buffer,
             f"  [6.1] Dropped {dropped_empty} empty candidate entity name(s)",
             level="debug",
+        )
+    if dropped_oversized:
+        _log(
+            log_buffer,
+            f"  [6.1] Dropped {dropped_oversized} candidate entity name(s) longer than "
+            f"{_MAX_ENTITY_NAME_CHARS} characters",
+            level="warning",
         )
 
     total_entities = sum(len(ents) for ents in all_entities)

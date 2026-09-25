@@ -15,9 +15,8 @@ from uuid import uuid4
 
 import pytest
 
-from hindsight_api.engine.search.reranking import CrossEncoderReranker
+from hindsight_api.engine.search.reranking import CrossEncoderReranker, RerankResult
 from hindsight_api.engine.search.types import MergedCandidate, RetrievalResult
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -66,7 +65,7 @@ async def test_passthrough_for_0_1_scores():
     reranker._initialized = True
 
     candidates = _make_candidates(3)
-    results = await reranker.rerank("test query", candidates)
+    results = (await reranker.rerank("test query", candidates)).results
 
     assert len(results) == 3
     # Results sorted by score descending; normalized == raw
@@ -89,7 +88,7 @@ async def test_low_confidence_scores_preserved():
     reranker._initialized = True
 
     candidates = _make_candidates(4)
-    results = await reranker.rerank("test query", candidates)
+    results = (await reranker.rerank("test query", candidates)).results
 
     # All normalized scores should remain low — not inflated to 1.0
     for result in results:
@@ -107,7 +106,7 @@ async def test_sigmoid_normalization_for_logits():
     reranker._initialized = True
 
     candidates = _make_candidates(3)
-    results = await reranker.rerank("test query", candidates)
+    results = (await reranker.rerank("test query", candidates)).results
 
     assert len(results) == 3
     import math
@@ -133,7 +132,7 @@ async def test_empty_candidates_returns_empty_without_predict():
 
     results = await reranker.rerank("test query", [])
 
-    assert results == []
+    assert results.results == []
     ce.predict.assert_not_awaited()
 
 
@@ -146,7 +145,7 @@ async def test_boundary_scores_passthrough():
     reranker._initialized = True
 
     candidates = _make_candidates(3)
-    results = await reranker.rerank("test query", candidates)
+    results = (await reranker.rerank("test query", candidates)).results
 
     by_score = {r.cross_encoder_score: r.cross_encoder_score_normalized for r in results}
     assert by_score[1.0] == pytest.approx(1.0)
@@ -159,7 +158,7 @@ async def test_zero_scores_survive_an_ordinary_reranker():
     """A low score from a plain cross-encoder means "least bad", never "discard"."""
     ce = _make_cross_encoder([0.5, 0.0, 0.2])
     ce.prunes_candidates = False
-    results = await CrossEncoderReranker(cross_encoder=ce).rerank("q", _make_candidates(3))
+    results = (await CrossEncoderReranker(cross_encoder=ce).rerank("q", _make_candidates(3))).results
     assert len(results) == 3
 
 
@@ -168,5 +167,60 @@ async def test_zero_scores_are_dropped_when_the_reranker_judges_relevance():
     """A reranker that decides relevance marks a discard with exactly 0.0."""
     ce = _make_cross_encoder([0.5, 0.0, 0.2])
     ce.prunes_candidates = True
-    results = await CrossEncoderReranker(cross_encoder=ce).rerank("q", _make_candidates(3))
+    results = (await CrossEncoderReranker(cross_encoder=ce).rerank("q", _make_candidates(3))).results
     assert [r.weight for r in results] == [0.5, 0.2]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first_query", ["primary", "fallback"])
+async def test_concurrent_reranks_capture_the_serving_member(first_query: str) -> None:
+    """The first predict pauses while another request changes the chain's cursor."""
+    import asyncio
+
+    from hindsight_api.engine.cross_encoder import CrossEncoderModel, MultiCrossEncoder, RRFPassthroughCrossEncoder
+
+    first_scored = asyncio.Event()
+    second_scored = asyncio.Event()
+
+    class _Primary(CrossEncoderModel):
+        @property
+        def provider_name(self) -> str:
+            return "tei"
+
+        async def initialize(self) -> None:
+            pass
+
+        async def _predict(self, pairs: list[tuple[str, str]]) -> list[float]:
+            if pairs[0][0] == "fallback":
+                raise RuntimeError("member down")
+            return [0.4] * len(pairs)
+
+    class _InterleavedChain(MultiCrossEncoder):
+        async def predict(self, pairs: list[tuple[str, str]]) -> list[float]:
+            scores = await super().predict(pairs)
+            # Yield AFTER the member answered and BEFORE rerank reads its metadata.
+            # Reading the shared _active cursor here would label the first request
+            # with the second request's provider, in either failover direction.
+            if pairs[0][0] == first_query:
+                first_scored.set()
+                await second_scored.wait()
+            else:
+                second_scored.set()
+            return scores
+
+    chain = _InterleavedChain([_Primary(), RRFPassthroughCrossEncoder()])
+    reranker = CrossEncoderReranker(cross_encoder=chain)
+    second_query = "fallback" if first_query == "primary" else "primary"
+
+    async def second_rerank() -> RerankResult:
+        await first_scored.wait()
+        return await reranker.rerank(second_query, _make_candidates(1))
+
+    results = await asyncio.wait_for(
+        asyncio.gather(reranker.rerank(first_query, _make_candidates(1)), second_rerank()), timeout=5
+    )
+    assert [r.provider_name for r in results] == [
+        "tei" if query == "primary" else "rrf" for query in [first_query, second_query]
+    ]
+    assert chain.provider_name == results[1].provider_name
+    assert chain.provider_name != results[0].provider_name

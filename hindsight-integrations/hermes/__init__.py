@@ -361,14 +361,23 @@ _METADATA_ATTRS = (
     "thread_id",
     "agent_identity",
 )
+# Naming Hermes' built-in session_search tells the model when to pick each tool. With only
+# the tool names listed, models defaulted to session_search (raw transcripts) for every
+# history question and skipped Hindsight's deduplicated memories.
+_TOOL_GUIDANCE = (
+    "For cross-session facts, user preferences, and past decisions, "
+    "prefer hindsight_recall over session_search — it returns "
+    "deduplicated, high-density observations across sessions. "
+    "Use hindsight_reflect for cross-session pattern synthesis. "
+    "Use session_search only when you need verbatim transcripts or "
+    "exact wording from a specific conversation. "
+    "Use hindsight_retain to store facts."
+)
+_CONTEXT_NOTE = "Relevant memories are automatically injected into context."
 _SYSTEM_PROMPT_TAILS = {
-    "context": "Relevant memories are automatically injected into context.",
-    "tools": ("Use hindsight_recall to search, hindsight_reflect for synthesis, hindsight_retain to store facts."),
-    "hybrid": (
-        "Relevant memories are automatically injected into context. "
-        "Use hindsight_recall to search, hindsight_reflect for synthesis, "
-        "hindsight_retain to store facts."
-    ),
+    "context": _CONTEXT_NOTE,
+    "tools": _TOOL_GUIDANCE,
+    "hybrid": f"{_CONTEXT_NOTE} {_TOOL_GUIDANCE}",
 }
 
 

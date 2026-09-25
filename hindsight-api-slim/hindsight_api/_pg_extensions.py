@@ -41,6 +41,7 @@ MANAGED_EXTENSIONS: tuple[str, ...] = (
     "vchord",
     "alloydb_scann",
     "pg_trgm",
+    "btree_gin",
     "vchord_bm25",
     "pg_textsearch",
     "pg_search",
