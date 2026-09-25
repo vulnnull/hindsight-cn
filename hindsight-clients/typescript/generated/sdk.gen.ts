@@ -263,6 +263,9 @@ import type {
   SearchKnowledgeBaseData,
   SearchKnowledgeBaseErrors,
   SearchKnowledgeBaseResponses,
+  SetBankAliasPrimaryData,
+  SetBankAliasPrimaryErrors,
+  SetBankAliasPrimaryResponses,
   TestBankLlmData,
   TestBankLlmErrors,
   TestBankLlmResponses,
@@ -1287,6 +1290,29 @@ export const deleteBankAlias = <ThrowOnError extends boolean = false>(
   (options.client ?? client).delete<DeleteBankAliasResponses, DeleteBankAliasErrors, ThrowOnError>({
     url: "/v1/default/banks/{bank_id}/aliases/{alias}",
     ...options,
+  });
+
+/**
+ * Show this alias in place of the bank id
+ *
+ * Present the bank under one of its aliases. Purely cosmetic: the bank keeps its own `bank_id`, which every other part of the system — authorisation, metering, exports, audit logs — continues to use.
+ *
+ * Promoting an alias demotes whichever one was shown before, so a bank is presented under at most one alias. Send `primary: false` to go back to showing its own id.
+ */
+export const setBankAliasPrimary = <ThrowOnError extends boolean = false>(
+  options: Options<SetBankAliasPrimaryData, ThrowOnError>
+) =>
+  (options.client ?? client).patch<
+    SetBankAliasPrimaryResponses,
+    SetBankAliasPrimaryErrors,
+    ThrowOnError
+  >({
+    url: "/v1/default/banks/{bank_id}/aliases/{alias}",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   });
 
 /**

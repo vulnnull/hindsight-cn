@@ -31,6 +31,7 @@ from collections.abc import AsyncIterator
 
 import pytest
 from hindsight_client_api.models.create_bank_alias_request import CreateBankAliasRequest
+from hindsight_client_api.models.set_bank_alias_primary_request import SetBankAliasPrimaryRequest
 
 from hindsight_system_tests.payloads import consolidation, extracted, fact
 
@@ -120,7 +121,8 @@ async def test_the_bank_reports_its_own_id_through_the_alias(client, migrating_b
 
     aliases = await client.banks.list_bank_aliases(new)
     assert aliases.bank_id == old
-    assert aliases.aliases == [new]
+    # Nothing is promoted here, so the bank is still presented under its own id.
+    assert [(a.alias, a.primary) for a in aliases.aliases] == [(new, False)]
 
 
 async def test_the_old_id_keeps_working_after_the_alias_is_removed(client, settled, migrating_bank):
@@ -152,3 +154,38 @@ async def test_the_new_id_cannot_be_claimed_by_a_second_bank(client, llm, migrat
         assert (await client.banks.list_bank_aliases(new)).bank_id == old
     finally:
         await client.banks.delete_bank(other)
+
+
+async def test_the_bank_can_be_presented_under_the_new_id(client, migrating_bank):
+    """The end of a migration: the bank is shown as the id everyone now uses, while
+    every row it owns is still keyed on the id it was created with.
+
+    That split is the whole point — a display that quietly became the identity
+    would be a rename, which is the thing aliases exist to avoid.
+    """
+    old, new = migrating_bank
+
+    await client.banks.set_bank_alias_primary(old, new, SetBankAliasPrimaryRequest(primary=True))
+
+    listing = await client.banks.list_banks(q=old)
+    row = next(b for b in listing.banks if b.bank_id == old)
+    assert row.display_alias == new, "the bank is not presented under the promoted alias"
+    assert row.bank_id == old, "promoting an alias must not touch the bank's identity"
+
+    # And the data is reachable by both, exactly as before the promotion.
+    for name in (old, new):
+        recalled = await client.arecall(bank_id=name, query="When is the deploy window?")
+        assert [r.text for r in recalled.results] == ["The deploy window is Tuesday | Involving: Ops"]
+
+
+async def test_dropping_the_shown_alias_returns_the_bank_to_its_own_id(client, migrating_bank):
+    """The flag lives on the alias row, so removing the alias removes the display
+    with it — there is no way to leave a bank pointing at an id that stopped
+    resolving."""
+    old, new = migrating_bank
+    await client.banks.set_bank_alias_primary(old, new, SetBankAliasPrimaryRequest(primary=True))
+
+    await client.banks.delete_bank_alias(old, new)
+
+    row = next(b for b in (await client.banks.list_banks(q=old)).banks if b.bank_id == old)
+    assert row.display_alias is None

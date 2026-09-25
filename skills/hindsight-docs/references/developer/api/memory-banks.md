@@ -62,10 +62,21 @@ An **alias** is an extra id a bank answers to. Every endpoint that accepts a ban
 This exists because a bank's id is the key on all of its data, so changing it means rewriting every row and cutting all clients over at once (that is [`rename-bank`](../admin-cli.md#rename-bank), and it needs downtime). An alias lets you do the same migration in phases: add the new id, move clients across a few at a time while both ids work, and stop when nothing calls the old one.
 
 ```
-POST   /v1/default/banks/{bank_id}/aliases     {"alias": "new-id"}
+POST   /v1/default/banks/{bank_id}/aliases             {"alias": "new-id"}
 GET    /v1/default/banks/{bank_id}/aliases
+PATCH  /v1/default/banks/{bank_id}/aliases/{alias}     {"primary": true}
 DELETE /v1/default/banks/{bank_id}/aliases/{alias}
 ```
+
+### Showing a bank under an alias
+
+Once callers have moved, the control plane can present the bank under the new id instead of the one it was created with. `PATCH` with `primary: true` promotes an alias; `primary: false` returns the bank to showing its own id without removing the alias.
+
+This is **display only**. `bank_id` remains the bank's identity: authorisation, metering, exports and audit logs all continue to use it, and it is what every response reports. The control plane shows the real id alongside the alias so the two are never confused.
+
+- **Optional, with no default.** A bank's own id is not an alias, so "not shown under an alias" is the normal state.
+- **At most one.** Promoting an alias demotes whichever one was shown before, in a single transaction.
+- **It cannot outlive the alias.** Deleting the promoted alias returns the bank to showing its own id.
 
 **What to know:**
 

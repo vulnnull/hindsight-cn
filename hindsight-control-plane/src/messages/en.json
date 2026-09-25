@@ -257,6 +257,9 @@
     "description": "Extra ids that also reach <name>{bankId}</name>, so callers can move to a new id without downtime.",
     "placeholder": "New id",
     "add": "Add",
+    "shownAsLabel": "Shown as",
+    "shownAsDescription": "Which id the control plane displays for this bank. Cosmetic only — {bankId} stays its identity everywhere else.",
+    "primaryTitle": "Shown in place of the bank id",
     "removeAria": "Remove alias {alias}",
     "removeTitle": "Remove alias {alias}?",
     "removeConfirm": "Every application still connected through {alias} will stop working immediately. Only this id goes away — {bankId} and its memories are untouched, and you can add the alias back.",
@@ -264,6 +267,7 @@
     "cancel": "Cancel",
     "loadFailed": "Failed to load aliases",
     "addFailed": "Failed to add alias",
+    "primaryFailed": "Failed to change which id is shown",
     "removeFailed": "Failed to remove alias"
   },
   "bankStats": {
@@ -1954,7 +1958,8 @@
       "bankAliases": {
         "list": "Failed to list bank aliases",
         "create": "Failed to create bank alias",
-        "delete": "Failed to delete bank alias"
+        "delete": "Failed to delete bank alias",
+        "update": "Failed to update bank alias"
       },
       "memories": {
         "list": "Failed to list memory units",

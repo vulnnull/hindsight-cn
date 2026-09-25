@@ -472,6 +472,19 @@ enum BankAliasCommands {
         alias: String,
     },
 
+    /// Show this bank under one of its aliases instead of its own id
+    Primary {
+        /// Bank ID
+        bank_id: String,
+
+        /// The alias to present the bank under
+        alias: String,
+
+        /// Go back to showing the bank's own id
+        #[arg(long)]
+        clear: bool,
+    },
+
     /// Stop an id reaching this bank (the bank and its memories are untouched)
     Remove {
         /// Bank ID
@@ -1524,6 +1537,18 @@ fn run() -> Result<()> {
                 BankAliasCommands::Add { bank_id, alias } => {
                     commands::bank::alias_add(&client, &bank_id, &alias, verbose, output_format)
                 }
+                BankAliasCommands::Primary {
+                    bank_id,
+                    alias,
+                    clear,
+                } => commands::bank::alias_primary(
+                    &client,
+                    &bank_id,
+                    &alias,
+                    !clear,
+                    verbose,
+                    output_format,
+                ),
                 BankAliasCommands::Remove {
                     bank_id,
                     alias,

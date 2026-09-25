@@ -577,8 +577,9 @@ if TYPE_CHECKING:
     from hindsight_api.models import RequestContext
 
     from ..webhooks.url_guard import GuardedWebhookClient
+    from . import bank_aliases as bank_aliases_mod
     from .audit import AuditLogListResponse, AuditLogStatsResponse
-    from .memories import MemoryScopeWatermark
+    from .memories import MemoriesExtension, MemoryScopeWatermark
     from .prompt_preview import PromptPreview
     from .retain.attachment_content import LoadedAttachment, RetainAttachment
     from .retain.attachment_store import StoredAttachment
@@ -2167,12 +2168,23 @@ def _attachment_ids_of(value: "Any") -> list[str]:
     return [str(v) for v in value]
 
 
+@dataclass(frozen=True)
+class _AttachmentRef:
+    """Attachment short ids named by one document: the filename lives on the document edge."""
+
+    document_id: str | None
+    attachment_ids: list[str]
+
+
 async def _resolve_memory_attachments(
     conn,
     bank_id: str,
-    refs: "Mapping[str, tuple[str | None, Sequence[str]]]",
+    refs: "Mapping[str, Sequence[_AttachmentRef]]",
 ) -> "dict[str, list[StoredAttachment]]":
-    """Resolve each memory's attachment ids, keyed by unit id; ``refs`` is unit id -> (document_id, ids).
+    """Resolve each memory's attachment ids, keyed by unit id.
+
+    Several refs per memory rather than one, because an observation shows the
+    attachments of its source facts, and those can come from several documents.
 
     Where the ids came from — `memory_units` or the store's own rows — is the caller's
     concern; this only reads the SQL ``attachments`` table.
@@ -2183,18 +2195,83 @@ async def _resolve_memory_attachments(
     from .retain.attachment_store import load_bank_attachments
 
     by_document: dict[str | None, dict[str, StoredAttachment]] = {}
-    for document_id, ids in refs.values():
-        cached = by_document.setdefault(document_id, {})
-        missing = [i for i in dict.fromkeys(ids) if i not in cached]
-        if missing:
-            cached.update(await load_bank_attachments(conn, bank_id, missing, document_id=document_id))
+    for unit_refs in refs.values():
+        for ref in unit_refs:
+            cached = by_document.setdefault(ref.document_id, {})
+            missing = [i for i in dict.fromkeys(ref.attachment_ids) if i not in cached]
+            if missing:
+                cached.update(await load_bank_attachments(conn, bank_id, missing, document_id=ref.document_id))
 
     resolved: dict[str, list[StoredAttachment]] = {}
-    for unit_id, (document_id, ids) in refs.items():
-        records = [by_document[document_id][i] for i in ids if i in by_document[document_id]]
+    for unit_id, unit_refs in refs.items():
+        # Keyed by short id: two sources drawn from the same screenshot show it once.
+        records = {
+            i: by_document[ref.document_id][i]
+            for ref in unit_refs
+            for i in ref.attachment_ids
+            if i in by_document[ref.document_id]
+        }
         if records:
-            resolved[unit_id] = records
+            resolved[unit_id] = list(records.values())
     return resolved
+
+
+async def _sql_attachment_refs(conn, bank_id: str, unit_ids: "Sequence[str]") -> "dict[str, list[_AttachmentRef]]":
+    """Each memory's own attachment ids, read from `memory_units` — a Postgres-backed bank only."""
+    rows = await conn.fetch(
+        # No `cardinality(...)` filter: it is a Postgres collection
+        # function, and Oracle stores this column as a JSON CLOB, where
+        # it raises ORA-00932. The rows are being fetched anyway for
+        # their document_id, so the empty ones are dropped below.
+        f"SELECT id::text AS id, document_id, attachment_ids FROM {fq_table('memory_units')} "
+        f"WHERE bank_id = $1 AND id = ANY($2::uuid[])",
+        bank_id,
+        list(unit_ids),
+    )
+    return {
+        row["id"]: [_AttachmentRef(row["document_id"], ids)]
+        for row in rows
+        if (ids := _attachment_ids_of(row["attachment_ids"]))
+    }
+
+
+async def _observation_attachment_refs(
+    conn, store: "MemoriesExtension", bank_id: str, observation_ids: "Sequence[str]"
+) -> "dict[str, list[_AttachmentRef]]":
+    """Each observation's attachments, as the union of its source facts' — see ``attachments_for_memories``.
+
+    Source order is kept, so the screenshot of the first fact the observation was
+    built on comes first. Sources that were deleted, or carry no attachment, add nothing.
+    """
+    # A bank that never retained an attachment has none to show. One probe on the
+    # attachments primary key, so the two reads below are only paid by banks that use them.
+    has_attachments = await conn.fetchval(
+        f"SELECT 1 WHERE EXISTS (SELECT 1 FROM {fq_table('attachments')} WHERE bank_id = $1)", bank_id
+    )
+    if not has_attachments:
+        return {}
+    observations = await store.get_memories(
+        conn=conn, fq_table=fq_table, bank_id=bank_id, unit_ids=list(observation_ids)
+    )
+    sources = list(dict.fromkeys(s for o in observations for s in o.source_memory_ids))
+    if not sources:
+        return {}
+    if store.store_owned_for(bank_id):
+        # The store carries each memory's ids on the row it returns (``StoredMemory.attachment_ids``).
+        source_rows = await store.get_memories(conn=conn, fq_table=fq_table, bank_id=bank_id, unit_ids=sources)
+        by_source = {
+            m.unit_id: _AttachmentRef(m.document_id, list(m.attachment_ids)) for m in source_rows if m.attachment_ids
+        }
+    else:
+        by_source = {
+            unit_id: unit_refs[0] for unit_id, unit_refs in (await _sql_attachment_refs(conn, bank_id, sources)).items()
+        }
+    refs: dict[str, list[_AttachmentRef]] = {}
+    for observation in observations:
+        source_refs = [by_source[s] for s in observation.source_memory_ids if s in by_source]
+        if source_refs:
+            refs[observation.unit_id] = source_refs
+    return refs
 
 
 def _provider_default_base_url(provider: str | None) -> str:
@@ -7427,7 +7504,7 @@ class MemoryEngine(MemoryEngineInterface):
         if store.store_owned_for(bank_id):
             wanted = set(chunk_ids)
             refs = {
-                chunk_id: (document_id, ids)
+                chunk_id: [_AttachmentRef(document_id, ids)]
                 for chunk_id, (document_id, text) in (carried_texts or {}).items()
                 if chunk_id in wanted and (ids := list(dict.fromkeys(iter_placeholder_ids(text or ""))))
             }
@@ -7476,6 +7553,53 @@ class MemoryEngine(MemoryEngineInterface):
             if any(i in by_document[document_by_chunk.get(chunk_id)] for i in ids)
         }
 
+    async def _evidence_as_stored(self, bank_id: str, facts: "list[MemoryFact]") -> "list[MemoryFact]":
+        """The memories a reflect answer cites, with the provenance its tools left out.
+
+        The agent's tool results are trimmed of what it never reads — ``document_id``,
+        ``chunk_id``, ``metadata`` (see ``reflect.tools._UNREAD_RESULT_FIELDS``) — so the
+        facts rebuilt from them carry only text and dates. The caller of reflect is the
+        one who needs the rest: which document an answer came from, and the attachments
+        to show beside it. One read for all of them; a fact deleted since it was
+        recalled keeps what the tool saw.
+        """
+        if not facts:
+            return facts
+        from .memories import get_memories
+
+        store = get_memories()
+        backend = await self._get_backend()
+        async with acquire_with_retry(backend) as conn:
+            stored = {
+                m.unit_id: m
+                for m in await store.get_memories(
+                    conn=conn, fq_table=fq_table, bank_id=bank_id, unit_ids=[f.id for f in facts]
+                )
+            }
+        # A store-owned bank carries attachment ids on its rows; a Postgres-backed one leaves
+        # them to be read from `memory_units` when the response is rendered (``None``).
+        carries_attachments = store.store_owned_for(bank_id)
+        hydrated: list[MemoryFact] = []
+        for fact in facts:
+            memory = stored.get(fact.id)
+            if memory is None:
+                hydrated.append(fact)
+                continue
+            hydrated.append(
+                MemoryFact.model_validate(
+                    {
+                        **fact.model_dump(),
+                        "document_id": memory.document_id,
+                        "chunk_id": memory.chunk_id,
+                        "tags": memory.tags,
+                        "metadata": memory.metadata,
+                        "mentioned_at": memory.mentioned_at.isoformat() if memory.mentioned_at else fact.mentioned_at,
+                        "attachment_ids": list(memory.attachment_ids) if carries_attachments else None,
+                    }
+                )
+            )
+        return hydrated
+
     async def attachments_for_memories(
         self,
         bank_id: str,
@@ -7483,6 +7607,7 @@ class MemoryEngine(MemoryEngineInterface):
         request_context: "RequestContext",
         *,
         carried: "Mapping[str, tuple[str | None, Sequence[str]]] | None" = None,
+        observation_ids: "Sequence[str]" = (),
     ) -> "dict[str, list[StoredAttachment]]":
         """The attachments each memory was actually drawn from, keyed by unit id.
 
@@ -7499,58 +7624,51 @@ class MemoryEngine(MemoryEngineInterface):
         ``carried``: unit id -> ``(document_id, attachment_ids)``. Either way only the
         ids are resolved here, against the SQL ``attachments`` table, which every bank
         writes and which carries no vector indexes.
+
+        An observation is extracted from no attachment, so it has no ids of its own. It
+        shows the attachments of the facts it was consolidated from, read through its
+        sources at render time rather than copied at consolidation: consolidation keeps
+        rewriting an observation's sources, and a copy would go stale with them.
+        ``observation_ids`` names which of ``unit_ids`` are observations — the caller
+        already has each row's type, and only an observation pays for the source read.
         """
         if not unit_ids:
             return {}
         from .memories import get_memories
 
         store = get_memories()
-        if store.store_owned_for(bank_id):
+        wanted_units = list(dict.fromkeys(str(u) for u in unit_ids))
+        observation_set = {str(o) for o in observation_ids}
+        wanted_observations = [u for u in wanted_units if u in observation_set]
+        store_owned = store.store_owned_for(bank_id)
+        refs: dict[str, list[_AttachmentRef]] = {}
+        if store_owned:
             # Never `memory_units` for a store-owned bank. It holds none of the bank's memories,
             # so the read can only come back empty, and it is not a cheap empty read: the table
             # carries partial vector indexes per bank, and the planner opens and locks every one
             # of them to plan any statement against it. In a tenant with a few thousand banks
             # that is ~15k locks and ~450ms of planning to return nothing -- on every recall.
             # The ids the store returned on its rows are the whole answer, so a page that
-            # carried none returns before touching Postgres at all.
-            wanted = {str(u) for u in unit_ids}
+            # carried none (and holds no observation) returns before touching Postgres at all.
             refs = {
-                unit_id: (document_id, list(ids))
+                unit_id: [_AttachmentRef(document_id, list(ids))]
                 for unit_id, (document_id, ids) in (carried or {}).items()
-                if unit_id in wanted and ids
+                if unit_id in wanted_units and ids
             }
-            if not refs:
+            if not refs and not wanted_observations:
                 return {}
-            profile = await self.get_bank_profile(bank_id, request_context=request_context)
-            if profile is None:
-                return {}
-            backend = await self._get_backend()
-            async with backend.acquire() as conn:
-                return await _resolve_memory_attachments(conn, bank_id, refs)
 
         profile = await self.get_bank_profile(bank_id, request_context=request_context)
         if profile is None:
             return {}
-        wanted_units = list(dict.fromkeys(str(u) for u in unit_ids))
         backend = await self._get_backend()
         async with backend.acquire() as conn:
-            rows = await conn.fetch(
-                # No `cardinality(...)` filter: it is a Postgres collection
-                # function, and Oracle stores this column as a JSON CLOB, where
-                # it raises ORA-00932. The rows are being fetched anyway for
-                # their document_id, so the empty ones are dropped below.
-                f"SELECT id::text AS id, document_id, attachment_ids FROM {fq_table('memory_units')} "
-                f"WHERE bank_id = $1 AND id = ANY($2::uuid[])",
-                bank_id,
-                wanted_units,
-            )
-            if not rows:
+            if not store_owned:
+                refs = await _sql_attachment_refs(conn, bank_id, wanted_units)
+            if wanted_observations:
+                refs.update(await _observation_attachment_refs(conn, store, bank_id, wanted_observations))
+            if not refs:
                 return {}
-            refs = {
-                row["id"]: (row["document_id"], ids)
-                for row in rows
-                if (ids := _attachment_ids_of(row["attachment_ids"]))
-            }
             return await _resolve_memory_attachments(conn, bank_id, refs)
 
     async def retrieve_bank_attachment(
@@ -15164,7 +15282,15 @@ class MemoryEngine(MemoryEngineInterface):
         # Resolve the page's config in one batch (single config-column query + a single
         # tenant-config resolve) rather than one round-trip per bank.
         configs = await self._config_resolver.get_bank_configs([bank["bank_id"] for bank in page], request_context)
+        # The id each bank is PRESENTED as, when one of its aliases was promoted.
+        # Resolved for the page here rather than left to the caller: every client
+        # renders a bank list, and none of them should need a second round trip to
+        # learn what to label it.
+        from . import bank_aliases
+
+        display = await bank_aliases.primary_aliases(self._backend, [bank["bank_id"] for bank in page])
         for bank in page:
+            bank["display_alias"] = display.get(bank["bank_id"])
             resolved = _overlay_bank_config_disposition_mission(
                 bank["disposition"], bank["mission"], configs.get(bank["bank_id"], {})
             )
@@ -15684,6 +15810,16 @@ class MemoryEngine(MemoryEngineInterface):
                                 continue  # Skip observations not actually used by the agent
                             seen_memory_ids.add(obs_id)
                             based_on["observation"].append(MemoryFact(**obs_data))
+            # One read for every cited memory, whatever its type.
+            evidence_types = ("world", "experience", "opinion", "observation")
+            stored_evidence = {
+                fact.id: fact
+                for fact in await self._evidence_as_stored(
+                    bank_id, [fact for fact_type in evidence_types for fact in based_on[fact_type]]
+                )
+            }
+            for fact_type in evidence_types:
+                based_on[fact_type] = [stored_evidence[fact.id] for fact in based_on[fact_type]]
 
             # Extract mental models from tool outputs - only include models the agent actually used
             # agent_result.used_mental_model_ids contains validated IDs from the done action
@@ -20476,8 +20612,8 @@ class MemoryEngine(MemoryEngineInterface):
         bank_id: str,
         *,
         request_context: "RequestContext",
-    ) -> list[str]:
-        """Every extra id this bank answers to, oldest first.
+    ) -> "list[bank_aliases_mod.BankAlias]":
+        """Every extra id this bank answers to, the primary one first.
 
         Args:
             bank_id: Bank identifier (may itself have been reached via an alias;
@@ -20505,6 +20641,7 @@ class MemoryEngine(MemoryEngineInterface):
         bank_id: str,
         alias: str,
         *,
+        primary: bool = False,
         request_context: "RequestContext",
     ) -> None:
         """Make ``alias`` another id this bank answers to.
@@ -20534,7 +20671,44 @@ class MemoryEngine(MemoryEngineInterface):
         await self._require_bank_exists(bank_id)
         from . import bank_aliases
 
-        await bank_aliases.create_alias(await self._get_backend(), bank_id, alias)
+        await bank_aliases.create_alias(await self._get_backend(), bank_id, alias, primary=primary)
+
+    async def set_bank_alias_primary(
+        self,
+        bank_id: str,
+        alias: str,
+        primary: bool,
+        *,
+        request_context: "RequestContext",
+    ) -> bool:
+        """Show ``alias`` in place of the bank's own id, or stop showing it.
+
+        Display only — the bank keeps its id, and everything that names a bank
+        (authorisation, metering, exports, audit) keeps using it. Gated by the same
+        write operation as creating an alias: choosing which id a bank is presented
+        as is part of managing its names.
+
+        Args:
+            bank_id: Bank identifier
+            alias: One of the bank's aliases
+            primary: True to show it, False to go back to showing the bank's own id
+            request_context: Request context for authentication
+
+        Returns:
+            False when the bank has no such alias, which the caller turns into a 404.
+        """
+        await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext, BankWriteOperation
+
+            ctx = BankWriteContext(
+                bank_id=bank_id, operation=BankWriteOperation.CREATE_BANK_ALIAS, request_context=request_context
+            )
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
+        await self._require_bank_exists(bank_id)
+        from . import bank_aliases
+
+        return await bank_aliases.set_primary(await self._get_backend(), bank_id, alias, primary)
 
     async def delete_bank_alias(
         self,

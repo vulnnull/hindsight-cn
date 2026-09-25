@@ -30,6 +30,7 @@ An unknown id resolves to itself, so behaviour for every id that is not an alias
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..config import get_config
@@ -122,17 +123,46 @@ async def alias_exists_on_conn(conn: "DatabaseConnection", alias: str) -> bool:
     return await conn.fetchval(f"SELECT 1 FROM {fq_table('bank_aliases')} WHERE alias = $1", alias) is not None
 
 
-async def list_aliases(pool, bank_id: str) -> list[str]:
-    """Every alias pointing at ``bank_id``, oldest first."""
+@dataclass(frozen=True)
+class BankAlias:
+    """One id a bank answers to, and whether it is the one shown in its place."""
+
+    alias: str
+    primary: bool
+
+
+async def list_aliases(pool, bank_id: str) -> list[BankAlias]:
+    """Every alias pointing at ``bank_id``, the primary one first then oldest first.
+
+    Primary first because that is the one a reader is looking for: it is the id the
+    bank is presented as, and the rest are the ones still being retired.
+    """
     async with acquire_with_retry(pool) as conn:
         rows = await conn.fetch(
-            f"SELECT alias FROM {fq_table('bank_aliases')} WHERE bank_id = $1 ORDER BY created_at, alias",
+            f"SELECT alias, is_primary FROM {fq_table('bank_aliases')} WHERE bank_id = $1 "
+            "ORDER BY is_primary DESC, created_at, alias",
             bank_id,
         )
-    return [row["alias"] for row in rows]
+    return [BankAlias(alias=row["alias"], primary=bool(row["is_primary"])) for row in rows]
 
 
-async def create_alias(pool, bank_id: str, alias: str) -> None:
+async def primary_aliases(pool, bank_ids: list[str]) -> dict[str, str]:
+    """Map each of ``bank_ids`` that has a primary alias to it.
+
+    One query for a whole page of banks rather than one per bank, and every
+    primary in the schema is read rather than building an ``IN`` list: at most one
+    row per aliased bank exists, so the table is far smaller than the bank list it
+    decorates, and a fixed statement stays portable across both dialects.
+    """
+    if not bank_ids:
+        return {}
+    wanted = set(bank_ids)
+    async with acquire_with_retry(pool) as conn:
+        rows = await conn.fetch(f"SELECT bank_id, alias FROM {fq_table('bank_aliases')} WHERE is_primary = TRUE")
+    return {row["bank_id"]: row["alias"] for row in rows if row["bank_id"] in wanted}
+
+
+async def create_alias(pool, bank_id: str, alias: str, *, primary: bool = False) -> None:
     """Point ``alias`` at ``bank_id``. Raises 409 if the name is already taken.
 
     Two collisions have to be refused, and only one of them is a constraint:
@@ -174,6 +204,46 @@ async def create_alias(pool, bank_id: str, alias: str) -> None:
     # The negative cached by an earlier resolve() of this same string would otherwise
     # keep the new alias invisible on this pod for the whole TTL.
     await invalidate(alias)
+    if primary:
+        # Separate statement rather than part of the INSERT: promotion has to demote
+        # whatever holds the flag today, which is the same work `set_primary` does.
+        await set_primary(pool, bank_id, alias, True)
+
+
+async def set_primary(pool, bank_id: str, alias: str, primary: bool) -> bool:
+    """Make ``alias`` the id shown for ``bank_id``, or stop it being that.
+
+    Promotion demotes the incumbent in the SAME transaction. The unique index makes
+    "two primaries" unrepresentable, so doing it in two statements outside a
+    transaction would not corrupt anything — it would fail the second write and
+    leave the bank with none, which is worse than either outcome the caller asked
+    for. Inside one transaction the bank goes straight from its old primary to its
+    new one, and a concurrent promotion of a different alias loses the index race
+    and rolls back whole.
+
+    Returns False when the bank has no such alias, which the caller turns into a 404.
+    """
+    aliases = fq_table("bank_aliases")
+    async with acquire_with_retry(pool) as conn:
+        async with conn.transaction():
+            owned = await conn.fetchval(f"SELECT 1 FROM {aliases} WHERE alias = $1 AND bank_id = $2", alias, bank_id)
+            if owned is None:
+                return False
+            if primary:
+                # Demote first: the index forbids the overlap that setting the new
+                # one first would create.
+                await conn.execute(
+                    f"UPDATE {aliases} SET is_primary = FALSE WHERE bank_id = $1 AND is_primary = TRUE AND alias <> $2",
+                    bank_id,
+                    alias,
+                )
+            await conn.execute(
+                f"UPDATE {aliases} SET is_primary = $1 WHERE alias = $2 AND bank_id = $3",
+                primary,
+                alias,
+                bank_id,
+            )
+    return True
 
 
 async def delete_alias(pool, bank_id: str, alias: str) -> bool:

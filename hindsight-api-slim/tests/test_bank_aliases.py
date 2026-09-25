@@ -40,7 +40,13 @@ async def bank(memory):
 
 def _aliases(resp) -> list[str]:
     assert resp.status_code in (200, 201), resp.text
-    return resp.json()["aliases"]
+    return [a["alias"] for a in resp.json()["aliases"]]
+
+
+def _primary(resp) -> str | None:
+    """The alias a bank is presented under, or None when it shows its own id."""
+    assert resp.status_code in (200, 201), resp.text
+    return next((a["alias"] for a in resp.json()["aliases"] if a["primary"]), None)
 
 
 @pytest.mark.asyncio
@@ -54,7 +60,7 @@ async def test_alias_reaches_the_same_bank(client, bank):
     resp = await client.get(f"/v1/default/banks/{alias}/aliases")
     assert resp.status_code == 200
     assert resp.json()["bank_id"] == bank
-    assert resp.json()["aliases"] == [alias]
+    assert _aliases(resp) == [alias]
 
 
 @pytest.mark.asyncio
@@ -235,3 +241,96 @@ async def test_extensions_see_the_canonical_id_not_the_alias(client, memory, ban
     seen = {c.args[0].bank_id for c in validator.validate_bank_read.await_args_list}
     assert seen == {bank}, f"validator saw {seen}, expected only the bank's own id"
     assert alias not in seen
+
+
+# ── Primary (display) alias ──────────────────────────────────────────────────
+#
+# A bank keeps its `bank_id` forever, so after a migration the UI would still
+# show the id nobody uses. Promoting an alias changes what the bank is PRESENTED
+# as and nothing else — every other part of the system keeps naming the real id.
+
+
+@pytest.mark.asyncio
+async def test_a_bank_shows_its_own_id_until_an_alias_is_promoted(client, bank):
+    """Optional by design: the bank's own id is not an alias row, so "no primary"
+    is the normal state and there is no implicit one to fall into."""
+    alias = f"a-{uuid.uuid4().hex[:8]}"
+    resp = await client.post(f"/v1/default/banks/{bank}/aliases", json={"alias": alias})
+
+    assert _primary(resp) is None
+    listing = await client.get("/v1/default/banks", params={"q": bank})
+    assert [b["display_alias"] for b in listing.json()["banks"]] == [None]
+
+
+@pytest.mark.asyncio
+async def test_promoting_an_alias_changes_only_what_the_bank_is_shown_as(client, bank):
+    alias = f"a-{uuid.uuid4().hex[:8]}"
+    await client.post(f"/v1/default/banks/{bank}/aliases", json={"alias": alias})
+
+    resp = await client.patch(f"/v1/default/banks/{bank}/aliases/{alias}", json={"primary": True})
+    assert _primary(resp) == alias
+    # The identity is untouched: the response still names the bank by its own id,
+    # and the list endpoint reports both, so a caller can show one and use the other.
+    assert resp.json()["bank_id"] == bank
+    row = next(b for b in (await client.get("/v1/default/banks", params={"q": bank})).json()["banks"])
+    assert row["bank_id"] == bank
+    assert row["display_alias"] == alias
+
+
+@pytest.mark.asyncio
+async def test_promoting_a_second_alias_demotes_the_first(client, bank):
+    """At most one, enforced by a unique index rather than by application logic —
+    two concurrent promotions would both read "none yet" and both write one."""
+    first, second = f"a1-{uuid.uuid4().hex[:8]}", f"a2-{uuid.uuid4().hex[:8]}"
+    for a in (first, second):
+        await client.post(f"/v1/default/banks/{bank}/aliases", json={"alias": a})
+
+    await client.patch(f"/v1/default/banks/{bank}/aliases/{first}", json={"primary": True})
+    resp = await client.patch(f"/v1/default/banks/{bank}/aliases/{second}", json={"primary": True})
+
+    assert _primary(resp) == second
+    primaries = [a["alias"] for a in resp.json()["aliases"] if a["primary"]]
+    assert primaries == [second], f"expected exactly one primary, got {primaries}"
+
+
+@pytest.mark.asyncio
+async def test_an_alias_can_be_created_already_primary(client, bank):
+    alias = f"a-{uuid.uuid4().hex[:8]}"
+    resp = await client.post(f"/v1/default/banks/{bank}/aliases", json={"alias": alias, "primary": True})
+    assert _primary(resp) == alias
+
+
+@pytest.mark.asyncio
+async def test_demoting_returns_the_bank_to_its_own_id(client, bank):
+    alias = f"a-{uuid.uuid4().hex[:8]}"
+    await client.post(f"/v1/default/banks/{bank}/aliases", json={"alias": alias, "primary": True})
+
+    resp = await client.patch(f"/v1/default/banks/{bank}/aliases/{alias}", json={"primary": False})
+    assert _primary(resp) is None
+    assert alias in _aliases(resp), "demoting must not remove the alias, only stop showing it"
+
+
+@pytest.mark.asyncio
+async def test_deleting_the_primary_alias_takes_the_display_with_it(client, bank):
+    """The flag lives on the alias row, so it cannot outlive what it names — the
+    reason it is not a `banks.display_alias` column, which would dangle here."""
+    alias = f"a-{uuid.uuid4().hex[:8]}"
+    await client.post(f"/v1/default/banks/{bank}/aliases", json={"alias": alias, "primary": True})
+
+    await client.delete(f"/v1/default/banks/{bank}/aliases/{alias}")
+
+    listing = await client.get("/v1/default/banks", params={"q": bank})
+    assert [b["display_alias"] for b in listing.json()["banks"]] == [None]
+
+
+@pytest.mark.asyncio
+async def test_promoting_an_alias_of_another_bank_is_a_404(client, memory, bank):
+    other = f"alias-other-{uuid.uuid4().hex[:8]}"
+    await memory.ensure_bank_profile(other, request_context=RequestContext())
+    alias = f"a-{uuid.uuid4().hex[:8]}"
+    await client.post(f"/v1/default/banks/{other}/aliases", json={"alias": alias})
+
+    resp = await client.patch(f"/v1/default/banks/{bank}/aliases/{alias}", json={"primary": True})
+    assert resp.status_code == 404
+    # And the other bank's alias was not promoted as a side effect.
+    assert _primary(await client.get(f"/v1/default/banks/{other}/aliases")) is None

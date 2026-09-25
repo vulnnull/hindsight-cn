@@ -17,8 +17,8 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
-from typing import Any, ClassVar, Dict, List
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr
+from typing import Any, ClassVar, Dict, List, Optional
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -27,7 +27,8 @@ class CreateBankAliasRequest(BaseModel):
     Request model for adding an alias to a bank.
     """ # noqa: E501
     alias: StrictStr = Field(description="The extra bank id. Same rules as a bank id (non-empty, at most 192 bytes of UTF-8, no control characters), and it must not already name a bank or another alias.")
-    __properties: ClassVar[List[str]] = ["alias"]
+    primary: Optional[StrictBool] = Field(default=False, description="Also show the bank under this alias, replacing whichever alias is shown today.")
+    __properties: ClassVar[List[str]] = ["alias", "primary"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -80,7 +81,8 @@ class CreateBankAliasRequest(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "alias": obj.get("alias")
+            "alias": obj.get("alias"),
+            "primary": obj.get("primary") if obj.get("primary") is not None else False
         })
         return _obj
 

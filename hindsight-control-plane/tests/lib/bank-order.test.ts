@@ -13,6 +13,7 @@ function bank(bank_id: string): BankInfo {
     last_document_at: null,
     last_write_at: null,
     matched_aliases: [],
+    display_alias: null,
   };
 }
 

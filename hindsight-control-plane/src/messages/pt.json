@@ -257,6 +257,9 @@
     "description": "IDs adicionais que também chegam a <name>{bankId}</name>, para migrar chamadores para um ID novo sem indisponibilidade.",
     "placeholder": "Novo ID",
     "add": "Adicionar",
+    "shownAsLabel": "Exibido como",
+    "shownAsDescription": "Qual ID o painel exibe para este banco. Apenas cosmético — {bankId} continua sendo sua identidade em todo o resto.",
+    "primaryTitle": "Exibido no lugar do ID do banco",
     "removeAria": "Remover o alias {alias}",
     "removeTitle": "Remover o alias {alias}?",
     "removeConfirm": "Todos os aplicativos ainda conectados por {alias} vão parar de funcionar imediatamente. Só este ID desaparece — {bankId} e suas memórias ficam intactos, e você pode adicionar o alias de volta.",
@@ -264,6 +267,7 @@
     "cancel": "Cancelar",
     "loadFailed": "Falha ao carregar os aliases",
     "addFailed": "Falha ao adicionar o alias",
+    "primaryFailed": "Falha ao alterar o ID exibido",
     "removeFailed": "Falha ao remover o alias"
   },
   "bankStats": {
@@ -1954,7 +1958,8 @@
       "bankAliases": {
         "list": "Falha ao listar os aliases do banco",
         "create": "Falha ao criar o alias do banco",
-        "delete": "Falha ao excluir o alias do banco"
+        "delete": "Falha ao excluir o alias do banco",
+        "update": "Falha ao atualizar o alias do banco"
       },
       "memories": {
         "list": "Falha ao listar unidades de memória",

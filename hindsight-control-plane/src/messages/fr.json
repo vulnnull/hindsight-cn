@@ -257,6 +257,9 @@
     "description": "Identifiants supplémentaires menant aussi à <name>{bankId}</name>, pour basculer les clients vers un nouvel identifiant sans interruption.",
     "placeholder": "Nouvel identifiant",
     "add": "Ajouter",
+    "shownAsLabel": "Affiché comme",
+    "shownAsDescription": "L'identifiant que la console affiche pour cette banque. Purement cosmétique : {bankId} reste son identité partout ailleurs.",
+    "primaryTitle": "Affiché à la place de l'identifiant de la banque",
     "removeAria": "Supprimer l'alias {alias}",
     "removeTitle": "Supprimer l'alias {alias} ?",
     "removeConfirm": "Toute application encore connectée via {alias} cessera immédiatement de fonctionner. Seul cet identifiant disparaît : {bankId} et ses souvenirs restent intacts, et vous pouvez rajouter l'alias.",
@@ -264,6 +267,7 @@
     "cancel": "Annuler",
     "loadFailed": "Échec du chargement des alias",
     "addFailed": "Échec de l'ajout de l'alias",
+    "primaryFailed": "Impossible de changer l'identifiant affiché",
     "removeFailed": "Échec de la suppression de l'alias"
   },
   "bankStats": {
@@ -1954,7 +1958,8 @@
       "bankAliases": {
         "list": "Échec de la liste des alias de la banque",
         "create": "Échec de la création de l'alias de la banque",
-        "delete": "Échec de la suppression de l'alias de la banque"
+        "delete": "Échec de la suppression de l'alias de la banque",
+        "update": "Échec de la mise à jour de l'alias de la banque"
       },
       "memories": {
         "list": "Impossible de lister les unités de mémoire",

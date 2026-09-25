@@ -36,8 +36,9 @@ class BankListItem(BaseModel):
     fact_count: Optional[StrictInt] = 0
     last_document_at: Optional[StrictStr] = None
     last_write_at: Optional[StrictStr] = None
+    display_alias: Optional[StrictStr] = None
     matched_aliases: Optional[List[StrictStr]] = Field(default=None, description="Aliases of this bank that matched the search `q`. Empty when no search was made, or when the bank matched on its own id or name — so a non-empty value explains a result whose `bank_id` does not contain the search text.")
-    __properties: ClassVar[List[str]] = ["bank_id", "name", "disposition", "mission", "created_at", "updated_at", "fact_count", "last_document_at", "last_write_at", "matched_aliases"]
+    __properties: ClassVar[List[str]] = ["bank_id", "name", "disposition", "mission", "created_at", "updated_at", "fact_count", "last_document_at", "last_write_at", "display_alias", "matched_aliases"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -111,6 +112,11 @@ class BankListItem(BaseModel):
         if self.last_write_at is None and "last_write_at" in self.model_fields_set:
             _dict['last_write_at'] = None
 
+        # set to None if display_alias (nullable) is None
+        # and model_fields_set contains the field
+        if self.display_alias is None and "display_alias" in self.model_fields_set:
+            _dict['display_alias'] = None
+
         return _dict
 
     @classmethod
@@ -132,6 +138,7 @@ class BankListItem(BaseModel):
             "fact_count": obj.get("fact_count") if obj.get("fact_count") is not None else 0,
             "last_document_at": obj.get("last_document_at"),
             "last_write_at": obj.get("last_write_at"),
+            "display_alias": obj.get("display_alias"),
             "matched_aliases": obj.get("matched_aliases")
         })
         return _obj

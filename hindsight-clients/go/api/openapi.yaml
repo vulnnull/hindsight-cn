@@ -3395,6 +3395,59 @@ paths:
       summary: Remove an alias from the bank
       tags:
       - Banks
+    patch:
+      description: |-
+        Present the bank under one of its aliases. Purely cosmetic: the bank keeps its own `bank_id`, which every other part of the system — authorisation, metering, exports, audit logs — continues to use.
+
+        Promoting an alias demotes whichever one was shown before, so a bank is presented under at most one alias. Send `primary: false` to go back to showing its own id.
+      operationId: set_bank_alias_primary
+      parameters:
+      - explode: false
+        in: path
+        name: bank_id
+        required: true
+        schema:
+          title: Bank Id
+          type: string
+        style: simple
+      - explode: false
+        in: path
+        name: alias
+        required: true
+        schema:
+          title: Alias
+          type: string
+        style: simple
+      - explode: false
+        in: header
+        name: authorization
+        required: false
+        schema:
+          nullable: true
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetBankAliasPrimaryRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BankAliasesResponse'
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Show this alias in place of the bank id
+      tags:
+      - Banks
   /v1/default/banks/{bank_id}:
     delete:
       description: "Delete an entire memory bank including all memories, entities,\
@@ -5687,12 +5740,31 @@ components:
       required:
       - mission
       title: BackgroundResponse
+    BankAliasEntry:
+      description: One id a bank answers to.
+      properties:
+        alias:
+          title: Alias
+          type: string
+        primary:
+          default: false
+          description: "Whether this alias is shown in place of the bank's own id.\
+            \ Display only — the bank keeps its id, and everything that names a bank\
+            \ still uses it. At most one alias per bank can be primary, and none has\
+            \ to be."
+          title: Primary
+          type: boolean
+      required:
+      - alias
+      title: BankAliasEntry
     BankAliasesResponse:
       description: Response model for a bank's aliases.
       example:
         aliases:
-        - user-123
-        - legacy-user123
+        - alias: user-123
+          primary: true
+        - alias: legacy-user123
+          primary: false
         bank_id: user123
       properties:
         bank_id:
@@ -5700,9 +5772,10 @@ components:
           title: Bank Id
           type: string
         aliases:
-          description: "Extra ids that also reach this bank, oldest first"
+          description: "Extra ids that also reach this bank, the primary one first\
+            \ then oldest first"
           items:
-            type: string
+            $ref: '#/components/schemas/BankAliasEntry'
           type: array
       required:
       - aliases
@@ -5780,6 +5853,9 @@ components:
           nullable: true
           type: string
         last_write_at:
+          nullable: true
+          type: string
+        display_alias:
           nullable: true
           type: string
         matched_aliases:
@@ -6906,6 +6982,12 @@ components:
             \ name a bank or another alias."
           title: Alias
           type: string
+        primary:
+          default: false
+          description: "Also show the bank under this alias, replacing whichever alias\
+            \ is shown today."
+          title: Primary
+          type: boolean
       required:
       - alias
       title: CreateBankAliasRequest
@@ -11615,6 +11697,29 @@ components:
         occurred_end:
           nullable: true
           type: string
+        mentioned_at:
+          nullable: true
+          type: string
+        document_id:
+          nullable: true
+          type: string
+        chunk_id:
+          nullable: true
+          type: string
+        tags:
+          items:
+            type: string
+          nullable: true
+          type: array
+        metadata:
+          additionalProperties:
+            type: string
+          nullable: true
+        attachments:
+          items:
+            $ref: '#/components/schemas/ChunkAttachment'
+          nullable: true
+          type: array
       required:
       - text
       title: ReflectFact
@@ -12078,6 +12183,20 @@ components:
       - field
       - kind
       title: RunSettingModel
+    SetBankAliasPrimaryRequest:
+      description: Request model for showing (or no longer showing) an alias in place
+        of the bank id.
+      example:
+        primary: true
+      properties:
+        primary:
+          description: True to present the bank under this alias; False to go back
+            to its own id.
+          title: Primary
+          type: boolean
+      required:
+      - primary
+      title: SetBankAliasPrimaryRequest
     SourceFactsIncludeOptions:
       description: Options for including source facts for observation-type results.
       properties:

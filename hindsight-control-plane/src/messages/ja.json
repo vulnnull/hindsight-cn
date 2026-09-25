@@ -257,6 +257,9 @@
     "description": "<name>{bankId}</name> に到達する追加の ID です。ダウンタイムなしで呼び出し元を新しい ID へ移行できます。",
     "placeholder": "新しい ID",
     "add": "追加",
+    "shownAsLabel": "表示名",
+    "shownAsDescription": "コントロールプレーンがこのバンクに表示する ID です。見た目だけで、{bankId} は他のすべての場所で引き続き識別子として使われます。",
+    "primaryTitle": "バンク ID の代わりに表示されます",
     "removeAria": "エイリアス {alias} を削除",
     "removeTitle": "エイリアス {alias} を削除しますか?",
     "removeConfirm": "{alias} 経由で接続しているアプリケーションは、すべて直ちに動作しなくなります。なくなるのはこの ID だけで、{bankId} とその記憶はそのまま残り、エイリアスは後から追加し直せます。",
@@ -264,6 +267,7 @@
     "cancel": "キャンセル",
     "loadFailed": "エイリアスを読み込めませんでした",
     "addFailed": "エイリアスを追加できませんでした",
+    "primaryFailed": "表示する ID を変更できませんでした",
     "removeFailed": "エイリアスを削除できませんでした"
   },
   "bankStats": {
@@ -1954,7 +1958,8 @@
       "bankAliases": {
         "list": "バンクのエイリアス一覧を取得できませんでした",
         "create": "バンクのエイリアスを作成できませんでした",
-        "delete": "バンクのエイリアスを削除できませんでした"
+        "delete": "バンクのエイリアスを削除できませんでした",
+        "update": "バンクのエイリアスを更新できませんでした"
       },
       "memories": {
         "list": "メモリユニットの一覧取得に失敗しました",

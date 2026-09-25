@@ -257,6 +257,9 @@
     "description": "<name>{bankId}</name>에 함께 연결되는 추가 ID로, 중단 없이 호출자를 새 ID로 옮길 수 있습니다.",
     "placeholder": "새 ID",
     "add": "추가",
+    "shownAsLabel": "표시 이름",
+    "shownAsDescription": "컨트롤 플레인이 이 뱅크에 표시하는 ID입니다. 표시용일 뿐이며, 다른 모든 곳에서는 {bankId}가 계속 식별자입니다.",
+    "primaryTitle": "뱅크 ID 대신 표시됨",
     "removeAria": "별칭 {alias} 제거",
     "removeTitle": "별칭 {alias}을(를) 제거할까요?",
     "removeConfirm": "{alias}을(를) 통해 연결된 모든 애플리케이션이 즉시 동작을 멈춥니다. 사라지는 것은 이 ID뿐이며, {bankId}과(와) 그 기억은 그대로 남고 별칭은 다시 추가할 수 있습니다.",
@@ -264,6 +267,7 @@
     "cancel": "취소",
     "loadFailed": "별칭을 불러오지 못했습니다",
     "addFailed": "별칭을 추가하지 못했습니다",
+    "primaryFailed": "표시할 ID를 변경하지 못했습니다",
     "removeFailed": "별칭을 제거하지 못했습니다"
   },
   "bankStats": {
@@ -1954,7 +1958,8 @@
       "bankAliases": {
         "list": "뱅크 별칭 목록을 가져오지 못했습니다",
         "create": "뱅크 별칭을 만들지 못했습니다",
-        "delete": "뱅크 별칭을 삭제하지 못했습니다"
+        "delete": "뱅크 별칭을 삭제하지 못했습니다",
+        "update": "뱅크 별칭을 업데이트하지 못했습니다"
       },
       "memories": {
         "list": "메모리 유닛 목록을 가져오지 못했습니다",

@@ -16,43 +16,42 @@ import (
 	"fmt"
 )
 
-// checks if the CreateBankAliasRequest type satisfies the MappedNullable interface at compile time
-var _ MappedNullable = &CreateBankAliasRequest{}
+// checks if the BankAliasEntry type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &BankAliasEntry{}
 
-// CreateBankAliasRequest Request model for adding an alias to a bank.
-type CreateBankAliasRequest struct {
-	// The extra bank id. Same rules as a bank id (non-empty, at most 192 bytes of UTF-8, no control characters), and it must not already name a bank or another alias.
+// BankAliasEntry One id a bank answers to.
+type BankAliasEntry struct {
 	Alias string `json:"alias"`
-	// Also show the bank under this alias, replacing whichever alias is shown today.
+	// Whether this alias is shown in place of the bank's own id. Display only — the bank keeps its id, and everything that names a bank still uses it. At most one alias per bank can be primary, and none has to be.
 	Primary *bool `json:"primary,omitempty"`
 }
 
-type _CreateBankAliasRequest CreateBankAliasRequest
+type _BankAliasEntry BankAliasEntry
 
-// NewCreateBankAliasRequest instantiates a new CreateBankAliasRequest object
+// NewBankAliasEntry instantiates a new BankAliasEntry object
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewCreateBankAliasRequest(alias string) *CreateBankAliasRequest {
-	this := CreateBankAliasRequest{}
+func NewBankAliasEntry(alias string) *BankAliasEntry {
+	this := BankAliasEntry{}
 	this.Alias = alias
 	var primary bool = false
 	this.Primary = &primary
 	return &this
 }
 
-// NewCreateBankAliasRequestWithDefaults instantiates a new CreateBankAliasRequest object
+// NewBankAliasEntryWithDefaults instantiates a new BankAliasEntry object
 // This constructor will only assign default values to properties that have it defined,
 // but it doesn't guarantee that properties required by API are set
-func NewCreateBankAliasRequestWithDefaults() *CreateBankAliasRequest {
-	this := CreateBankAliasRequest{}
+func NewBankAliasEntryWithDefaults() *BankAliasEntry {
+	this := BankAliasEntry{}
 	var primary bool = false
 	this.Primary = &primary
 	return &this
 }
 
 // GetAlias returns the Alias field value
-func (o *CreateBankAliasRequest) GetAlias() string {
+func (o *BankAliasEntry) GetAlias() string {
 	if o == nil {
 		var ret string
 		return ret
@@ -63,7 +62,7 @@ func (o *CreateBankAliasRequest) GetAlias() string {
 
 // GetAliasOk returns a tuple with the Alias field value
 // and a boolean to check if the value has been set.
-func (o *CreateBankAliasRequest) GetAliasOk() (*string, bool) {
+func (o *BankAliasEntry) GetAliasOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -71,12 +70,12 @@ func (o *CreateBankAliasRequest) GetAliasOk() (*string, bool) {
 }
 
 // SetAlias sets field value
-func (o *CreateBankAliasRequest) SetAlias(v string) {
+func (o *BankAliasEntry) SetAlias(v string) {
 	o.Alias = v
 }
 
 // GetPrimary returns the Primary field value if set, zero value otherwise.
-func (o *CreateBankAliasRequest) GetPrimary() bool {
+func (o *BankAliasEntry) GetPrimary() bool {
 	if o == nil || IsNil(o.Primary) {
 		var ret bool
 		return ret
@@ -86,7 +85,7 @@ func (o *CreateBankAliasRequest) GetPrimary() bool {
 
 // GetPrimaryOk returns a tuple with the Primary field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *CreateBankAliasRequest) GetPrimaryOk() (*bool, bool) {
+func (o *BankAliasEntry) GetPrimaryOk() (*bool, bool) {
 	if o == nil || IsNil(o.Primary) {
 		return nil, false
 	}
@@ -94,7 +93,7 @@ func (o *CreateBankAliasRequest) GetPrimaryOk() (*bool, bool) {
 }
 
 // HasPrimary returns a boolean if a field has been set.
-func (o *CreateBankAliasRequest) HasPrimary() bool {
+func (o *BankAliasEntry) HasPrimary() bool {
 	if o != nil && !IsNil(o.Primary) {
 		return true
 	}
@@ -103,11 +102,11 @@ func (o *CreateBankAliasRequest) HasPrimary() bool {
 }
 
 // SetPrimary gets a reference to the given bool and assigns it to the Primary field.
-func (o *CreateBankAliasRequest) SetPrimary(v bool) {
+func (o *BankAliasEntry) SetPrimary(v bool) {
 	o.Primary = &v
 }
 
-func (o CreateBankAliasRequest) MarshalJSON() ([]byte, error) {
+func (o BankAliasEntry) MarshalJSON() ([]byte, error) {
 	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
@@ -115,7 +114,7 @@ func (o CreateBankAliasRequest) MarshalJSON() ([]byte, error) {
 	return json.Marshal(toSerialize)
 }
 
-func (o CreateBankAliasRequest) ToMap() (map[string]interface{}, error) {
+func (o BankAliasEntry) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["alias"] = o.Alias
 	if !IsNil(o.Primary) {
@@ -124,7 +123,7 @@ func (o CreateBankAliasRequest) ToMap() (map[string]interface{}, error) {
 	return toSerialize, nil
 }
 
-func (o *CreateBankAliasRequest) UnmarshalJSON(data []byte) (err error) {
+func (o *BankAliasEntry) UnmarshalJSON(data []byte) (err error) {
 	// This validates that all required properties are included in the JSON object
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
@@ -146,53 +145,53 @@ func (o *CreateBankAliasRequest) UnmarshalJSON(data []byte) (err error) {
 		}
 	}
 
-	varCreateBankAliasRequest := _CreateBankAliasRequest{}
+	varBankAliasEntry := _BankAliasEntry{}
 
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varCreateBankAliasRequest)
+	err = decoder.Decode(&varBankAliasEntry)
 
 	if err != nil {
 		return err
 	}
 
-	*o = CreateBankAliasRequest(varCreateBankAliasRequest)
+	*o = BankAliasEntry(varBankAliasEntry)
 
 	return err
 }
 
-type NullableCreateBankAliasRequest struct {
-	value *CreateBankAliasRequest
+type NullableBankAliasEntry struct {
+	value *BankAliasEntry
 	isSet bool
 }
 
-func (v NullableCreateBankAliasRequest) Get() *CreateBankAliasRequest {
+func (v NullableBankAliasEntry) Get() *BankAliasEntry {
 	return v.value
 }
 
-func (v *NullableCreateBankAliasRequest) Set(val *CreateBankAliasRequest) {
+func (v *NullableBankAliasEntry) Set(val *BankAliasEntry) {
 	v.value = val
 	v.isSet = true
 }
 
-func (v NullableCreateBankAliasRequest) IsSet() bool {
+func (v NullableBankAliasEntry) IsSet() bool {
 	return v.isSet
 }
 
-func (v *NullableCreateBankAliasRequest) Unset() {
+func (v *NullableBankAliasEntry) Unset() {
 	v.value = nil
 	v.isSet = false
 }
 
-func NewNullableCreateBankAliasRequest(val *CreateBankAliasRequest) *NullableCreateBankAliasRequest {
-	return &NullableCreateBankAliasRequest{value: val, isSet: true}
+func NewNullableBankAliasEntry(val *BankAliasEntry) *NullableBankAliasEntry {
+	return &NullableBankAliasEntry{value: val, isSet: true}
 }
 
-func (v NullableCreateBankAliasRequest) MarshalJSON() ([]byte, error) {
+func (v NullableBankAliasEntry) MarshalJSON() ([]byte, error) {
 	return json.Marshal(v.value)
 }
 
-func (v *NullableCreateBankAliasRequest) UnmarshalJSON(src []byte) error {
+func (v *NullableBankAliasEntry) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }

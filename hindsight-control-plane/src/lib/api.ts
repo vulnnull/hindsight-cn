@@ -378,6 +378,18 @@ export interface BankTemplateImportResponse {
   dry_run: boolean;
 }
 
+export interface BankAliasEntry {
+  alias: string;
+  /** Shown in place of the bank's own id. At most one per bank; often none. */
+  primary: boolean;
+}
+
+export interface BankAliasesResponse {
+  /** The bank's own id, which an alias never replaces. */
+  bank_id: string;
+  aliases: BankAliasEntry[];
+}
+
 export class ControlPlaneClient {
   private async fetchApi<T>(
     path: string,
@@ -1337,7 +1349,7 @@ export class ControlPlaneClient {
    * replaces — so a request made *through* an alias still reports the real one.
    */
   async listBankAliases(bankId: string) {
-    return this.fetchApi<{ bank_id: string; aliases: string[] }>(bankApi(bankId, "/aliases"));
+    return this.fetchApi<BankAliasesResponse>(bankApi(bankId, "/aliases"));
   }
 
   /**
@@ -1345,17 +1357,28 @@ export class ControlPlaneClient {
    * already a bank or another alias.
    */
   async createBankAlias(bankId: string, alias: string) {
-    return this.fetchApi<{ bank_id: string; aliases: string[] }>(bankApi(bankId, "/aliases"), {
+    return this.fetchApi<BankAliasesResponse>(bankApi(bankId, "/aliases"), {
       method: "POST",
       body: JSON.stringify({ alias }),
     });
   }
 
   /**
+   * Show this bank under one of its aliases, or (with false) under its own id
+   * again. Display only — `bank_id` stays the bank's identity everywhere else.
+   */
+  async setBankAliasPrimary(bankId: string, alias: string, primary: boolean) {
+    return this.fetchApi<BankAliasesResponse>(
+      bankApi(bankId, `/aliases/${encodeURIComponent(alias)}`),
+      { method: "PATCH", body: JSON.stringify({ primary }) }
+    );
+  }
+
+  /**
    * Stop an id reaching this bank. The bank and its memories are untouched.
    */
   async deleteBankAlias(bankId: string, alias: string) {
-    return this.fetchApi<{ bank_id: string; aliases: string[] }>(
+    return this.fetchApi<BankAliasesResponse>(
       bankApi(bankId, `/aliases/${encodeURIComponent(alias)}`),
       { method: "DELETE" }
     );

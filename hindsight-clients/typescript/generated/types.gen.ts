@@ -194,6 +194,24 @@ export type BackgroundResponse = {
 };
 
 /**
+ * BankAliasEntry
+ *
+ * One id a bank answers to.
+ */
+export type BankAliasEntry = {
+  /**
+   * Alias
+   */
+  alias: string;
+  /**
+   * Primary
+   *
+   * Whether this alias is shown in place of the bank's own id. Display only — the bank keeps its id, and everything that names a bank still uses it. At most one alias per bank can be primary, and none has to be.
+   */
+  primary?: boolean;
+};
+
+/**
  * BankAliasesResponse
  *
  * Response model for a bank's aliases.
@@ -208,9 +226,9 @@ export type BankAliasesResponse = {
   /**
    * Aliases
    *
-   * Extra ids that also reach this bank, oldest first
+   * Extra ids that also reach this bank, the primary one first then oldest first
    */
-  aliases: Array<string>;
+  aliases: Array<BankAliasEntry>;
 };
 
 /**
@@ -302,6 +320,12 @@ export type BankListItem = {
    * When anything was last written to this bank: a document retained (including appends to an existing document) or a fact stored. Null if the bank is empty.
    */
   last_write_at?: string | null;
+  /**
+   * Display Alias
+   *
+   * The alias this bank is presented under, when one was promoted. Display only: `bank_id` remains the bank's identity everywhere else. Null when no alias is primary, in which case show `bank_id`.
+   */
+  display_alias?: string | null;
   /**
    * Matched Aliases
    *
@@ -1427,6 +1451,12 @@ export type CreateBankAliasRequest = {
    * The extra bank id. Same rules as a bank id (non-empty, at most 192 bytes of UTF-8, no control characters), and it must not already name a bank or another alias.
    */
   alias: string;
+  /**
+   * Primary
+   *
+   * Also show the bank under this alias, replacing whichever alias is shown today.
+   */
+  primary?: boolean;
 };
 
 /**
@@ -5546,7 +5576,7 @@ export type RecallResult = {
   /**
    * Attachments
    *
-   * Attachments this fact was drawn from, as recorded per fact at extraction time — the same edge the memory read endpoints return, not everything its chunk happened to carry. A fact stated in prose reports none. Omitted when there are none.
+   * Attachments this fact was drawn from, as recorded per fact at extraction time — the same edge the memory read endpoints return, not everything its chunk happened to carry. A fact stated in prose reports none; an observation reports those of the facts it was consolidated from. Omitted when there are none.
    */
   attachments?: Array<ChunkAttachment> | null;
 };
@@ -5685,6 +5715,34 @@ export type ReflectFact = {
    * Occurred End
    */
   occurred_end?: string | null;
+  /**
+   * Mentioned At
+   */
+  mentioned_at?: string | null;
+  /**
+   * Document Id
+   */
+  document_id?: string | null;
+  /**
+   * Chunk Id
+   */
+  chunk_id?: string | null;
+  /**
+   * Tags
+   */
+  tags?: Array<string> | null;
+  /**
+   * Metadata
+   */
+  metadata?: {
+    [key: string]: string;
+  } | null;
+  /**
+   * Attachments
+   *
+   * Attachments this memory was drawn from — the same per-fact edge recall reports. An observation reports those of the facts it was consolidated from. Omitted when there are none.
+   */
+  attachments?: Array<ChunkAttachment> | null;
 };
 
 /**
@@ -6142,6 +6200,20 @@ export type RunSettingModel = {
    * Whether this bank may override the field via the bank config API.
    */
   editable?: boolean;
+};
+
+/**
+ * SetBankAliasPrimaryRequest
+ *
+ * Request model for showing (or no longer showing) an alias in place of the bank id.
+ */
+export type SetBankAliasPrimaryRequest = {
+  /**
+   * Primary
+   *
+   * True to present the bank under this alias; False to go back to its own id.
+   */
+  primary: boolean;
 };
 
 /**
@@ -9632,6 +9704,47 @@ export type DeleteBankAliasResponses = {
 };
 
 export type DeleteBankAliasResponse = DeleteBankAliasResponses[keyof DeleteBankAliasResponses];
+
+export type SetBankAliasPrimaryData = {
+  body: SetBankAliasPrimaryRequest;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+    /**
+     * Alias
+     */
+    alias: string;
+  };
+  query?: never;
+  url: "/v1/default/banks/{bank_id}/aliases/{alias}";
+};
+
+export type SetBankAliasPrimaryErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type SetBankAliasPrimaryError = SetBankAliasPrimaryErrors[keyof SetBankAliasPrimaryErrors];
+
+export type SetBankAliasPrimaryResponses = {
+  /**
+   * Successful Response
+   */
+  200: BankAliasesResponse;
+};
+
+export type SetBankAliasPrimaryResponse =
+  SetBankAliasPrimaryResponses[keyof SetBankAliasPrimaryResponses];
 
 export type DeleteBankData = {
   body?: never;

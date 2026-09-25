@@ -553,8 +553,11 @@ pub fn alias_list(
             ));
         } else {
             println!("Aliases that also reach '{}':", result.bank_id);
-            for alias in &result.aliases {
-                println!("  {}", alias);
+            for entry in &result.aliases {
+                // Marked rather than listed separately: the primary one is still an
+                // ordinary alias, it is just the one the UI shows in place of the id.
+                let marker = if entry.primary { "  (shown)" } else { "" };
+                println!("  {}{}", entry.alias, marker);
             }
         }
     } else {
@@ -575,6 +578,35 @@ pub fn alias_add(
 
     if output_format == OutputFormat::Pretty {
         ui::print_success(&format!("'{}' now reaches bank '{}'", alias, result.bank_id));
+    } else {
+        output::print_output(&result, output_format)?;
+    }
+    Ok(())
+}
+
+/// Show this bank under one of its aliases
+pub fn alias_primary(
+    client: &ApiClient,
+    bank_id: &str,
+    alias: &str,
+    primary: bool,
+    verbose: bool,
+    output_format: OutputFormat,
+) -> Result<()> {
+    let result = client.set_bank_alias_primary(bank_id, alias, primary, verbose)?;
+
+    if output_format == OutputFormat::Pretty {
+        // Say what did NOT change as well: the point of the flag is that it is
+        // cosmetic, and an operator reading this needs to know the id everything
+        // else still uses.
+        if primary {
+            ui::print_success(&format!(
+                "Bank '{}' is now shown as '{}' (its id is still '{}')",
+                result.bank_id, alias, result.bank_id
+            ));
+        } else {
+            ui::print_success(&format!("Bank '{}' is shown under its own id again", result.bank_id));
+        }
     } else {
         output::print_output(&result, output_format)?;
     }

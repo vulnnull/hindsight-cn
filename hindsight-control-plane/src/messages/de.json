@@ -257,6 +257,9 @@
     "description": "Zusätzliche IDs, die ebenfalls <name>{bankId}</name> erreichen, damit Aufrufer ohne Ausfallzeit auf eine neue ID wechseln können.",
     "placeholder": "Neue ID",
     "add": "Hinzufügen",
+    "shownAsLabel": "Angezeigt als",
+    "shownAsDescription": "Welche ID die Control Plane für diese Bank anzeigt. Rein kosmetisch – {bankId} bleibt überall sonst ihre Identität.",
+    "primaryTitle": "Wird anstelle der Bank-ID angezeigt",
     "removeAria": "Alias {alias} entfernen",
     "removeTitle": "Alias {alias} entfernen?",
     "removeConfirm": "Jede Anwendung, die noch über {alias} verbunden ist, funktioniert sofort nicht mehr. Nur diese ID verschwindet – {bankId} und die Erinnerungen bleiben unberührt, und Sie können den Alias wieder hinzufügen.",
@@ -264,6 +267,7 @@
     "cancel": "Abbrechen",
     "loadFailed": "Aliasse konnten nicht geladen werden",
     "addFailed": "Alias konnte nicht hinzugefügt werden",
+    "primaryFailed": "Die angezeigte ID konnte nicht geändert werden",
     "removeFailed": "Alias konnte nicht entfernt werden"
   },
   "bankStats": {
@@ -1954,7 +1958,8 @@
       "bankAliases": {
         "list": "Bank-Aliasse konnten nicht aufgelistet werden",
         "create": "Bank-Alias konnte nicht erstellt werden",
-        "delete": "Bank-Alias konnte nicht gelöscht werden"
+        "delete": "Bank-Alias konnte nicht gelöscht werden",
+        "update": "Bank-Alias konnte nicht aktualisiert werden"
       },
       "memories": {
         "list": "Speichereinheiten konnten nicht aufgelistet werden",

@@ -23,8 +23,8 @@ var _ MappedNullable = &BankAliasesResponse{}
 type BankAliasesResponse struct {
 	// The bank's own id, which an alias never replaces
 	BankId string `json:"bank_id"`
-	// Extra ids that also reach this bank, oldest first
-	Aliases []string `json:"aliases"`
+	// Extra ids that also reach this bank, the primary one first then oldest first
+	Aliases []BankAliasEntry `json:"aliases"`
 }
 
 type _BankAliasesResponse BankAliasesResponse
@@ -33,7 +33,7 @@ type _BankAliasesResponse BankAliasesResponse
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewBankAliasesResponse(bankId string, aliases []string) *BankAliasesResponse {
+func NewBankAliasesResponse(bankId string, aliases []BankAliasEntry) *BankAliasesResponse {
 	this := BankAliasesResponse{}
 	this.BankId = bankId
 	this.Aliases = aliases
@@ -73,9 +73,9 @@ func (o *BankAliasesResponse) SetBankId(v string) {
 }
 
 // GetAliases returns the Aliases field value
-func (o *BankAliasesResponse) GetAliases() []string {
+func (o *BankAliasesResponse) GetAliases() []BankAliasEntry {
 	if o == nil {
-		var ret []string
+		var ret []BankAliasEntry
 		return ret
 	}
 
@@ -84,7 +84,7 @@ func (o *BankAliasesResponse) GetAliases() []string {
 
 // GetAliasesOk returns a tuple with the Aliases field value
 // and a boolean to check if the value has been set.
-func (o *BankAliasesResponse) GetAliasesOk() ([]string, bool) {
+func (o *BankAliasesResponse) GetAliasesOk() ([]BankAliasEntry, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -92,7 +92,7 @@ func (o *BankAliasesResponse) GetAliasesOk() ([]string, bool) {
 }
 
 // SetAliases sets field value
-func (o *BankAliasesResponse) SetAliases(v []string) {
+func (o *BankAliasesResponse) SetAliases(v []BankAliasEntry) {
 	o.Aliases = v
 }
 

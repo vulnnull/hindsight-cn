@@ -30,6 +30,7 @@ type BankListItem struct {
 	FactCount *int32 `json:"fact_count,omitempty"`
 	LastDocumentAt NullableString `json:"last_document_at,omitempty"`
 	LastWriteAt NullableString `json:"last_write_at,omitempty"`
+	DisplayAlias NullableString `json:"display_alias,omitempty"`
 	// Aliases of this bank that matched the search `q`. Empty when no search was made, or when the bank matched on its own id or name — so a non-empty value explains a result whose `bank_id` does not contain the search text.
 	MatchedAliases []string `json:"matched_aliases,omitempty"`
 }
@@ -391,6 +392,48 @@ func (o *BankListItem) UnsetLastWriteAt() {
 	o.LastWriteAt.Unset()
 }
 
+// GetDisplayAlias returns the DisplayAlias field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *BankListItem) GetDisplayAlias() string {
+	if o == nil || IsNil(o.DisplayAlias.Get()) {
+		var ret string
+		return ret
+	}
+	return *o.DisplayAlias.Get()
+}
+
+// GetDisplayAliasOk returns a tuple with the DisplayAlias field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *BankListItem) GetDisplayAliasOk() (*string, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return o.DisplayAlias.Get(), o.DisplayAlias.IsSet()
+}
+
+// HasDisplayAlias returns a boolean if a field has been set.
+func (o *BankListItem) HasDisplayAlias() bool {
+	if o != nil && o.DisplayAlias.IsSet() {
+		return true
+	}
+
+	return false
+}
+
+// SetDisplayAlias gets a reference to the given NullableString and assigns it to the DisplayAlias field.
+func (o *BankListItem) SetDisplayAlias(v string) {
+	o.DisplayAlias.Set(&v)
+}
+// SetDisplayAliasNil sets the value for DisplayAlias to be an explicit nil
+func (o *BankListItem) SetDisplayAliasNil() {
+	o.DisplayAlias.Set(nil)
+}
+
+// UnsetDisplayAlias ensures that no value is present for DisplayAlias, not even an explicit nil
+func (o *BankListItem) UnsetDisplayAlias() {
+	o.DisplayAlias.Unset()
+}
+
 // GetMatchedAliases returns the MatchedAliases field value if set, zero value otherwise.
 func (o *BankListItem) GetMatchedAliases() []string {
 	if o == nil || IsNil(o.MatchedAliases) {
@@ -455,6 +498,9 @@ func (o BankListItem) ToMap() (map[string]interface{}, error) {
 	}
 	if o.LastWriteAt.IsSet() {
 		toSerialize["last_write_at"] = o.LastWriteAt.Get()
+	}
+	if o.DisplayAlias.IsSet() {
+		toSerialize["display_alias"] = o.DisplayAlias.Get()
 	}
 	if !IsNil(o.MatchedAliases) {
 		toSerialize["matched_aliases"] = o.MatchedAliases

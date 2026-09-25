@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useMemo, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import { useBank } from "@/lib/bank-context";
 import { useFeatures } from "@/lib/features-context";
-import { client } from "@/lib/api";
+import { client, type BankAliasEntry } from "@/lib/api";
 import { PreviewPromptButton } from "@/components/prompt-preview-dialog";
 import { TagFilterInput } from "@/components/tag-filter-input";
 import type {
@@ -1948,9 +1948,13 @@ function ConfigSection({
  * button neither covers nor waits for them. Its own errors therefore render here
  * instead of in the section's error slot.
  */
+/** Sentinel for "no alias is shown" — Radix Select cannot hold an empty value,
+ *  and the bank's own id is deliberately not one of the alias options. */
+const OWN_ID = "__own_id__";
+
 function BankAliasRows({ bankId }: { bankId: string | null }) {
   const t = useTranslations("bankAliases");
-  const [aliases, setAliases] = useState<string[]>([]);
+  const [aliases, setAliases] = useState<BankAliasEntry[]>([]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1984,6 +1988,25 @@ function BankAliasRows({ bankId }: { bankId: string | null }) {
       setError(e instanceof Error ? e.message : t("addFailed"));
     } finally {
       setBusy(false);
+    }
+  };
+
+  /** Show the bank as `choice`, or as its own id when `choice` is OWN_ID. */
+  const promote = async (choice: string) => {
+    if (!bankId) return;
+    setError(null);
+    const current = aliases.find((a) => a.primary)?.alias ?? null;
+    try {
+      // The whole list comes back either way, so the demoted and promoted rows
+      // update in the same render — the UI never shows two as shown.
+      const next =
+        choice === OWN_ID
+          ? current && (await client.setBankAliasPrimary(bankId, current, false))
+          : await client.setBankAliasPrimary(bankId, choice, true);
+      if (next) setAliases(next.aliases ?? []);
+    } catch (e) {
+      console.error("Failed to set primary bank alias:", e);
+      setError(t("primaryFailed"));
     }
   };
 
@@ -2032,15 +2055,43 @@ function BankAliasRows({ bankId }: { bankId: string | null }) {
           </Button>
         </div>
       </FieldRow>
+      {aliases.length > 0 && (
+        <FieldRow label={t("shownAsLabel")} description={t("shownAsDescription", { bankId })}>
+          <Select
+            value={aliases.find((a) => a.primary)?.alias ?? OWN_ID}
+            onValueChange={(v) => promote(v)}
+          >
+            <SelectTrigger className="w-full h-8 text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {/* Always offered, and the default: a bank need not be shown as an
+                  alias, and this is how you put it back to its own id. */}
+              <SelectItem value={OWN_ID}>{bankId}</SelectItem>
+              {aliases.map((entry) => (
+                <SelectItem key={entry.alias} value={entry.alias}>
+                  {entry.alias}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </FieldRow>
+      )}
       {(aliases.length > 0 || error) && (
         <div className="px-6 py-3 flex flex-wrap items-center gap-1.5">
-          {aliases.map((alias) => (
+          {aliases.map((entry) => (
             <IdChip
-              key={alias}
-              id={alias}
+              key={entry.alias}
+              id={entry.alias}
               size="xs"
-              onRemove={() => setPendingRemove(alias)}
-              removeLabel={t("removeAria", { alias })}
+              // Marks the one the bank is shown as. Promotion lives in the "Shown
+              // as" row rather than on the chip: the chip shell renders a button
+              // instead of the ✕ when given an onClick, so a clickable chip would
+              // quietly lose its remove control.
+              active={entry.primary}
+              title={entry.primary ? t("primaryTitle") : undefined}
+              onRemove={() => setPendingRemove(entry.alias)}
+              removeLabel={t("removeAria", { alias: entry.alias })}
             />
           ))}
           {error && <p className="text-xs text-destructive">{error}</p>}

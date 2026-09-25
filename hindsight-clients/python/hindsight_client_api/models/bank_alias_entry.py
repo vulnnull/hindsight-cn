@@ -17,19 +17,18 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
-from typing import Any, ClassVar, Dict, List
-from hindsight_client_api.models.bank_alias_entry import BankAliasEntry
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr
+from typing import Any, ClassVar, Dict, List, Optional
 from typing import Optional, Set
 from typing_extensions import Self
 
-class BankAliasesResponse(BaseModel):
+class BankAliasEntry(BaseModel):
     """
-    Response model for a bank's aliases.
+    One id a bank answers to.
     """ # noqa: E501
-    bank_id: StrictStr = Field(description="The bank's own id, which an alias never replaces")
-    aliases: List[BankAliasEntry] = Field(description="Extra ids that also reach this bank, the primary one first then oldest first")
-    __properties: ClassVar[List[str]] = ["bank_id", "aliases"]
+    alias: StrictStr
+    primary: Optional[StrictBool] = Field(default=False, description="Whether this alias is shown in place of the bank's own id. Display only — the bank keeps its id, and everything that names a bank still uses it. At most one alias per bank can be primary, and none has to be.")
+    __properties: ClassVar[List[str]] = ["alias", "primary"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -49,7 +48,7 @@ class BankAliasesResponse(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of BankAliasesResponse from a JSON string"""
+        """Create an instance of BankAliasEntry from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -70,18 +69,11 @@ class BankAliasesResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of each item in aliases (list)
-        _items = []
-        if self.aliases:
-            for _item_aliases in self.aliases:
-                if _item_aliases:
-                    _items.append(_item_aliases.to_dict())
-            _dict['aliases'] = _items
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of BankAliasesResponse from a dict"""
+        """Create an instance of BankAliasEntry from a dict"""
         if obj is None:
             return None
 
@@ -89,8 +81,8 @@ class BankAliasesResponse(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "bank_id": obj.get("bank_id"),
-            "aliases": [BankAliasEntry.from_dict(_item) for _item in obj["aliases"]] if obj.get("aliases") is not None else None
+            "alias": obj.get("alias"),
+            "primary": obj.get("primary") if obj.get("primary") is not None else False
         })
         return _obj
 

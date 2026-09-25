@@ -2082,7 +2082,8 @@
       "bankAliases": {
         "list": "获取记忆库别名列表失败",
         "create": "创建记忆库别名失败",
-        "delete": "删除记忆库别名失败"
+        "delete": "删除记忆库别名失败",
+        "update": "更新记忆库别名失败"
       }
     }
   },
@@ -2224,6 +2225,10 @@
     "cancel": "取消",
     "loadFailed": "加载别名失败",
     "addFailed": "添加别名失败",
-    "removeFailed": "删除别名失败"
+    "removeFailed": "删除别名失败",
+    "shownAsLabel": "显示为",
+    "shownAsDescription": "控制台为该记忆库显示的 ID。仅影响显示 —— 在其他所有地方 {bankId} 仍是它的标识。",
+    "primaryTitle": "显示在记忆库 ID 的位置",
+    "primaryFailed": "更改显示的 ID 失败"
   }
 }

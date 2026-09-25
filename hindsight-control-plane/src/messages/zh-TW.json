@@ -257,6 +257,9 @@
     "description": "同樣可以存取 <name>{bankId}</name> 的額外 ID，可讓呼叫方在不停機的情況下遷移到新 ID。",
     "placeholder": "新 ID",
     "add": "新增",
+    "shownAsLabel": "顯示為",
+    "shownAsDescription": "控制台為此記憶庫顯示的 ID。僅影響顯示 —— 在其他所有地方 {bankId} 仍是它的識別碼。",
+    "primaryTitle": "顯示在記憶庫 ID 的位置",
     "removeAria": "移除別名 {alias}",
     "removeTitle": "要移除別名 {alias} 嗎？",
     "removeConfirm": "所有仍透過 {alias} 連線的應用會立即停止運作。消失的只是這個 ID —— {bankId} 及其記憶不受影響，之後也可以重新加回該別名。",
@@ -264,6 +267,7 @@
     "cancel": "取消",
     "loadFailed": "載入別名失敗",
     "addFailed": "新增別名失敗",
+    "primaryFailed": "變更顯示的 ID 失敗",
     "removeFailed": "移除別名失敗"
   },
   "bankStats": {
@@ -1954,7 +1958,8 @@
       "bankAliases": {
         "list": "取得記憶庫別名清單失敗",
         "create": "建立記憶庫別名失敗",
-        "delete": "刪除記憶庫別名失敗"
+        "delete": "刪除記憶庫別名失敗",
+        "update": "更新記憶庫別名失敗"
       },
       "memories": {
         "list": "列出記憶單元失敗",
