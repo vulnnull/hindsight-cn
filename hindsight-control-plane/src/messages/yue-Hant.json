@@ -383,12 +383,18 @@
     "promptPreviewCancel": "取消",
     "promptPreviewServerLevel": "伺服器層級嘅設定。",
     "promptPreviewSaved": "已儲存{name}",
-    "testerSampleLabel": "原始資料",
+    "testerSampleLabel": "測試資料",
     "testerRunSettingsLabel": "其他設定",
     "testerSamplePlaceholder": "貼一段呢個記憶庫會記低嘅嘢…",
     "testerSampleDefault": "Sarah 喺 2024 年 3 月搬去柏林，帶領支付團隊。佢寧願用非同步更新，唔中意開會。",
     "testerRunAction": "執行",
     "testerRunNote": "模擬一次真實嘅 retain，如果有設定 LLM 就連 LLM 一齊叫。唔會儲存任何嘢。",
+    "testerColumnPrompt": "提示",
+    "testerColumnResult": "結果",
+    "testerResultEmpty": "執行一次就睇到 retain 會抽取乜嘢。",
+    "testerRunning": "抽取緊…",
+    "testerColumnCollapse": "收起 {name}",
+    "testerColumnExpand": "展開 {name}",
     "testerNoFacts": "喺呢段文字度擷取唔到事實。",
     "testerOccurredStart": "發生開始",
     "testerOccurredEnd": "發生結束",
@@ -628,6 +634,7 @@
         "retain_extract_causal_links": "因果關係",
         "retain_extraction_mode": "擷取規則",
         "retain_mission": "使命設定",
+        "retain_optional_fact_dimensions": "可選事實欄位",
         "retain_structured_chunk_size": "結構化分塊大小"
       },
       "section": {
@@ -647,7 +654,8 @@
         "retain_custom_instructions": "未設定，所以 custom 模式都係用上面嘅內建規則。寫低說明就可以換走佢。",
         "retain_extract_causal_links": "會叫模型連埋互為因果嘅事實，同埋擴充回應結構。",
         "retain_extraction_mode": "chunks 模式：每個分塊照原文儲存，所以唔會送出提示詞。揀第二個模式就見到。",
-        "retain_mission": "會擺喺呢度，行先過一般擷取規則。"
+        "retain_mission": "會擺喺呢度，行先過一般擷取規則。",
+        "retain_optional_fact_dimensions": "會畀模型將「幾時」、「喺邊」、「邊個」同「點解」留空，而唔係寫「N/A」。"
       }
     }
   },
@@ -1424,6 +1432,7 @@
     "cumulative": "累計",
     "tokensInput": "輸入",
     "tokensOutput": "輸出",
+    "tokensThoughts": "推理",
     "tokensCached": "已快取",
     "tokensTotal": "總計",
     "tableHeaderTokens": "Token",

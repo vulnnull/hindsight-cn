@@ -54,6 +54,7 @@ from .local_device import (
 )
 from .remote_retry import RetryPolicy, acall_with_retry
 from .tei_retry import TEI_KEEPALIVE_EXPIRY_SECONDS, is_retryable_tei_transport_error, tei_retry_delay
+from .token_encoding import count_tokens, truncate_to_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -910,6 +911,18 @@ class SiliconFlowCrossEncoder(CrossEncoderModel):
         return await self._client.predict(pairs)
 
 
+# Single source of truth for prompt templates and overheads
+_RANK_INSTRUCTIONS_PREFIX = "Which candidate answers the question: "
+_CUT_INSTRUCTIONS = (
+    "How far down this ranked list does genuine relevance to the question extend? "
+    "Count a candidate as relevant only if it helps answer the question."
+)
+
+_OPTION_KEY_OVERHEAD = 7  # JSON envelope overhead per choice option: '"c249": "' + comma/newline
+_LISTING_ITEM_OVERHEAD = 10  # Formatting overhead per item in cut listing: "[1] ...\n\n"
+_MAX_QUERY_TOKENS = 2_000  # Defensive ceiling on query tokens in reranker
+
+
 class TypeSafeCrossEncoder(CrossEncoderModel):
     """
     TypeSafe reranker (https://typesafe.ai), Jev by default.
@@ -918,12 +931,14 @@ class TypeSafeCrossEncoder(CrossEncoderModel):
     against a *state*. This provider asks two of them.
 
     **Rank — one Choice whose options are the candidates.** A Choice answers with a
-    probability for every option, summing to 1, so handing it the whole pool returns
-    the ranking in a single call. That beats scoring each candidate on its own:
-    judged together the model only has to say which candidate beats which, instead
-    of pinning every candidate to an absolute scale it must re-derive each time. On a
-    200-question LoCoMo set the listwise shape scored recall@1 0.94 against 0.87 for
-    one call per candidate, at a thirtieth of the calls.
+    probability for every option, summing to 1. When the candidate pool fits within
+    MAX_OPTIONS (250) and token context limits, handing it the whole pool returns the
+    ranking in a single call. That beats scoring each candidate on its own: judged together
+    the model only has to say which candidate beats which, instead of pinning every
+    candidate to an absolute scale it must re-derive each time. On a 200-question LoCoMo
+    set the listwise shape scored recall@1 0.94 against 0.87 for one call per candidate,
+    at a thirtieth of the calls. Pools exceeding option limits or token budgets are
+    partitioned into groups whose winners compete in a finals round.
 
     **Cut — one Score over the ranked shortlist**, asking how far down the list
     relevance extends. Only asked when ``prune_candidates`` is on. A Score's levels
@@ -942,14 +957,19 @@ class TypeSafeCrossEncoder(CrossEncoderModel):
     SYSTEMONE_PATH = "/v1/systemone"
 
     # A Choice accepts at most 255 options; stay clear of the edge. A pool larger
-    # than this is ranked in chunks whose winners are then ranked against each other,
-    # because probabilities are normalised within a call and so cannot be compared
-    # across two of them.
+    # than this or exceeding single-question token limits is ranked in chunks whose
+    # winners are then ranked against each other, because probabilities are normalised
+    # within a call and so cannot be compared across two of them.
     MAX_OPTIONS = 250
 
     # How many of the ranked candidates the cut question is shown. The cut only ever
     # keeps a handful, so a longer list costs tokens to no purpose.
     SHORTLIST = 12
+
+    # Context window safety limit for Jev /v1/systemone.
+    # Single question context limit is 32k. A defensive safety margin (26k vs 32k)
+    # absorbs cross-tokenizer divergence and JSON envelope formatting overheads.
+    MAX_QUESTION_TOKENS = 26_000
 
     # Ordered depths for the cut. The model picks the level; these are the
     # granularity offered, which is a design choice and not a tuned threshold.
@@ -1024,7 +1044,7 @@ class TypeSafeCrossEncoder(CrossEncoderModel):
             "questions": {
                 "rank": {
                     "type": "choice",
-                    "instructions": f"Which candidate answers the question: {query}",
+                    "instructions": f"{_RANK_INSTRUCTIONS_PREFIX}{query}",
                     "criteria": {f"c{position}": docs[index] for position, index in enumerate(indices)},
                 }
             },
@@ -1037,36 +1057,120 @@ class TypeSafeCrossEncoder(CrossEncoderModel):
         return [indices[position] for position in by_probability]
 
     async def _rank(self, query: str, docs: list[str], indices: list[int]) -> list[int]:
-        """Rank a whole pool best first, in rounds when it exceeds the option cap.
+        """Rank a whole pool best first, in rounds when it exceeds option or token limits.
 
-        Each round's probabilities are normalised within its own call, so the rounds
-        cannot simply be concatenated — the winners are ranked against each other
-        instead. Candidates that win no round keep their round order behind the
-        finalists: they are the ones the cut would discard anyway.
+        Each round's probabilities are normalised within its own call, so the winners
+        are ranked against each other in a finals round. Candidates that do not make the
+        finals maintain their caller input order (initial RRF rank) behind the finalists,
+        discarding intra-group model ranks since probabilities across separate rounds
+        are not on a shared scale (#4599).
         """
-        if len(indices) <= self.MAX_OPTIONS:
-            return await self._rank_once(query, docs, indices)
+        if not indices:
+            return []
 
-        groups = [indices[start : start + self.MAX_OPTIONS] for start in range(0, len(indices), self.MAX_OPTIONS)]
-        ranked_groups = await asyncio.gather(*(self._rank_once(query, docs, group) for group in groups))
-        finalists = [index for group in ranked_groups for index in group[: self.SHORTLIST]]
-        rest = [index for group in ranked_groups for index in group[self.SHORTLIST :]]
-        return (await self._rank_once(query, docs, finalists)) + rest
+        # Available token budget for candidate options in one choice question.
+        state_tokens = count_tokens(f"Question: {query}")
+        # +30: cushion for the question's JSON framing (type, keys) around the instructions.
+        instr_tokens = count_tokens(f"{_RANK_INSTRUCTIONS_PREFIX}{query}") + 30
+        net_budget = max(50, self.MAX_QUESTION_TOKENS - state_tokens - instr_tokens)
+
+        # Pre-truncate outlier documents that individually exceed the question budget,
+        # and copy docs so we don't mutate caller's list.
+        effective_docs = list(docs)
+        doc_tokens: dict[int, int] = {}
+        for index in indices:
+            t = count_tokens(effective_docs[index])
+            if t + _OPTION_KEY_OVERHEAD > net_budget:
+                cap = max(10, net_budget - _OPTION_KEY_OVERHEAD)
+                effective_docs[index] = truncate_to_tokens(effective_docs[index], cap).text
+                t = count_tokens(effective_docs[index])
+            doc_tokens[index] = t
+
+        # Pack candidates into groups bounded by MAX_OPTIONS and net_budget.
+        groups: list[list[int]] = []
+        curr_group: list[int] = []
+        curr_tokens = 0
+        for index in indices:
+            item_tokens = doc_tokens[index] + _OPTION_KEY_OVERHEAD
+            if curr_group and (len(curr_group) >= self.MAX_OPTIONS or curr_tokens + item_tokens > net_budget):
+                groups.append(curr_group)
+                curr_group = [index]
+                curr_tokens = item_tokens
+            else:
+                curr_group.append(index)
+                curr_tokens += item_tokens
+        if curr_group:
+            groups.append(curr_group)
+
+        # Fast path: all candidates fit into a single group.
+        if len(groups) == 1:
+            return await self._rank_once(query, effective_docs, groups[0])
+
+        # Groups with >= 2 candidates are ranked via Jev Choice questions in parallel.
+        # Single-candidate groups skip the preliminary round: a 1-candidate Choice
+        # is rejected by Jev ("criteria must map 2 or more options") and the winner is trivial.
+        multi_indices = [i for i, g in enumerate(groups) if len(g) >= 2]
+        ranked_groups: list[list[int]] = [list(g) for g in groups]
+        if multi_indices:
+            ranked_multi = await asyncio.gather(
+                *(self._rank_once(query, effective_docs, groups[i]) for i in multi_indices)
+            )
+            for i, r in zip(multi_indices, ranked_multi):
+                ranked_groups[i] = r
+
+        # Advance the top of each group to the finals; the rest fall back to RRF order (#4599).
+        # The finals is one Choice, so the finalists must fit MAX_OPTIONS too: long documents
+        # can split a pool into more than MAX_OPTIONS // SHORTLIST groups, so the per-group
+        # quota shrinks, and past MAX_OPTIONS groups the lowest-input-ranked winners overflow
+        # into the rest.
+        quota = max(1, min(self.SHORTLIST, self.MAX_OPTIONS // len(ranked_groups)))
+        finalists = [index for group in ranked_groups for index in group[:quota]]
+        rest = [index for group in ranked_groups for index in group[quota:]] + finalists[self.MAX_OPTIONS :]
+        finalists = finalists[: self.MAX_OPTIONS]
+        index_pos = {idx: pos for pos, idx in enumerate(indices)}
+        rest.sort(key=lambda idx: index_pos[idx])
+
+        # Finals round: if finalists exceed budget, cap each doc evenly (budget // n).
+        finalist_tokens = sum(doc_tokens[idx] + _OPTION_KEY_OVERHEAD for idx in finalists)
+        if finalist_tokens > net_budget:
+            cap = max(10, (net_budget - len(finalists) * _OPTION_KEY_OVERHEAD) // len(finalists))
+            for idx in finalists:
+                if doc_tokens[idx] > cap:
+                    effective_docs[idx] = truncate_to_tokens(effective_docs[idx], cap).text
+
+        ranked_finalists = await self._rank_once(query, effective_docs, finalists)
+        return ranked_finalists + rest
 
     async def _cut(self, query: str, docs: list[str], order: list[int]) -> int:
         """How many of the ranked candidates are relevant, as the model sees it."""
         shortlist = order[: self.SHORTLIST]
-        listing = "\n\n".join(f"[{position + 1}] {docs[index]}" for position, index in enumerate(shortlist))
+        if not shortlist:
+            return 0
+
+        # Instructions and levels are fixed, plus a cushion for the request's JSON framing.
+        cut_overhead = count_tokens(_CUT_INSTRUCTIONS) + sum(count_tokens(c) for c in self.CUT_LEVELS) + 50
+        prefix = f"Question: {query}\n\nCandidates, already ranked best first:\n"
+        prefix_tokens = count_tokens(prefix)
+        available_listing_tokens = max(100, self.MAX_QUESTION_TOKENS - cut_overhead - prefix_tokens)
+
+        # Truncate shortlist documents if they exceed the available listing budget
+        shortlist_docs = [docs[index] for index in shortlist]
+        shortlist_tokens = [count_tokens(d) for d in shortlist_docs]
+        total_shortlist_tokens = sum(shortlist_tokens) + len(shortlist) * _LISTING_ITEM_OVERHEAD
+        if total_shortlist_tokens > available_listing_tokens:
+            cap = max(10, (available_listing_tokens - len(shortlist) * _LISTING_ITEM_OVERHEAD) // len(shortlist))
+            shortlist_docs = [
+                truncate_to_tokens(d, cap).text if t > cap else d for d, t in zip(shortlist_docs, shortlist_tokens)
+            ]
+
+        listing = "\n\n".join(f"[{position + 1}] {shortlist_docs[position]}" for position in range(len(shortlist)))
         body = {
-            "state": f"Question: {query}\n\nCandidates, already ranked best first:\n{listing}",
+            "state": f"{prefix}{listing}",
             "model": self.model,
             "questions": {
                 "depth": {
                     "type": "score",
-                    "instructions": (
-                        "How far down this ranked list does genuine relevance to the question extend? "
-                        "Count a candidate as relevant only if it helps answer the question."
-                    ),
+                    "instructions": _CUT_INSTRUCTIONS,
                     "criteria": self.CUT_LEVELS,
                 }
             },
@@ -1077,6 +1181,17 @@ class TypeSafeCrossEncoder(CrossEncoderModel):
         return len(shortlist) if depth is None else min(depth, len(shortlist))
 
     async def _rank_group(self, query: str, docs: list[str], indices: list[int], scores: list[float]) -> None:
+        if not indices:
+            return
+
+        # Query appears in both State and instructions across rank and cut.
+        # Defensively bound query tokens so that _rank and _cut share the identical
+        # bounded query, preventing context overflow in _cut and eliminating semantic drift.
+        max_allowed_query = max(50, (self.MAX_QUESTION_TOKENS - 200) // 2)
+        effective_query_cap = min(_MAX_QUERY_TOKENS, max_allowed_query)
+        if count_tokens(query) > effective_query_cap:
+            query = truncate_to_tokens(query, effective_query_cap).text
+
         order = await self._rank(query, docs, indices)
         keep = await self._cut(query, docs, order) if self.prunes_candidates else len(order)
         # Positions, not confidences — see the class docstring. Descending from 1.0 so

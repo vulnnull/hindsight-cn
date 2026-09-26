@@ -383,12 +383,18 @@
     "promptPreviewCancel": "Cancel",
     "promptPreviewServerLevel": "Server-level setting.",
     "promptPreviewSaved": "{name} saved",
-    "testerSampleLabel": "Raw data",
+    "testerSampleLabel": "Test data",
     "testerRunSettingsLabel": "Other settings",
     "testerSamplePlaceholder": "Paste something this bank would retain…",
     "testerSampleDefault": "Sarah moved to Berlin in March 2024 to lead the payments team. She prefers async updates over meetings.",
     "testerRunAction": "Run",
     "testerRunNote": "Simulates a real retain, including the LLM if one is configured. Nothing is stored.",
+    "testerColumnPrompt": "Prompt",
+    "testerColumnResult": "Result",
+    "testerResultEmpty": "Run to see what retain would extract.",
+    "testerRunning": "Extracting…",
+    "testerColumnCollapse": "Collapse {name}",
+    "testerColumnExpand": "Expand {name}",
     "testerNoFacts": "No facts extracted from this text.",
     "testerOccurredStart": "Occurred from",
     "testerOccurredEnd": "Occurred until",
@@ -628,6 +634,7 @@
         "retain_extract_causal_links": "Causal relationships",
         "retain_extraction_mode": "Extraction rules",
         "retain_mission": "Mission",
+        "retain_optional_fact_dimensions": "Optional fact fields",
         "retain_structured_chunk_size": "Structured chunk size"
       },
       "section": {
@@ -647,7 +654,8 @@
         "retain_custom_instructions": "Unset, so custom mode falls back to the built-in rules above. Write instructions to replace them.",
         "retain_extract_causal_links": "Would ask the model to link facts that caused one another, and widen the response schema.",
         "retain_extraction_mode": "Chunks mode: each chunk is stored verbatim, so no prompt is sent. Pick another mode to see one.",
-        "retain_mission": "Would be prepended here, taking priority over the general extraction rules."
+        "retain_mission": "Would be prepended here, taking priority over the general extraction rules.",
+        "retain_optional_fact_dimensions": "Would let the model leave \"when\", \"where\", \"who\" and \"why\" empty instead of writing \"N/A\"."
       }
     }
   },
@@ -1424,6 +1432,7 @@
     "cumulative": "Cumulative",
     "tokensInput": "Input",
     "tokensOutput": "Output",
+    "tokensThoughts": "Reasoning",
     "tokensCached": "Cached",
     "tokensTotal": "Total",
     "tableHeaderTokens": "Tokens",

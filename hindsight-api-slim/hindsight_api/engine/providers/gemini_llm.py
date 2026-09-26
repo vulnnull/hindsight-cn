@@ -67,6 +67,7 @@ def _usage_from_gemini_response(response: Any) -> LLMResponseUsage:
         input_tokens=usage.prompt_token_count or 0,
         output_tokens=usage.candidates_token_count or 0,
         cached_tokens=getattr(usage, "cached_content_token_count", 0) or 0,
+        thoughts_tokens=getattr(usage, "thoughts_token_count", 0) or 0,
     )
 
 
@@ -651,6 +652,7 @@ class GeminiLLM(LLMInterface):
                     finish_reason=finish_reason,
                     error=None,
                     cached_tokens=cached_tokens,
+                    thoughts_tokens=thoughts_tokens,
                 )
 
                 # Log slow calls
@@ -1035,6 +1037,7 @@ class GeminiLLM(LLMInterface):
                     error=None,
                     tool_calls=tool_calls_dict,
                     cached_tokens=cached_input_tokens,
+                    thoughts_tokens=thoughts_tokens,
                 )
 
                 return LLMToolCallResult(

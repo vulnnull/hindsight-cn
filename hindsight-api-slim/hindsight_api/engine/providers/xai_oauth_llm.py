@@ -460,10 +460,15 @@ class XaiOAuthLLM(LLMInterface):
         client = self._client
         self._inflight[client] = self._inflight.get(client, 0) + 1
         try:
-            async with client.get().post(f"{self.base_url}/chat/completions", json=body, headers=headers) as response:
-                status_code = response.status
-                response_headers = response.headers
-                body_text = await response.text(errors="replace")
+            # Wall-clock cap: the session's sock_read restarts on every byte, so an upstream
+            # trickling keep-alive whitespace never trips it and the call hangs (#4763).
+            async with asyncio.timeout(self.timeout):
+                async with client.get().post(
+                    f"{self.base_url}/chat/completions", json=body, headers=headers
+                ) as response:
+                    status_code = response.status
+                    response_headers = response.headers
+                    body_text = await response.text(errors="replace")
         finally:
             self._release_client(client)
 
@@ -759,6 +764,7 @@ class XaiOAuthLLM(LLMInterface):
                         input_tokens=counts.input_tokens,
                         output_tokens=counts.output_tokens,
                         cached_tokens=counts.cached_tokens,
+                        thoughts_tokens=counts.thoughts_tokens,
                     )
                 )
 
@@ -816,7 +822,7 @@ class XaiOAuthLLM(LLMInterface):
             # retry while an identical failure one hop later got ten. The
             # states a retry cannot fix raise XaiOAuthLoginRequiredError, which
             # is deliberately absent here and stays fatal.
-            except (_UpstreamStatusError, aiohttp.ClientError, XaiOAuthRefreshError) as e:
+            except (_UpstreamStatusError, aiohttp.ClientError, XaiOAuthRefreshError, TimeoutError) as e:
                 last_exception = e
                 retryable = e.retryable if isinstance(e, _UpstreamStatusError) else True
                 if retryable and attempt < max_retries:
@@ -882,6 +888,14 @@ class XaiOAuthLLM(LLMInterface):
                     completion = await self._request_completion(body, body["messages"])
 
                 counts = _token_counts(completion.usage)
+                stash_response_usage(
+                    LLMResponseUsage(
+                        input_tokens=counts.input_tokens,
+                        output_tokens=counts.output_tokens,
+                        cached_tokens=counts.cached_tokens,
+                        thoughts_tokens=counts.thoughts_tokens,
+                    )
+                )
                 choice = completion.choices[0] if completion.choices else None
                 message = choice.message if choice is not None else None
                 content = message.content if message is not None else None
@@ -918,7 +932,7 @@ class XaiOAuthLLM(LLMInterface):
                     thoughts_tokens=counts.thoughts_tokens,
                 )
 
-            except (_UpstreamStatusError, aiohttp.ClientError, XaiOAuthRefreshError) as e:
+            except (_UpstreamStatusError, aiohttp.ClientError, XaiOAuthRefreshError, TimeoutError) as e:
                 last_exception = e
                 retryable = e.retryable if isinstance(e, _UpstreamStatusError) else True
                 if retryable and attempt < max_retries:
@@ -1047,6 +1061,7 @@ class XaiOAuthLLM(LLMInterface):
                 finish_reason=finish_reason,
                 error=None,
                 cached_tokens=counts.cached_tokens,
+                thoughts_tokens=counts.thoughts_tokens,
                 tool_calls=(
                     [{"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in tool_calls]
                     if tool_calls

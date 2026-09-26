@@ -1086,9 +1086,11 @@ SiliconFlow hosts a range of open-weight rerankers behind a Cohere-compatible `/
 ### TypeSafe Models
 
 TypeSafe is not a `/rerank` endpoint — it answers typed *questions* against a *state*.
-Hindsight makes the candidates the options of a single Choice question, so the returned
-probability distribution is the ranking: one call for the whole pool, however many
-candidates it holds.
+Hindsight makes the candidates the options of a Choice question, so the returned
+probability distribution is the ranking. When the candidate pool fits within the 250-option
+limit and context token budget, a single call ranks the entire pool. Larger pools or pools
+with long documents are partitioned into groups whose top candidates advance to a finals
+ranking round, with token truncation applied to fit context windows.
 
 | Model | Use Case |
 |-------|----------|

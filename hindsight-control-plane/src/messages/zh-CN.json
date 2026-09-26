@@ -546,7 +546,8 @@
         "retain_extract_causal_links": "因果关系",
         "retain_extraction_mode": "提取规则",
         "retain_mission": "Mission",
-        "retain_structured_chunk_size": "结构化分块大小"
+        "retain_structured_chunk_size": "结构化分块大小",
+        "retain_optional_fact_dimensions": "可选事实字段"
       },
       "section": {
         "bank_identity": "记忆库标识",
@@ -565,7 +566,8 @@
         "retain_custom_instructions": "未设置，因此 custom 模式仍使用上面的内置规则。写入说明即可替换。",
         "retain_extract_causal_links": "会要求模型关联互为因果的事实，并扩展响应结构。",
         "retain_extraction_mode": "chunks 模式：每个分块按原文存储，因此不会发送提示词。切换其他模式即可查看。",
-        "retain_mission": "会被放在这里，优先于通用提取规则。"
+        "retain_mission": "会被放在这里，优先于通用提取规则。",
+        "retain_optional_fact_dimensions": "允许模型将“何时”、“何地”、“何人”和“为何”留空，而不是写“N/A”。"
       }
     },
     "knowledgePageDefaultTriggerLabel": "知识页面默认触发器",
@@ -635,7 +637,13 @@
     "consolidationStrategySourceFactsDescription": "对这些范围，每次整合调用传入的源事实最大令牌数。",
     "consolidationStrategySourceFactsPerObservationDescription": "在这些范围中，每条沉淀认知考虑的源事实最大令牌数。",
     "clientsTitle": "客户端",
-    "clientsDescription": "应用和智能体在该记忆库上可以访问的内容。"
+    "clientsDescription": "应用和智能体在该记忆库上可以访问的内容。",
+    "testerColumnPrompt": "提示词",
+    "testerColumnResult": "结果",
+    "testerResultEmpty": "运行后即可查看 retain 会提取的内容。",
+    "testerRunning": "正在提取…",
+    "testerColumnCollapse": "折叠 {name}",
+    "testerColumnExpand": "展开 {name}"
   },
   "bankOperations": {
     "title": "后台操作",
@@ -1487,7 +1495,8 @@
     "groupByRunHint": "按操作运行对 LLM 调用进行分组",
     "entryCount": "{count, plural, one {# 条记录} other {# 条记录}}",
     "memoriesCreated": "已创建记忆 ({count}):",
-    "memoriesSource": "来源记忆 ({count}):"
+    "memoriesSource": "来源记忆 ({count}):",
+    "tokensThoughts": "推理"
   },
   "observationHistory": {
     "unchanged": "未更改",

@@ -154,6 +154,7 @@ export interface LLMRequestEntry {
   duration_ms: number | null;
   input_tokens: number | null;
   output_tokens: number | null;
+  thoughts_tokens: number | null;
   cached_tokens: number | null;
   total_tokens: number | null;
   input: unknown | null;
@@ -174,6 +175,9 @@ export interface LLMRequestsResponse {
 export interface LLMRequestTokenSums {
   input: number;
   output: number;
+  // Absent on a server predating reasoning usage; the generated schema is
+  // nullable for the same reason.
+  thoughts: number | null;
   cached: number;
   total: number;
 }
@@ -2196,13 +2200,17 @@ export class ControlPlaneClient {
   }
 
   /**
-   * Extract facts from sample text without storing anything — a real LLM call.
+   * Extract facts from sample text (and optional attachments) without storing anything — a real LLM call.
    *
    * The paid half of the prompt tester: `previewPrompt` shows what would be sent,
    * this shows what comes back. Runs under the same strategy-resolved config a real
    * retain would, so what it extracts is what retain would extract.
    */
-  async dryRunExtract(bankId: string, content: string, strategy?: string | null) {
+  async dryRunExtract(
+    bankId: string,
+    content: string | RetainContentBlock[],
+    strategy?: string | null
+  ) {
     return this.fetchApi<{
       facts: {
         text: string;
@@ -2212,6 +2220,8 @@ export class ControlPlaneClient {
         occurred_end?: string | null;
         /** Index into `chunks` of the chunk this fact came from. */
         chunk_index?: number | null;
+        /** The input blocks (by position in `content`) the model read this fact off. */
+        attachments?: { block_index: number; type: string; media_type: string }[];
       }[];
       /** The chunks the input was cut into before extraction. */
       chunks?: { text: string; fact_count: number }[];

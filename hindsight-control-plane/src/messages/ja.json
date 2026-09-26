@@ -383,12 +383,18 @@
     "promptPreviewCancel": "キャンセル",
     "promptPreviewServerLevel": "サーバーレベルの設定です。",
     "promptPreviewSaved": "{name}を保存しました",
-    "testerSampleLabel": "生データ",
+    "testerSampleLabel": "テストデータ",
     "testerRunSettingsLabel": "その他の設定",
     "testerSamplePlaceholder": "このバンクが記憶しそうな文章を貼り付けてください…",
     "testerSampleDefault": "Sarah は 2024 年 3 月に決済チームを率いるためベルリンへ移りました。会議よりも非同期の更新を好みます。",
     "testerRunAction": "実行",
     "testerRunNote": "実際の retain をシミュレートします（LLM が設定されていれば LLM も含みます）。保存はされません。",
+    "testerColumnPrompt": "プロンプト",
+    "testerColumnResult": "結果",
+    "testerResultEmpty": "実行すると retain が抽出する内容を確認できます。",
+    "testerRunning": "抽出中…",
+    "testerColumnCollapse": "{name} を折りたたむ",
+    "testerColumnExpand": "{name} を展開",
     "testerNoFacts": "このテキストからは事実が抽出されませんでした。",
     "testerOccurredStart": "発生開始",
     "testerOccurredEnd": "発生終了",
@@ -628,6 +634,7 @@
         "retain_extract_causal_links": "因果関係",
         "retain_extraction_mode": "抽出ルール",
         "retain_mission": "ミッション",
+        "retain_optional_fact_dimensions": "任意の事実フィールド",
         "retain_structured_chunk_size": "構造化チャンクサイズ"
       },
       "section": {
@@ -647,7 +654,8 @@
         "retain_custom_instructions": "未設定のため、カスタムモードでも上の組み込みルールが使われます。置き換えるには指示を書いてください。",
         "retain_extract_causal_links": "因果関係のある事実を結び付けるようモデルに求め、レスポンススキーマを拡張します。",
         "retain_extraction_mode": "chunks モード: 各チャンクはそのまま保存され、プロンプトは送信されません。別のモードを選ぶと表示されます。",
-        "retain_mission": "ここに前置きされ、一般的な抽出ルールより優先されます。"
+        "retain_mission": "ここに前置きされ、一般的な抽出ルールより優先されます。",
+        "retain_optional_fact_dimensions": "「いつ」「どこで」「誰が」「なぜ」を「N/A」と書かずに空のままにできるようにします。"
       }
     }
   },
@@ -1424,6 +1432,7 @@
     "cumulative": "累積",
     "tokensInput": "入力",
     "tokensOutput": "出力",
+    "tokensThoughts": "推論",
     "tokensCached": "キャッシュ",
     "tokensTotal": "合計",
     "tableHeaderTokens": "トークン",

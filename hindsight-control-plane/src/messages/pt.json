@@ -383,12 +383,18 @@
     "promptPreviewCancel": "Cancelar",
     "promptPreviewServerLevel": "Configuração no nível do servidor.",
     "promptPreviewSaved": "{name} salvo",
-    "testerSampleLabel": "Dados brutos",
+    "testerSampleLabel": "Dados de teste",
     "testerRunSettingsLabel": "Outras configurações",
     "testerSamplePlaceholder": "Cole algo que este banco guardaria…",
     "testerSampleDefault": "Sarah mudou-se para Berlim em março de 2024 para liderar a equipe de pagamentos. Ela prefere atualizações assíncronas a reuniões.",
     "testerRunAction": "Executar",
     "testerRunNote": "Simula um retain real, incluindo o LLM se houver um configurado. Nada é salvo.",
+    "testerColumnPrompt": "Prompt",
+    "testerColumnResult": "Resultado",
+    "testerResultEmpty": "Execute para ver o que o retain extrairia.",
+    "testerRunning": "Extraindo…",
+    "testerColumnCollapse": "Recolher {name}",
+    "testerColumnExpand": "Expandir {name}",
     "testerNoFacts": "Nenhum fato extraído deste texto.",
     "testerOccurredStart": "Ocorreu a partir de",
     "testerOccurredEnd": "Ocorreu até",
@@ -628,6 +634,7 @@
         "retain_extract_causal_links": "Relações causais",
         "retain_extraction_mode": "Regras de extração",
         "retain_mission": "Missão",
+        "retain_optional_fact_dimensions": "Campos opcionais do fato",
         "retain_structured_chunk_size": "Tamanho do trecho estruturado"
       },
       "section": {
@@ -647,7 +654,8 @@
         "retain_custom_instructions": "Não definido, então o modo custom recorre às regras internas acima. Escreva instruções para substituí-las.",
         "retain_extract_causal_links": "Pediria ao modelo para ligar fatos que causaram uns aos outros, e ampliaria o esquema de resposta.",
         "retain_extraction_mode": "Modo chunks: cada trecho é armazenado literalmente, então nenhum prompt é enviado. Escolha outro modo para ver um.",
-        "retain_mission": "Seria colocado aqui, com prioridade sobre as regras gerais de extração."
+        "retain_mission": "Seria colocado aqui, com prioridade sobre as regras gerais de extração.",
+        "retain_optional_fact_dimensions": "Permitiria ao modelo deixar \"quando\", \"onde\", \"quem\" e \"por quê\" vazios em vez de escrever \"N/A\"."
       }
     }
   },
@@ -1424,6 +1432,7 @@
     "cumulative": "Cumulativo",
     "tokensInput": "Entrada",
     "tokensOutput": "Saída",
+    "tokensThoughts": "Raciocínio",
     "tokensCached": "Em cache",
     "tokensTotal": "Total",
     "tableHeaderTokens": "Tokens",

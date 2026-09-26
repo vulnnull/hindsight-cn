@@ -76,6 +76,12 @@ class StubbedReply:
 
     finish_reason: str
 
+    visible_tokens: int | None = None
+    """Opt-in provider-reported visible completion tokens for usage stories."""
+
+    reasoning_tokens: int = 0
+    """Opt-in OpenAI reasoning tokens, included in completion_tokens on the wire."""
+
 
 @dataclass(frozen=True)
 class ChatRule:
@@ -114,7 +120,9 @@ class RuleBuilder:
         self._contains = contains
         self._tool = tool
 
-    def returns(self, payload: BaseModel) -> LLMStub:
+    def returns(
+        self, payload: BaseModel, *, visible_tokens: int | None = None, reasoning_tokens: int = 0
+    ) -> LLMStub:
         """Answer with ``payload`` serialized as the assistant message content.
 
         This is the structured-output path: the server asked for JSON matching a
@@ -123,7 +131,11 @@ class RuleBuilder:
         several layers away as "the LLM returned unusable facts".
         """
         body = payload.model_dump_json()
-        return self._register(lambda _request: _assistant_message(body))
+        return self._register(
+            lambda _request: _assistant_message(
+                body, visible_tokens=visible_tokens, reasoning_tokens=reasoning_tokens
+            )
+        )
 
     def returns_text(self, text: str) -> LLMStub:
         return self._register(lambda _request: _assistant_message(text))
@@ -194,8 +206,15 @@ def _tool_call(tool_name: str, arguments: dict[str, Any]) -> StubbedReply:
     )
 
 
-def _assistant_message(content: str) -> StubbedReply:
-    return StubbedReply(message={"role": "assistant", "content": content}, finish_reason="stop")
+def _assistant_message(
+    content: str, *, visible_tokens: int | None = None, reasoning_tokens: int = 0
+) -> StubbedReply:
+    return StubbedReply(
+        message={"role": "assistant", "content": content},
+        finish_reason="stop",
+        visible_tokens=visible_tokens,
+        reasoning_tokens=reasoning_tokens,
+    )
 
 
 @dataclass(frozen=True)

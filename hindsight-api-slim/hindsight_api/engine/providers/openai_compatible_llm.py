@@ -53,7 +53,11 @@ from hindsight_api.engine.llm_interface import (
     ProviderRateLimitResetError,
 )
 from hindsight_api.engine.llm_trace import LLMResponseUsage, stash_response_usage
-from hindsight_api.engine.llm_transport import build_aiohttp_timeout, build_sdk_timeout, describe_transport_error
+from hindsight_api.engine.llm_transport import (
+    build_aiohttp_timeout,
+    build_sdk_timeout,
+    describe_llm_error,
+)
 from hindsight_api.engine.llm_wrapper import parse_llm_json
 from hindsight_api.engine.providers.llm_debug import dump_request_on_4xx
 from hindsight_api.engine.providers.openai_compatible_headers import with_openai_compatible_user_agent
@@ -390,21 +394,17 @@ def _content_or_error(response: Any, *, provider: str, model: str, scope: str) -
 
 
 def _usage_from_openai_response(response: Any) -> LLMResponseUsage:
-    """Extract prompt/completion/cached token counts from an OpenAI-shaped usage block."""
-    usage = getattr(response, "usage", None)
-    input_tokens = (usage.prompt_tokens or 0) if usage else 0
-    output_tokens = (usage.completion_tokens or 0) if usage else 0
-    cached_tokens = 0
-    if usage and getattr(usage, "prompt_tokens_details", None):
-        cached_tokens = getattr(usage.prompt_tokens_details, "cached_tokens", 0) or 0
+    """Extract input / visible-output / cached / reasoning counts from an OpenAI-shaped usage block."""
+    usage = visible_token_usage(response)
     return LLMResponseUsage(
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        cached_tokens=cached_tokens,
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        cached_tokens=usage.cached_tokens,
+        thoughts_tokens=usage.thoughts_tokens,
     )
 
 
-def _visible_token_usage(response: Any) -> TokenUsage:
+def visible_token_usage(response: Any) -> TokenUsage:
     """Normalize an OpenAI-shaped usage block into visible-only output plus reasoning.
 
     The ``TokenUsage`` contract — and the Gemini provider — treat
@@ -1267,7 +1267,12 @@ class OpenAICompatibleLLM(LLMInterface):
                 if response_format is not None:
                     async with attempt_context() if attempt_context is not None else nullcontext():
                         set_stage(f"llm.{self.provider}.{scope}.attempt={attempt + 1}/{max_retries + 1}")
-                        response = await self._client.chat.completions.create(**call_params)
+                        # Wall-clock cap: the SDK's timeout is per phase and its read timeout restarts
+                        # on every byte, so an upstream trickling keep-alive whitespace never trips it
+                        # and the call pins its worker slot forever (#4763).
+                        response = await asyncio.wait_for(
+                            self._client.chat.completions.create(**call_params), timeout=self.timeout
+                        )
                     # Stash usage before parse/validate, which may raise locally
                     # even though the provider charged for these tokens (#2387).
                     stash_response_usage(_usage_from_openai_response(response))
@@ -1347,7 +1352,9 @@ class OpenAICompatibleLLM(LLMInterface):
                 else:
                     async with attempt_context() if attempt_context is not None else nullcontext():
                         set_stage(f"llm.{self.provider}.{scope}.attempt={attempt + 1}/{max_retries + 1}")
-                        response = await self._client.chat.completions.create(**call_params)
+                        response = await asyncio.wait_for(
+                            self._client.chat.completions.create(**call_params), timeout=self.timeout
+                        )
                     stash_response_usage(_usage_from_openai_response(response))
                     result, first_choice = _content_or_error(
                         response,
@@ -1368,8 +1375,8 @@ class OpenAICompatibleLLM(LLMInterface):
                 usage = response.usage
                 # ``output_tokens``/``total_tokens`` are visible-only past this
                 # point, with reasoning surfaced separately in
-                # ``thoughts_tokens`` — see ``_visible_token_usage``.
-                token_counts = _visible_token_usage(response)
+                # ``thoughts_tokens`` — see ``visible_token_usage``.
+                token_counts = visible_token_usage(response)
                 input_tokens = token_counts.input_tokens
                 output_tokens = token_counts.output_tokens
                 total_tokens = token_counts.total_tokens
@@ -1409,6 +1416,7 @@ class OpenAICompatibleLLM(LLMInterface):
                     finish_reason=finish_reason,
                     error=None,
                     cached_tokens=cached_tokens,
+                    thoughts_tokens=thoughts_tokens,
                 )
 
                 # Log slow calls
@@ -1433,21 +1441,18 @@ class OpenAICompatibleLLM(LLMInterface):
                     "LLM output exceeded token limits. Input may need to be split into smaller chunks."
                 ) from e
 
-            except APIConnectionError as e:
+            except (APIConnectionError, TimeoutError) as e:
                 last_exception = e
                 status_code = getattr(e, "status_code", None) or getattr(
                     getattr(e, "response", None), "status_code", None
                 )
-                cause = describe_transport_error(e)
-                logger.warning(
-                    f"APIConnectionError (HTTP {status_code}), attempt {attempt + 1}: {str(e)[:200]} [{cause}]"
-                )
+                logger.warning(f"Connection error (HTTP {status_code}), attempt {attempt + 1}: {describe_llm_error(e)}")
                 if attempt < max_retries:
                     backoff = min(initial_backoff * (2**attempt), max_backoff)
                     await asyncio.sleep(backoff)
                     continue
                 else:
-                    logger.error(f"Connection error after {max_retries + 1} attempts: {str(e)} [{cause}]")
+                    logger.error(f"Connection error after {max_retries + 1} attempts: {describe_llm_error(e)}")
                     raise
 
             except APIStatusError as e:
@@ -1676,7 +1681,10 @@ class OpenAICompatibleLLM(LLMInterface):
             try:
                 async with attempt_context() if attempt_context is not None else nullcontext():
                     set_stage(f"llm.{self.provider}.tools.attempt={attempt + 1}/{max_retries + 1}")
-                    response = await self._client.chat.completions.create(**call_params)
+                    response = await asyncio.wait_for(
+                        self._client.chat.completions.create(**call_params), timeout=self.timeout
+                    )
+                    stash_response_usage(_usage_from_openai_response(response))
 
                 message = response.choices[0].message
                 finish_reason = response.choices[0].finish_reason
@@ -1695,9 +1703,9 @@ class OpenAICompatibleLLM(LLMInterface):
 
                 # Record metrics
                 duration = time.time() - start_time
-                # See ``_visible_token_usage``: ``output_tokens`` is visible-only,
+                # See ``visible_token_usage``: ``output_tokens`` is visible-only,
                 # with reasoning surfaced separately in ``thoughts_tokens``.
-                token_counts = _visible_token_usage(response)
+                token_counts = visible_token_usage(response)
                 input_tokens = token_counts.input_tokens
                 output_tokens = token_counts.output_tokens
                 cached_tokens = token_counts.cached_tokens
@@ -1740,6 +1748,8 @@ class OpenAICompatibleLLM(LLMInterface):
                     finish_reason=finish_reason,
                     error=None,
                     tool_calls=tool_calls_dict,
+                    cached_tokens=cached_tokens,
+                    thoughts_tokens=thoughts_tokens,
                 )
 
                 return LLMToolCallResult(
@@ -1752,22 +1762,21 @@ class OpenAICompatibleLLM(LLMInterface):
                     thoughts_tokens=thoughts_tokens,
                 )
 
-            except APIConnectionError as e:
+            except (APIConnectionError, TimeoutError) as e:
                 last_exception = e
                 status_code = getattr(e, "status_code", None) or getattr(
                     getattr(e, "response", None), "status_code", None
                 )
-                cause = describe_transport_error(e)
                 if attempt < max_retries:
                     logger.warning(
-                        f"APIConnectionError in tool call ({self.provider}/{self.model}, scope={scope}, "
-                        f"attempt {attempt + 1}/{max_retries + 1}, HTTP {status_code}): {str(e)[:200]} [{cause}]"
+                        f"Connection error in tool call ({self.provider}/{self.model}, scope={scope}, "
+                        f"attempt {attempt + 1}/{max_retries + 1}, HTTP {status_code}): {describe_llm_error(e)}"
                     )
                     await asyncio.sleep(min(initial_backoff * (2**attempt), max_backoff))
                     continue
                 logger.error(
                     f"Connection error in tool call after {max_retries + 1} attempts "
-                    f"({self.provider}/{self.model}, scope={scope}): {str(e)} [{cause}]"
+                    f"({self.provider}/{self.model}, scope={scope}): {describe_llm_error(e)}"
                 )
                 raise
 
@@ -1890,9 +1899,11 @@ class OpenAICompatibleLLM(LLMInterface):
             try:
                 async with attempt_context() if attempt_context is not None else nullcontext():
                     set_stage(f"llm.ollama_native.{scope}.attempt={attempt + 1}/{max_retries + 1}")
-                    async with session.post(native_url, json=payload, headers=headers) as response:
-                        await raise_for_status(response)
-                        body_text = await response.text()
+                    # Wall-clock cap: sock_read resets on every byte, like the SDK path (#4763).
+                    async with asyncio.timeout(self.timeout):
+                        async with session.post(native_url, json=payload, headers=headers) as response:
+                            await raise_for_status(response)
+                            body_text = await response.text()
 
                 result = json.loads(body_text)
                 # Stash usage before the guards below, which can raise on a
