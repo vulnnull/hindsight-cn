@@ -580,6 +580,7 @@ if TYPE_CHECKING:
     from hindsight_api.config_resolver import ValidatedBankConfigUpdate
     from hindsight_api.extensions import (
         BankWriteOperation,
+        MemoryCurationAction,
         OperationValidatorExtension,
         TenantExtension,
         ValidationResult,
@@ -681,7 +682,14 @@ from .retain.fold import FoldMemberRef
 from .retain.types import RetainBatchResult, RetainContentDict, merge_processed_content_tokens
 from .search.reranking import CrossEncoderReranker, apply_combined_scoring
 from .search.tag_resolution import MAX_VOCABULARY, TagResolutionError, needs_resolution, resolve_tag_groups
-from .search.tags import TagGroup, TagsMatch, build_tag_groups_where_clause, build_tags_where_clause
+from .search.tags import (
+    TagGroup,
+    TagsMatch,
+    build_tag_groups_where_clause,
+    build_tags_where_clause,
+    strict_tag_group,
+    strict_tags_match,
+)
 from .search.types import ScoredResult
 from .source_facts import select_source_facts_within_budget
 from .task_backend import TaskBackend
@@ -1857,13 +1865,18 @@ def _mental_model_stale_scope(
     trigger = trigger or {}
     tag_filtering = _resolve_refresh_tag_filtering(mm_tags, trigger)
 
+    # A tag-scoped model is stale only when a write lands *in* its tags. The
+    # refresh under "any"/"all" may still read untagged memories, but an untagged
+    # write is not about this model — counting it flagged every such model stale
+    # after nearly every write to a bank that mixes the two (#4857). A model with
+    # no tag filter keeps counting every write: the whole bank is its scope.
     return MemoryScopeWatermark(
         key=key,
         since=since,
         fact_types=list(trigger.get("fact_types") or []),
         tags=tag_filtering.tags,
-        tags_match=tag_filtering.tags_match,
-        tag_groups=tag_filtering.tag_groups,
+        tags_match=strict_tags_match(tag_filtering.tags_match) if tag_filtering.tags else tag_filtering.tags_match,
+        tag_groups=[strict_tag_group(g) for g in tag_filtering.tag_groups] if tag_filtering.tag_groups else None,
     )
 
 
@@ -3817,7 +3830,7 @@ class MemoryEngine(MemoryEngineInterface):
                     await conn.execute(
                         f"""
                         UPDATE {fq_table("async_operations")}
-                        SET status = 'completed', updated_at = NOW(), completed_at = NOW()
+                        SET status = 'completed', error_message = NULL, updated_at = NOW(), completed_at = NOW()
                         WHERE operation_id = $1
                         """,
                         uuid.UUID(operation_id),
@@ -4858,7 +4871,7 @@ class MemoryEngine(MemoryEngineInterface):
                     row = await conn.fetchrow(
                         f"""
                         UPDATE {fq_table("async_operations")}
-                        SET status = 'completed', updated_at = NOW(), completed_at = NOW()
+                        SET status = 'completed', error_message = NULL, updated_at = NOW(), completed_at = NOW()
                         WHERE operation_id = $1 AND status NOT IN ('completed', 'failed', 'cancelled')
                         RETURNING operation_id
                         """,
@@ -5030,7 +5043,7 @@ class MemoryEngine(MemoryEngineInterface):
                     row = await conn.fetchrow(
                         f"""
                         UPDATE {fq_table("async_operations")}
-                        SET status = 'completed', updated_at = NOW(), completed_at = NOW()
+                        SET status = 'completed', error_message = NULL, updated_at = NOW(), completed_at = NOW()
                         WHERE operation_id = $1 AND status NOT IN ('completed', 'failed', 'cancelled')
                         RETURNING operation_id
                         """,
@@ -5081,7 +5094,7 @@ class MemoryEngine(MemoryEngineInterface):
                     row = await conn.fetchrow(
                         f"""
                         UPDATE {fq_table("async_operations")}
-                        SET status = 'completed', updated_at = NOW(), completed_at = NOW()
+                        SET status = 'completed', error_message = NULL, updated_at = NOW(), completed_at = NOW()
                         WHERE operation_id = $1 AND status NOT IN ('completed', 'failed', 'cancelled')
                         RETURNING operation_id
                         """,
@@ -12185,6 +12198,10 @@ class MemoryEngine(MemoryEngineInterface):
             dt = datetime.fromisoformat(value)
             return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
+        doing_edit = any(
+            v is not None for v in (text, context, occurred_start, occurred_end, new_fact_type, new_entities)
+        )
+
         await self._authenticate_tenant(request_context)
         if self._operation_validator:
             from hindsight_api.extensions import BankWriteContext, BankWriteOperation
@@ -12193,6 +12210,18 @@ class MemoryEngine(MemoryEngineInterface):
                 bank_id=bank_id, operation=BankWriteOperation.UPDATE_MEMORY_UNIT, request_context=request_context
             )
             await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
+
+            from hindsight_api.extensions import MemoryUpdateContext
+
+            update_ctx = MemoryUpdateContext(
+                bank_id=bank_id,
+                memory_id=memory_id,
+                request_context=request_context,
+                text=text,
+                state=state,
+                edits_fields=doing_edit,
+            )
+            await self._validate_operation(self._operation_validator.validate_memory_update(update_ctx))
 
         backend = await self._get_backend()
         from .graph_maintenance import enqueue_entity_prune_candidates, enqueue_relink_victims
@@ -12254,9 +12283,6 @@ class MemoryEngine(MemoryEngineInterface):
                 )
 
             # --- Edit fields (live rows only): text / context / dates / fact_type / entities ---
-            doing_edit = any(v is not None for v in (text, context, occurred_start, occurred_end, new_fact_type)) or (
-                new_entities is not None
-            )
             if doing_edit:
                 if not live:
                     raise ValueError("Cannot edit an invalidated memory; revert it to 'valid' first.")
@@ -12403,6 +12429,10 @@ class MemoryEngine(MemoryEngineInterface):
         # -- Phase 2: short write transaction -- all visible mutations atomic --
         phase2_committed = False
         edit_applied = False
+        # What the curation actually did, for the post-operation hook: the committed
+        # action and the text it re-embedded (None when nothing was re-embedded).
+        curation_action: MemoryCurationAction | None = None
+        reembedded_text: str | None = None
         try:
             async with acquire_with_retry(backend) as conn:
                 async with conn.transaction():
@@ -12511,6 +12541,8 @@ class MemoryEngine(MemoryEngineInterface):
                         need_consolidation = True
                         need_graph = True
                         edit_applied = True
+                        curation_action = "edit"
+                        reembedded_text = edit_plan.new_text
 
                     # --- Invalidate: move live → archive ---
                     if do_invalidate and live2:
@@ -12531,11 +12563,13 @@ class MemoryEngine(MemoryEngineInterface):
                         await self._delete_stale_observations_for_memories(conn, bank_id, [memory_id])
                         need_consolidation = True
                         need_graph = True
+                        curation_action = "invalidate"
                     elif do_reason_update and archived2 and reason is not None:
                         # Already archived — just update the recorded reason.
                         await store.set_invalidation_reason(
                             conn=conn, fq_table=fq_table, bank_id=bank_id, unit_id=str(memory_uuid), reason=reason
                         )
+                        curation_action = "reason"
 
                     # --- Revert: move archive → live ---
                     elif do_revert and archived2 and revert_plan is not None:
@@ -12567,6 +12601,8 @@ class MemoryEngine(MemoryEngineInterface):
                                     unit_id=str(memory_uuid),
                                     embedding=revert_embedding,
                                 )
+                            curation_action = "revert"
+                            reembedded_text = restored.text if revert_embedding is not None else None
                         need_consolidation = True
                         need_graph = True
 
@@ -12590,11 +12626,13 @@ class MemoryEngine(MemoryEngineInterface):
                 except Exception as e:
                     logger.warning(f"Failed to submit orphan-entity cleanup after a failed edit in bank {bank_id}: {e}")
 
+        consolidation_submitted = False
         if need_consolidation:
             config = await self._config_resolver.resolve_full_config(bank_id, request_context)
             if config.enable_auto_consolidation:
                 try:
                     await self.submit_async_consolidation(bank_id=bank_id, request_context=request_context)
+                    consolidation_submitted = True
                 except Exception as e:
                     logger.warning(f"Failed to submit consolidation after curating memory in bank {bank_id}: {e}")
         if need_graph:
@@ -12613,6 +12651,23 @@ class MemoryEngine(MemoryEngineInterface):
             # pending, which is the common case: the survivors are about to be
             # re-consolidated and that path checks the same thing.
             await self._submit_refreshes_for_retracted_grounding(bank_id, request_context=request_context)
+
+        if self._operation_validator and phase2_committed and curation_action is not None:
+            from hindsight_api.extensions import MemoryUpdateResult
+
+            result_ctx = MemoryUpdateResult(
+                bank_id=bank_id,
+                memory_id=memory_id,
+                request_context=request_context,
+                action=curation_action,
+                reembedded_text=reembedded_text,
+                reembedded_tokens=count_tokens(reembedded_text) if reembedded_text else 0,
+                consolidation_submitted=consolidation_submitted,
+            )
+            try:
+                await self._operation_validator.on_memory_update_complete(result_ctx)
+            except Exception as hook_err:
+                logger.warning(f"Post-memory-update hook error (non-fatal): {hook_err}")
 
         return await self.get_memory_unit(bank_id=bank_id, memory_id=memory_id, request_context=request_context)
 
@@ -21366,6 +21421,9 @@ class MemoryEngine(MemoryEngineInterface):
                     {
                         "id": str(row["operation_id"]),
                         "task_type": row["operation_type"],
+                        # Same names the single-operation read uses (#4858).
+                        "operation_id": str(row["operation_id"]),
+                        "operation_type": row["operation_type"],
                         "items_count": result_metadata.get("items_count", 0),
                         "document_id": result_metadata.get("document_id"),
                         "filename": result_metadata.get("original_filename"),
@@ -21505,6 +21563,10 @@ class MemoryEngine(MemoryEngineInterface):
                         "operation_id": operation_id,
                         "status": api_status,
                         "operation_type": row["operation_type"],
+                        # Same names the list uses, so one client model reads both (#4858).
+                        "id": operation_id,
+                        "task_type": row["operation_type"],
+                        "mental_model_id": result_metadata.get("mental_model_id"),
                         "created_at": row["created_at"].isoformat() if row["created_at"] else None,
                         "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
                         "completed_at": row["completed_at"].isoformat() if row["completed_at"] else None,
@@ -21523,6 +21585,10 @@ class MemoryEngine(MemoryEngineInterface):
                         "operation_id": operation_id,
                         "status": api_status,
                         "operation_type": row["operation_type"],
+                        # Same names the list uses, so one client model reads both (#4858).
+                        "id": operation_id,
+                        "task_type": row["operation_type"],
+                        "mental_model_id": result_metadata.get("mental_model_id"),
                         "created_at": row["created_at"].isoformat() if row["created_at"] else None,
                         "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
                         "completed_at": row["completed_at"].isoformat() if row["completed_at"] else None,
@@ -21540,6 +21606,8 @@ class MemoryEngine(MemoryEngineInterface):
                     "operation_id": operation_id,
                     "status": "not_found",
                     "operation_type": None,
+                    "id": operation_id,
+                    "task_type": None,
                     "created_at": None,
                     "updated_at": None,
                     "completed_at": None,

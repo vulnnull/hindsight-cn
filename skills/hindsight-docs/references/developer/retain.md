@@ -189,7 +189,7 @@ Tags enable visibility scoping—useful when one memory bank serves multiple use
 - **Document tags**: Apply tags to all items in a batch
 - **Tag filtering**: Filter during recall/reflect by tags
 
-See [Retain API](./api/retain) for code examples and [Recall API](./api/recall) for filtering options.
+See [Retain API](./api/retain.md) for code examples and [Recall API](./api/recall.md) for filtering options.
 
 ---
 
@@ -352,7 +352,7 @@ After `retain()` completes, Hindsight automatically triggers **observation conso
 
 This happens asynchronously — your `retain()` call returns immediately while consolidation runs in the background.
 
-See [Observations](./observations) for details on how consolidation works.
+See [Observations](./observations.md) for details on how consolidation works.
 
 ---
 
@@ -386,7 +386,7 @@ See [Memory Defense](./memory-defense/index.md) for the full guide.
 
 ## Next Steps
 
-- [**Observations**](./observations) — How knowledge is consolidated after retain
-- [**Recall**](./retrieval) — How multi-strategy search retrieves relevant memories
-- [**Reflect**](./reflect) — How the agentic loop uses observations
-- [**Retain API**](./api/retain) — Code examples and parameters
+- [**Observations**](./observations.md) — How knowledge is consolidated after retain
+- [**Recall**](./retrieval.md) — How multi-strategy search retrieves relevant memories
+- [**Reflect**](./reflect.md) — How the agentic loop uses observations
+- [**Retain API**](./api/retain.md) — Code examples and parameters

@@ -3,7 +3,7 @@
 
 User-curated summaries that provide high-quality, pre-computed answers for common queries.
 
-See [Mental Models](../mental-models) for the concepts behind this API.
+See [Mental Models](../mental-models.md) for the concepts behind this API.
 
 {/* Import raw source files */}
 
@@ -199,7 +199,7 @@ Mental models can be configured to **automatically refresh** when observations a
 | `refresh_cron` | string \| null | null | UTC 5-field cron expression for scheduled refreshes, such as `"0 3 * * *"` for daily at 03:00 UTC |
 | `min_refresh_interval_seconds` | int \| null | null | Minimum seconds between two *automatic* refreshes of this model. See [Rate-limiting automatic refreshes](#rate-limiting-automatic-refreshes) below. `null` uses the bank/global default. |
 | `tags_match` | string \| null | null | How the model's `tags` filter source memories during refresh: `any`, `all`, `any_strict`, `all_strict`, or `exact`. When `null`, a **tagged** model defaults to `all_strict` (a memory must carry every one of the model's tags). Set `"any"` to match memories carrying *any* of the tags — see [Tags and Visibility](#tags-and-visibility). |
-| `tag_groups` | list \| null | null | Advanced boolean tag expressions that override flat `tags`/`tags_match` entirely. See the [Recall tags reference](./recall#tags). |
+| `tag_groups` | list \| null | null | Advanced boolean tag expressions that override flat `tags`/`tags_match` entirely. See the [Recall tags reference](./recall.md#tags). |
 | `fact_types` | list \| null | null | Restrict which fact types the refresh reads: any of `world`, `experience`, `observation`. `null` means all three. Must not be an empty list. |
 | `exclude_mental_models` | bool | false | Hide *all* other mental models from the refresh, so the model never synthesises from sibling models. |
 | `exclude_mental_model_ids` | list \| null | null | Hide specific mental models by ID from the refresh. The model being refreshed is always excluded from itself. |
@@ -281,13 +281,15 @@ Key behaviours:
 - **Fails loudly.** If a `response_schema` is configured but the structured extraction cannot be produced, the refresh **fails** rather than silently persisting content with no structured view. The model's previous content and `structured_output` are preserved, and the refresh can be retried.
 - **Invalid schemas are rejected** at request time: the schema must be an object with at least one property, and each property's `type` must be one of `string`, `number`, `integer`, `boolean`, `array`, or `object`.
 
-See [Reflect → `response_schema`](./reflect#response_schema) for how the same schema works on the `reflect` endpoint. The `structured_output` value appears on the model's `reflect_response` (see [Response Fields](#response-fields)).
+See [Reflect → `response_schema`](./reflect.md#response_schema) for how the same schema works on the `reflect` endpoint. The `structured_output` value appears on the model's `reflect_response` (see [Response Fields](#response-fields)).
 
 ### Staleness Gating
 
 Both automatic triggers run the same check before spending an LLM call: **is there a memory in this model's resolved scope newer than its last refresh?** The model's `tags`/`tags_match`, `tag_groups`, and `fact_types` all apply to that check, so activity elsewhere in the bank does not trigger a rebuild, and a cron tick over an unchanged scope is skipped entirely. Memories still waiting to be consolidated count — they are already stored, so a model whose scope reaches them is considered stale.
 
-Every `is_stale` you can read is computed by that same rule: the flag on a single mental-model read, the one on the list, the one surfaced to the reflect agent, and the per-page flag on the [knowledge-base tree](./knowledge-pages). A model flagged stale is one a refresh would actually rewrite.
+**Untagged writes never make a tagged model stale.** Under `tags_match: "any"` or `"all"` a refresh also *reads* untagged memories, but staleness only counts writes that carry the model's tags. Otherwise, on a bank that mixes tagged and untagged writes, every such model would read stale after nearly every write (#4857). The same goes for `tag_groups` leaves using those modes; a group that selects untagged memories explicitly (an `exact` leaf with no tags, or a `not`) still counts them. A model with no tags has the whole bank as its scope, so any write marks it stale.
+
+Every `is_stale` you can read is computed by that same rule: the flag on a single mental-model read, the one on the list, the one surfaced to the reflect agent, and the per-page flag on the [knowledge-base tree](./knowledge-pages.md). A model flagged stale is one a refresh would actually rewrite.
 
 Listing does not cost one query per model — the whole page is answered together — so you do not have to approximate. If you are already holding `last_memory_write_at` from the bank stats endpoint, a model whose `last_memory_seen_at` is at or after it is provably up to date without asking at all: nothing in the bank changed, so nothing in that model's scope did.
 
@@ -822,7 +824,7 @@ behind to inspect.
 
 #### What a trace contains
 
-The trace is deliberately shaped like a [reflect](./reflect) trace: the calls the
+The trace is deliberately shaped like a [reflect](./reflect.md) trace: the calls the
 agent made, plus the decision specific to a refresh. It is stored on the mental
 model row and re-read on every fetch, so it holds nothing that can be derived from
 somewhere else.
@@ -843,7 +845,7 @@ somewhere else.
 - **Tool outputs.** Only `result_count` is kept. Recall payloads are large and the
   trace is re-read on every model fetch, so storing them would grow the row without
   bound. A count is enough to see *that* a tool came back empty; when you need the
-  raw prompts and responses, use [LLM request tracing](../monitoring), which stores
+  raw prompts and responses, use [LLM request tracing](../monitoring.md), which stores
   them separately and expires them on its own retention schedule.
 - **The evidence.** The facts a refresh grounded the document on already live in
   `reflect_response.based_on`, in the same shape reflect uses. The trace does not
@@ -1115,13 +1117,13 @@ result3, _, _ := client.MentalModelsAPI.CreateMentalModel(ctx, mmBankID).
 fmt.Printf("Operation ID: %s\n", result3.GetOperationId())
 ```
 
-The MCP `create_mental_model` tool exposes the same option as a top-level `tags_match` argument. Available modes are `any`, `all`, `any_strict`, `all_strict`, and `exact` — see the [Recall tags reference](./recall#tags) for their exact semantics.
+The MCP `create_mental_model` tool exposes the same option as a top-level `tags_match` argument. Available modes are `any`, `all`, `any_strict`, `all_strict`, and `exact` — see the [Recall tags reference](./recall.md#tags) for their exact semantics.
 
 ### How tags affect mental model lookup during reflect
 
 When you call `reflect` with tags, those same tags are used to filter which mental models the agent can see. A mental model is visible only if its tags overlap with the tags on the reflect request.
 
-For more details on tag matching modes (`any`, `any_strict`, `all`, `all_strict`) and worked examples, see the [Recall tags reference](./recall#tags).
+For more details on tag matching modes (`any`, `any_strict`, `all`, `all_strict`) and worked examples, see the [Recall tags reference](./recall.md#tags).
 
 ### Listing mental model tags
 
@@ -1224,6 +1226,6 @@ History tracking is enabled by default. Set `HINDSIGHT_API_ENABLE_MENTAL_MODEL_H
 
 ## Next Steps
 
-- [**Reflect**](./reflect) — How the agentic loop uses mental models
+- [**Reflect**](./reflect.md) — How the agentic loop uses mental models
 - [**Observations**](../observations.md) — How knowledge is consolidated
-- [**Operations**](./operations) — Track async mental model creation
+- [**Operations**](./operations.md) — Track async mental model creation

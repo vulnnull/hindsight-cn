@@ -311,7 +311,7 @@ Disposition creates **consistent character** across conversations while observat
 
 ## Next Steps
 
-- [**Observations**](./observations) — How knowledge is consolidated
-- [**Retain**](./retain) — How rich facts are stored
-- [**Recall**](./retrieval) — How multi-strategy search works
-- [**Reflect API**](./api/reflect) — Code examples and parameters
+- [**Observations**](./observations.md) — How knowledge is consolidated
+- [**Retain**](./retain.md) — How rich facts are stored
+- [**Recall**](./retrieval.md) — How multi-strategy search works
+- [**Reflect API**](./api/reflect.md) — Code examples and parameters

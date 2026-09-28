@@ -27,7 +27,7 @@ empty bank.
 
 > **💡 Prerequisites**
 >
-Make sure you've completed the [Quick Start](./quickstart) to install the client and start the server.
+Make sure you've completed the [Quick Start](./quickstart.md) to install the client and start the server.
 ## Creating a Memory Bank
 
 ### Python
@@ -384,7 +384,7 @@ Only applies when `HINDSIGHT_API_LLM_PROVIDER` is `gemini` or `vertexai`.
 
 ### recall_budget_function {#recall-budget-configuration}
 
-Selects how the [`recall` request's `budget` parameter](./recall) (`low` / `mid` / `high`) maps to the internal `thinking_budget` integer used by every retrieval method (semantic, BM25, graph, temporal). Two functions are supported:
+Selects how the [`recall` request's `budget` parameter](./recall.md) (`low` / `mid` / `high`) maps to the internal `thinking_budget` integer used by every retrieval method (semantic, BM25, graph, temporal). Two functions are supported:
 
 | Function | Behaviour |
 |----------|-----------|
@@ -703,7 +703,7 @@ You can also update configuration directly from the Control Plane UI — navigat
 
 ## Directives
 
-Directives are hard rules that the agent must follow during [reflect](./reflect) operations. Unlike disposition traits which influence *how* the agent reasons, directives are explicit instructions that are enforced whenever they are in scope (see [Directive Scope and Tags](#directive-scope-and-tags)).
+Directives are hard rules that the agent must follow during [reflect](./reflect.md) operations. Unlike disposition traits which influence *how* the agent reasons, directives are explicit instructions that are enforced whenever they are in scope (see [Directive Scope and Tags](#directive-scope-and-tags)).
 
 > **ℹ️ Info**
 >

@@ -31,7 +31,7 @@ from hindsight_api.engine.llm_interface import (
 from hindsight_api.engine.llm_trace import LLMResponseUsage, stash_response_usage
 from hindsight_api.engine.llm_wrapper import parse_llm_json
 from hindsight_api.engine.providers.llm_debug import dump_request_on_4xx
-from hindsight_api.engine.providers.openai_compatible_llm import visible_token_usage
+from hindsight_api.engine.providers.openai_compatible_llm import _strip_code_fences, visible_token_usage
 from hindsight_api.engine.response_models import LLMToolCall, LLMToolCallResult, TokenUsage
 from hindsight_api.engine.structured_output import provider_json_schema, strict_json_schema
 from hindsight_api.metrics import get_metrics_collector
@@ -366,27 +366,20 @@ class LiteLLMLLM(LLMInterface):
                     raise OutputTooLongError("LiteLLM response was truncated due to token limit")
 
                 if response_format is not None:
-                    # Strip markdown code fences if present
-                    clean_content = content
-                    if "```json" in content:
-                        clean_content = content.split("```json")[1].split("```")[0].strip()
-                    elif "```" in content:
-                        clean_content = content.split("```")[1].split("```")[0].strip()
-
+                    # Fences are stripped line-based by the shared helper, so a
+                    # JSON value that itself contains the text "```json" is no
+                    # longer truncated mid-payload (#4819).
                     try:
-                        json_data = json.loads(clean_content)
+                        json_data = json.loads(_strip_code_fences(content))
                     except json.JSONDecodeError:
-                        try:
-                            json_data = json.loads(content)
-                        except json.JSONDecodeError:
-                            if attempt < max_retries:
-                                # Prefer a clean re-roll first — a fresh generation
-                                # usually beats repairing a malformed one.
-                                raise
-                            # Retry budget spent: structural repair as a last
-                            # resort (#2547/#2544). Raises again if unrecoverable,
-                            # which the outer handler surfaces loudly.
-                            json_data = parse_llm_json(content)
+                        if attempt < max_retries:
+                            # Prefer a clean re-roll first — a fresh generation
+                            # usually beats repairing a malformed one.
+                            raise
+                        # Retry budget spent: structural repair as a last
+                        # resort (#2547/#2544). Raises again if unrecoverable,
+                        # which the outer handler surfaces loudly.
+                        json_data = parse_llm_json(content)
 
                     if skip_validation:
                         result = json_data

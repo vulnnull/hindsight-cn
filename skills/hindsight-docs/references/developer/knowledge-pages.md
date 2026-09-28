@@ -9,16 +9,16 @@ The shape is a wiki. The engine underneath is memory.
 
 ## Mental Models, Simplified
 
-A knowledge page *is* a [mental model](./mental-models). Same synthesis, same background refresh, same provenance.
+A knowledge page *is* a [mental model](./mental-models.md). Same synthesis, same background refresh, same provenance.
 
 What's different is how much you have to know to use one. A mental model exposes its mechanics — what it reads, when it rebuilds, how it edits itself. Nobody should have to think about synthesis scope and refresh triggers to keep a wiki. So a page comes with those decisions already made:
 
-- It's built from the bank's [observations](./observations) — consolidated, deduplicated beliefs — rather than raw conversational detail.
+- It's built from the bank's [observations](./observations.md) — consolidated, deduplicated beliefs — rather than raw conversational detail.
 - It refreshes incrementally whenever consolidation produces new knowledge in its scope, editing the document rather than regenerating it.
 - It never reads other pages, so pages can't cite each other into a feedback loop.
 - It gets a larger content budget, because it's a document rather than an answer.
 
-You supply a name and a question. Everything else is a default you can override if you need to — every mental model setting still applies. See the [Knowledge Pages API](./api/knowledge-pages) for the exact defaults and how to change them.
+You supply a name and a question. Everything else is a default you can override if you need to — every mental model setting still applies. See the [Knowledge Pages API](./api/knowledge-pages.md) for the exact defaults and how to change them.
 
 ---
 
@@ -50,7 +50,7 @@ Pages are searchable at the **document level**: a query returns whole pages, ran
 
 That last part matters. Search is a tool an agent *chooses* to call, visible in the transcript, rather than content pushed into its context on every turn. Retrieval the agent asked for informs what it's doing; retrieval it didn't ask for tends to derail it.
 
-This is a different path from [recall](./retrieval), which searches individual memories. Use page search to pick a document; use recall for a specific fact.
+This is a different path from [recall](./retrieval.md), which searches individual memories. Use page search to pick a document; use recall for a specific fact.
 
 ---
 
@@ -71,6 +71,6 @@ This is also why pages heal themselves rather than rot: they aren't the storage,
 ## Working With Pages
 
 - **Control plane** — the Knowledge Base view renders the tree, page contents, and which pages have fallen behind.
-- **HTTP API** — see [Knowledge Pages API](./api/knowledge-pages) for the full endpoint surface.
+- **HTTP API** — see [Knowledge Pages API](./api/knowledge-pages.md) for the full endpoint surface.
 - **CLI** — `hindsight fs` mirrors a bank to a local folder of markdown files.
 - **Agent tools** — the agent SDK exposes `agent_knowledge_*` tools so an agent can list, read, create, and update its own pages during a session.

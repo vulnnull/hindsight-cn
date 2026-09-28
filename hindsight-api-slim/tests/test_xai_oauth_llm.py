@@ -1587,6 +1587,18 @@ async def test_structured_output_falls_back_to_schema_in_prompt(tmp_path, monkey
     assert "valid JSON matching this schema" in body["messages"][0]["content"]
 
 
+async def test_structured_output_keeps_a_fence_marker_inside_a_json_value(tmp_path, monkeypatch):
+    """A ``` inside a string value must not cut the payload short (#4819)."""
+    fenced = '```json\n{"answer": "wrap it in ```json fences"}\n```'
+    llm = _make_llm(tmp_path, monkeypatch, replies=[_ok_reply(fenced)])
+
+    result = (
+        await llm.call(messages=[{"role": "user", "content": "hi"}], response_format=_Answer, max_retries=0)
+    ).content
+
+    assert result.answer == "wrap it in ```json fences"
+
+
 async def test_call_with_tools_returns_proposed_tool_calls(tmp_path, monkeypatch):
     reply = _FakeResponse(
         200,
