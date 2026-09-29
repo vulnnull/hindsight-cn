@@ -49,6 +49,12 @@ Hindsight Cloud  api.hindsight.vectorize.io/mcp
 4. Muse lists the banks it can see, creates its own `muse` bank plus the "About me"
    mental model and the nightly task, and tells you three things it found about you.
 
+Those are four separate operations, not one, and they can land partway. Listing banks
+and creating the bank are free; `recall` and the mental model are billed, so on an
+account with no credits you end up with an empty `muse` bank and a live nightly task
+pointed at it. Muse reports which step failed. Top up and ask it to retry the blocked
+steps rather than pasting the prompt again.
+
 The prompt connects Muse to the root URL (`/mcp`), which reaches every bank in your
 account. That is the point: Muse writes to its own bank and reads the others when a
 question calls for it. Because the root URL also exposes bank management, the prompt

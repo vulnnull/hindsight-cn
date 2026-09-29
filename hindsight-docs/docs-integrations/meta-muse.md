@@ -35,6 +35,10 @@ Because Muse has no hooks, the connect prompt also asks Muse to create a nightly
 3. Muse shows a **Connect** button for Hindsight. Click it and approve access on Hindsight's sign-in page.
 4. Muse lists the banks it can see, creates its own `muse` bank plus the "About me" mental model and the nightly task, and tells you three things it found about you.
 
+:::note Step 4 is four operations, not one
+Listing banks and creating the `muse` bank are free; `recall` and the mental model are billed. On an account with no credits the first two succeed and the last two fail, leaving an empty `muse` bank and a live nightly task pointed at it. Muse will tell you which step failed. Top up, then ask it to retry the blocked steps rather than pasting the connect prompt again.
+:::
+
 The prompt uses the root URL, `https://api.hindsight.vectorize.io/mcp` (see the [MCP server reference](/developer/mcp-server) for the endpoint, its tools and its auth options), which reaches every bank in your account. That is the point: Muse writes to its own bank and reads the others when a question calls for it. Because the root URL also exposes bank management, the prompt forbids `delete_bank`, `clear_memories` and `invalidate_memory`. To hand Muse exactly one bank instead, connect it to `/mcp/<bank>/`: that endpoint takes the same OAuth sign-in and drops the `bank_id` argument from every tool.
 
 ## Self-Hosted Hindsight

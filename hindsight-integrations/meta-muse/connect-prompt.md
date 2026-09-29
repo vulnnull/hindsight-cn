@@ -39,13 +39,18 @@ Follow these rules in every conversation:
 
 Then do this setup once:
 
-10. In the `muse` bank, create a mental model (`create_mental_model`) named "About me",
-    source query "Who is this person: their work, current projects, the people they
-    mention most, and their stated preferences". Read it with `get_mental_model` at the
-    start of new conversations.
-11. Create a scheduled task that runs every night at 11pm: summarize what I told you
-    and what we did today, and `retain` the summary to the `muse` bank with the tag
-    `source:muse`.
+10. In the `muse` bank, check for a mental model named "About me" with
+    `list_mental_models` first. Only if it does not exist, create it
+    (`create_mental_model`) with source query "Who is this person: their work, current
+    projects, the people they mention most, and their stated preferences". Never create
+    a second one: if a previous attempt failed partway, the model may already be there.
+    Read it with `get_mental_model` at the start of new conversations.
+11. If you do not already have one, create a scheduled task that runs every night at
+    11pm: summarize what I told you and what we did today, and `retain` the summary to
+    the `muse` bank with the tag `source:muse`.
 12. To confirm everything works, tell me which banks you can see, then call `recall`
     with "what do you know about me" and tell me the three most useful things you
-    found.
+    found, naming the bank each one came from. If a step above failed, say which one
+    and why rather than reporting success. Reads are cheap but `recall` and mental
+    models are billed, so a `402` here means the account is out of credits rather than
+    anything being misconfigured.
