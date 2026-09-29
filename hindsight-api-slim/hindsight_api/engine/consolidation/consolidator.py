@@ -19,6 +19,7 @@ import asyncio
 import copy
 import json
 import logging
+import math
 import time
 import uuid
 from collections import defaultdict
@@ -47,7 +48,7 @@ from ..llm_trace import (
     trace_context_of,
 )
 from ..llm_wrapper import sanitize_llm_output
-from ..memories import FactRecord, get_memories
+from ..memories import FactRecord, StoredMemory, get_memories
 from ..memory_engine import Budget, fq_table
 from ..retain import embedding_utils
 from .prompts import (
@@ -1457,12 +1458,41 @@ async def _reconcile_merge_via_store(
     )
 
 
+#: How many rounds' worth of candidates the fair fetch looks at before choosing one round.
+#: Whatever the window misses, the next round sees, so this trades a bigger read for fairness
+#: rather than for correctness.
+#: ponytail: fixed factor, make it configurable if a bank's groups are wider than 5 rounds.
+_FAIR_FETCH_OVERFETCH = 5
+
+
+def _fair_group_slice(memories: list[StoredMemory], limit: int, quota: int) -> list[StoredMemory]:
+    """Oldest-first, but at most ``quota`` facts per consolidation group.
+
+    ``memories`` must already be sorted oldest-first: groups are then visited in the order
+    of their oldest fact, and the round fills from the front. Keying is
+    ``_consolidation_batch_key``, the same key the dispatcher groups by, so a round that
+    holds N keys gives the dispatcher N groups to run in parallel.
+    """
+    taken: list[StoredMemory] = []
+    seen: defaultdict[tuple[str, ...], int] = defaultdict(int)
+    for m in memories:
+        key = _consolidation_batch_key({"tags": list(m.tags or []), "observation_scopes": m.observation_scopes})
+        if seen[key] >= quota:
+            continue
+        seen[key] += 1
+        taken.append(m)
+        if len(taken) >= limit:
+            break
+    return taken
+
+
 async def _fetch_unconsolidated_rows(
     conn,
     bank_id: str,
     fact_types: list[str],
     limit: int,
     observation_scopes: list[list[str]] | None,
+    llm_parallelism: int,
 ) -> list[dict[str, Any]]:
     """Unconsolidated candidate facts, read through the memories store.
 
@@ -1471,16 +1501,31 @@ async def _fetch_unconsolidated_rows(
     consolidation silently produces no observations. Returns the same row-dict shape the
     consolidation loop consumes. Mirrors the job's scope filter: with scopes, OR each
     "tags ⊇ scope" and merge oldest-first; without, one unscoped read.
+
+    With ``llm_parallelism > 1`` the round is picked *fairly* across consolidation groups
+    instead of strictly oldest-first. A strict oldest-first round holds only the group that
+    owns the oldest facts, and the dispatcher parallelises across groups — one group in the
+    round means one LLM call at a time, whatever the parallelism, and a big group's backlog
+    starves every other group until it drains (#4823). So read a window of
+    ``_FAIR_FETCH_OVERFETCH`` rounds and take at most ``ceil(limit / llm_parallelism)`` facts
+    per group, leaving enough distinct groups in the round to fill the parallel slots. Facts
+    are still consumed oldest-first *within* a group, which is the ordering consolidation
+    actually depends on.
     """
     store = get_memories()
     scopes: list[list[str] | None] = list(observation_scopes) if observation_scopes else [None]
+    fair = llm_parallelism > 1
+    read_limit = limit * _FAIR_FETCH_OVERFETCH if fair else limit
     by_id: dict[str, Any] = {}
     for scope in scopes:
         for m in await store.find_unconsolidated(
-            conn=conn, fq_table=fq_table, bank_id=bank_id, fact_types=fact_types, limit=limit, scope_tags=scope
+            conn=conn, fq_table=fq_table, bank_id=bank_id, fact_types=fact_types, limit=read_limit, scope_tags=scope
         ):
             by_id.setdefault(m.unit_id, m)
-    ordered = sorted(by_id.values(), key=lambda m: (m.created_at is None, m.created_at))[:limit]
+    oldest_first = sorted(by_id.values(), key=lambda m: (m.created_at is None, m.created_at))
+    ordered = (
+        _fair_group_slice(oldest_first, limit, math.ceil(limit / llm_parallelism)) if fair else oldest_first[:limit]
+    )
     return [
         {
             "id": uuid.UUID(m.unit_id),
@@ -1759,7 +1804,12 @@ async def _run_consolidation_job(
         async with acquire_with_retry(pool) as conn:
             t0 = time.time()
             memories = await _fetch_unconsolidated_rows(
-                conn, bank_id, ["experience", "world"], fetch_limit, observation_scopes
+                conn,
+                bank_id,
+                ["experience", "world"],
+                fetch_limit,
+                observation_scopes,
+                max(1, config.consolidation_llm_parallelism),
             )
             perf.record_timing("fetch_memories", time.time() - t0)
 

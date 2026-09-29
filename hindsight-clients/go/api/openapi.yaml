@@ -7,7 +7,7 @@ info:
     name: Apache 2.0
     url: https://www.apache.org/licenses/LICENSE-2.0.html
   title: Hindsight HTTP API
-  version: 0.10.1
+  version: 0.10.2
 servers:
 - url: /
 paths:
@@ -7248,7 +7248,8 @@ components:
           tags_match: any
           min_refresh_interval_seconds: 0
           keep_trace: false
-          recall_max_tokens: 5
+          budget: low
+          recall_max_tokens: 1
         tags:
         - tags
         - tags
@@ -8536,7 +8537,8 @@ components:
           tags_match: any
           min_refresh_interval_seconds: 0
           keep_trace: false
-          recall_max_tokens: 5
+          budget: low
+          recall_max_tokens: 1
         tags:
         - tags
         - tags
@@ -8805,7 +8807,8 @@ components:
             tags_match: any
             min_refresh_interval_seconds: 0
             keep_trace: false
-            recall_max_tokens: 5
+            budget: low
+            recall_max_tokens: 1
           tags:
           - tags
           - tags
@@ -8853,7 +8856,8 @@ components:
             tags_match: any
             min_refresh_interval_seconds: 0
             keep_trace: false
-            recall_max_tokens: 5
+            budget: low
+            recall_max_tokens: 1
           tags:
           - tags
           - tags
@@ -10215,7 +10219,8 @@ components:
             tags_match: any
             min_refresh_interval_seconds: 0
             keep_trace: false
-            recall_max_tokens: 5
+            budget: low
+            recall_max_tokens: 1
           last_refreshed_at: last_refreshed_at
           is_stale: true
           last_memory_seen_at: last_memory_seen_at
@@ -10263,7 +10268,8 @@ components:
             tags_match: any
             min_refresh_interval_seconds: 0
             keep_trace: false
-            recall_max_tokens: 5
+            budget: low
+            recall_max_tokens: 1
           last_refreshed_at: last_refreshed_at
           is_stale: true
           last_memory_seen_at: last_memory_seen_at
@@ -10477,7 +10483,8 @@ components:
           tags_match: any
           min_refresh_interval_seconds: 0
           keep_trace: false
-          recall_max_tokens: 5
+          budget: low
+          recall_max_tokens: 1
         last_refreshed_at: last_refreshed_at
         is_stale: true
         last_memory_seen_at: last_memory_seen_at
@@ -10622,9 +10629,12 @@ components:
       description: |-
         Trigger settings for a mental model.
 
-        Inherits the reflect options an operator can also default per bank
-        (``reflect_default_options``): set here they apply to this model's refreshes
-        only, and win over the bank default.
+        A refresh is not an ad-hoc reflect with different arguments: it synthesizes a
+        whole document, so it wants its own retrieval and iteration settings. This
+        trigger is therefore the only source for them — a bank's
+        ``reflect_default_options`` deliberately does not reach a refresh. The
+        per-bank default for these fields is ``knowledge_page_default_trigger``,
+        which is merged over this same shape when a page is created.
       example:
         recall_chunks_max_tokens: 5
         refresh_cron: refresh_cron
@@ -10656,15 +10666,11 @@ components:
         tags_match: any
         min_refresh_interval_seconds: 0
         keep_trace: false
-        recall_max_tokens: 5
+        budget: low
+        recall_max_tokens: 1
       properties:
-        reflect_search_observations_max_tokens:
-          minimum: 1.0
-          nullable: true
-          type: integer
-        reflect_search_observations_include_entities:
-          nullable: true
-          type: boolean
+        budget:
+          $ref: '#/components/schemas/Budget'
         mode:
           default: full
           description: "Refresh mode. 'full' (default) regenerates the mental model\
@@ -10734,6 +10740,13 @@ components:
         recall_chunks_max_tokens:
           nullable: true
           type: integer
+        reflect_search_observations_max_tokens:
+          minimum: 1.0
+          nullable: true
+          type: integer
+        reflect_search_observations_include_entities:
+          nullable: true
+          type: boolean
         response_schema:
           additionalProperties: {}
           nullable: true
@@ -10755,9 +10768,12 @@ components:
       description: |-
         Trigger settings for a mental model.
 
-        Inherits the reflect options an operator can also default per bank
-        (``reflect_default_options``): set here they apply to this model's refreshes
-        only, and win over the bank default.
+        A refresh is not an ad-hoc reflect with different arguments: it synthesizes a
+        whole document, so it wants its own retrieval and iteration settings. This
+        trigger is therefore the only source for them — a bank's
+        ``reflect_default_options`` deliberately does not reach a refresh. The
+        per-bank default for these fields is ``knowledge_page_default_trigger``,
+        which is merged over this same shape when a page is created.
       example:
         recall_chunks_max_tokens: 5
         refresh_cron: refresh_cron
@@ -10789,15 +10805,11 @@ components:
         tags_match: any
         min_refresh_interval_seconds: 0
         keep_trace: false
-        recall_max_tokens: 5
+        budget: low
+        recall_max_tokens: 1
       properties:
-        reflect_search_observations_max_tokens:
-          minimum: 1.0
-          nullable: true
-          type: integer
-        reflect_search_observations_include_entities:
-          nullable: true
-          type: boolean
+        budget:
+          $ref: '#/components/schemas/Budget'
         mode:
           default: full
           description: "Refresh mode. 'full' (default) regenerates the mental model\
@@ -10867,6 +10879,13 @@ components:
         recall_chunks_max_tokens:
           nullable: true
           type: integer
+        reflect_search_observations_max_tokens:
+          minimum: 1.0
+          nullable: true
+          type: integer
+        reflect_search_observations_include_entities:
+          nullable: true
+          type: boolean
         response_schema:
           additionalProperties: {}
           nullable: true
@@ -12821,7 +12840,8 @@ components:
           tags_match: any
           min_refresh_interval_seconds: 0
           keep_trace: false
-          recall_max_tokens: 5
+          budget: low
+          recall_max_tokens: 1
         tags:
         - tags
         - tags

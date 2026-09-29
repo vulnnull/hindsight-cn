@@ -147,12 +147,14 @@ async def test_a_bank_default_trigger_shapes_new_pages(client, llm, bank_id, set
     """``knowledge_page_default_trigger`` is merged over the built-in page default.
 
     The configured fields win (here an hourly cron, which also replaces the
-    built-in refresh-after-consolidation), everything unmentioned keeps the page
-    contract, and a trigger sent with the create request still beats the bank.
+    built-in refresh-after-consolidation, and a refresh budget), everything
+    unmentioned keeps the page contract, and a trigger sent with the create
+    request still beats the bank — for the fields it names.
     """
     reflect_loop(llm, answer=ANSWER)
     await client.banks.update_bank_config(
-        bank_id, {"updates": {"knowledge_page_default_trigger": {"refresh_cron": "0 * * * *"}}}
+        bank_id,
+        {"updates": {"knowledge_page_default_trigger": {"refresh_cron": "0 * * * *", "budget": "high"}}},
     )
 
     scheduled = await client.knowledge_base.create_knowledge_page(
@@ -173,10 +175,14 @@ async def test_a_bank_default_trigger_shapes_new_pages(client, llm, bank_id, set
     assert page.mode == "delta"
     assert page.fact_types == ["observation"]
     assert page.exclude_mental_models is True
+    assert page.budget == "high"
 
     override = triggers[explicit.page_id]
     assert override.refresh_after_consolidation is True
     assert override.refresh_cron is None
+    # The create named only the refresh trigger, so the bank's budget still
+    # applies: a partial trigger patches the default, it does not replace it.
+    assert override.budget == "high"
 
 
 async def test_an_invalid_bank_default_trigger_is_rejected(client, bank_id):

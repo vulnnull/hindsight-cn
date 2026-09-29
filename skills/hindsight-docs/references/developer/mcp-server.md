@@ -383,6 +383,7 @@ you can also configure from an agent over MCP.
 | `include_chunks` | boolean | Whether the refresh's internal recall returns raw chunk text |
 | `recall_max_tokens` | integer | Token budget for facts from the refresh's internal recall |
 | `recall_chunks_max_tokens` | integer | Token budget for raw chunks from the refresh's internal recall |
+| `budget` | string | How many agent steps a refresh may spend, as a multiple of the server's reflect iteration limit: `low` halves it, `mid` keeps it, `high` doubles it. Omit for `mid` |
 | `response_schema` | object | JSON Schema for structured output, stored alongside the markdown under `reflect_response.structured_output` |
 | `keep_trace` | boolean | Record how each refresh reached its result under `reflect_response.trace`. The only way to diagnose a cron- or consolidation-driven refresh after the fact |
 

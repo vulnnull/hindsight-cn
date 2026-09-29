@@ -30,6 +30,8 @@ interface BeforeAgentStartEvent {
   prompt: string;
   /** The fully assembled system prompt for this turn. */
   systemPrompt: string;
+  /** Present on hosts that compose the prompt from extension sections. */
+  systemPromptOptions?: { sections: Record<string, string> };
 }
 
 interface AgentEndEvent {
@@ -121,7 +123,7 @@ export function createPiHooks(
   let sessionStartAwaited = false;
   return {
     async beforeAgentStart(
-      event: { prompt: string; systemPrompt: string },
+      event: Omit<BeforeAgentStartEvent, "type">,
       sessionId: string
     ): Promise<BeforeAgentStartResult | undefined> {
       if (!sessionStartAwaited) {
@@ -139,6 +141,13 @@ export function createPiHooks(
         return undefined;
       }
       diag(harness, "inject_ok", { session: sessionId, chars: injection.length });
+      // Hosts that compose the prompt from sections get the memory as one: a returned systemPrompt
+      // forces the whole prompt, so sections added by later extensions are dropped (#4841). Older
+      // hosts without sections still take the appended full prompt below.
+      if (event.systemPromptOptions?.sections) {
+        event.systemPromptOptions.sections.hindsight = injection;
+        return undefined;
+      }
       return { systemPrompt: `${event.systemPrompt}\n\n${injection}` };
     },
     async agentEnd(event: { messages: readonly PiMessage[] }, sessionId: string): Promise<void> {

@@ -1110,7 +1110,10 @@
     "optionsObservationsEntitiesNo": "否 — 跳过实体（减小提示词大小）",
     "nextRefreshPaused": "刷新失败后已暂停",
     "nextRefreshRetrying": "重试中，下次尝试{time}",
-    "nextRefreshRunning": "正在刷新"
+    "nextRefreshRunning": "正在刷新",
+    "optionsBudgetLabel": "刷新预算",
+    "optionsBudgetDescription": "一次刷新可使用的智能体步数，按服务器迭代上限的倍数计：low 减半，mid 不变，high 加倍。",
+    "optionsBudgetDefault": "默认 — mid"
   },
   "cronPreview": {
     "invalid": "无效的 cron 表达式",
@@ -1786,7 +1789,18 @@
     "failureReasonUnexpected": "意外错误",
     "refreshPaused": "刷新已暂停",
     "errorsPausedNotice": "该模型不再自动刷新：这些失败之后，自动刷新已暂停。手动刷新可重试，成功后会恢复自动刷新。",
-    "noHistoryOnlyFailures": "尚无版本——迄今每次刷新都失败了。请查看“错误”标签页。"
+    "noHistoryOnlyFailures": "尚无版本——迄今每次刷新都失败了。请查看“错误”标签页。",
+    "reflectParamsTitle": "Reflect 参数",
+    "labelBudget": "刷新预算",
+    "budgetDefault": "默认 — mid",
+    "labelObservationsMaxTokens": "观察最大 token",
+    "observationsMaxTokensDefault": "默认",
+    "labelObservationEntities": "观察实体",
+    "observationEntitiesDefault": "默认",
+    "labelMinRefreshInterval": "最短刷新间隔",
+    "minRefreshIntervalDefault": "默认",
+    "labelKeepTrace": "保留追踪",
+    "secondsSuffix": "秒"
   },
   "constellation": {
     "instructions": "滚动缩放 · 拖拽平移 · 悬停探索 · 点击选择",

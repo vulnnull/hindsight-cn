@@ -267,6 +267,43 @@ describe("buildHookOutput", () => {
     const serverError = () => new ReflectError("reflect 502 bad gateway", 502, false);
     const HIT = { id: "kp-1", name: "Upload retries", snippet: "200ms  jitter\nwindow" };
 
+    it.each([undefined, 2000, 15000])(
+      "shares injectTimeoutMs=%s across page search and recall after reflect times out",
+      async (injectTimeoutMs) => {
+        let now = 100000;
+        const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+        try {
+          const cfg = resolveConfig({ injectTimeoutMs });
+          const client = makeClient({
+            reflect: vi.fn(async () => {
+              now += cfg.reflectTimeoutMs;
+              throw timedOut();
+            }),
+            searchKnowledgePages: vi.fn(async () => {
+              now += 1200;
+              return [];
+            }),
+          });
+          await buildHookOutput({
+            harness: "dsh",
+            prompt: MATCHING_PROMPT,
+            cfg,
+            client,
+            cacheFile,
+          });
+          const budget = injectTimeoutMs ?? 7000;
+          expect(client.searchKnowledgePages).toHaveBeenCalledWith(MATCHING_PROMPT, {
+            timeoutMs: budget,
+          });
+          expect(client.recallObservations).toHaveBeenCalledWith(MATCHING_PROMPT, {
+            timeoutMs: budget - 1200,
+          });
+        } finally {
+          clock.mockRestore();
+        }
+      }
+    );
+
     it("timeout -> injects matching knowledge pages, skips recall, caches it (no retry)", async () => {
       const client = makeClient({
         reflect: vi.fn(async () => {
@@ -421,6 +458,28 @@ describe("buildHookOutput", () => {
       expect(events.find((e) => e.event === "reflect_fallback_observations")?.count).toBe(1);
     });
   });
+
+  it.each(["pages", "recall"] as const)(
+    "autoInject %s honours the default and configured injection timeouts",
+    async (autoInject) => {
+      for (const injectTimeoutMs of [undefined, 2000, 15000]) {
+        const client = makeClient();
+        await buildHookOutput({
+          harness: "dsh",
+          prompt: MATCHING_PROMPT,
+          cfg: resolveConfig({ autoInject, injectTimeoutMs }),
+          client,
+          cacheFile: join(root, `${autoInject}-${injectTimeoutMs}.json`),
+        });
+        const retrieve =
+          autoInject === "pages" ? client.searchKnowledgePages : client.recallObservations;
+        expect(retrieve).toHaveBeenCalledWith(MATCHING_PROMPT, {
+          timeoutMs: injectTimeoutMs ?? 7000,
+        });
+        expect(client.reflect).not.toHaveBeenCalled();
+      }
+    }
+  );
 
   it("autoInject pages: injects page-search hits once, never reflects or recalls", async () => {
     const client = makeClient({

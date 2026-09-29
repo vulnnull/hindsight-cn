@@ -4,7 +4,12 @@
  * the REF-ID tracer; every turn gets an ABSOLUTE timestamp.
  */
 import { RateLimitedError, type HindsightClient } from "./hindsight";
-import { fingerprintTurns, planRetain, type RetainCursorStore } from "./retain-cursor";
+import {
+  advancePaths,
+  fingerprintTurns,
+  planRetain,
+  type RetainCursorStore,
+} from "./retain-cursor";
 import type { RetainStamp } from "./retain-stamp";
 import type { ChatSession } from "./types";
 import { uuidV5 } from "./uuid";
@@ -107,11 +112,13 @@ export async function ingestChats(
   return failures;
 }
 
-/** Capability probe for the append path. Any failure answers "no": a write-back must never be lost
- *  because we couldn't work out whether the cheaper form of it was available. */
+/** Capability probe for the append path. A failed server-version probe answers "no": appending
+ *  without `operation_id` dedupe can double-write, so doubt falls back to a full replace. A failed
+ *  bank-config probe answers "yes" (see HindsightClient.supportsAppendRetain): banks store document
+ *  text by default, and only an explicit `store_document_text: false` rules append out (#4613). */
 async function supportsAppend(client: HindsightClient): Promise<boolean> {
   try {
-    return await client.supportsIdempotentRetain();
+    return await client.supportsAppendRetain();
   } catch {
     return false;
   }
@@ -194,9 +201,16 @@ function serialize(
   return next;
 }
 
-/** The `context` of a session write-back when `retainContext` is unset. */
+/**
+ * The `context` of a session write-back when `retainContext` is unset. The second sentence keeps an
+ * agent's own "fixed"/"passes" a claim: stored as fact, a later session applied it without checking
+ * the code (#4791). It lives here rather than in the bank's retain mission because the mission is
+ * seeded once and never reaches a bank that already has one; the context rides on every write.
+ */
 export const DEFAULT_RETAIN_CONTEXT =
-  "conversation between the user and you (the coding agent): user turns are the user's words and decisions, assistant turns are yours";
+  "conversation between the user and you (the coding agent): user turns are the user's words and " +
+  "decisions, assistant turns are yours. When an assistant turn says something is fixed, passes or " +
+  'works, record it as the agent\'s claim ("the agent reported X fixed"), not as an established fact.';
 
 /**
  * Live write-back: upsert a running session under a stable document_id, sending only what is new.
@@ -219,7 +233,13 @@ export async function retainLiveSession(
   turns: TransportTurn[],
   startTs: string,
   harness?: string,
-  opts: { cursors?: RetainCursorStore; stamp?: RetainStamp; retryUntil?: number } = {}
+  opts: {
+    cursors?: RetainCursorStore;
+    stamp?: RetainStamp;
+    retryUntil?: number;
+    /** The transcript file the turns came from, when there is one — see RetainCursor.paths. */
+    transcriptPath?: string;
+  } = {}
 ): Promise<void> {
   const cursors = opts.cursors;
   if (!cursors)
@@ -231,11 +251,22 @@ export async function retainLiveSession(
       harness,
       opts.stamp,
       undefined,
-      opts.retryUntil
+      opts.retryUntil,
+      opts.transcriptPath
     );
   // Serialised so the plan is made against the previous write-back's CONFIRMED cursor (see above).
   return serialize(cursors, sessionId, () =>
-    writeSession(client, sessionId, turns, startTs, harness, opts.stamp, cursors, opts.retryUntil)
+    writeSession(
+      client,
+      sessionId,
+      turns,
+      startTs,
+      harness,
+      opts.stamp,
+      cursors,
+      opts.retryUntil,
+      opts.transcriptPath
+    )
   );
 }
 
@@ -248,7 +279,8 @@ async function writeSession(
   stamp?: RetainStamp,
   cursors?: RetainCursorStore,
   /** Absolute time this write-back may keep retrying until; the caller owns its own clock. */
-  retryUntil = Date.now() + DEFAULT_RETRY_WINDOW_MS
+  retryUntil = Date.now() + DEFAULT_RETRY_WINDOW_MS,
+  transcriptPath?: string
 ): Promise<void> {
   if (!turns.length) return;
   const refId = `conversation:${sessionId}`;
@@ -258,7 +290,20 @@ async function writeSession(
   // (#4560). A "no" is not remembered — the server can be upgraded mid-session.
   const appendSupported =
     Boolean(cursors) && (cursor?.appendSupported === true || (await supportsAppend(client)));
-  const plan = planRetain(turns, cursor, { appendSupported, bank: client.bank });
+  const plan = planRetain(turns, cursor, {
+    appendSupported,
+    bank: client.bank,
+    path: transcriptPath,
+  });
+  // Which files the document holds after this write-back. A replace rebuilds it from THIS file
+  // alone, so it forgets the others — which is what lets the file it dropped be appended back as a
+  // segment on its next hook, rather than replacing again.
+  const paths =
+    plan.mode === "replace"
+      ? transcriptPath
+        ? [transcriptPath]
+        : undefined
+      : advancePaths(cursor?.paths, transcriptPath);
   // Appends built but never confirmed. A replace rewrites the whole document from the same
   // transcript, so it SUBSUMES them; on every other path they go out first, oldest first, before
   // anything new — the document only ever grows in transcript order.
@@ -307,6 +352,7 @@ async function writeSession(
     turns: turns.length,
     fingerprint: fingerprintTurns(turns, turns.length),
     bank: client.bank,
+    ...(paths ? { paths } : {}),
     ...(appendSupported ? { appendSupported: true } : {}),
   };
   // Still ours to retry only while the cursor holds the claim we write below.

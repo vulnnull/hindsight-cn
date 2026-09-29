@@ -145,6 +145,47 @@ def _probe(url: str, read: float) -> ProbeResponse | None:
     return probe_get(url, read_timeout=read, connect_timeout=min(read, PROBE_CONNECT_TIMEOUT))
 
 
+# Interpreter-selection variables of the *parent* process. They are meaningful
+# only for the interpreter that set them; forwarding them to a child that runs a
+# different interpreter makes that child import the parent's packages.
+_PARENT_INTERPRETER_ENV = ("PYTHONPATH", "PYTHONHOME", "PYTHONSAFEPATH", "VIRTUAL_ENV")
+
+
+def _runs_a_foreign_interpreter(cmd: list[str]) -> bool:
+    """Whether *cmd* launches hindsight-api on an interpreter that is not ours.
+
+    True for every uv-launched form — the ``uvx hindsight-api@<version>`` fallback and the
+    monorepo ``uv run --project <api-slim> ... hindsight-api`` dev command — because uv resolves
+    an environment of its own, usually on a different Python than the caller. False for the
+    installed-binary paths, which are a single executable from an environment we already share.
+
+    Matched on the basename, not the literal string: the sibling candidate paths in
+    ``_find_api_command`` are returned resolved (``[str(candidate)]``), so a future change that
+    resolves the launcher the same way must not silently stop scrubbing the env.
+    """
+    return Path(cmd[0]).stem in {"uv", "uvx"}
+
+
+def _strip_parent_interpreter_env(env: dict[str, str]) -> dict[str, str]:
+    """Drop the parent interpreter's PYTHONPATH/PYTHONHOME/VIRTUAL_ENV from *env*.
+
+    Only for the uv-launched commands, which run in an environment uv
+    builds for them, usually on a different Python than the caller. Hosts that
+    locate their own site-packages through PYTHONPATH (Hermes' package-manager
+    install exports its Python 3.14 generation that way) otherwise hand that
+    directory to uvx's 3.12 interpreter, which then imports the host's pydantic
+    and dies on the missing compiled extension::
+
+        ModuleNotFoundError: No module named 'pydantic_core._pydantic_core'
+
+    The installed-binary paths keep the env untouched: a ``pip install --target``
+    layout (issue #1240) relies on PYTHONPATH to find hindsight_api at all, and a
+    binary from the caller's own venv runs the same interpreter, so nothing there
+    is foreign.
+    """
+    return {key: value for key, value in env.items() if key not in _PARENT_INTERPRETER_ENV}
+
+
 def _detach_popen_kwargs(log_handle: IO[bytes]) -> dict:
     """Cross-platform kwargs to spawn a subprocess detached from the caller.
 
@@ -898,6 +939,8 @@ class DaemonEmbedManager(EmbedManager):
         ]
         if extra_args:
             cmd.extend(extra_args)
+        if _runs_a_foreign_interpreter(cmd):
+            env = _strip_parent_interpreter_env(env)
 
         try:
             # Start daemon. Redirect stdout/stderr to the daemon log so that

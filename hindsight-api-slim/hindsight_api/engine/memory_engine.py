@@ -1562,6 +1562,13 @@ class Budget(str, Enum):
     HIGH = "high"
 
 
+#: Budget a mental-model refresh runs at when its trigger names none. Not LOW: a
+#: refresh writes a whole document and, with ``exclude_mental_models``, has to read
+#: raw facts before it can, so halving ``reflect_max_iterations`` is exactly the wrong
+#: default for the heaviest reflect there is (#4856).
+DEFAULT_MENTAL_MODEL_REFRESH_BUDGET = Budget.MID
+
+
 def _resolve_thinking_budget(config_dict: dict, budget: "Budget | None", max_tokens: int) -> int:
     """
     Map a Budget enum level to the integer thinking_budget passed to retrieval.
@@ -8542,6 +8549,14 @@ class MemoryEngine(MemoryEngineInterface):
                             )
                             await asyncio.sleep(wait_time)
                         else:
+                            # The existence guard above answers from a per-process cache, so a
+                            # bank deleted by ANOTHER process within the TTL still reads as
+                            # existing here, and the recall then fails in the store (a store that
+                            # owns its storage has already dropped the bank's). Re-check uncached,
+                            # only now that the recall has failed, so the hot path stays free of
+                            # the extra acquire: a bank that is gone answers the 404 the guard
+                            # would have given, not an opaque store error.
+                            await self._raise_if_bank_deleted(bank_id)
                             # Not a connection error or out of retries - call post-hook and raise
                             error_msg = str(e)
                             if self._operation_validator:
@@ -8604,6 +8619,18 @@ class MemoryEngine(MemoryEngineInterface):
                         except Exception as hook_err:
                             logger.warning(f"Post-recall hook error (non-fatal): {hook_err}")
                     raise Exception(error_msg)
+
+            # The SQL-store half of the failure-path re-check above. A bank deleted by another
+            # process within the cache TTL does not FAIL here -- its rows are gone, so the recall
+            # answers empty, indistinguishable from a healthy empty bank. Only an empty SQL recall
+            # can be that, and it has already taken a connection per retrieval arm, so one more
+            # existence read on it is marginal; a recall with results never pays it. A store that
+            # owns its storage fails loudly instead, and is covered by the failure path.
+            if result is not None and not result.results:
+                from .memories import get_memories
+
+                if not get_memories().store_owned_for(bank_id):
+                    await self._raise_if_bank_deleted(bank_id)
 
             # Call post-operation hook for success
             if self._operation_validator and result is not None:
@@ -11447,6 +11474,12 @@ class MemoryEngine(MemoryEngineInterface):
         result: dict[str, int] = {}
         bank_internal_id: str | None = None
         legacy_files: list[str] = []
+        # Deleting a bank that was never created is a no-op that reports zero, not an error. A store
+        # that owns its storage has no namespace for such a bank, and counting in it faults rather
+        # than answering zero, so it must not be asked: every store_owned_for() below is gated on the
+        # bank row actually being there. Declared here, not only where it is read, because the
+        # post-commit gate sits outside the transaction that fetches the row.
+        bank_present = False
         async with acquire_with_retry(backend) as conn:
             # Ensure connection is not in read-only mode (can happen with connection poolers)
             await conn.execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE")
@@ -11455,15 +11488,16 @@ class MemoryEngine(MemoryEngineInterface):
                     # Match delete_document's bank-before-data order. Otherwise a
                     # bank delete could hold its documents while waiting for the
                     # bank row held by a concurrent document delete.
-                    await conn.fetchrow(
+                    bank_row = await conn.fetchrow(
                         f"SELECT bank_id FROM {fq_table('banks')} WHERE bank_id = $1 FOR NO KEY UPDATE",
                         bank_id,
                     )
+                    bank_present = bank_row is not None
                     if fact_type:
                         from .memories import get_memories as _get_memories_for_scope
 
                         _scope_store = _get_memories_for_scope()
-                        _scope_store_owned = _scope_store.store_owned_for(bank_id)
+                        _scope_store_owned = bank_present and _scope_store.store_owned_for(bank_id)
 
                         # For source memory types, capture ids so we can invalidate
                         # dependent observations AFTER the delete below. Running the
@@ -11554,7 +11588,7 @@ class MemoryEngine(MemoryEngineInterface):
                         from .memories import get_memories as _get_memories_for_delete
 
                         _del_store = _get_memories_for_delete()
-                        if not _del_store.store_owned_for(bank_id):
+                        if not (bank_present and _del_store.store_owned_for(bank_id)):
                             units_count = await conn.fetchval(
                                 f"SELECT COUNT(*) FROM {fq_table('memory_units')} WHERE bank_id = $1", bank_id
                             )
@@ -11696,7 +11730,7 @@ class MemoryEngine(MemoryEngineInterface):
         from .memories import DeletePredicate, get_memories
 
         store = get_memories()
-        if store.store_owned_for(bank_id):
+        if bank_present and store.store_owned_for(bank_id):
             # Three cases, and the middle one is the whole point. `delete_bank_profile` is what
             # separates "delete this bank" from "clear this bank's memories" — the API's clear
             # endpoint calls in with it False, and the bank goes on existing afterwards.
@@ -14686,6 +14720,34 @@ class MemoryEngine(MemoryEngineInterface):
 
             raise OperationValidationError(f"Bank '{bank_id}' not found", status_code=404)
 
+    async def _raise_if_bank_deleted(self, bank_id: str) -> None:
+        """After a bank-scoped read failed or came back empty, 404 if the bank no longer exists.
+
+        The after-the-fact complement to :meth:`_require_bank_exists`. That guard reads through the
+        per-process ``bank_info_cache``, and ``delete_bank`` invalidates only the process that
+        served it, so for up to the cache TTL another process lets a read of a deleted bank
+        through. The read then fails in a store that owns its storage, or answers empty from the
+        SQL store, rather than answering 404. This probe is uncached, and runs only on those two
+        outcomes, so a read that returns results pays nothing for it.
+
+        When the bank is gone the stale entry is dropped, so later reads on this process 404
+        at the guard instead of failing in the store again. A probe that itself fails is
+        swallowed: the caller re-raises its original, more informative error.
+        """
+        from . import bank_info_cache
+
+        try:
+            backend = await self._get_backend()
+            exists = await bank_utils.bank_exists(backend, bank_id)
+        except Exception:
+            return
+        if exists:
+            return
+        await bank_info_cache.invalidate(bank_id)
+        from hindsight_api.extensions import OperationValidationError
+
+        raise OperationValidationError(f"Bank '{bank_id}' not found", status_code=404)
+
     async def _ensure_bank_exists(
         self,
         bank_id: str,
@@ -15755,7 +15817,7 @@ class MemoryEngine(MemoryEngineInterface):
         )
 
         # Reflect options an operator can default per bank: caller arg (the reflect
-        # request, or the mental model's trigger) → bank reflect_default_options →
+        # request) → bank reflect_default_options →
         # the shipped default. Unlike the recall budgets these have no flat config
         # key of their own — they are reflect's own knobs, so they live together in
         # one object shaped like the request fields that carry them (#4483).
@@ -17749,10 +17811,25 @@ class MemoryEngine(MemoryEngineInterface):
         recall_include_chunks_override = trigger_data.get("include_chunks")
         recall_max_tokens_override = trigger_data.get("recall_max_tokens")
         recall_chunks_max_tokens_override = trigger_data.get("recall_chunks_max_tokens")
+        # A refresh resolves these itself instead of leaving them None for reflect to
+        # fill in, because reflect would fill them from the bank's
+        # ``reflect_default_options`` — which is tuned for answering a question, not for
+        # writing a document. The trigger (and, merged into it at creation time, the
+        # bank's ``knowledge_page_default_trigger``) is the whole story for a refresh, so
+        # the shipped fallbacks live here and reflect is handed explicit values.
         reflect_search_observations_max_tokens_override = trigger_data.get("reflect_search_observations_max_tokens")
+        if reflect_search_observations_max_tokens_override is None:
+            reflect_search_observations_max_tokens_override = DEFAULT_OBSERVATIONS_TOOL_MAX_TOKENS
         reflect_search_observations_include_entities_override = trigger_data.get(
             "reflect_search_observations_include_entities"
         )
+        if reflect_search_observations_include_entities_override is None:
+            reflect_search_observations_include_entities_override = True
+        # Refresh is the heaviest reflect in routine use, so it does not inherit the
+        # ad-hoc reflect default of LOW (which halves reflect_max_iterations and can run
+        # the loop out before the raw facts are read) — see #4856.
+        raw_budget = trigger_data.get("budget")
+        refresh_budget = Budget(raw_budget) if raw_budget else DEFAULT_MENTAL_MODEL_REFRESH_BUDGET
         requested_mode: RefreshMode = trigger_data.get("mode") or "full"
 
         current_content = (mental_model.get("content") or "").strip()
@@ -17857,6 +17934,7 @@ class MemoryEngine(MemoryEngineInterface):
             recall_chunks_max_tokens_override=recall_chunks_max_tokens_override,
             reflect_search_observations_max_tokens_override=reflect_search_observations_max_tokens_override,
             reflect_search_observations_include_entities_override=reflect_search_observations_include_entities_override,
+            budget=refresh_budget,
             # The refresh stores a document, so the agent states its structure and
             # the markdown is rendered from it. The model never writes the markdown
             # that gets persisted, and nothing has to read markdown back to find

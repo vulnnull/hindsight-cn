@@ -4,7 +4,7 @@
  *
  *   npm run export                       # every figure, every step, MP4
  *   npm run export -- what-hindsight-does recall   # only these figures
- *   npm run export -- --gif --dark       # also write GIFs, and record the dark theme
+ *   npm run export -- --dark             # record the dark theme
  *   npm run export -- --2x               # play at 2x: half as long, same frames
  *   npm run export -- --square           # pad to a square, for feeds that crop to 1:1
  *
@@ -147,23 +147,6 @@ try {
         '+faststart',
         mp4,
       ]);
-      if (flags.has('--gif')) {
-        const palette = join(RAW, `${name}.png`);
-        const filters = 'fps=15,scale=900:-2:flags=lanczos';
-        await run('ffmpeg', ['-y', '-ss', String(blankLead), '-i', webm, '-vf', `${filters},palettegen=stats_mode=diff`, palette]);
-        await run('ffmpeg', [
-          '-y',
-          '-ss',
-          String(blankLead),
-          '-i',
-          webm,
-          '-i',
-          palette,
-          '-lavfi',
-          `${filters}[x];[x][1:v]paletteuse=dither=bayer`,
-          join(OUT, `${name}.gif`),
-        ]);
-      }
       // The narration beside the clip: a clip is watched, but the words are what gets pasted into a post.
       const { label: heading, says } = narration.steps[i];
       const md = [`# ${narration.title} — ${heading}`, '', ...says.map((s) => `- ${s}`), ''].join('\n');

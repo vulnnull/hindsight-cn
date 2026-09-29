@@ -1,7 +1,9 @@
 /**
- * ZCode's end-to-end write-back, driven through the REAL lifecycle declaration.
+ * End-to-end write-back for the harnesses whose host keeps no durable transcript (ZCode, TraeCode),
+ * driven through the REAL lifecycle declaration. The ZCode suites cover its fallbacks; the
+ * family-wide suite at the bottom runs the shared wire for every journal-backed harness.
  *
- * ZCode is the one harness whose host keeps no durable transcript: its `Stop` payload carries the
+ * ZCode was the first such host: its `Stop` payload carries the
  * assistant reply plus an ephemeral, assistant-only file it deletes as soon as the hook returns,
  * and no user prompt at all. The plugin therefore journals the conversation itself
  * (core/turn-journal.ts). That makes the retain path a WIRE between two separate hook processes —
@@ -52,7 +54,7 @@ const stubClient = () => {
   const retain = vi.fn().mockResolvedValue(undefined);
   const makeClient = vi.fn(() => ({
     retain,
-    supportsIdempotentRetain: async () => false,
+    supportsAppendRetain: async () => false,
   })) as unknown as Parameters<typeof runRetainHook>[1];
   return { retain, makeClient };
 };
@@ -261,5 +263,87 @@ describe("ZCode event parsing", () => {
     expect(zcode.sessionStart.emit({ additionalContext: "context" })).toEqual({
       hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: "context" },
     });
+  });
+});
+
+/**
+ * The same wire for EVERY harness that journals its own conversation (`journalPrompt`), driven
+ * through both real hooks. Only the Stop field carrying the reply differs per host, so a new
+ * journal-backed harness must name that field here — the guard below fails until it does.
+ */
+const JOURNAL_REPLY_FIELD: Record<string, string> = {
+  zcode: "responseText",
+  traecode: "last_assistant_message",
+};
+
+it("covers every journal-backed harness in the wire tests below", () => {
+  const journaled = Object.entries(HOOK_HARNESSES)
+    .filter(([, spec]) => spec.prompt.journalPrompt)
+    .map(([name]) => name);
+  expect(journaled.sort()).toEqual(Object.keys(JOURNAL_REPLY_FIELD).sort());
+});
+
+describe.each(Object.keys(JOURNAL_REPLY_FIELD))("%s: prompt hook -> Stop hook", (name) => {
+  const spec = HOOK_HARNESSES[name as keyof typeof HOOK_HARNESSES];
+
+  const prompt = async (text: string) => {
+    stdin = JSON.stringify({ prompt: text, cwd: root, session_id: sessionId });
+    const write = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    try {
+      await runHook(spec.prompt, () => ({
+        reflect: async () => "",
+        listPages: async () => ({ items: [] }),
+        searchKnowledgePages: async () => [],
+        recallObservations: async () => [],
+        knowledgePagesSupported: false,
+      }));
+    } finally {
+      write.mockRestore();
+    }
+  };
+
+  const stop = async (reply: string) => {
+    stdin = JSON.stringify({
+      session_id: sessionId,
+      sessionId,
+      cwd: root,
+      [JOURNAL_REPLY_FIELD[name]]: reply,
+    });
+    const client = stubClient();
+    await runRetainHook(spec.retain, client.makeClient);
+    return client.retain;
+  };
+
+  beforeEach(() => {
+    rawConfig = { autoSeed: false };
+  });
+
+  afterEach(() => {
+    rmSync(journalPath(name, sessionId), { force: true });
+  });
+
+  it("retains the whole conversation across turns, in order", async () => {
+    await prompt("we use zod for validation");
+    await stop("noted");
+    await prompt("and pytest-xdist for the suite");
+    const retain = await stop("got it");
+
+    expect(retainedTurns(retain).map((t) => [t.role, t.content])).toEqual([
+      ["user", "we use zod for validation"],
+      ["assistant", "noted"],
+      ["user", "and pytest-xdist for the suite"],
+      ["assistant", "got it"],
+    ]);
+  });
+
+  it("does not store the reply twice when Stop is delivered twice for one turn", async () => {
+    await prompt("ship it");
+    await stop("shipped");
+    const retain = await stop("shipped");
+
+    expect(retainedTurns(retain).map((t) => [t.role, t.content])).toEqual([
+      ["user", "ship it"],
+      ["assistant", "shipped"],
+    ]);
   });
 });

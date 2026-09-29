@@ -20,6 +20,68 @@ const settledTrigger = (name: string) => pageTriggerFor(buildPageTrigger(), "rep
 
 afterEach(() => vi.restoreAllMocks());
 
+describe("HindsightClient append capability", () => {
+  it("rejects append when the bank cannot store document text", async () => {
+    const calls: any[] = [];
+    stubFetchRouted(calls, [
+      {
+        match: (m, u) => m === "GET" && u.endsWith("/version"),
+        json: { api_version: "0.10.1" },
+      },
+      {
+        match: (m, u) => m === "GET" && u.endsWith("/config"),
+        json: { config: { store_document_text: false }, overrides: {} },
+      },
+    ]);
+
+    const c = new HindsightClient({ apiUrl: "http://x", bank: "repo-a" });
+    await expect(c.supportsAppendRetain()).resolves.toBe(false);
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://x/version",
+      "http://x/v1/default/banks/repo-a/config",
+    ]);
+  });
+
+  it("accepts append when the resolved bank config stores document text", async () => {
+    const calls: any[] = [];
+    stubFetchRouted(calls, [
+      {
+        match: (m, u) => m === "GET" && u.endsWith("/version"),
+        json: { api_version: "0.10.1" },
+      },
+      {
+        match: (m, u) => m === "GET" && u.endsWith("/config"),
+        json: { config: { store_document_text: true }, overrides: {} },
+      },
+    ]);
+
+    const c = new HindsightClient({ apiUrl: "http://x", bank: "repo-a" });
+    await expect(c.supportsAppendRetain()).resolves.toBe(true);
+  });
+
+  it("assumes append is supported when the bank config probe fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.endsWith("/config")) throw new Error("timeout");
+        return { ok: true, status: 200, json: async () => ({ api_version: "0.10.1" }) } as any;
+      })
+    );
+    const c = new HindsightClient({ apiUrl: "http://x", bank: "repo-a" });
+    await expect(c.supportsAppendRetain()).resolves.toBe(true);
+  });
+
+  it("never appends against a server without idempotent retain, whatever the bank says", async () => {
+    const calls: any[] = [];
+    stubFetchRouted(calls, [
+      { match: (m, u) => m === "GET" && u.endsWith("/version"), json: { api_version: "0.1.0" } },
+    ]);
+    const c = new HindsightClient({ apiUrl: "http://x", bank: "repo-a" });
+    await expect(c.supportsAppendRetain()).resolves.toBe(false);
+    expect(calls.map((call) => call.url)).toEqual(["http://x/version"]);
+  });
+});
+
 function stubFetch(calls: any[], jsonImpl: () => Promise<unknown> = async () => ({ ok: true })) {
   vi.stubGlobal(
     "fetch",
@@ -234,6 +296,40 @@ describe("HindsightClient knowledge-page reads", () => {
     expect(result).toEqual({ id: "kp-1" });
     expect(calls[0].method).toBe("GET");
     expect(calls[0].url).toContain("/knowledge-base/pages/kp-1");
+  });
+
+  it("getPage returns the body once, with a dated field the model can judge (#4836)", async () => {
+    stubFetch([], async () => ({
+      id: "p1",
+      name: "Pricing decisions",
+      description: "What has been decided about pricing?",
+      tags: ["type:knowledge-page"],
+      timestamp: "2026-09-17T10:00:00Z",
+      body: "The threshold is compared against the discounted subtotal.",
+      // The API also returns the SAME body with YAML frontmatter on top; passing the response
+      // through handed the model the page twice.
+      markdown:
+        "---\nname: Pricing decisions\n---\nThe threshold is compared against the discounted subtotal.",
+    }));
+    const c = new HindsightClient({ apiUrl: "http://x", bank: "repo-a" });
+    expect(await c.getPage("p1")).toEqual({
+      id: "p1",
+      name: "Pricing decisions",
+      description: "What has been decided about pricing?",
+      tags: ["type:knowledge-page"],
+      last_updated_at: "2026-09-17T10:00:00Z",
+      body: "The threshold is compared against the discounted subtotal.",
+    });
+  });
+
+  it("getPage falls back to the full markdown when a page has no body", async () => {
+    stubFetch([], async () => ({ id: "p2", name: "Empty", markdown: "---\nname: Empty\n---\n" }));
+    const c = new HindsightClient({ apiUrl: "http://x", bank: "repo-a" });
+    expect(await c.getPage("p2")).toEqual({
+      id: "p2",
+      name: "Empty",
+      body: "---\nname: Empty\n---\n",
+    });
   });
 
   it("searchKnowledgePages sends the client's pageSearchLimit — the tool and the hook share it", async () => {
@@ -1292,6 +1388,32 @@ describe("HindsightClient.configureBank — missions are seeded once (#2492)", (
     // Not even the probe: the bank's configuration is none of this plugin's business.
     expect(calls.some((k) => k.url.endsWith("/config"))).toBe(false);
     expect(calls.some((k) => k.url.includes("/knowledge-base/"))).toBe(true);
+  });
+
+  it("writes defaultBankConfig into the import where the bank is silent (#4725)", async () => {
+    // A bank the plugin creates is otherwise born with the server's defaults for everything the
+    // template does not name; the cheap baseline has to travel in the SAME import that creates it.
+    const calls: any[] = [];
+    const routeList = routes({ reflect_mission: "seeded", enable_auto_consolidation: true });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: any) => {
+        const method = init?.method;
+        calls.push({ url, method, body: init?.body ? JSON.parse(init.body) : undefined });
+        const route = routeList.find((r) => r.match(method, url));
+        return { ok: true, status: 200, json: async () => route?.json ?? { ok: true } } as any;
+      })
+    );
+    await new HindsightClient({ apiUrl: "http://x", bank: "repo-a" }).configureBank({
+      defaults: {
+        enable_auto_consolidation: false,
+        mental_model_min_refresh_interval_seconds: 21600,
+      },
+    });
+    const body = calls.find((k) => k.method === "POST" && k.url.endsWith("/import")).body;
+    expect(body.bank.mental_model_min_refresh_interval_seconds).toBe(21600);
+    // The operator's own choice on this bank is not this plugin's to revert.
+    expect(body.bank).not.toHaveProperty("enable_auto_consolidation");
   });
 
   it("re-seeds the missions after an explicit reset", async () => {

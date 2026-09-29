@@ -171,19 +171,26 @@ class MentalModelTriggerInput(BaseModel):
         default=None,
         description="Override the token budget for raw chunks from the refresh's internal recall. null = bank/global default.",
     )
+    budget: Budget | None = Field(
+        default=None,
+        description=(
+            "How many agent steps a refresh may spend, as a multiple of the server's reflect iteration "
+            "limit: 'low' halves it, 'mid' keeps it, 'high' doubles it. null = mid."
+        ),
+    )
     reflect_search_observations_max_tokens: int | None = Field(
         default=None,
         ge=1,
         description=(
             "Override the token budget for the refresh's search_observations calls. Lowering it drops the "
-            "lowest-ranked observations and shrinks the reflect context. null = bank default (5000)."
+            "lowest-ranked observations and shrinks the reflect context. null = the shipped 5000."
         ),
     )
     reflect_search_observations_include_entities: bool | None = Field(
         default=None,
         description=(
             "Override whether search_observations attaches resolved entity names, which can be over half the "
-            "tool payload. null = bank default (enabled)."
+            "tool payload. null = enabled."
         ),
     )
     response_schema: dict | None = Field(

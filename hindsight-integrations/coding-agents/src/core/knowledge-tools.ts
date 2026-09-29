@@ -68,29 +68,8 @@ const CREDIT_REMINDER =
   "reply — quoted, paraphrased, or merely confirming what you were going to say — open that part " +
   'with "> 🧠 **From Hindsight memory (<page>)** — <the specific facts you drew on>". Rewriting a ' +
   "snippet in your own words does not make it yours. If none of them bear on the turn, ignore them " +
-  "silently — an unhelpful search needs no mention.";
-
-/**
- * What the agent gets back from reading one page.
- *
- * The API returns `body` AND `markdown`, where `markdown` is that same body with YAML frontmatter
- * on top — so passing the response straight through handed the model the entire page twice, on
- * every read. `timestamp` goes out as `last_updated_at`: the value is the page's last refresh, and
- * a bare "timestamp" beside a page tells the model nothing about whether it is looking at something
- * current.
- */
-export function shapePage(page: unknown): unknown {
-  const p = (page ?? {}) as Record<string, unknown>;
-  const body = typeof p.body === "string" && p.body.trim() ? p.body : p.markdown;
-  return {
-    id: p.id,
-    name: p.name,
-    ...(p.description ? { description: p.description } : {}),
-    ...(Array.isArray(p.tags) && p.tags.length ? { tags: p.tags } : {}),
-    ...(p.timestamp ? { last_updated_at: p.timestamp } : {}),
-    body,
-  };
-}
+  "silently — an unhelpful search needs no mention. These are past records: check a claim that " +
+  "something was fixed or works against the code before relying on it.";
 
 export interface ToolSpec {
   name: string;
@@ -146,8 +125,12 @@ export function buildKnowledgeTools(
     reflectTimeoutMs?: number;
     /** Reflect budget for `hindsight_reflect` (cfg.reflectBudget, default "high"). */
     reflectBudget?: "low" | "mid" | "high";
+    /** cfg.toolGuideExtra, added after the crediting note so it lands with the results too. */
+    toolGuideExtra?: string;
   } = {}
 ): ToolSpec[] {
+  const extra = opts.toolGuideExtra?.trim();
+  const crediting = extra ? `${CREDIT_REMINDER} ${extra}` : CREDIT_REMINDER;
   return [
     {
       name: "hindsight_sync_status",
@@ -228,7 +211,7 @@ export function buildKnowledgeTools(
         // Same sentence the payload carries, from the same constant: two copies of a rule this
         // fiddly drift apart, and the description is what a host shows when the tool is listed.
         "read a full page with hindsight_read_knowledge_page. " +
-        CREDIT_REMINDER,
+        crediting,
       inputSchema: { query: z.string().describe("what to look for") },
       annotations: READ_ONLY_ANNOTATIONS,
       handler: async (args: { query: string }) => {
@@ -255,7 +238,7 @@ export function buildKnowledgeTools(
               ...(h.source_query ? { description: h.source_query } : {}),
               snippet: h.snippet,
             })),
-            crediting: CREDIT_REMINDER,
+            crediting,
           });
         } catch (e) {
           return err(e);
@@ -286,7 +269,7 @@ export function buildKnowledgeTools(
         "that id. Prefer reading a page over re-deriving the same understanding from source.",
       inputSchema: { page_id: z.string() },
       annotations: READ_ONLY_ANNOTATIONS,
-      handler: guarded(async ({ page_id }) => shapePage(await client.getPage(page_id))),
+      handler: guarded(async ({ page_id }) => client.getPage(page_id)),
     },
     {
       name: "hindsight_reflect",

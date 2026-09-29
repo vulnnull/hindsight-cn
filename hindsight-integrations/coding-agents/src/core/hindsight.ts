@@ -123,6 +123,12 @@ export interface ClientOpts {
    *  the key mid-session 401'd every call until the host restarted (#3600). Consulted only on a
    *  401, so the happy path never touches the filesystem. See `core/host-client.ts`. */
   tokenProvider?: () => string | undefined;
+  /** How long one request may spend waiting out rate limits (HTTP 429) before it throws
+   *  `RateLimitedError`. Default 0: a hook answers to its host's deadline and must fail fast.
+   *  Background work that has nobody waiting on it (deepen) sets this, because a 429 it does not
+   *  wait out is an item missing from the bank — deepen used to log "failed to enqueue" and carry
+   *  on, dropping about a third of a repo's chats against a rate-limited Hindsight Cloud. */
+  rateLimitPatienceMs?: number;
 }
 
 export interface RetainOpts {
@@ -275,6 +281,36 @@ const RETRY_AFTER_FLOOR_MS = 10 * 1000;
  */
 const RETRY_AFTER_CEILING_MS = 60 * 1000;
 
+/** First wait when a request is rate-limited and `Retry-After` asks for less (Cloud sends "0"),
+ *  doubled per attempt up to RETRY_AFTER_CEILING_MS. Jittered, so a pool of workers that all got
+ *  the 429 together does not come back together. */
+const RATE_LIMIT_BACKOFF_MS = 1000;
+
+/**
+ * What the agent gets back from reading one page.
+ *
+ * The API returns `body` AND `markdown`, where `markdown` is that same body with YAML frontmatter
+ * on top — so passing the response straight through handed the model the entire page twice, on
+ * every read. `timestamp` goes out as `last_updated_at`: the value is the page's last refresh, and
+ * a bare "timestamp" beside a page tells the model nothing about whether it is looking at something
+ * current.
+ *
+ * Applied inside `getPage`, not by the read tool: it used to live in knowledge-tools, which left
+ * `getPage` itself returning both copies to any other caller (#4836).
+ */
+function shapePage(page: unknown): unknown {
+  const p = (page ?? {}) as Record<string, unknown>;
+  const body = typeof p.body === "string" && p.body.trim() ? p.body : p.markdown;
+  return {
+    id: p.id,
+    name: p.name,
+    ...(p.description ? { description: p.description } : {}),
+    ...(Array.isArray(p.tags) && p.tags.length ? { tags: p.tags } : {}),
+    ...(p.timestamp ? { last_updated_at: p.timestamp } : {}),
+    body,
+  };
+}
+
 export class HindsightClient {
   readonly apiUrl: string;
   /** The credential the NEXT request will sign with — NOT the one the config file holds. The two
@@ -293,6 +329,7 @@ export class HindsightClient {
   readonly observationScopes: ObservationScopes;
   readonly pageSearchLimit: number;
   readonly recallOptions: Record<string, unknown>;
+  private readonly rateLimitPatienceMs: number;
 
   constructor(o: ClientOpts) {
     this.apiUrl = o.apiUrl.replace(/\/$/, "");
@@ -308,6 +345,7 @@ export class HindsightClient {
     // module-level object, and handing every client the same reference makes one caller's
     // mutation everyone's.
     this.recallOptions = { ...DEFAULT_RECALL_OPTIONS, ...o.recallOptions };
+    this.rateLimitPatienceMs = o.rateLimitPatienceMs ?? 0;
   }
 
   /** The credential in use, for diagnostics. Never log or report the VALUE — booleans only. */
@@ -316,7 +354,12 @@ export class HindsightClient {
   }
 
   private headers(): Record<string, string> {
-    const h: Record<string, string> = { "Content-Type": "application/json" };
+    // `identity`: the server gzips bodies >= 1 KB, and some hosts (DSH runs plugins on its own
+    // fetch) hand back the compressed bytes undecoded, so `.json()` dies on the gzip magic (#4868).
+    const h: Record<string, string> = {
+      "Content-Type": "application/json",
+      "Accept-Encoding": "identity",
+    };
     if (this.token) h["Authorization"] = `Bearer ${this.token}`;
     return h;
   }
@@ -378,13 +421,23 @@ export class HindsightClient {
   ): Promise<Response> {
     // Hard cap on EVERY request: a stalled server (pool deadlock, network) must degrade to a
     // memoryless turn — never hang a host that awaits us (opencode blocks its BOOT on plugin init).
-    const r = await this.fetchWithAuth(url, {
-      method,
-      body: body ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    if (r.status === 429 && !tolerate.includes(429))
-      throw new RateLimitedError(retryAfterMs(r.headers.get("retry-after")));
+    const payload = body ? JSON.stringify(body) : undefined;
+    let r: Response;
+    for (let attempt = 0, waited = 0; ; attempt++) {
+      r = await this.fetchWithAuth(url, {
+        method,
+        body: payload,
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (r.status !== 429 || tolerate.includes(429)) break;
+      const asked = retryAfterMs(r.headers.get("retry-after"));
+      const backoff = Math.min(RETRY_AFTER_CEILING_MS, RATE_LIMIT_BACKOFF_MS * 2 ** attempt);
+      const wait =
+        Math.min(RETRY_AFTER_CEILING_MS, Math.max(asked, backoff)) * (1 + Math.random() / 2);
+      if (waited + wait > this.rateLimitPatienceMs) throw new RateLimitedError(asked);
+      await sleep(wait);
+      waited += wait;
+    }
     if (!r.ok && r.status !== 404 && !tolerate.includes(r.status))
       throw new Error(
         `${method} ${url} -> ${r.status} ${await r.text()}${this.authHint(r.status)}`
@@ -452,6 +505,24 @@ export class HindsightClient {
   }
 
   /**
+   * Whether a session write-back may use `update_mode="append"`: the server must dedupe by
+   * `operation_id` AND the bank must keep document text, or the server rejects the append in the
+   * background (#4613). Only an explicit `store_document_text: false` answers "no" — an unreachable
+   * or unparseable config assumes the default (stored), so a flaky probe never downgrades appends.
+   */
+  async supportsAppendRetain(): Promise<boolean> {
+    if (!(await this.supportsIdempotentRetain())) return false;
+    try {
+      const r = await this.req("GET", this.bankUrl("/config"));
+      if (!r.ok) return true;
+      const j = (await r.json()) as { config?: { store_document_text?: boolean } };
+      return j.config?.store_document_text !== false;
+    } catch {
+      return true;
+    }
+  }
+
+  /**
    * Every document_id currently in the bank under a strategy tag (e.g. `source:git`), paginated into a
    * Set. Powers the incremental git-sync's "what's already ingested?" check — since git commits are stored
    * with document_id `git:<sha>`, the returned Set lets a caller diff a ref's commits against memory.
@@ -480,6 +551,25 @@ export class HindsightClient {
     return ids;
   }
 
+  /**
+   * The tags on one document, or undefined when the bank holds none with that id. Read from the
+   * document LISTING narrowed by `q` (a substring match on the id, so the exact id is picked out of
+   * the page) rather than GET /documents/{id}, which also sends the document's full text: the
+   * caller, the git-log freshness check on SessionStart, reads a ~100k-character document for one tag.
+   */
+  async documentTags(documentId: string): Promise<string[] | undefined> {
+    const limit = 100;
+    for (let offset = 0; ; offset += limit) {
+      const q = `?q=${encodeURIComponent(documentId)}&limit=${limit}&offset=${offset}`;
+      const r = await this.req("GET", this.bankUrl(`/documents${q}`));
+      const j = (await r.json()) as { items?: { id?: string; tags?: string[] }[]; total?: number };
+      const items = j.items ?? [];
+      const hit = items.find((it) => it.id === documentId);
+      if (hit) return hit.tags ?? [];
+      if (items.length < limit || offset + limit >= (j.total ?? 0)) return undefined;
+    }
+  }
+
   /** Configure the bank: POST the coding bank manifest to /import (missions, retain strategies,
    *  entity labels), then seed knowledge pages when the server supports them. Both halves are
    *  idempotent and ADDITIVE — nothing the bank already says is overwritten (#3927), bar the
@@ -502,6 +592,8 @@ export class HindsightClient {
       manage?: boolean;
       /** Extraction mode for the plugin's own strategies — see RawConfig.retainExtractionMode. */
       extractionMode?: RetainExtractionMode;
+      /** Bank-config fields to add where the bank is silent — see RawConfig.defaultBankConfig. */
+      defaults?: Record<string, unknown>;
     } = {}
   ): Promise<void> {
     if (opts.reset) {
@@ -517,7 +609,8 @@ export class HindsightClient {
       // re-synced to `extractionMode` (#4560). A reset just deleted the bank, so there is nothing to read.
       const manifest = codingBankManifest(
         opts.reset ? undefined : await this.readBankOverrides(),
-        opts.extractionMode
+        opts.extractionMode,
+        opts.defaults
       );
       if (!manifest) {
         this.log(`[bank] ${this.bank} already carries the coding structure — nothing to apply`);
@@ -744,8 +837,8 @@ export class HindsightClient {
   }
 
   /**
-   * Read one knowledge page's synthesized content by knowledge-base id, as an OKF document
-   * (YAML frontmatter + markdown body). The endpoint omits the internal reflect trace that built
+   * Read one knowledge page's synthesized content by knowledge-base id, shaped by `shapePage` so
+   * the body arrives once. The endpoint omits the internal reflect trace that built
    * the page — that is 70-95% of the raw bytes and can blow past an MCP host's per-tool-result
    * token cap.
    */
@@ -756,7 +849,7 @@ export class HindsightClient {
       this.bankUrl(`/knowledge-base/pages/${encodeURIComponent(pageId)}`)
     );
     if (r.status === 404) throw new Error(`knowledge page not found: ${pageId}`);
-    return await r.json();
+    return shapePage(await r.json());
   }
 
   /** Hybrid (BM25 + vector, RRF-fused) server-side search over the bank's knowledge pages.

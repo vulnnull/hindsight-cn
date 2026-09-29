@@ -60,12 +60,15 @@ export interface HookSpec {
   harness: string;
   /** Read the fields out of the harness's stdin event (shapes differ per harness). */
   parse(event: Record<string, unknown>): HookEventFields;
+  /** Optional event gate, evaluated before config loading: false makes the hook a silent no-op. */
+  accept?(event: Record<string, unknown>): boolean;
   /** Some hosts execute hook commands from their global config directory. Those hosts must provide
    * a workspace path in the event; falling back to process.cwd() would create a bank for config. */
   requireCwd?: boolean;
   /** Record this prompt in the session's own turn journal (core/turn-journal.ts). Set ONLY by the
    *  harnesses whose host keeps no durable transcript, because for them the journal IS the
-   *  transcript their Stop hook retains — see the ZCode entry in harness/hook-lifecycle.ts. */
+   *  transcript their Stop hook retains — see the ZCode and TraeCode entries in
+   *  harness/hook-lifecycle.ts. */
   journalPrompt?: boolean;
   /** Wrap injected context (and an optional user-facing notice) in the harness's native
    *  hook-output schema. Harnesses whose schema has no user-visible channel ignore `notice`. */
@@ -85,10 +88,6 @@ interface HookClient {
   /** Recorded on reflect failures so the diag trail says which bank to look at server-side. */
   readonly bank?: string;
 }
-
-/** Shared deadline for the whole fallback chain (page search, then observation recall) that runs
- *  after a reflect timeout/5xx. Both are retrieval-only endpoints — no LLM — so seconds suffice. */
-const HOOK_FALLBACK_BUDGET_MS = 7_000;
 
 /** How many turns auto-inject may FAIL on before a session gives up on memory. The budget is
  *  turns, not time: each retry costs another full attempt (up to `reflectTimeoutMs` on the
@@ -165,9 +164,12 @@ async function injectRecall(
 async function reflectFallback(
   harness: string,
   prompt: string,
-  client: HookClient
+  client: HookClient,
+  timeoutMs: number
 ): Promise<string | null | undefined> {
-  const deadline = Date.now() + HOOK_FALLBACK_BUDGET_MS;
+  // Page search and recall share ONE retrieval budget after reflect fails, rather than each
+  // spending a full injectTimeoutMs and doubling the time added to the host's hook window.
+  const deadline = Date.now() + timeoutMs;
   const remaining = () => Math.max(deadline - Date.now(), 1);
   return (
     (await injectPages(harness, prompt, client, remaining(), "reflect_fallback_pages")) ??
@@ -232,7 +234,7 @@ export async function buildHookOutput(args: {
       harness,
       prompt,
       client,
-      HOOK_FALLBACK_BUDGET_MS,
+      cfg.injectTimeoutMs,
       "inject_pages",
       PAGE_INJECT_LEAD
     );
@@ -248,7 +250,7 @@ export async function buildHookOutput(args: {
       harness,
       prompt,
       client,
-      HOOK_FALLBACK_BUDGET_MS,
+      cfg.injectTimeoutMs,
       "inject_recall",
       RECALL_INJECT_LEAD
     );
@@ -297,7 +299,7 @@ export async function buildHookOutput(args: {
         query: prompt.slice(0, 80),
       });
       if (e instanceof ReflectError && e.fallbackEligible) {
-        fallback = await reflectFallback(harness, prompt, client);
+        fallback = await reflectFallback(harness, prompt, client, cfg.injectTimeoutMs);
         // The fallback body is cached exactly like a reflect answer: injected once, not retried.
         if (fallback) reflectAnswer = fallback;
       }
@@ -344,7 +346,12 @@ export async function buildHookOutput(args: {
   // every turn (even a plain "yes") read as phantom research. The roster below keeps the tool
   // and the page names in front of the agent.
   if (cadence > 0 && turns % cadence === 0) {
-    blocks.push(buildRosterRefresh(pages, { reflectOnNewGoals: cfg.autoInject !== "reflect" }));
+    blocks.push(
+      buildRosterRefresh(pages, {
+        reflectOnNewGoals: cfg.autoInject !== "reflect",
+        extra: cfg.toolGuideExtra,
+      })
+    );
   }
   const kept = blocks.filter(Boolean);
 
@@ -392,6 +399,7 @@ export async function runHook(
   } catch {
     return; // no/invalid event: stay silent
   }
+  if (spec.accept && !spec.accept(ev)) return;
   const { prompt: rawPrompt, cwd: rawCwd, sessionId } = spec.parse(ev);
   if (spec.requireCwd && !rawCwd) return;
   const cwd = rawCwd || process.cwd();

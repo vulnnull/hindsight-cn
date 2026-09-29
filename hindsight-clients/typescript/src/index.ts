@@ -256,6 +256,12 @@ export interface MentalModelTriggerOptions {
   includeChunks?: boolean;
   recallMaxTokens?: number;
   recallChunksMaxTokens?: number;
+  /** Token budget for the refresh's search_observations calls. Omit for the shipped 5000. */
+  reflectSearchObservationsMaxTokens?: number;
+  /** Whether search_observations attaches resolved entity names, which can be over half the tool payload. Omit for enabled. */
+  reflectSearchObservationsIncludeEntities?: boolean;
+  /** How many agent steps a refresh may spend, as a multiple of the server's reflect iteration limit: 'low' halves it, 'mid' keeps it, 'high' doubles it. Omit for 'mid'. */
+  budget?: "low" | "mid" | "high";
   /** JSON Schema for structured output, stored alongside the markdown content. */
   responseSchema?: Record<string, unknown>;
   /** Record how each refresh reached its result under reflect_response.trace. */
@@ -287,6 +293,9 @@ function toTriggerBody(trigger: MentalModelTriggerOptions): MentalModelTriggerIn
     include_chunks: trigger.includeChunks,
     recall_max_tokens: trigger.recallMaxTokens,
     recall_chunks_max_tokens: trigger.recallChunksMaxTokens,
+    reflect_search_observations_max_tokens: trigger.reflectSearchObservationsMaxTokens,
+    reflect_search_observations_include_entities: trigger.reflectSearchObservationsIncludeEntities,
+    budget: trigger.budget,
     response_schema: trigger.responseSchema,
     keep_trace: trigger.keepTrace,
   };

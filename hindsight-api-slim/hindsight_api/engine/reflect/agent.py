@@ -65,7 +65,8 @@ _TOOL_ARG_MAX_TOKENS = 16000
 
 #: Default budget for ``search_observations``: the value the tool schema advertises
 #: to the model. It is the floor of the chain a bank can raise or lower through
-#: ``reflect_default_options.reflect_search_observations_max_tokens`` (or a mental model's trigger),
+#: ``reflect_default_options.reflect_search_observations_max_tokens`` (or, for a refresh, the
+#: mental model's own trigger, which does not read ``reflect_default_options``),
 #: which is why it stays a plain constant here rather than a ``config`` field.
 DEFAULT_OBSERVATIONS_TOOL_MAX_TOKENS = 5000
 

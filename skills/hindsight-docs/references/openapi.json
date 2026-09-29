@@ -10,7 +10,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "0.10.1"
+    "version": "0.10.2"
   },
   "paths": {
     "/health": {
@@ -15338,30 +15338,16 @@
       },
       "MentalModelTrigger-Input": {
         "properties": {
-          "reflect_search_observations_max_tokens": {
+          "budget": {
             "anyOf": [
               {
-                "type": "integer",
-                "minimum": 1.0
+                "$ref": "#/components/schemas/Budget"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Reflect Search Observations Max Tokens",
-            "description": "Token budget for reflect's search_observations tool when the model names none. Observation evidence is often the largest contributor to the reflect context; lowering it trades the lowest-ranked observations for a smaller LLM context. None means use the shipped default (5000)."
-          },
-          "reflect_search_observations_include_entities": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reflect Search Observations Include Entities",
-            "description": "Whether search_observations attaches resolved entity names to each observation. Entities can be more than half the serialized tool payload; turning them off keeps the same observations and ranking with a much smaller context. None means enabled."
+            "description": "How many agent iterations a refresh may spend, as a multiple of reflect_max_iterations: 'low' halves it, 'mid' keeps it, 'high' doubles it. A refresh is the heaviest reflect there is \u2014 it writes a whole document, and with exclude_mental_models it must read raw facts first \u2014 so null means 'mid', not the 'low' an ad-hoc reflect defaults to."
           },
           "mode": {
             "type": "string",
@@ -15528,6 +15514,31 @@
             "title": "Recall Chunks Max Tokens",
             "description": "Override the token budget for raw chunks returned by the internal recall during refresh. None means use the bank/global config default (recall_chunks_max_tokens)."
           },
+          "reflect_search_observations_max_tokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reflect Search Observations Max Tokens",
+            "description": "Override the token budget for the refresh's search_observations calls. Observation evidence is often the largest contributor to the reflect context; lowering it trades the lowest-ranked observations for a smaller LLM context. null means the shipped 5000."
+          },
+          "reflect_search_observations_include_entities": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reflect Search Observations Include Entities",
+            "description": "Override whether search_observations attaches resolved entity names to each observation. Entities can be more than half the serialized tool payload; turning them off keeps the same observations and ranking with a much smaller context. null means enabled."
+          },
           "response_schema": {
             "anyOf": [
               {
@@ -15550,34 +15561,20 @@
         },
         "type": "object",
         "title": "MentalModelTrigger",
-        "description": "Trigger settings for a mental model.\n\nInherits the reflect options an operator can also default per bank\n(``reflect_default_options``): set here they apply to this model's refreshes\nonly, and win over the bank default."
+        "description": "Trigger settings for a mental model.\n\nA refresh is not an ad-hoc reflect with different arguments: it synthesizes a\nwhole document, so it wants its own retrieval and iteration settings. This\ntrigger is therefore the only source for them \u2014 a bank's\n``reflect_default_options`` deliberately does not reach a refresh. The\nper-bank default for these fields is ``knowledge_page_default_trigger``,\nwhich is merged over this same shape when a page is created."
       },
       "MentalModelTrigger-Output": {
         "properties": {
-          "reflect_search_observations_max_tokens": {
+          "budget": {
             "anyOf": [
               {
-                "type": "integer",
-                "minimum": 1.0
+                "$ref": "#/components/schemas/Budget"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Reflect Search Observations Max Tokens",
-            "description": "Token budget for reflect's search_observations tool when the model names none. Observation evidence is often the largest contributor to the reflect context; lowering it trades the lowest-ranked observations for a smaller LLM context. None means use the shipped default (5000)."
-          },
-          "reflect_search_observations_include_entities": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reflect Search Observations Include Entities",
-            "description": "Whether search_observations attaches resolved entity names to each observation. Entities can be more than half the serialized tool payload; turning them off keeps the same observations and ranking with a much smaller context. None means enabled."
+            "description": "How many agent iterations a refresh may spend, as a multiple of reflect_max_iterations: 'low' halves it, 'mid' keeps it, 'high' doubles it. A refresh is the heaviest reflect there is \u2014 it writes a whole document, and with exclude_mental_models it must read raw facts first \u2014 so null means 'mid', not the 'low' an ad-hoc reflect defaults to."
           },
           "mode": {
             "type": "string",
@@ -15744,6 +15741,31 @@
             "title": "Recall Chunks Max Tokens",
             "description": "Override the token budget for raw chunks returned by the internal recall during refresh. None means use the bank/global config default (recall_chunks_max_tokens)."
           },
+          "reflect_search_observations_max_tokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reflect Search Observations Max Tokens",
+            "description": "Override the token budget for the refresh's search_observations calls. Observation evidence is often the largest contributor to the reflect context; lowering it trades the lowest-ranked observations for a smaller LLM context. null means the shipped 5000."
+          },
+          "reflect_search_observations_include_entities": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reflect Search Observations Include Entities",
+            "description": "Override whether search_observations attaches resolved entity names to each observation. Entities can be more than half the serialized tool payload; turning them off keeps the same observations and ranking with a much smaller context. null means enabled."
+          },
           "response_schema": {
             "anyOf": [
               {
@@ -15766,7 +15788,7 @@
         },
         "type": "object",
         "title": "MentalModelTrigger",
-        "description": "Trigger settings for a mental model.\n\nInherits the reflect options an operator can also default per bank\n(``reflect_default_options``): set here they apply to this model's refreshes\nonly, and win over the bank default."
+        "description": "Trigger settings for a mental model.\n\nA refresh is not an ad-hoc reflect with different arguments: it synthesizes a\nwhole document, so it wants its own retrieval and iteration settings. This\ntrigger is therefore the only source for them \u2014 a bank's\n``reflect_default_options`` deliberately does not reach a refresh. The\nper-bank default for these fields is ``knowledge_page_default_trigger``,\nwhich is merged over this same shape when a page is created."
       },
       "MinScores": {
         "properties": {
