@@ -10,7 +10,7 @@ import uuid
 from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, TypedDict, cast
 
 from pydantic import BaseModel, Field
 
@@ -21,7 +21,7 @@ from ..memory_engine import fq_table, get_current_schema
 from ..response_models import DispositionTraits
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
 
     from ..db.base import DatabaseConnection
     from ..db.ops import DataAccessOps
@@ -814,7 +814,8 @@ async def list_banks(pool, *, search_query: str | None = None) -> list:
     # under load, and the retain path enforces the same rule everywhere else.
     await _apply_store_last_write(result, sort_keys)
 
-    result.sort(key=lambda bank: sort_keys[bank["bank_id"]], reverse=True)
+    # The row dicts are heterogeneous, so their value type is a union; the id is a str.
+    result.sort(key=lambda bank: sort_keys[cast(str, bank["bank_id"])], reverse=True)
     return result
 
 
@@ -912,6 +913,33 @@ async def list_banks_page(pool, *, limit: int, offset: int, search_query: str | 
     return BankPage(banks=rows, total=await _count_banks(pool))
 
 
+async def list_banks_among(pool, bank_ids: list[str], *, search_query: str | None = None) -> list:
+    """The banks among ``bank_ids`` (canonical ids), most recently written first.
+
+    For a caller that may see only these banks. Reads those rows by id rather than ranking the
+    tenant and filtering: O(allowed banks), and — through :func:`_bank_rows` — without naming
+    ``memory_units`` for a store-owned set, whose planning alone costs seconds on a tenant with
+    tens of thousands of banks. Ids that name no bank drop out.
+
+    A search goes through :func:`list_banks`, which matches names and aliases in SQL, and is then
+    narrowed to the set — the cost of an unscoped search, which is small because a search is.
+    """
+    wanted = list(dict.fromkeys(bank_ids))
+    if search_query:
+        allowed = set(wanted)
+        return [bank for bank in await list_banks(pool, search_query=search_query) if bank["bank_id"] in allowed]
+    banks = await _bank_rows(pool, wanted)
+    # The same key :func:`list_banks` ranks by: last write, else creation, else the epoch — then
+    # overlaid with the store's write time for banks whose memories live there.
+    sort_keys: dict[str, datetime] = {}
+    for bank in banks:
+        when = bank["last_write_at"] or bank["created_at"]
+        sort_keys[bank["bank_id"]] = datetime.fromisoformat(when) if when else _UNIX_EPOCH
+    await _apply_store_last_write(banks, sort_keys)
+    banks.sort(key=lambda bank: sort_keys[bank["bank_id"]], reverse=True)
+    return banks
+
+
 #: Banks per store page. The merge consumes one page for a page-1 request however large the tenant.
 _STORE_PAGE = 100
 
@@ -962,7 +990,10 @@ async def _merge_ordered_bank_ids(pool, store, want: int, first: "BankWritePage"
     return out
 
 
-async def _store_write_stream(store, first: "BankWritePage") -> "AsyncIterator[BankWriteTime]":
+# `AsyncGenerator`, not `AsyncIterator`: the caller wraps this in `aclosing`, which needs the
+# `aclose()` an iterator does not promise -- and closing it early is the whole point of the
+# generator (see the docstring), so the weaker type contradicted the use.
+async def _store_write_stream(store, first: "BankWritePage") -> "AsyncGenerator[BankWriteTime, None]":
     """The store's banks as one continuous newest-written-first stream, page by page.
 
     A generator rather than a list so the merge pulls only the pages it needs: a page-1 request
@@ -976,7 +1007,10 @@ async def _store_write_stream(store, first: "BankWritePage") -> "AsyncIterator[B
     page = first
     while True:
         for bank in page.banks:
-            yield BankWriteTime(bank_id=bank.bank_id, last_write_at=_as_utc(bank.last_write_at))
+            # `_as_utc` is None-tolerant for callers that may not have a timestamp; the store
+            # always records one for a bank it returns here, and `BankWriteTime` declares it
+            # non-optional.
+            yield BankWriteTime(bank_id=bank.bank_id, last_write_at=cast(datetime, _as_utc(bank.last_write_at)))
         if not page.next_page_token:
             return
         page = await store.list_banks_by_write(limit=_STORE_PAGE, page_token=page.next_page_token)

@@ -42,6 +42,7 @@ from ...retain.link_utils import (
     _normalize_datetime,
     compute_semantic_links_ann,
 )
+from ...search.tags import TagsMatch
 from ..base import EntityPrunePassResult, RelinkPassResult
 
 logger = logging.getLogger(__name__)
@@ -178,7 +179,7 @@ async def graph_units(
     document_id: str | None = None,
     chunk_id: str | None = None,
     tags: list[str] | None = None,
-    tags_match: str = "all_strict",
+    tags_match: TagsMatch = "all_strict",
     limit: int = 1000,
 ) -> dict[str, Any]:
     """Memory nodes for the graph view, plus the total matching count.

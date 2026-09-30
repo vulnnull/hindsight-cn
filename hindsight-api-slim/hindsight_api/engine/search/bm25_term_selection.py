@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING
 from ..memory_engine import get_current_schema
 
 if TYPE_CHECKING:
-    from ...config import HindsightConfig
+    from ...config import ConfigLike
     from ..sql import SQLDialect
 
 logger = logging.getLogger(__name__)
@@ -126,7 +126,7 @@ async def build_bm25_query_text(
     query_text: str,
     table: str,
     language: str,
-    config: HindsightConfig,
+    config: ConfigLike,
 ) -> str:
     """Turn query tokens into the text parameter a BM25 arm binds.
 

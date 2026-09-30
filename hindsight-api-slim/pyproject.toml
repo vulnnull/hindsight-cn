@@ -229,7 +229,9 @@ dev = [
     "python-dotenv>=1.2.1",
     "filelock>=3.20.1",  # TOCTOU race condition fix
     "ruff>=0.8.0",
-    "ty>=0.0.1",
+    # PINNED, not floated: ty is pre-1.0 and what it reports changes between releases -- an
+    # unpinned upgrade turns a clean tree red without a code change.
+    "ty==0.0.84",
     "testcontainers>=4.0.0",
 ]
 
@@ -308,8 +310,18 @@ exclude = [
 ]
 
 [tool.ty.rules]
-# Disable noisy rules while keeping important ones
-invalid-argument-type = "ignore"    # False positives with **kwargs patterns
+# `ty check` is GREEN on this config and the `typecheck-api` job in test.yml runs it, so anything not
+# "ignore" below is enforced. Exactly one rule is on today; everything else is off either because
+# it does not fit this codebase or because it is not clean yet and turning it on is its own piece
+# of work. Turning one on means fixing what it reports first -- an ignore here is a to-do, not a
+# verdict that the rule is wrong.
+
+# ON, and enforced by the `typecheck-api` job in test.yml. This is the rule that catches a call passing the
+# wrong type to a declared parameter -- the class of bug that reaches production unchallenged
+# because Python does not enforce annotations and a dataclass does not validate at construction.
+# It was off for "false positives with **kwargs patterns": real, but the fix is to annotate a
+# kwargs bag `dict[str, Any]`, which says what it is, rather than to give up the rule everywhere.
+invalid-argument-type = "error"
 invalid-return-type = "ignore"      # Often intentional in async code
 invalid-parameter-default = "ignore" # Optional params with None default
 possibly-missing-attribute = "ignore" # Common with Optional types
@@ -318,3 +330,20 @@ call-non-callable = "ignore"        # False positives with Optional types
 invalid-key = "ignore"              # Pydantic ConfigDict not understood
 invalid-method-override = "ignore"  # Intentional signature differences
 unresolved-reference = "ignore"     # Forward references not always resolved
+
+# Not clean yet -- counts are what this config reports over `hindsight_api/` today. Each is its
+# own clean-up, in the same shape as the `invalid-argument-type` one: fix the call sites, then
+# flip the rule. Listed with their sizes so the next person knows what they are taking on.
+unresolved-attribute = "ignore"      # 87 -- mostly attributes on Optional fields
+invalid-type-form = "ignore"         # 7
+no-matching-overload = "ignore"      # 5
+unresolved-import = "ignore"         # 4 -- optional extras (mlx, oracledb) not installed
+not-iterable = "ignore"              # 4
+invalid-yield = "ignore"             # 4
+too-many-positional-arguments = "ignore"  # 2
+invalid-assignment = "ignore"        # 2
+unknown-argument = "ignore"          # 1
+unused-ignore-comment = "ignore"     # 8 -- stale `ty: ignore`s left by the above
+truthiness-test-of-callable = "ignore"    # 2
+deprecated = "ignore"                # 2
+possibly-missing-submodule = "ignore"     # 1

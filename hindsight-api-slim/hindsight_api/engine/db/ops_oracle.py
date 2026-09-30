@@ -8,6 +8,7 @@ columns can't appear in GROUP BY).
 import json
 import uuid as uuid_mod
 from datetime import UTC, datetime
+from typing import cast
 
 from .base import DatabaseConnection
 from .ops import (
@@ -263,7 +264,8 @@ class OracleOps(DataAccessOps):
                 orig_name,
             )
             if row:
-                results.append(row)
+                # `fetchrow` hands back the base row type; these tables are read as dicts.
+                results.append(cast(ResultRow, row))
         return results
 
     async def bulk_reassert_entities(
@@ -587,7 +589,7 @@ class OracleOps(DataAccessOps):
                 uid,
             )
             if row:
-                rows.append(row)
+                rows.append(cast(ResultRow, row))
         return rows
 
     async def fetch_temporal_neighbors(
@@ -648,7 +650,7 @@ class OracleOps(DataAccessOps):
                 half_limit,
                 uid,
             )
-            rows.extend(unit_rows)
+            rows.extend(cast("list[ResultRow]", unit_rows))
         return rows
 
     def build_entity_expansion_cte(

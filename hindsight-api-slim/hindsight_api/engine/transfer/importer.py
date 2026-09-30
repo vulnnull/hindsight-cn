@@ -17,7 +17,7 @@ import zipfile
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from ..causal_links import CANONICAL_CAUSAL_LINK_TYPE, LEGACY_CAUSAL_LINK_TYPES
 from ..db.ops_postgresql import pg_search_vector_expr
@@ -1880,7 +1880,8 @@ def _to_extracted_fact(fact: TransferFact) -> ExtractedFact:
             if rel.relation_type == CANONICAL_CAUSAL_LINK_TYPE
         ],
         content_index=0,
-        chunk_index=fact.chunk_index,
+        # The record declares a chunk index; an imported fact always carries one by here.
+        chunk_index=cast(int, fact.chunk_index),
         context=fact.context or "",
         mentioned_at=mentioned_at,
         metadata=dict(fact.metadata),

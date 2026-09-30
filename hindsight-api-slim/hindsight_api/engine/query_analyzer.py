@@ -10,6 +10,7 @@ import re
 import threading
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 from dateparser.conf import Settings, apply_settings
 from pydantic import BaseModel, Field
@@ -373,7 +374,10 @@ class DateparserQueryAnalyzer(QueryAnalyzer):
             # Settings populates its attributes dynamically, so this is a getattr
             # rather than a plain access: the name is not statically visible.
             default_languages = getattr(settings, "DEFAULT_LANGUAGES", None)
-            language = best_language(text, self._locales) or (default_languages[0] if default_languages else None)
+            # `_locales` starts as None and is filled during `load()`, which runs first.
+            language = best_language(text, cast("list", self._locales)) or (
+                default_languages[0] if default_languages else None
+            )
             if not language:
                 return None
             return self._exact_search.search_parse(language, text, settings=settings) or None

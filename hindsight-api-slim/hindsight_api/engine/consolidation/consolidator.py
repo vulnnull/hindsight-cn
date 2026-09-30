@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 from enum import StrEnum
 from fnmatch import fnmatchcase
 from itertools import combinations
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import asyncpg
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -57,9 +57,10 @@ from .prompts import (
 )
 
 if TYPE_CHECKING:
-    from asyncpg import Connection
-
+    # The engine's connection abstraction, which is what every caller passes; the annotations
+    # below named asyncpg's concrete type, which predates it.
     from ...api.http import RequestContext
+    from ..db.base import DatabaseConnection
     from ..memories.base import StoredMemory
     from ..memory_engine import MemoryEngine
     from ..response_models import ConsolidationStrategiesPreview, MemoryFact, RecallResult
@@ -537,7 +538,8 @@ async def _apply_dedup_update_fold(
     else:
         updated_obs = await store.get_memories(conn=conn, fq_table=fq_table, bank_id=bank_id, unit_ids=[updated_id])
         updated_sources = list(updated_obs[0].source_memory_ids or []) if updated_obs else []
-        live_u_sources = await _filter_live_source_memories(conn, bank_id, updated_sources)
+        # The ids come back off a store record as strings; the filter addresses them as UUIDs.
+        live_u_sources = await _filter_live_source_memories(conn, bank_id, [uuid.UUID(str(u)) for u in updated_sources])
         if not live_u_sources:
             return False
         await _reconcile_merge_via_store(
@@ -730,7 +732,7 @@ def _scope_sort_key(scope: frozenset[str]) -> tuple[str, ...]:
 
 
 async def _filter_live_source_memories(
-    conn: "Connection",
+    conn: "DatabaseConnection",
     bank_id: str,
     source_memory_ids: list[uuid.UUID],
 ) -> list[uuid.UUID]:
@@ -764,7 +766,7 @@ async def _filter_live_source_memories(
 
 
 async def _sources_changed_since_read(
-    conn: "Connection",
+    conn: "DatabaseConnection",
     bank_id: str,
     memories: list[dict[str, Any]],
 ) -> list[str]:
@@ -793,7 +795,7 @@ async def _sources_changed_since_read(
 
 
 async def _any_live_source_memory(
-    conn: "Connection",
+    conn: "DatabaseConnection",
     bank_id: str,
     source_memory_ids: list[uuid.UUID],
 ) -> bool:
@@ -982,7 +984,7 @@ def _aggregate_source_fields(source_mems: list[dict[str, Any]], tags: list[str] 
 
 
 async def _count_observations_for_scope(
-    conn: "Connection",
+    conn: "DatabaseConnection",
     bank_id: str,
     tags: list[str],
 ) -> int:
@@ -1444,7 +1446,11 @@ async def _reconcile_merge_via_store(
         record=FactRecord(
             unit_id=observation_id,
             text=merged_text,
-            embedding=str(embeddings[0]) if embeddings else None,
+            # `FactRecord.embedding` is declared non-optional, but consolidation has nothing to
+            # write when the embedder returned nothing -- so a store reading the seam's own
+            # declaration is handed None anyway. Widening the field would make every extension
+            # handle it, so the mismatch is named here rather than moved onto implementers.
+            embedding=cast("list[float] | str", str(embeddings[0]) if embeddings else None),
             fact_type="observation",
             tags=list(cur.tags or []),
             proof_count=len(merged_sources),
@@ -1919,7 +1925,8 @@ async def _run_consolidation_job(
                         # an earlier scope's write and the stamp never commit apart (#3876).
                         is_final_pass = pass_index == len(obs_tags_list) - 1
                         pass_results, pass_deleted, pass_failed = await _process_memory_batch(
-                            pool=pool,
+                            # Optional on the caller only because the engine clears its backend on close.
+                            pool=cast("DatabaseBackend", pool),
                             memory_engine=memory_engine,
                             llm_config=llm_config,
                             bank_id=bank_id,
@@ -1962,7 +1969,8 @@ async def _run_consolidation_job(
                                     }
                 else:
                     sub_results, sub_deleted, sub_llm_failed = await _process_memory_batch(
-                        pool=pool,
+                        # Optional on the caller only because the engine clears its backend on close.
+                        pool=cast("DatabaseBackend", pool),
                         memory_engine=memory_engine,
                         llm_config=llm_config,
                         bank_id=bank_id,
@@ -2898,7 +2906,7 @@ class _ObservationHistorySnapshot:
 
 
 async def _append_observation_history(
-    conn: "Connection",
+    conn: "DatabaseConnection",
     bank_id: str,
     observation_id: str,
     snapshot: _ObservationHistorySnapshot,
@@ -3082,7 +3090,8 @@ async def _apply_update_action(
             record=FactRecord(
                 unit_id=observation_id,
                 text=new_text,
-                embedding=embedding_str,
+                # Same non-optional-field caveat as the first FactRecord above.
+                embedding=cast("list[float] | str", embedding_str),
                 fact_type="observation",
                 tags=merged_tags,
                 proof_count=len(source_ids),
@@ -3168,7 +3177,7 @@ async def _apply_create_action(
 
 
 async def _execute_delete_action(
-    conn: "Connection",
+    conn: "DatabaseConnection",
     bank_id: str,
     observation_id: str,
 ) -> None:
@@ -3743,7 +3752,8 @@ async def _apply_create_observation(
             record=FactRecord(
                 unit_id=str(observation_id),
                 text=observation_text,
-                embedding=embedding_str,
+                # Same non-optional-field caveat as the first FactRecord above.
+                embedding=cast("list[float] | str", embedding_str),
                 fact_type="observation",
                 tags=list(obs_tags),
                 proof_count=1,

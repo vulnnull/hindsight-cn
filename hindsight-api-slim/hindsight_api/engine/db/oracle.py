@@ -21,7 +21,7 @@ import re
 import uuid as _uuid_mod
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, cast
 
 from .pool_instrumentation import PoolStats, acquire_conn
 
@@ -1185,7 +1185,8 @@ class OracleConnection(DatabaseConnection):
                 raise
 
             if ret_cols is not None:
-                row_dict = await self._read_returning_values(ret_cols, params)
+                # `params` is the bind dict built for the statement just executed.
+                row_dict = await self._read_returning_values(ret_cols, cast("dict[str, Any]", params))
                 return [ResultRow(row_dict)] if row_dict else []
 
             columns = [col[0].lower() for col in cursor.description or []]
@@ -1223,7 +1224,8 @@ class OracleConnection(DatabaseConnection):
                 raise
 
             if ret_cols is not None:
-                row_dict = await self._read_returning_values(ret_cols, params)
+                # `params` is the bind dict built for the statement just executed.
+                row_dict = await self._read_returning_values(ret_cols, cast("dict[str, Any]", params))
                 return ResultRow(row_dict) if row_dict else None
 
             columns = [col[0].lower() for col in cursor.description or []]
@@ -1256,7 +1258,8 @@ class OracleConnection(DatabaseConnection):
             await cursor.execute(query, params)
 
             if ret_cols is not None:
-                row_dict = await self._read_returning_values(ret_cols, params)
+                # `params` is the bind dict built for the statement just executed.
+                row_dict = await self._read_returning_values(ret_cols, cast("dict[str, Any]", params))
                 if row_dict is None:
                     return None
                 vals = list(row_dict.values())

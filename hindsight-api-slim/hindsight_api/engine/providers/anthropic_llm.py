@@ -14,7 +14,7 @@ import logging
 import re
 import time
 from contextlib import AbstractAsyncContextManager, nullcontext
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 from hindsight_api.engine.cache_affinity import apply_opencode_session
 from hindsight_api.engine.llm_interface import (
@@ -879,7 +879,9 @@ class AnthropicLLM(LLMInterface):
         ]
 
         logger.info(f"Submitting Anthropic message batch with {len(batch_requests)} requests")
-        batch = await self._client.messages.batches.create(requests=batch_requests)
+        # The SDK types each request as a TypedDict; these are built as plain dicts with the
+        # same keys just above.
+        batch = await self._client.messages.batches.create(requests=cast("list", batch_requests))
         logger.info(f"Anthropic batch submitted: {batch.id}, status={batch.processing_status}")
 
         return {

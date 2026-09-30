@@ -7,6 +7,7 @@ import re
 import time
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from typing import cast
 
 import numpy as np
 
@@ -323,7 +324,9 @@ def _prepare_entities_for_resolution(
             else:
                 continue
 
-            normalized_text = _normalize_entity_name(raw_text)
+            # `raw_text` is read out of a heterogeneous entity dict, so it widens to object;
+            # both branches above assign a string.
+            normalized_text = _normalize_entity_name(cast(str, raw_text))
             if not normalized_text:
                 # A blank or whitespace-only candidate would otherwise be created
                 # as an entity with an empty canonical_name — the resolver has no

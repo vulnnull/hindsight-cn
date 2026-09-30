@@ -36,7 +36,7 @@ import json
 import logging
 import time
 from contextlib import AbstractAsyncContextManager, nullcontext
-from typing import Any, Callable
+from typing import Any, Callable, cast
 from urllib.parse import parse_qs, urlparse, urlunparse
 
 from openai import APIConnectionError, APIStatusError, AsyncOpenAI
@@ -625,7 +625,12 @@ class OpenAIResponsesLLM(LLMInterface):
                 except json.JSONDecodeError:
                     arguments = {"_raw": raw_args}
                 tool_calls.append(
-                    LLMToolCall(id=getattr(item, "call_id", None), name=getattr(item, "name", ""), arguments=arguments)
+                    # `call_id` is present on every function-call item this branch selects.
+                    LLMToolCall(
+                        id=cast(str, getattr(item, "call_id", None)),
+                        name=getattr(item, "name", ""),
+                        arguments=arguments,
+                    )
                 )
 
             content = response.output_text or None

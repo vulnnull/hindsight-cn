@@ -14,7 +14,7 @@ import json
 import logging
 import time
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, cast
 
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -677,6 +677,8 @@ def create_span_recorder() -> LLMSpanRecorder:
     tracer = get_tracer()
     if tracer is None:
         raise RuntimeError("Tracing not initialized. Call initialize_tracing() first.")
-    _span_recorder = LLMSpanRecorder(tracer)
+    # The None case is raised above; a NoOpTracer presents the same API and is what a
+    # tracing-disabled deployment gets.
+    _span_recorder = LLMSpanRecorder(cast("Tracer", tracer))
     register_span_recorder(_span_recorder)
     return _span_recorder

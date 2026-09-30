@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qsl
 
 if TYPE_CHECKING:
@@ -50,7 +50,10 @@ class EmbeddedPostgres:
                     "pg0-embedded is required for embedded PostgreSQL. "
                     "Install it with: pip install 'hindsight-api-slim[embedded-db]'"
                 )
-            kwargs = {
+            # A kwargs BAG, assembled conditionally below. Inferred, its value type is the union
+            # of everything in it, so the `**` unpack is checked as if every key could be every
+            # type -- one diagnostic per parameter of the callee, none of them real.
+            kwargs: dict[str, Any] = {
                 "name": self.name,
                 "username": self.username,
                 "password": self.password,
@@ -223,7 +226,10 @@ async def resolve_database_url(db_url: str) -> str:
     """
     parsed = parse_pg0_url(db_url)
     if parsed.is_pg0:
-        kwargs: dict[str, object] = {"name": parsed.instance_name, "port": parsed.port, "config": parsed.config}
+        # A kwargs BAG, assembled conditionally below. Inferred, its value type is the union of
+        # everything in it, so the `**` unpack is checked as if every key could be every type --
+        # one diagnostic per parameter of the callee, none of them real.
+        kwargs: dict[str, Any] = {"name": parsed.instance_name, "port": parsed.port, "config": parsed.config}
         if parsed.username is not None:
             kwargs["username"] = parsed.username
         if parsed.password is not None:

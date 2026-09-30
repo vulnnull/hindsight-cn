@@ -21,7 +21,7 @@ import json
 from datetime import datetime
 from typing import Any
 
-from ...search.tags import build_tags_where_clause
+from ...search.tags import TagsMatch, build_tags_where_clause
 from ...time_filter import MEMORY_TIME_FIELDS, build_time_clause
 
 
@@ -92,7 +92,7 @@ async def list_memory_units(
     document_id: str | None = None,
     entity_id: str | None = None,
     tags: list[str] | None = None,
-    tags_match: str = "any",
+    tags_match: TagsMatch = "any",
     created_before: datetime | None = None,
     time_field: str | None = None,
     start_date: datetime | None = None,

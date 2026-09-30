@@ -42,9 +42,15 @@ import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from ...extensions.base import Extension
+
+# The five tag-matching modes, as the HTTP layer already validates them. Declared here
+# rather than `str` so a store implementing this seam is checked against the modes that
+# actually exist -- the SQL builders below take this exact type, and a bare `str` made
+# every hop between them unverifiable.
+from ..search.tags import TagsMatch
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..search.retrieval import GraphRetriever
@@ -290,7 +296,7 @@ class DeletePredicate:
     fact_types: list[str] | None = None
     metadata_equals: dict[str, str] | None = None
     tags: list[str] | None = None
-    tags_match: str = "any"
+    tags_match: TagsMatch = "any"
     delete_all: bool = False
 
     def is_empty(self) -> bool:
@@ -603,7 +609,7 @@ class MemoryScopeWatermark:
     since: datetime
     fact_types: list[str] | None = None
     tags: list[str] | None = None
-    tags_match: str = "any"
+    tags_match: TagsMatch = "any"
     tag_groups: list | None = None
 
 
@@ -676,7 +682,7 @@ class FullRecallRequest:
     temporal_window: "tuple[datetime, datetime] | None" = None
     temporal_semantic_threshold: float = 0.1
     tags: "list[str] | None" = None
-    tags_match: str = "any"
+    tags_match: TagsMatch = "any"
     tag_groups: "list | None" = None
     created_after: "datetime | None" = None
     created_before: "datetime | None" = None
@@ -918,7 +924,7 @@ class MemoriesExtension(Extension, ABC):
         text: str,
         limit: int,
         tags: list[str] | None = None,
-        tags_match: str = "any",
+        tags_match: TagsMatch = "any",
         tag_groups: list | None = None,
     ) -> list["KnowledgePageMatch"]:
         """Hybrid search over the bank's pages: text and (when given) embedding, fused BY THE STORE.
@@ -940,7 +946,7 @@ class MemoriesExtension(Extension, ABC):
         embedding: list[float],
         limit: int,
         tags: list[str] | None = None,
-        tags_match: str = "any",
+        tags_match: TagsMatch = "any",
         tag_groups: list | None = None,
         exclude_ids: list[str] | None = None,
     ) -> list["KnowledgePageMatch"]:
@@ -1177,7 +1183,7 @@ class MemoriesExtension(Extension, ABC):
         bank_id: str,
         search_query: "str | None" = None,
         tags: "list[str] | None" = None,
-        tags_match: str = "any_strict",
+        tags_match: TagsMatch = "any_strict",
         time_field: str | None = None,
         start_date: "datetime | None" = None,
         end_date: "datetime | None" = None,
@@ -1444,7 +1450,7 @@ class MemoriesExtension(Extension, ABC):
         temporal_window: "tuple[datetime, datetime] | None" = None,
         temporal_semantic_threshold: float = 0.1,
         tags: list[str] | None = None,
-        tags_match: str = "any",
+        tags_match: TagsMatch = "any",
         tag_groups: list | None = None,
         created_after: datetime | None = None,
         created_before: datetime | None = None,
@@ -1528,7 +1534,7 @@ class MemoriesExtension(Extension, ABC):
         limit: int = 100,
         page_token: str = "",
         tags: list[str] | None = None,
-        tags_match: str = "any",
+        tags_match: TagsMatch = "any",
         tag_groups: list | None = None,
         document_id: str | None = None,
         metadata_equals: dict[str, str] | None = None,
@@ -1697,7 +1703,7 @@ class MemoriesExtension(Extension, ABC):
         since: datetime,
         fact_types: list[str] | None = None,
         tags: list[str] | None = None,
-        tags_match: str = "any",
+        tags_match: TagsMatch = "any",
         tag_groups: list | None = None,
     ) -> bool:
         """Whether any memory in the given scope was written after ``since``.
@@ -1741,6 +1747,34 @@ class MemoriesExtension(Extension, ABC):
             )
             for scope in scopes
         }
+
+    @abstractmethod
+    async def newest_memory_updated_at(
+        self,
+        *,
+        conn,
+        fq_table,
+        bank_id: str,
+        until: datetime,
+        since: datetime | None = None,
+        fact_types: list[str] | None = None,
+        tags: list[str] | None = None,
+        tags_match: TagsMatch = "any",
+        tag_groups: list | None = None,
+    ) -> datetime | None:
+        """The newest ``updated_at`` in the given scope within ``(since, until]``, or None.
+
+        Backs the mental-model refresh, which reads it for two answers: whether the
+        scope holds anything to reflect over at all (None means no), and the
+        watermark the refresh persists — the newest memory it could have read, so the
+        next staleness check asks about writes after it. ``since`` is the delta
+        window's lower bound (None for a full refresh), which is also what lets a
+        store bound the read to the writes since the last refresh.
+
+        The scope is the same as :meth:`any_memory_updated_since`'s. Abstract rather
+        than defaulted: a store that answered None here would leave every refresh
+        with nothing to read, which is silent rather than wrong-looking.
+        """
 
     async def latest_memory_write_at(self, *, conn, fq_table, bank_id: str) -> datetime | None:
         """The newest ``updated_at`` across the bank's memories, or None if it has none.
@@ -1866,7 +1900,7 @@ class MemoriesExtension(Extension, ABC):
         document_id: str | None = None,
         entity_id: str | None = None,
         tags: list[str] | None = None,
-        tags_match: str = "any",
+        tags_match: TagsMatch = "any",
         created_before: "datetime | None" = None,
         time_field: str | None = None,
         start_date: "datetime | None" = None,
@@ -2054,7 +2088,7 @@ class MemoriesExtension(Extension, ABC):
         document_id: str | None = None,
         chunk_id: str | None = None,
         tags: list[str] | None = None,
-        tags_match: str = "all_strict",
+        tags_match: TagsMatch = "all_strict",
         limit: int = 1000,
     ) -> dict[str, Any]:
         """Memory nodes for the graph view, plus the total matching count.
@@ -2083,7 +2117,7 @@ class MemoriesExtension(Extension, ABC):
         document_id: str | None = None,
         chunk_id: str | None = None,
         tags: list[str] | None = None,
-        tags_match: str = "all_strict",
+        tags_match: TagsMatch = "all_strict",
         limit: int = 1000,
     ) -> dict[str, Any]:
         """Everything one graph render reads, in one pass:
@@ -2104,7 +2138,10 @@ class MemoriesExtension(Extension, ABC):
             conn=conn,
             fq_table=fq_table,
             bank_id=bank_id,
-            fact_type=fact_type,
+            # `graph_view` accepts a list of fact types; `graph_units`, which stores override,
+            # declares a single one. Widening `graph_units` would land on every implementer, so
+            # the mismatch is stated here -- a list caller reaches a store that cannot take one.
+            fact_type=cast("str | None", fact_type),
             search_query=search_query,
             document_id=document_id,
             chunk_id=chunk_id,

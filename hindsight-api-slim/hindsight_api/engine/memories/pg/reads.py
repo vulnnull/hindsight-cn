@@ -33,6 +33,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ...search.tags import (
+    TagsMatch,
     build_tag_groups_where_clause,
     build_tags_where_clause,
     build_tags_where_clause_simple,
@@ -200,7 +201,7 @@ async def scan_memories(
     limit: int = 100,
     page_token: str = "",
     tags: list[str] | None = None,
-    tags_match: str = "any",
+    tags_match: TagsMatch = "any",
     tag_groups: list | None = None,
     document_id: str | None = None,
     metadata_equals: dict[str, str] | None = None,
@@ -497,7 +498,7 @@ async def any_memory_updated_since(
     since: datetime,
     fact_types: list[str] | None = None,
     tags: list[str] | None = None,
-    tags_match: str = "any",
+    tags_match: TagsMatch = "any",
     tag_groups: list | None = None,
 ) -> bool:
     """Whether any memory in ``bank_id``'s scope was written after ``since``.
@@ -586,6 +587,52 @@ async def any_memory_updated_since(
         *params,
     )
     return row is not None
+
+
+async def newest_memory_updated_at(
+    *,
+    conn,
+    fq_table: Callable[[str], str],
+    bank_id: str,
+    until: datetime,
+    since: datetime | None = None,
+    fact_types: list[str] | None = None,
+    tags: list[str] | None = None,
+    tags_match: TagsMatch = "any",
+    tag_groups: list | None = None,
+) -> datetime | None:
+    """``MAX(updated_at)`` over ``bank_id``'s scope within ``(since, until]``.
+
+    Only rows visible to this statement count, which is the point: a row whose
+    writing transaction has not committed yet is left out of the max, so once it
+    commits it is still newer than the watermark the refresh persists and the next
+    staleness check catches it.
+    """
+    params: list[Any] = [bank_id, until]
+    where = ["bank_id = $1", "updated_at <= $2"]
+    if since is not None:
+        params.append(since)
+        where.append(f"updated_at > ${len(params)}")
+
+    built = build_tags_where_clause(tags, param_offset=len(params) + 1, match=tags_match)
+    if built.sql:
+        where.append(built.sql.removeprefix("AND "))
+        params.extend(built.params)
+
+    built = build_tag_groups_where_clause(tag_groups, param_offset=len(params) + 1)
+    if built.sql:
+        where.append(built.sql.removeprefix("AND "))
+        params.extend(built.params)
+    # Untagged, no tag_groups → no tag constraint, matching any memory in the bank.
+
+    if fact_types:
+        params.append(list(fact_types))
+        where.append(f"fact_type = ANY(${len(params)}::text[])")
+
+    return await conn.fetchval(
+        f"SELECT MAX(updated_at) FROM {fq_table('memory_units')} WHERE {' AND '.join(where)}",
+        *params,
+    )
 
 
 async def latest_memory_write_at(

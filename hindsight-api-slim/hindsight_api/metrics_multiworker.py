@@ -35,7 +35,7 @@ import tempfile
 import threading
 import time
 from collections.abc import Iterable
-from typing import IO
+from typing import IO, cast
 
 from prometheus_client import REGISTRY, CollectorRegistry, generate_latest
 from prometheus_client.metrics_core import Metric
@@ -108,7 +108,9 @@ def merge_expositions(parts: Iterable[tuple[str, str]]) -> bytes:
                     sample.name, {**sample.labels, LABEL: slot}, sample.value, sample.timestamp, sample.exemplar
                 )
     registry = CollectorRegistry(auto_describe=False)
-    registry.register(_Families(families.values()))
+    # `_Families` implements `collect()`, which is all a registry calls; it does not inherit
+    # prometheus_client's `Collector` base.
+    registry.register(cast("Collector", _Families(families.values())))
     return generate_latest(registry)
 
 

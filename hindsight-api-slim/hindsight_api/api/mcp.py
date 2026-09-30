@@ -188,7 +188,9 @@ def create_mcp_server(memory: MemoryEngine, multi_bank: bool = True) -> FastMCP:
         mcp_authenticated_resolver=get_current_mcp_authenticated,  # Propagate MCP pre-auth flag
         extra_headers_resolver=get_current_extra_headers,  # Propagate allowlisted headers to extensions
         include_bank_id_param=multi_bank,
-        tools=base_tools,
+        # `set(...)`: the parameter declares a mutable set and `base_tools` is frozen. Copying is
+        # what the callee's declaration asks for, and it cannot then alias our constant.
+        tools=set(base_tools) if base_tools is not None else None,
         retain_description=retain_description,
         recall_description=recall_description,
     )

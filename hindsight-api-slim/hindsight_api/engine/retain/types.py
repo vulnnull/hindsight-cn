@@ -11,7 +11,7 @@ from array import array
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Literal, TypedDict
+from typing import Literal, TypedDict, cast
 from uuid import UUID
 
 import numpy as np
@@ -47,7 +47,7 @@ EmbeddingLike = PackedEmbedding | Sequence[float] | str
 
 def _repr_literal(values: Iterable[object]) -> str:
     """Per-element ``repr()`` formatting, kept for non-finite and non-numeric inputs."""
-    return "[" + ",".join(repr(float(v)) for v in values) + "]"  # type: ignore[arg-type]
+    return "[" + ",".join(repr(float(cast(float, v))) for v in values) + "]"
 
 
 @functools.lru_cache(maxsize=64)

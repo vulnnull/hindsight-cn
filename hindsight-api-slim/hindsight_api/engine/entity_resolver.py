@@ -1680,7 +1680,9 @@ class EntityResolver:
                 if prev is _SENTINEL_MISSING:
                     cooccurrence_pairs[key] = event_date
                 else:
-                    cooccurrence_pairs[key] = _later_date(prev, event_date)
+                    # `prev` came out of the map compared against a sentinel, which widens it
+                    # to object; the branch above is what proves it is a stored date.
+                    cooccurrence_pairs[key] = _later_date(cast("datetime | None", prev), event_date)
 
         # Accumulate co-occurrence pairs for post-transaction flush.
         # The actual INSERT/UPDATE is deferred to flush_pending_stats() to avoid

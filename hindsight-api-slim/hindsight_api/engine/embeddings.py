@@ -72,7 +72,7 @@ from .remote_retry import (
 from .tei_retry import TEI_KEEPALIVE_EXPIRY_SECONDS, is_retryable_tei_transport_error, tei_retry_delay
 
 if TYPE_CHECKING:
-    from ..config import HindsightConfig
+    from ..config import ConfigLike
 
 logger = logging.getLogger(__name__)
 
@@ -2130,7 +2130,7 @@ class GeminiEmbeddings(Embeddings):
         return [emb.values for emb in embeddings]
 
 
-def _retry_policy_from_config(config: "HindsightConfig") -> RetryPolicy:
+def _retry_policy_from_config(config: "ConfigLike") -> RetryPolicy:
     """Build the embedding retry policy from resolved configuration."""
     return RetryPolicy(
         max_retries=config.embeddings_max_retries,
@@ -2140,7 +2140,7 @@ def _retry_policy_from_config(config: "HindsightConfig") -> RetryPolicy:
     )
 
 
-def _with_request_concurrency(backend: Embeddings, config: "HindsightConfig") -> Embeddings:
+def _with_request_concurrency(backend: Embeddings, config: "ConfigLike") -> Embeddings:
     """Let a remote backend keep several requests in flight for one encode() call.
 
     Set here rather than in eight constructor signatures: the bound is a property of the

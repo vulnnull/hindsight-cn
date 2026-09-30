@@ -45,7 +45,7 @@ import time
 from collections.abc import Mapping
 from contextlib import AbstractAsyncContextManager, nullcontext, suppress
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, cast
 from urllib.parse import urlsplit
 
 import aiohttp
@@ -411,7 +411,8 @@ class XaiOAuthLLM(LLMInterface):
         (the request timeout). Passing the timeout alone would silently defeat
         the skew on short-timeout lanes.
         """
-        return max(DEFAULT_REFRESH_SKEW_SECONDS, self.timeout)
+        # `timeout` is resolved from config in __init__ and is a number from then on.
+        return max(DEFAULT_REFRESH_SKEW_SECONDS, cast(float, self.timeout))
 
     async def _access_token(self) -> str:
         """Return a token good for at least :meth:`_admission_ttl` seconds."""
@@ -474,7 +475,7 @@ class XaiOAuthLLM(LLMInterface):
 
     def _new_client(self) -> LoopLocalSession:
         """Build a replacement pooled client. A seam tests override directly."""
-        return LoopLocalSession(timeout=build_aiohttp_timeout(self.timeout))
+        return LoopLocalSession(timeout=build_aiohttp_timeout(cast(float, self.timeout)))
 
     async def _recycle_client(self) -> None:
         """Drop the shared client's pooled connections after a retryable >=500.

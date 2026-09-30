@@ -13,7 +13,7 @@ import time
 import warnings
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from typing import Any, cast
 
 import aiohttp
 
@@ -630,7 +630,9 @@ class RemoteTEICrossEncoder(CrossEncoderModel):
         # Run all requests in parallel with GLOBAL semaphore for backpressure
         # This ensures max_concurrent is respected across ALL parallel recall operations
         all_scores = [0.0] * len(pairs)
-        semaphore = RemoteTEICrossEncoder._global_semaphore
+        # Built lazily above and non-None from that point on; the class attribute stays Optional
+        # because it is unset until the first predict sizes it from config.
+        semaphore = cast(CrossLoopSemaphore, RemoteTEICrossEncoder._global_semaphore)
 
         tasks = [self._rerank_query_group(semaphore, query, texts) for query, _, texts in tasks_info]
         results = await asyncio.gather(*tasks)

@@ -2429,7 +2429,12 @@ async def _streaming_retain_batch(
     all_unit_ids: list[str] = []
 
     # document_id is already resolved by retain_batch (includes recovery from
-    # operation result_metadata on retry).
+    # operation result_metadata on retry), so it is always present here even though the
+    # parameter is optional. Stated rather than assumed: every use below hands it to
+    # something that declares `str`, and an unresolved id would surface as a confusing
+    # failure in whichever of them ran first.
+    if document_id is None:
+        raise ValueError("document_id must be resolved before the retain producer runs")
     effective_doc_id = document_id
 
     # Default template for metadata (context, event_date, etc.) when content list is empty.

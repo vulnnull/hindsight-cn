@@ -415,6 +415,29 @@ class InMemoryMemories(MemoriesExtension):
             rows = [r for r in rows if r.fact_type in fact_types]
         return any(r.created_at is not None and r.created_at > since for r in rows)
 
+    async def newest_memory_updated_at(
+        self,
+        *,
+        conn,
+        fq_table,
+        bank_id,
+        until,
+        since=None,
+        fact_types=None,
+        tags=None,
+        tags_match="any",
+        tag_groups=None,
+    ):
+        stamps = [
+            r.created_at
+            for r in self.rows.values()
+            if r.created_at is not None
+            and r.created_at <= until
+            and (since is None or r.created_at > since)
+            and (not fact_types or r.fact_type in fact_types)
+        ]
+        return max(stamps, default=None)
+
     async def live_memory_ids(self, *, conn, fq_table, bank_id, unit_ids):
         # "Live" for this stub is simply "present in self.rows" — the retraction
         # check only ever asks whether the id still resolves, so a store that keeps
@@ -948,6 +971,54 @@ async def test_engine_list_tags_routes_through_the_installed_store(memory, reque
 
     assert result["items"] == [{"tag": "only-in-the-store", "count": 1}]
     assert "list_tags" in store.calls
+
+
+async def test_mental_model_refresh_reads_memories_only_the_store_holds(memory, request_context, restore_default_store):
+    """A refresh must find its scope's memories through the store, not in ``memory_units`` (#4966).
+
+    The memory lives only in the stub's dict. A refresh that asked Postgres whether the scope held
+    anything saw an empty table, skipped the reflect loop with ``no_sources_in_scope``, and never
+    advanced its watermark — so the staleness check (which does go through the store) re-queued it
+    forever and the page never filled.
+    """
+    from hindsight_api.engine.response_models import ReflectResult
+
+    store = InMemoryMemories({})
+    set_memories(store)
+    bank_id = f"seam-mm-{uuid.uuid4().hex[:8]}"
+    await memory.ensure_bank_profile(bank_id, request_context=request_context)
+    mm = await memory.create_mental_model(
+        bank_id=bank_id,
+        name="Pets",
+        source_query="What do we know about the pets?",
+        content="",
+        request_context=request_context,
+    )
+
+    class _Fact:
+        fact_text = "the cat sat on the mat"
+        fact_type = "world"
+        tags: list[str] = []
+
+    await store.insert_facts(conn=None, ops=None, bank_id=bank_id, facts=[_Fact()], document_id="d")
+
+    reflect_calls: list[dict] = []
+
+    async def fake_reflect_async(**kwargs):
+        reflect_calls.append(kwargs)
+        return ReflectResult(text="The cat sits on the mat.", based_on={})
+
+    memory.reflect_async = fake_reflect_async  # type: ignore[method-assign]
+
+    refreshed = await memory.refresh_mental_model(
+        bank_id=bank_id, mental_model_id=mm["id"], request_context=request_context
+    )
+
+    assert len(reflect_calls) == 1, "the refresh skipped reflect over a scope the store says is non-empty"
+    assert refreshed["reflect_response"].get("reflect_skipped") is None
+    assert refreshed["last_memory_seen_at"] is not None, "the watermark must advance past what was read"
+
+    await memory.delete_bank(bank_id, request_context=request_context)
 
 
 async def test_maintenance_passes_are_optional(restore_default_store):

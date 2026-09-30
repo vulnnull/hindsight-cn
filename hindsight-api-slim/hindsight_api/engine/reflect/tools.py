@@ -12,15 +12,18 @@ import logging
 import uuid
 from dataclasses import replace
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from ..chunk_ids import resolve_chunk_id_in
+from ..search.tags import TagsMatch
 from .tokenization import count_prompt_tokens
 
 if TYPE_CHECKING:
-    from asyncpg import Connection
-
+    # The engine's own connection abstraction, which is what every caller passes. This said
+    # `asyncpg.Connection` -- the concrete driver type -- which predates that abstraction and
+    # was never what arrived here; only `.fetch()` is used, and both provide it.
     from ...api.http import RequestContext
+    from ..db.base import DatabaseConnection
     from ..memory_engine import MemoryEngine
 
 logger = logging.getLogger(__name__)
@@ -111,14 +114,14 @@ def _document_metadata_from_retain_params(retain_params: Any) -> dict[str, Any] 
 
 async def tool_search_mental_models(
     memory_engine: "MemoryEngine",
-    conn: "Connection",
+    conn: "DatabaseConnection",
     bank_id: str,
     query: str,
     query_embedding: list[float],
     max_results: int = 5,
     top_result_max_tokens: int = 4000,
     tags: list[str] | None = None,
-    tags_match: str = "any",
+    tags_match: TagsMatch = "any",
     tag_groups: "list | None" = None,
     exclude_ids: list[str] | None = None,
     last_memory_write_at: datetime | None = None,
@@ -302,7 +305,7 @@ async def tool_search_mental_models(
 
 
 async def tool_read_mental_models(
-    conn: "Connection",
+    conn: "DatabaseConnection",
     bank_id: str,
     mental_model_ids: list[str],
     max_tokens: int = 6000,
@@ -370,7 +373,7 @@ async def tool_search_observations(
     request_context: "RequestContext",
     max_tokens: int = 5000,
     tags: list[str] | None = None,
-    tags_match: str = "any",
+    tags_match: TagsMatch = "any",
     tag_groups: "list | None" = None,
     last_consolidated_at: datetime | None = None,
     pending_consolidation: int = 0,
@@ -463,7 +466,7 @@ async def tool_recall(
     request_context: "RequestContext",
     max_tokens: int = 2048,
     tags: list[str] | None = None,
-    tags_match: str = "any",
+    tags_match: TagsMatch = "any",
     tag_groups: "list | None" = None,
     connection_budget: int = 1,
     max_chunk_tokens: int = 1000,
@@ -530,7 +533,7 @@ async def tool_recall(
 
 
 async def tool_expand(
-    conn: "Connection",
+    conn: "DatabaseConnection",
     bank_id: str,
     memory_ids: list[str],
     depth: str,
@@ -628,6 +631,10 @@ async def tool_expand(
                 continue
             if cid in _seen_chunks:
                 continue
+            # `cid` / `did` are row values, typed as the union of everything the row holds; the
+            # `if not cid or not did` guard above is what makes them present, not what types them.
+            cid = cast(str, cid)
+            did = cast(str, did)
             ref = resolve_chunk_id_in(cid, bank_id)
             if ref is None or ref.document_id != did:
                 continue
@@ -660,7 +667,7 @@ async def tool_expand(
     if depth == "document":
         for m in memories:
             if not m["chunk_id"] and m["document_id"]:
-                doc_ids_direct.add(m["document_id"])
+                doc_ids_direct.add(cast(str, m["document_id"]))
 
     # Batch fetch all documents
     doc_map: dict[str, Any] = {}
@@ -718,7 +725,7 @@ async def tool_expand(
 
         # Add chunk if available
         if memory["chunk_id"] and memory["chunk_id"] in chunk_map:
-            chunk = chunk_map[memory["chunk_id"]]
+            chunk = chunk_map[cast(str, memory["chunk_id"])]
             item["chunk"] = {
                 "id": chunk["chunk_id"],
                 "text": chunk["chunk_text"],
@@ -736,7 +743,7 @@ async def tool_expand(
                 }
         elif memory["document_id"] and depth == "document" and memory["document_id"] in doc_map:
             # No chunk, but has document_id
-            doc = doc_map[memory["document_id"]]
+            doc = doc_map[cast(str, memory["document_id"])]
             item["document"] = {
                 "id": doc["id"],
                 "full_text": doc["original_text"],

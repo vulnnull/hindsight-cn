@@ -28,6 +28,7 @@ import asyncio
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Union
 
 from ..memory_engine import fq_table
 from .attachment_content import LoadedAttachment, RetainAttachment, short_attachment_id
@@ -326,3 +327,12 @@ class InMemoryAttachmentLoader:
 
     async def load(self, attachment_ids: Sequence[str]) -> dict[str, LoadedAttachment]:
         return {att_id: self._attachments[att_id] for att_id in attachment_ids if att_id in self._attachments}
+
+
+#: Either loader a retain/extraction call can be handed.
+#:
+#: :class:`RetainAttachmentLoader` reads blobs back from storage for a real retain;
+#: :class:`InMemoryAttachmentLoader` serves a preview/dry run from bytes already in hand. Neither
+#: subclasses the other -- they present the same small `load()` surface -- so a parameter naming
+#: only the first rejects every dry-run caller. Widening only: existing callers stay valid.
+AttachmentLoader = Union[RetainAttachmentLoader, InMemoryAttachmentLoader]

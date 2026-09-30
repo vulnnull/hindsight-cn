@@ -23,6 +23,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from ..search.tags import TagsMatch
 from .base import (
     DeletePredicate,
     EntityPrunePassResult,
@@ -91,7 +92,7 @@ class PostgresMemories(MemoriesExtension):
         temporal_window: "tuple[datetime, datetime] | None" = None,
         temporal_semantic_threshold: float = 0.1,
         tags: list[str] | None = None,
-        tags_match: str = "any",
+        tags_match: TagsMatch = "any",
         tag_groups: list | None = None,
         created_after: datetime | None = None,
         created_before: datetime | None = None,
@@ -220,7 +221,7 @@ class PostgresMemories(MemoriesExtension):
         query_text: str,
         limit: int,
         tags: list[str] | None = None,
-        tags_match: str = "any",
+        tags_match: TagsMatch = "any",
         tag_groups: list | None = None,
         created_after: datetime | None = None,
         created_before: datetime | None = None,
@@ -271,7 +272,7 @@ class PostgresMemories(MemoriesExtension):
         limit: int,
         semantic_threshold: float = 0.1,
         tags: list[str] | None = None,
-        tags_match: str = "any",
+        tags_match: TagsMatch = "any",
         tag_groups: list | None = None,
         created_after: datetime | None = None,
         created_before: datetime | None = None,
@@ -309,7 +310,7 @@ class PostgresMemories(MemoriesExtension):
         limit: int = 100,
         page_token: str = "",
         tags: list[str] | None = None,
-        tags_match: str = "any",
+        tags_match: TagsMatch = "any",
         tag_groups: list | None = None,
         document_id: str | None = None,
         metadata_equals: dict[str, str] | None = None,
@@ -405,7 +406,7 @@ class PostgresMemories(MemoriesExtension):
         since: datetime,
         fact_types: list[str] | None = None,
         tags: list[str] | None = None,
-        tags_match: str = "any",
+        tags_match: TagsMatch = "any",
         tag_groups: list | None = None,
     ) -> bool:
         return await reads.any_memory_updated_since(
@@ -428,6 +429,31 @@ class PostgresMemories(MemoriesExtension):
         scopes: list[MemoryScopeWatermark],
     ) -> dict[str, bool]:
         return await reads.any_memory_updated_since_batch(conn=conn, fq_table=fq_table, bank_id=bank_id, scopes=scopes)
+
+    async def newest_memory_updated_at(
+        self,
+        *,
+        conn,
+        fq_table,
+        bank_id: str,
+        until: datetime,
+        since: datetime | None = None,
+        fact_types: list[str] | None = None,
+        tags: list[str] | None = None,
+        tags_match: TagsMatch = "any",
+        tag_groups: list | None = None,
+    ) -> datetime | None:
+        return await reads.newest_memory_updated_at(
+            conn=conn,
+            fq_table=fq_table,
+            bank_id=bank_id,
+            until=until,
+            since=since,
+            fact_types=fact_types,
+            tags=tags,
+            tags_match=tags_match,
+            tag_groups=tag_groups,
+        )
 
     async def latest_memory_write_at(self, *, conn, fq_table, bank_id: str) -> datetime | None:
         return await reads.latest_memory_write_at(conn=conn, fq_table=fq_table, bank_id=bank_id)
@@ -495,7 +521,7 @@ class PostgresMemories(MemoriesExtension):
         document_id: str | None = None,
         entity_id: str | None = None,
         tags: list[str] | None = None,
-        tags_match: str = "any",
+        tags_match: TagsMatch = "any",
         created_before: datetime | None = None,
         time_field: str | None = None,
         start_date: datetime | None = None,
@@ -615,7 +641,7 @@ class PostgresMemories(MemoriesExtension):
         document_id: str | None = None,
         chunk_id: str | None = None,
         tags: list[str] | None = None,
-        tags_match: str = "all_strict",
+        tags_match: TagsMatch = "all_strict",
         limit: int = 1000,
     ) -> dict[str, Any]:
         return await graph.graph_units(

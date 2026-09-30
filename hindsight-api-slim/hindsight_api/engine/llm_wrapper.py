@@ -8,7 +8,7 @@ import re
 import time
 import uuid
 from contextlib import AsyncExitStack, asynccontextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Union
 
 from json_repair import repair_json
 from pydantic import BaseModel
@@ -47,6 +47,7 @@ from .llm_transport import configure_http_logging
 from .provider_auth import requires_api_key as requires_api_key
 
 if TYPE_CHECKING:
+    from .multi_llm import MultiLLMProvider
     from .response_models import LLMToolCallResult
 
 logger = logging.getLogger(__name__)
@@ -1744,7 +1745,7 @@ class ConfiguredLLMProvider:
 
     def __init__(
         self,
-        provider: "LLMProvider",
+        provider: "AnyLLMProvider",
         gemini_safety_settings: list | None,
         trace_ctx: Any | None = None,
     ) -> None:
@@ -1838,3 +1839,15 @@ class ConfiguredLLMProvider:
 
 # Backwards compatibility alias
 LLMConfig = LLMProvider
+
+#: Anything a call site can use as "the LLM to call".
+#:
+#: Three unrelated classes are interchangeable here and none subclasses another:
+#: :class:`LLMProvider`, :class:`ConfiguredLLMProvider` (``with_config()``, which delegates every
+#: attribute to the provider it wraps) and ``MultiLLMProvider`` (a fallback chain presenting the
+#: same surface). Annotating a parameter with :class:`LLMProvider` alone therefore rejects two of
+#: the three, and the call sites that pass them are correct code a nominal check reads as wrong.
+#:
+#: Widening only: every existing caller stays valid. A function that genuinely needs the concrete
+#: class -- to reach something the wrappers do not forward -- should keep naming it.
+AnyLLMProvider = Union["LLMProvider", "ConfiguredLLMProvider", "MultiLLMProvider"]

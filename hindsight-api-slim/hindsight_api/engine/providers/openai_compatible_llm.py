@@ -28,7 +28,7 @@ import time
 from contextlib import AbstractAsyncContextManager, nullcontext
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 from urllib.parse import parse_qs, urlparse, urlunparse
 
 import aiohttp
@@ -2150,8 +2150,12 @@ class OpenAICompatibleLLM(LLMInterface):
     async def submit_batch(
         self,
         requests: list[dict[str, Any]],
-        endpoint: str = "/v1/chat/completions",
-        completion_window: str = "24h",
+        # The SDK's own literals: batch creation accepts exactly these, and a plain `str` here
+        # let a typo reach the API as a runtime error instead of failing at the call site.
+        endpoint: Literal["/v1/responses", "/v1/chat/completions", "/v1/embeddings", "/v1/completions"] = (
+            "/v1/chat/completions"
+        ),
+        completion_window: Literal["24h"] = "24h",
     ) -> dict[str, Any]:
         """
         Submit a batch of requests to OpenAI/Groq Batch API.

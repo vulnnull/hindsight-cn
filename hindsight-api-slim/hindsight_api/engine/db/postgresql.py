@@ -10,7 +10,7 @@ avoiding Python-level wrapping overhead (~570K __getitem__ calls per
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, cast
 from urllib.parse import parse_qs, urlparse
 
 import asyncpg
@@ -108,10 +108,12 @@ class PostgresConnection(DatabaseConnection):
             yield self
 
     async def execute(self, query: str, *args: Any, timeout: float | None = None) -> str:
-        return await self._conn.execute(query, *args, timeout=timeout)
+        # asyncpg's stubs declare `timeout: float`; None is its documented "no timeout", and
+        # every method on this class passes it straight through.
+        return await self._conn.execute(query, *args, timeout=cast(float, timeout))
 
     async def executemany(self, query: str, args: list[tuple[Any, ...]], *, timeout: float | None = None) -> None:
-        await self._conn.executemany(query, args, timeout=timeout)
+        await self._conn.executemany(query, args, timeout=cast(float, timeout))
 
     async def fetch(self, query: str, *args: Any, timeout: float | None = None) -> list:
         # Return raw asyncpg.Record objects — they satisfy the ResultRow

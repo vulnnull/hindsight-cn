@@ -414,7 +414,8 @@ class CrossEncoderReranker:
         token = _served_provider.set(None)
         try:
             try:
-                scores = await self.cross_encoder.predict(pairs)
+                # The model takes 2-tuples; `pairs` is built as two-element lists.
+                scores = await self.cross_encoder.predict([(a, b) for a, b in pairs])
             except RerankTimeoutError as exc:
                 logger.warning(f"Reranking: {exc}; ranking the remainder by RRF order")
                 unscored = {i for i, score in enumerate(exc.scores) if score is None}

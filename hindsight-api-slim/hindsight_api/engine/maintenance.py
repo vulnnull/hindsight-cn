@@ -62,7 +62,7 @@ from collections.abc import Coroutine
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
-from ..config import HindsightConfig, get_config
+from ..config import ConfigLike, get_config
 from ..models import RequestContext
 from .db_utils import acquire_with_retry
 from .schema import _is_oracle, fq_routine, fq_table, fq_table_explicit
@@ -236,7 +236,7 @@ class MaintenanceLoop:
 
     # ── retention ──────────────────────────────────────────────────────────
 
-    async def _run_retention(self, cfg: HindsightConfig) -> None:
+    async def _run_retention(self, cfg: ConfigLike) -> None:
         # Retention days are static server-level config, so one global cutoff
         # applies to every tenant schema (the routine sweeps them all).
         # Not gated on audit_log_enabled: it is per-bank overridable, so a bank
@@ -330,7 +330,7 @@ class MaintenanceLoop:
 
     # ── terminal operation cleanup ─────────────────────────────────────────
 
-    async def _run_operation_cleanup(self, cfg: HindsightConfig) -> None:
+    async def _run_operation_cleanup(self, cfg: ConfigLike) -> None:
         """Prune one bounded batch of expired terminal operations per tenant schema.
 
         Previously this rode the worker's task-claiming loop, so it only fired

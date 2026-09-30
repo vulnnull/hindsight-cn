@@ -7,6 +7,7 @@ Handles insertion of facts into the database.
 import json
 import logging
 import uuid
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
@@ -146,7 +147,9 @@ async def ensure_bank_exists(conn, bank_id: str, *, ops) -> None:
 async def delete_stale_observations_for_memories(
     conn,
     bank_id: str,
-    fact_ids: "list[str | uuid.UUID]",
+    # `Sequence`, not `list`: a list is invariant, so `list[str]` -- what every caller actually
+    # holds -- is not a `list[str | UUID]`. Nothing here mutates it; it is iterated and bound.
+    fact_ids: "Sequence[str | uuid.UUID]",
     ops=None,
 ) -> int:
     """Delete observations whose source memories are about to be removed.
@@ -180,7 +183,9 @@ async def delete_stale_observations_for_memories(
         ops=ops,
         fq_table=fq_table,
         bank_id=bank_id,
-        fact_ids=fact_ids,
+        # The seam declares `list`; this function now takes a Sequence so its own callers are
+        # not forced to copy. Materialise here rather than widen a method extensions override.
+        fact_ids=list(fact_ids),
     )
 
 

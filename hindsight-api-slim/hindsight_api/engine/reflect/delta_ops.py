@@ -45,7 +45,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Any, Literal, Union, cast
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator
 
@@ -424,7 +424,8 @@ def _unreachable_correction_prompt(
     # A mistyped block id (#4829) is fixed by seeing the real ones, so list the
     # blocks of every section a failed block op named.
     for section_id in dict.fromkeys(e.get("section_id") for e in skipped if e.get("block_id")):
-        section = document.section_by_id(section_id)
+        # `section_id` is a dict read, filtered above to entries that carry one.
+        section = document.section_by_id(cast(str, section_id))
         if section is None:
             continue
         lines += ["", f"The blocks of section {section.id} are:"]
