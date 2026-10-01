@@ -444,8 +444,76 @@ for _, hit := range results.Results {
 |---|---|---|---|
 | `q` | string | — | Required. Search query (min length 1). |
 | `limit` | int | `10` | Maximum results, 1–50. |
+| `tags` | string[] | — | Only pages carrying these tags, matched per `tags_match`. See [Filter by Tags](#filter-by-tags). |
+| `tags_match` | string | `any` | `any`, `all`, `any_strict`, `all_strict`, or `exact`. |
+| `tag_groups` | string | — | JSON-encoded compound filter, same shape as recall's `tag_groups`. |
 
 This searches whole pages. To search individual memories, use [recall](./recall.md).
+
+### Filter by Tags
+
+The tree and search take the same tag filter as [recall](./recall.md): `tags` with `tags_match`, or a compound `tag_groups` expression (JSON-encoded in the query string, since both are `GET` requests). It matches each page's own tags. Search ranks only among the pages that match, and the tree keeps only matching pages plus the folders above them. A folder with no matching page under it is left out, because its name can reveal as much as its pages.
+
+As in recall, `any` and `all` also return **untagged** pages. Use `any_strict`, `all_strict`, or `exact` when only tagged pages should come back, for example to show a user only their own pages.
+
+### Python
+
+```python
+# Narrow the tree and search to pages carrying a tag (recall's tags / tags_match / tag_groups)
+tree = client.get_knowledge_base_tree(BANK_ID, tags=["type:runbook"], tags_match="any_strict")
+ops_hits = client.search_knowledge_base(BANK_ID, q="how do we deploy", tags=["ops"], tags_match="all_strict")
+print(f"{len(tree.roots)} runbook roots, {len(ops_hits.results)} ops hits")
+
+# Compound filters use tag_groups: here, runbooks that are not drafts
+not_drafts = client.search_knowledge_base(
+    BANK_ID,
+    q="how do we deploy",
+    tag_groups=[{"and": [{"tags": ["type:runbook"]}, {"not": {"tags": ["draft"]}}]}],
+)
+print(f"{len(not_drafts.results)} non-draft runbooks")
+```
+
+### Node.js
+
+```javascript
+// Narrow the tree and search to pages carrying a tag (recall's tags / tags_match / tag_groups)
+const runbooks = await client.getKnowledgeBaseTree(BANK_ID, { tags: ['type:runbook'], tagsMatch: 'any_strict' });
+const opsHits = await client.searchKnowledgeBase(BANK_ID, 'how do we deploy', { tags: ['ops'], tagsMatch: 'all_strict' });
+console.log(`${runbooks.roots.length} runbook roots, ${opsHits.results.length} ops hits`);
+
+// Compound filters use tagGroups: here, runbooks that are not drafts
+const notDrafts = await client.searchKnowledgeBase(BANK_ID, 'how do we deploy', {
+    tagGroups: [{ and: [{ tags: ['type:runbook'] }, { not: { tags: ['draft'] } }] }],
+});
+console.log(`${notDrafts.results.length} non-draft runbooks`);
+```
+
+### CLI
+
+```bash
+# Narrow the tree and search to pages carrying a tag (recall's tags / tags_match / tag_groups)
+hindsight knowledge-base tree "$BANK_ID" --tags type:runbook --tags-match any_strict
+hindsight knowledge-base search "$BANK_ID" "how do we deploy" --tags ops --tags-match all_strict
+
+# Compound filters use --tag-groups: here, runbooks that are not drafts
+hindsight knowledge-base search "$BANK_ID" "how do we deploy" \
+    --tag-groups '[{"and":[{"tags":["type:runbook"]},{"not":{"tags":["draft"]}}]}]'
+```
+
+### Go
+
+```go
+// Narrow the tree and search to pages carrying a tag (recall's tags / tags_match / tag_groups)
+runbooks, _, _ := client.KnowledgeBaseAPI.GetKnowledgeBaseTree(ctx, kpBankID).
+	Tags([]string{"type:runbook"}).TagsMatch("any_strict").Execute()
+fmt.Printf("runbook roots: %d\n", len(runbooks.Roots))
+
+// Compound filters use tag_groups, sent as one JSON-encoded query param
+notDrafts, _, _ := client.KnowledgeBaseAPI.SearchKnowledgeBase(ctx, kpBankID).
+	Q("how do we deploy").
+	TagGroups(`[{"and":[{"tags":["type:runbook"]},{"not":{"tags":["draft"]}}]}]`).Execute()
+fmt.Printf("non-draft hits: %d\n", len(notDrafts.Results))
+```
 
 ---
 

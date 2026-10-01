@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..retain.types import EmbeddingLike, EntityResolutionResult
 from ..schema import fq_store_table, fq_store_table_explicit
-from ..search.tags import TagsMatch
+from ..search.tags import TagGroup, TagsMatch
 from .base import (
     AttachmentRef,
     BankContentCounts,
@@ -397,9 +397,16 @@ class PostgresMemories(MemoriesExtension):
         pattern: str | None = None,
         limit: int = 100,
         offset: int = 0,
+        tag_groups: list[TagGroup] | None = None,
     ) -> dict[str, Any]:
         return await reads.list_tags(
-            conn=conn, fq_table=fq_store_table, bank_id=bank_id, pattern=pattern, limit=limit, offset=offset
+            conn=conn,
+            fq_table=fq_store_table,
+            bank_id=bank_id,
+            pattern=pattern,
+            limit=limit,
+            offset=offset,
+            tag_groups=tag_groups,
         )
 
     async def find_unconsolidated(
@@ -529,17 +536,38 @@ class PostgresMemories(MemoriesExtension):
         return await counts.link_counts(conn=conn, fq_table=fq_store_table, bank_id=bank_id)
 
     async def memories_timeseries(
-        self, *, conn, fq_table, bank_id: str, time_field: str, trunc: str, since: datetime
+        self,
+        *,
+        conn,
+        fq_table,
+        bank_id: str,
+        time_field: str,
+        trunc: str,
+        since: datetime,
+        tag_groups: list[TagGroup] | None = None,
     ) -> list[dict[str, Any]]:
         return await counts.memories_timeseries(
-            conn=conn, fq_table=fq_store_table, bank_id=bank_id, time_field=time_field, trunc=trunc, since=since
+            conn=conn,
+            fq_table=fq_store_table,
+            bank_id=bank_id,
+            time_field=time_field,
+            trunc=trunc,
+            since=since,
+            tag_groups=tag_groups,
         )
 
     async def observation_scope_counts(
-        self, *, conn, fq_table, bank_id: str, limit: int = 100, offset: int = 0
+        self,
+        *,
+        conn,
+        fq_table,
+        bank_id: str,
+        limit: int = 100,
+        offset: int = 0,
+        tag_groups: list[TagGroup] | None = None,
     ) -> dict[str, Any]:
         return await counts.observation_scope_counts(
-            conn=conn, fq_table=fq_store_table, bank_id=bank_id, limit=limit, offset=offset
+            conn=conn, fq_table=fq_store_table, bank_id=bank_id, limit=limit, offset=offset, tag_groups=tag_groups
         )
 
     # ------------------------------------------------------------------ observations
@@ -576,6 +604,7 @@ class PostgresMemories(MemoriesExtension):
         entity_id: str | None = None,
         tags: list[str] | None = None,
         tags_match: TagsMatch = "any",
+        tag_groups: list[TagGroup] | None = None,
         created_before: datetime | None = None,
         time_field: str | None = None,
         start_date: datetime | None = None,
@@ -596,6 +625,7 @@ class PostgresMemories(MemoriesExtension):
             entity_id=entity_id,
             tags=tags,
             tags_match=tags_match,
+            tag_groups=tag_groups,
             created_before=created_before,
             time_field=time_field,
             start_date=start_date,
@@ -653,6 +683,7 @@ class PostgresMemories(MemoriesExtension):
         entity_names: list[str] | None = None,  # noqa: ARG002 — this store's registry is SQL; the host already minted+linked, so entity_ids is authoritative.
         embedding=None,
         current_fact_type: str | None = None,  # noqa: ARG002 — one UPDATE writes every field, so a fact-type change needs no different path.
+        exact_entity_names: bool = False,  # noqa: ARG002 — the host already resolved with the caller's flag; entity_ids is authoritative.
     ) -> None:
         await writes.apply_edit(
             conn=conn,
@@ -677,11 +708,22 @@ class PostgresMemories(MemoriesExtension):
         fq_table,
         bank_id: str,
         search: str | None = None,
+        tags: list[str] | None = None,
+        tags_match: TagsMatch = "any",
+        tag_groups: list | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> dict[str, Any]:
         return await curation.list_entities(
-            conn=conn, fq_table=fq_store_table, bank_id=bank_id, search=search, limit=limit, offset=offset
+            conn=conn,
+            fq_table=fq_store_table,
+            bank_id=bank_id,
+            search=search,
+            tags=tags,
+            tags_match=tags_match,
+            tag_groups=tag_groups,
+            limit=limit,
+            offset=offset,
         )
 
     # ------------------------------------------------------------------ graph
@@ -698,6 +740,7 @@ class PostgresMemories(MemoriesExtension):
         chunk_id: str | None = None,
         tags: list[str] | None = None,
         tags_match: TagsMatch = "all_strict",
+        tag_groups: list[TagGroup] | None = None,
         limit: int = 1000,
     ) -> dict[str, Any]:
         return await graph.graph_units(
@@ -710,6 +753,7 @@ class PostgresMemories(MemoriesExtension):
             chunk_id=chunk_id,
             tags=tags,
             tags_match=tags_match,
+            tag_groups=tag_groups,
             limit=limit,
         )
 
@@ -720,10 +764,24 @@ class PostgresMemories(MemoriesExtension):
         return await graph.graph_direct_links(conn=conn, fq_table=fq_store_table, bank_id=bank_id, unit_ids=unit_ids)
 
     async def entity_memory_counts(
-        self, *, conn, fq_table, bank_id: str, entity_ids: list[str] | None = None
+        self,
+        *,
+        conn,
+        fq_table,
+        bank_id: str,
+        entity_ids: list[str] | None = None,
+        tags: list[str] | None = None,
+        tags_match: TagsMatch = "any",
+        tag_groups: list | None = None,
     ) -> dict[str, int]:
         return await graph.entity_memory_counts(
-            conn=conn, fq_table=fq_store_table, bank_id=bank_id, entity_ids=entity_ids
+            conn=conn,
+            fq_table=fq_store_table,
+            bank_id=bank_id,
+            entity_ids=entity_ids,
+            tags=tags,
+            tags_match=tags_match,
+            tag_groups=tag_groups,
         )
 
     async def entities_for_units(self, *, conn, fq_table, bank_id: str, unit_ids: list[str]) -> dict[str, list[str]]:
@@ -872,6 +930,11 @@ class PostgresMemories(MemoriesExtension):
             conn=conn, fq_table=fq_store_table, bank_id=bank_id, document_id=document_id
         )
 
+    async def documents_tags(self, *, conn, fq_table, bank_id: str, document_ids: list[str]) -> dict[str, list[str]]:
+        return await documents.documents_tags(
+            conn=conn, fq_table=fq_store_table, bank_id=bank_id, document_ids=document_ids
+        )
+
     async def update_document_tags(
         self, *, conn, fq_table, bank_id: str, document_id: str, tags: list[str] | None, found: bool
     ) -> bool:
@@ -912,6 +975,7 @@ class PostgresMemories(MemoriesExtension):
         search_query: str | None,
         tags: list[str] | None,
         tags_match: TagsMatch,
+        tag_groups: list[TagGroup] | None,
         time_field: str | None,
         start_date: datetime | None,
         end_date: datetime | None,
@@ -925,6 +989,7 @@ class PostgresMemories(MemoriesExtension):
             search_query=search_query,
             tags=tags,
             tags_match=tags_match,
+            tag_groups=tag_groups,
             time_field=time_field,
             start_date=start_date,
             end_date=end_date,
@@ -1013,17 +1078,51 @@ class PostgresMemories(MemoriesExtension):
         # Not bank-scoped, exactly as before: the ids come from this bank's own observation.
         return await engine_curation.source_fact_summaries(conn=conn, fq_table=fq_store_table, unit_ids=unit_ids)
 
-    async def entity_graph(self, *, conn, fq_table, bank_id: str, limit: int, min_count: int) -> dict:
+    async def entity_graph(
+        self,
+        *,
+        conn,
+        fq_table,
+        bank_id: str,
+        limit: int,
+        min_count: int,
+        tags: list[str] | None = None,
+        tags_match: TagsMatch = "any",
+        tag_groups: list | None = None,
+    ) -> dict:
         return await engine_curation.entity_graph(
-            conn=conn, fq_table=fq_store_table, bank_id=bank_id, limit=limit, min_count=min_count
+            conn=conn,
+            fq_table=fq_store_table,
+            bank_id=bank_id,
+            limit=limit,
+            min_count=min_count,
+            tags=tags,
+            tags_match=tags_match,
+            tag_groups=tag_groups,
         )
 
     async def count_bank_documents(self, *, conn, fq_table, bank_id: str) -> int:
         return await engine_curation.count_bank_documents(conn=conn, fq_table=fq_store_table, bank_id=bank_id)
 
-    async def get_entity_detail(self, *, conn, fq_table, bank_id: str, entity_id: uuid.UUID) -> dict[str, Any] | None:
+    async def get_entity_detail(
+        self,
+        *,
+        conn,
+        fq_table,
+        bank_id: str,
+        entity_id: uuid.UUID,
+        tags: list[str] | None = None,
+        tags_match: TagsMatch = "any",
+        tag_groups: list | None = None,
+    ) -> dict[str, Any] | None:
         return await engine_curation.get_entity_detail(
-            conn=conn, fq_table=fq_store_table, bank_id=bank_id, entity_id=entity_id
+            conn=conn,
+            fq_table=fq_store_table,
+            bank_id=bank_id,
+            entity_id=entity_id,
+            tags=tags,
+            tags_match=tags_match,
+            tag_groups=tag_groups,
         )
 
     # ------------------------------------------------------------------ retain

@@ -78,6 +78,21 @@ for hit in results.results:
     print(f"{hit.score:.3f}  {hit.name}: {hit.snippet}")
 # [/docs:search-pages]
 
+# [docs:filter-by-tags]
+# Narrow the tree and search to pages carrying a tag (recall's tags / tags_match / tag_groups)
+tree = client.get_knowledge_base_tree(BANK_ID, tags=["type:runbook"], tags_match="any_strict")
+ops_hits = client.search_knowledge_base(BANK_ID, q="how do we deploy", tags=["ops"], tags_match="all_strict")
+print(f"{len(tree.roots)} runbook roots, {len(ops_hits.results)} ops hits")
+
+# Compound filters use tag_groups: here, runbooks that are not drafts
+not_drafts = client.search_knowledge_base(
+    BANK_ID,
+    q="how do we deploy",
+    tag_groups=[{"and": [{"tags": ["type:runbook"]}, {"not": {"tags": ["draft"]}}]}],
+)
+print(f"{len(not_drafts.results)} non-draft runbooks")
+# [/docs:filter-by-tags]
+
 # [docs:update-node]
 # Rename a node, move it, and/or update a page's options.
 # Changing source_query rebuilds the page against the new question.

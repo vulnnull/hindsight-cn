@@ -2153,14 +2153,17 @@
     "editSourceQueryHint": "更改此项会根据你的记忆重建页面内容。",
     "saveChanges": "保存更改",
     "advancedSearchTitle": "高级搜索",
-    "advancedSearchDescription": "在服务器上运行混合搜索（BM25 + 向量），查看排序后的页面和原始响应。",
+    "tagFilterTitle": "按标签筛选",
+    "endpointSearch": "搜索",
+    "endpointTree": "树",
+    "advancedSearchDescription": "在服务器上试用知识库接口：混合搜索（BM25 + 向量）或页面树，使用与侧边栏相同的标签筛选，并查看原始响应。",
     "advancedQuery": "查询",
     "advancedLimit": "数量上限",
-    "advancedRun": "搜索",
+    "advancedRun": "运行",
     "advancedResults": "结果",
     "advancedJson": "原始 JSON",
     "advancedMeta": "{total} 条结果 · {ms} 毫秒",
-    "advancedIdle": "运行搜索即可查看排序后的页面和原始响应。"
+    "advancedIdle": "运行请求以查看结果和原始响应。"
   },
   "home": {
     "title": "Home",

@@ -84,6 +84,14 @@ class StubbedReply:
 
 
 @dataclass(frozen=True)
+class ToolCall:
+    """One tool call a computed rule answers with."""
+
+    name: str
+    arguments: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class ChatRule:
     contains: tuple[str, ...]
     respond: Callable[[ChatRequest], StubbedReply]
@@ -164,6 +172,20 @@ class RuleBuilder:
 
         def respond(_request: ChatRequest) -> StubbedReply:
             return _tool_call(tool_name, arguments)
+
+        return self._register(respond, requires_tools=True)
+
+    def answers_with_tool_call(self, build: Callable[[ChatRequest], ToolCall]) -> LLMStub:
+        """Compute the tool call from the request that triggered it.
+
+        For a turn whose right answer depends on what already happened in the loop —
+        call a tool once, then finish — which a fixed reply cannot express: the
+        reflect loop offers the same tools on every free turn.
+        """
+
+        def respond(request: ChatRequest) -> StubbedReply:
+            call = build(request)
+            return _tool_call(call.name, call.arguments)
 
         return self._register(respond, requires_tools=True)
 

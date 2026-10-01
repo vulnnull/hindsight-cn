@@ -9,7 +9,7 @@ is now the real one.
 """
 
 import pytest
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Query
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, Field
 
@@ -39,6 +39,13 @@ def _make_test_app() -> FastAPI:
     async def list_items(limit: int = 10, offset: int = 0):
         return {"items": [], "limit": limit, "offset": offset}
 
+    def _tag_filter(tags: list[str] | None = Query(None), tags_match: str = "any") -> str:
+        return f"{tags}:{tags_match}"
+
+    @app.get("/filtered")
+    async def filtered(tag_filter: str = Depends(_tag_filter)):
+        return {"filter": tag_filter}
+
     @app.get("/items/{item_id}")
     async def get_item(item_id: str, details: bool = False):
         return {"id": item_id, "details": details}
@@ -64,6 +71,12 @@ class TestUnknownQueryParams:
         resp = client.get("/items", params={"limit": 5, "offset": 0})
         assert resp.status_code == 200
         assert "X-Ignored-Params" not in resp.headers
+
+    def test_params_declared_by_a_dependency_are_known(self, client):
+        """A ``Depends()`` helper's query params are applied, so they are not "ignored"."""
+        resp = client.get("/filtered", params={"tags": ["a", "b"], "tags_match": "all", "nope": 1})
+        assert resp.json() == {"filter": "['a', 'b']:all"}
+        assert resp.headers["X-Ignored-Params"] == "nope"
 
     def test_unknown_query_param_sets_header(self, client):
         resp = client.get("/items", params={"limit": 5, "tag": "foo"})

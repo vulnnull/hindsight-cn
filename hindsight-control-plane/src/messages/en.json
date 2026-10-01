@@ -2140,14 +2140,17 @@
     "editSourceQueryHint": "Changing this rebuilds the page's content from your memories.",
     "saveChanges": "Save changes",
     "advancedSearchTitle": "Advanced search",
-    "advancedSearchDescription": "Run the hybrid search (BM25 + vector) on the server and inspect the ranked pages and the raw response.",
+    "tagFilterTitle": "Filter by tags",
+    "endpointSearch": "Search",
+    "endpointTree": "Tree",
+    "advancedSearchDescription": "Try the knowledge-base endpoints on the server: hybrid search (BM25 + vector) or the page tree, with the same tag filter as the sidebar, and inspect the raw response.",
     "advancedQuery": "Query",
     "advancedLimit": "Limit",
-    "advancedRun": "Search",
+    "advancedRun": "Run",
     "advancedResults": "Results",
     "advancedJson": "Raw JSON",
     "advancedMeta": "{total} results · {ms} ms",
-    "advancedIdle": "Run a search to see ranked pages and the raw response."
+    "advancedIdle": "Run a request to see the result and the raw response."
   },
   "home": {
     "title": "Home",

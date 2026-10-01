@@ -2140,14 +2140,17 @@
     "editSourceQueryHint": "改呢個會根據你嘅記憶重建頁面內容。",
     "saveChanges": "儲存變更",
     "advancedSearchTitle": "進階搜尋",
-    "advancedSearchDescription": "喺伺服器行混合搜尋（BM25 + 向量），睇排好序嘅頁面同原始回應。",
+    "tagFilterTitle": "按標籤篩選",
+    "endpointSearch": "搜尋",
+    "endpointTree": "樹",
+    "advancedSearchDescription": "喺伺服器上試用知識庫端點：混合搜尋（BM25 + 向量）或者頁面樹，用同側邊欄一樣嘅標籤篩選，再睇原始回應。",
     "advancedQuery": "查詢",
     "advancedLimit": "數量上限",
-    "advancedRun": "搜尋",
+    "advancedRun": "執行",
     "advancedResults": "結果",
     "advancedJson": "原始 JSON",
     "advancedMeta": "{total} 個結果 · {ms} 毫秒",
-    "advancedIdle": "行一次搜尋就見到排好序嘅頁面同原始回應。"
+    "advancedIdle": "執行請求就會見到結果同原始回應。"
   },
   "home": {
     "title": "首頁",

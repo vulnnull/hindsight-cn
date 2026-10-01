@@ -75,6 +75,19 @@ for (const hit of results.results) {
 }
 // [/docs:search-pages]
 
+// [docs:filter-by-tags]
+// Narrow the tree and search to pages carrying a tag (recall's tags / tags_match / tag_groups)
+const runbooks = await client.getKnowledgeBaseTree(BANK_ID, { tags: ['type:runbook'], tagsMatch: 'any_strict' });
+const opsHits = await client.searchKnowledgeBase(BANK_ID, 'how do we deploy', { tags: ['ops'], tagsMatch: 'all_strict' });
+console.log(`${runbooks.roots.length} runbook roots, ${opsHits.results.length} ops hits`);
+
+// Compound filters use tagGroups: here, runbooks that are not drafts
+const notDrafts = await client.searchKnowledgeBase(BANK_ID, 'how do we deploy', {
+    tagGroups: [{ and: [{ tags: ['type:runbook'] }, { not: { tags: ['draft'] } }] }],
+});
+console.log(`${notDrafts.results.length} non-draft runbooks`);
+// [/docs:filter-by-tags]
+
 // [docs:update-node]
 // Rename a node, move it, and/or update a page's options.
 // Changing sourceQuery rebuilds the page against the new question.

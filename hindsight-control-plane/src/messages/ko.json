@@ -2140,14 +2140,17 @@
     "editSourceQueryHint": "이 항목을 변경하면 기억을 기반으로 페이지 내용이 다시 생성됩니다.",
     "saveChanges": "변경사항 저장",
     "advancedSearchTitle": "고급 검색",
-    "advancedSearchDescription": "서버에서 하이브리드 검색(BM25 + 벡터)을 실행하고 순위가 매겨진 페이지와 원본 응답을 확인합니다.",
+    "tagFilterTitle": "태그로 필터",
+    "endpointSearch": "검색",
+    "endpointTree": "트리",
+    "advancedSearchDescription": "서버의 지식 베이스 엔드포인트를 시험해 보세요: 하이브리드 검색(BM25 + 벡터) 또는 페이지 트리를 사이드바와 같은 태그 필터로 실행하고 원시 응답을 확인합니다.",
     "advancedQuery": "질의",
     "advancedLimit": "개수 제한",
-    "advancedRun": "검색",
+    "advancedRun": "실행",
     "advancedResults": "결과",
     "advancedJson": "원본 JSON",
     "advancedMeta": "결과 {total}개 · {ms} ms",
-    "advancedIdle": "검색을 실행하면 순위가 매겨진 페이지와 원본 응답이 표시됩니다."
+    "advancedIdle": "요청을 실행하면 결과와 원시 응답이 표시됩니다."
   },
   "home": {
     "title": "홈",

@@ -2140,14 +2140,17 @@
     "editSourceQueryHint": "Wenn Sie dies ändern, wird der Inhalt der Seite aus Ihren Erinnerungen neu aufgebaut.",
     "saveChanges": "Änderungen speichern",
     "advancedSearchTitle": "Erweiterte Suche",
-    "advancedSearchDescription": "Führt die hybride Suche (BM25 + Vektor) auf dem Server aus und zeigt die bewerteten Seiten sowie die Rohantwort.",
+    "tagFilterTitle": "Nach Tags filtern",
+    "endpointSearch": "Suche",
+    "endpointTree": "Baum",
+    "advancedSearchDescription": "Teste die Knowledge-Base-Endpunkte auf dem Server: hybride Suche (BM25 + Vektor) oder den Seitenbaum, mit demselben Tag-Filter wie in der Seitenleiste, und sieh dir die Rohantwort an.",
     "advancedQuery": "Suchanfrage",
     "advancedLimit": "Limit",
-    "advancedRun": "Suchen",
+    "advancedRun": "Ausführen",
     "advancedResults": "Ergebnisse",
     "advancedJson": "Rohes JSON",
     "advancedMeta": "{total} Ergebnisse · {ms} ms",
-    "advancedIdle": "Starten Sie eine Suche, um bewertete Seiten und die Rohantwort zu sehen."
+    "advancedIdle": "Führe eine Anfrage aus, um Ergebnis und Rohantwort zu sehen."
   },
   "home": {
     "title": "Übersicht",

@@ -446,6 +446,20 @@ class BankReadContext:
     bank_id: str
     operation: BankReadOperation
     request_context: "RequestContext"
+    # The caller's tag filter, set only on the reads that take one (knowledge-base tree
+    # and search). A validator narrows what they return by answering with
+    # ``ValidationResult.accept_with(tags=..., tags_match=..., tag_groups=...)``.
+    tags: list[str] | None = None
+    tags_match: "TagsMatch" = "any"
+    tag_groups: "list[TagGroup] | None" = None
+
+
+@dataclass
+class TagScopeContext:
+    """Context for resolving the tag scope a caller is confined to in one bank."""
+
+    bank_id: str
+    request_context: "RequestContext"
 
 
 @dataclass
@@ -900,6 +914,81 @@ class OperationValidatorExtension(Extension, ABC):
                 - error: Error message (if failed)
         """
         pass
+
+    # =========================================================================
+    # Tag scope - which tagged data a caller may reach (optional - override to implement)
+    # =========================================================================
+
+    async def resolve_tag_scope(self, ctx: TagScopeContext) -> "list[TagGroup] | None":
+        """
+        Confine a caller to the memories whose tags satisfy these groups.
+
+        Override to isolate callers that share a bank by tag — e.g. a caller who may
+        read only ``user:dan`` and the shared ``kind:rule`` scope returns
+        ``[TagGroupLeaf(tags=["user:dan", "kind:rule"], match="any_strict")]``.
+
+        The engine AND-s the returned groups into every tag-scoped operation, on
+        top of whatever filter the caller asked for, so a caller can narrow its
+        scope but never widen it:
+
+        - filtered reads (recall, reflect and its tools, memory / document /
+          mental-model lists, observation scopes, tag lists, graph, timeseries,
+          entities, the knowledge-base tree, search and export) only see rows
+          inside the scope; directives keep applying when untagged;
+        - reads and writes of one item by id (a memory, a document and its
+          chunks, a mental model or knowledge node, a directive) answer 404 when
+          the item's tags fall outside it;
+        - a mental model created or updated by the caller records the scope in its
+          trigger (``scope_tag_groups``), which every refresh AND-s in, so it can
+          never be built from memories the caller could not read itself;
+        - whole-bank operations (export, clone, import, bank-wide clears, deleting
+          the bank, changing its config, mission or disposition, running or retrying
+          consolidation on request) are refused (403): they cannot be narrowed.
+
+        A ``_strict`` match is almost always what you want: the non-strict modes
+        also admit untagged rows, and an untagged mental model is built from the
+        whole bank.
+
+        Called once per operation; background work running with
+        ``request_context.internal`` is never scoped.
+
+        Args:
+            ctx: Context containing:
+                - bank_id: Bank identifier
+                - request_context: Request context with auth info
+
+        Returns:
+            Tag groups every reachable row must satisfy (AND-ed), or None for no
+            restriction.
+        """
+        return None
+
+    async def resolve_write_tag_scope(self, ctx: TagScopeContext) -> "list[str] | None":
+        """
+        The tags a caller may write in a bank, as shell-style patterns (``user:dan``, ``project:*``).
+
+        Reading and writing are separate permissions: a caller can read the shared
+        ``kind:rule`` scope without being allowed to change it. Return the tags the caller
+        may write; the engine then refuses (403) any write that would produce or touch a
+        tag outside them:
+
+        - a retain (text or files) whose item or document tags fall outside them, whose
+          explicit ``observation_scopes`` do, or whose retain strategy has an entity label
+          with ``tag: true`` that could tag a fact outside them (checked before
+          extraction, so a refused retain costs no LLM call);
+        - editing, invalidating or clearing the observations of a memory, and updating,
+          reprocessing or deleting a document, whose tags fall outside them;
+        - creating, updating, refreshing, clearing or deleting a mental model or
+          knowledge page whose tags fall outside them (including the tags it is
+          given), and moving a knowledge node into a folder that holds such pages;
+        - creating, updating or deleting a directive whose tags fall outside them.
+
+        An untagged item counts as outside any scope: it belongs to everyone. As with
+        the read scope, whole-bank operations are refused to a write-scoped caller.
+
+        Return None (the default) to leave writes unrestricted.
+        """
+        return None
 
     # =========================================================================
     # Mental Model - Pre-operation validation hook (optional - override to implement)

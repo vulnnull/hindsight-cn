@@ -56,6 +56,16 @@ hindsight knowledge-base get-page "$BANK_ID" "$PAGE_ID"
 hindsight knowledge-base search "$BANK_ID" "how do we deploy" --limit 5
 # [/docs:search-pages]
 
+# [docs:filter-by-tags]
+# Narrow the tree and search to pages carrying a tag (recall's tags / tags_match / tag_groups)
+hindsight knowledge-base tree "$BANK_ID" --tags type:runbook --tags-match any_strict
+hindsight knowledge-base search "$BANK_ID" "how do we deploy" --tags ops --tags-match all_strict
+
+# Compound filters use --tag-groups: here, runbooks that are not drafts
+hindsight knowledge-base search "$BANK_ID" "how do we deploy" \
+    --tag-groups '[{"and":[{"tags":["type:runbook"]},{"not":{"tags":["draft"]}}]}]'
+# [/docs:filter-by-tags]
+
 # [docs:update-node]
 # Rename a node, move it, and/or update a page's options.
 # Changing --source-query rebuilds the page against the new question.

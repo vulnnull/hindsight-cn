@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { localizeApiErrorPayload } from "@/lib/i18n/api-errors";
 import { dataplaneBankUrl, getDataplaneHeaders } from "@/lib/hindsight-client";
+import { tagFilterParams } from "../tag-filter-params";
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,9 +15,12 @@ export async function GET(request: NextRequest) {
         { status: 400 }
       );
     }
-    const response = await fetch(dataplaneBankUrl(bankId, "/knowledge-base/tree"), {
-      headers: getDataplaneHeaders(),
-    });
+    const response = await fetch(
+      dataplaneBankUrl(bankId, `/knowledge-base/tree?${tagFilterParams(request)}`),
+      {
+        headers: getDataplaneHeaders(),
+      }
+    );
     if (!response.ok) {
       const error = await response.json().catch(() => ({ detail: response.statusText }));
       return NextResponse.json(error, { status: response.status });

@@ -7828,6 +7828,24 @@ export type ListEntitiesData = {
      * Offset for pagination
      */
     offset?: number;
+    /**
+     * Tags
+     *
+     * Only count memories carrying these tags. An entity is returned only when a matching memory mentions it, and its mention count and dates cover the matching memories only.
+     */
+    tags?: Array<string> | null;
+    /**
+     * Tags Match
+     *
+     * How `tags` match (same modes as listing memories).
+     */
+    tags_match?: "any" | "all" | "any_strict" | "all_strict" | "exact";
+    /**
+     * Tag Groups
+     *
+     * Compound tag filter as a JSON-encoded list of tag groups — the same shape `tag_groups` takes in a recall body (leaves {tags, match, resolve} and {and: [...]}, {or: [...]}, {not: ...}; groups are AND-ed). Mutually exclusive with `tags`.
+     */
+    tag_groups?: string | null;
   };
   url: "/v1/default/banks/{bank_id}/entities";
 };
@@ -7881,6 +7899,24 @@ export type GetEntityGraphData = {
      * Minimum cooccurrence_count to include an edge
      */
     min_count?: number;
+    /**
+     * Tags
+     *
+     * Only count memories carrying these tags. Edges and node mention counts are computed from the matching memories only.
+     */
+    tags?: Array<string> | null;
+    /**
+     * Tags Match
+     *
+     * How `tags` match (same modes as listing memories).
+     */
+    tags_match?: "any" | "all" | "any_strict" | "all_strict" | "exact";
+    /**
+     * Tag Groups
+     *
+     * Compound tag filter as a JSON-encoded list of tag groups — the same shape `tag_groups` takes in a recall body (leaves {tags, match, resolve} and {and: [...]}, {or: [...]}, {not: ...}; groups are AND-ed). Mutually exclusive with `tags`.
+     */
+    tag_groups?: string | null;
   };
   url: "/v1/default/banks/{bank_id}/entities/graph";
 };
@@ -7925,7 +7961,26 @@ export type GetEntityData = {
      */
     entity_id: string;
   };
-  query?: never;
+  query?: {
+    /**
+     * Tags
+     *
+     * Only count memories carrying these tags. The entity is a 404 when no matching memory mentions it; its mention count and dates cover the matching memories only.
+     */
+    tags?: Array<string> | null;
+    /**
+     * Tags Match
+     *
+     * How `tags` match (same modes as listing memories).
+     */
+    tags_match?: "any" | "all" | "any_strict" | "all_strict" | "exact";
+    /**
+     * Tag Groups
+     *
+     * Compound tag filter as a JSON-encoded list of tag groups — the same shape `tag_groups` takes in a recall body (leaves {tags, match, resolve} and {and: [...]}, {or: [...]}, {not: ...}; groups are AND-ed). Mutually exclusive with `tags`.
+     */
+    tag_groups?: string | null;
+  };
   url: "/v1/default/banks/{bank_id}/entities/{entity_id}";
 };
 
@@ -8395,7 +8450,26 @@ export type GetKnowledgeBaseTreeData = {
      */
     bank_id: string;
   };
-  query?: never;
+  query?: {
+    /**
+     * Tags
+     *
+     * Only return pages carrying these tags (matched per `tags_match`, like recall).
+     */
+    tags?: Array<string> | null;
+    /**
+     * Tags Match
+     *
+     * How `tags` match a page's tags: any, all, any_strict, all_strict, exact. 'any'/'all' also return untagged pages; the _strict modes and 'exact' do not.
+     */
+    tags_match?: "any" | "all" | "any_strict" | "all_strict" | "exact";
+    /**
+     * Tag Groups
+     *
+     * JSON-encoded compound tag filter, same shape as recall's `tag_groups`, e.g. `[{"or":[{"tags":["user:kate"],"match":"all_strict"},{"tags":["team"]}]}]`. Top-level groups are AND-ed, and AND-ed with `tags`.
+     */
+    tag_groups?: string | null;
+  };
   url: "/v1/default/banks/{bank_id}/knowledge-base/tree";
 };
 
@@ -8566,6 +8640,24 @@ export type SearchKnowledgeBaseData = {
      * Maximum results to return
      */
     limit?: number;
+    /**
+     * Tags
+     *
+     * Only return pages carrying these tags (matched per `tags_match`, like recall).
+     */
+    tags?: Array<string> | null;
+    /**
+     * Tags Match
+     *
+     * How `tags` match a page's tags: any, all, any_strict, all_strict, exact. 'any'/'all' also return untagged pages; the _strict modes and 'exact' do not.
+     */
+    tags_match?: "any" | "all" | "any_strict" | "all_strict" | "exact";
+    /**
+     * Tag Groups
+     *
+     * JSON-encoded compound tag filter, same shape as recall's `tag_groups`, e.g. `[{"or":[{"tags":["user:kate"],"match":"all_strict"},{"tags":["team"]}]}]`. Top-level groups are AND-ed, and AND-ed with `tags`.
+     */
+    tag_groups?: string | null;
   };
   url: "/v1/default/banks/{bank_id}/knowledge-base/search";
 };

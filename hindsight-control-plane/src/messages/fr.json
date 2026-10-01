@@ -2140,14 +2140,17 @@
     "editSourceQueryHint": "Modifier ceci reconstruit le contenu de la page à partir de vos mémoires.",
     "saveChanges": "Enregistrer les modifications",
     "advancedSearchTitle": "Recherche avancée",
-    "advancedSearchDescription": "Lance la recherche hybride (BM25 + vectorielle) sur le serveur et affiche les pages classées ainsi que la réponse brute.",
+    "tagFilterTitle": "Filtrer par tags",
+    "endpointSearch": "Recherche",
+    "endpointTree": "Arbre",
+    "advancedSearchDescription": "Testez les endpoints de la base de connaissances sur le serveur : recherche hybride (BM25 + vecteur) ou arbre des pages, avec le même filtre de tags que la barre latérale, et inspectez la réponse brute.",
     "advancedQuery": "Requête",
     "advancedLimit": "Limite",
-    "advancedRun": "Rechercher",
+    "advancedRun": "Exécuter",
     "advancedResults": "Résultats",
     "advancedJson": "JSON brut",
     "advancedMeta": "{total} résultats · {ms} ms",
-    "advancedIdle": "Lancez une recherche pour voir les pages classées et la réponse brute."
+    "advancedIdle": "Lancez une requête pour voir le résultat et la réponse brute."
   },
   "home": {
     "title": "Accueil",

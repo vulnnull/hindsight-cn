@@ -1348,6 +1348,9 @@ class TestObservationDrillDown:
                     bank_id=bank_id,
                     memory_ids=obs["source_fact_ids"][:2],  # Take first 2
                     depth="chunk",
+                    tags=None,
+                    tags_match="any",
+                    tag_groups=None,
                 )
 
             assert "results" in expand_result

@@ -23,7 +23,7 @@ from datetime import datetime
 from typing import Any
 
 from ...db_utils import acquire_with_retry
-from ...search.tags import TagsMatch, build_tags_where_clause
+from ...search.tags import TagGroup, TagsMatch, build_tag_groups_where_clause, build_tags_where_clause
 from ...time_filter import DOCUMENT_TIME_FIELDS, build_time_clause
 from ..base import (
     AttachmentRef,
@@ -167,7 +167,7 @@ async def recall_chunks(*, backend, fq_table: Callable[[str], str], chunk_ids: l
     async with acquire_with_retry(backend) as conn:
         chunks_rows = await conn.fetch(
             f"""
-            SELECT chunk_id, chunk_text, chunk_index
+            SELECT chunk_id, chunk_text, chunk_index, document_id
             FROM {fq_table("chunks")}
             WHERE chunk_id = ANY($1::text[])
             """,
@@ -358,6 +358,18 @@ async def current_document_tags(
     return DocumentTags(found=True, tags=list(_doc_row["tags"] or []))
 
 
+async def documents_tags(
+    *, conn, fq_table: Callable[[str], str], bank_id: str, document_ids: list[str]
+) -> dict[str, list[str]]:
+    """document id -> its `documents.tags`, for the ids that have a row in this bank."""
+    rows = await conn.fetch(
+        f"SELECT id, tags FROM {fq_table('documents')} WHERE id = ANY($1) AND bank_id = $2",
+        document_ids,
+        bank_id,
+    )
+    return {row["id"]: list(row["tags"] or []) for row in rows}
+
+
 async def update_document_tags(
     *, conn, fq_table: Callable[[str], str], bank_id: str, document_id: str, tags: list[str] | None
 ) -> bool:
@@ -542,6 +554,7 @@ async def list_documents(
     search_query: str | None,
     tags: list[str] | None,
     tags_match: TagsMatch,
+    tag_groups: list[TagGroup] | None,
     time_field: str | None,
     start_date: datetime | None,
     end_date: datetime | None,
@@ -571,6 +584,11 @@ async def list_documents(
         next_param = built.next_param_offset
         query_params.extend(tags_params)
         param_count = next_param - 1  # next_param is next available; convert to last used
+        if tag_groups:
+            groups = build_tag_groups_where_clause(tag_groups, param_count + 1)
+            query_conditions.append(groups.sql.removeprefix("AND "))
+            query_params.extend(groups.params)
+            param_count = groups.next_param_offset - 1
 
         window = build_time_clause(
             time_field=time_field,

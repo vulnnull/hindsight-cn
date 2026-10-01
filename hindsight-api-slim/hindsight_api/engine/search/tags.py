@@ -25,6 +25,7 @@ EXACT matching: Memory matches only if its tag set EQUALS the request tag set (o
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from fnmatch import fnmatchcase
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -110,6 +111,16 @@ def tag_clause_is_index_only(tags: list[str] | None, match: TagsMatch) -> bool:
     if match == "exact":
         return True
     return not _parse_tags_match(match).include_untagged
+
+
+def tag_filter_active(tags: list[str] | None, match: TagsMatch, tag_groups: list | None = None) -> bool:
+    """Whether ``tags``/``match``/``tag_groups`` filter anything at all.
+
+    Empty tags mean "no filter" in every mode but ``exact``, where they select the
+    untagged (global) scope — the rule :func:`build_tags_where_clause` applies. A read
+    with a cheaper unfiltered path asks this to pick it.
+    """
+    return bool(tags) or match == "exact" or bool(tag_groups)
 
 
 def build_tags_where_clause(
@@ -466,24 +477,42 @@ def build_tag_groups_where_clause(
     return TagClause(f"AND {combined}", all_params, offset)
 
 
+def build_tag_filter_clause(
+    tags: list[str] | None,
+    match: TagsMatch,
+    tag_groups: list | None,
+    param_offset: int,
+) -> TagClause:
+    """``tags``/``match`` and ``tag_groups`` as one clause, AND-ed, binds in placeholder order.
+
+    For reads that take both filters side by side. Built without a table alias: run it
+    on an unaliased ``memory_units`` so the Oracle rewriter, which matches a bare
+    ``tags`` column, can translate the array operators. Fuzzy leaves must already be
+    resolved — see ``MemoryEngine._resolve_fuzzy_tag_groups``.
+    """
+    plain = build_tags_where_clause(tags, param_offset, match=match)
+    groups = build_tag_groups_where_clause(tag_groups, plain.next_param_offset)
+    sql = " ".join(part for part in (plain.sql, groups.sql) if part)
+    return TagClause(sql, [*plain.params, *groups.params], groups.next_param_offset)
+
+
 # =============================================================================
 # Python-side filter for compound tag groups (post-retrieval filtering)
 # =============================================================================
 
 
-def _match_group(result: object, group: TagGroup) -> bool:
+def _match_group(result_tags: list[str] | None, group: TagGroup) -> bool:
     """
-    Recursively evaluate a TagGroup against a retrieval result.
+    Recursively evaluate a TagGroup against one row's tags.
 
     Args:
-        result: Any object with a 'tags' attribute (list[str] or None).
+        result_tags: The row's tags (None or empty for an untagged row).
         group: The TagGroup to evaluate.
 
     Returns:
-        True if the result matches the group, False otherwise.
+        True if the tags match the group, False otherwise.
     """
     if isinstance(group, TagGroupLeaf):
-        result_tags = getattr(result, "tags", None)
         is_untagged = result_tags is None or len(result_tags) == 0
         if group.match == "exact" and len(group.tags) == 0:
             # Empty scope = global/untagged: match only untagged results.
@@ -504,13 +533,13 @@ def _match_group(result: object, group: TagGroup) -> bool:
                 return tags_set <= result_tags_set
 
     elif isinstance(group, TagGroupAnd):
-        return all(_match_group(result, child) for child in group.filters)
+        return all(_match_group(result_tags, child) for child in group.filters)
 
     elif isinstance(group, TagGroupOr):
-        return any(_match_group(result, child) for child in group.filters)
+        return any(_match_group(result_tags, child) for child in group.filters)
 
     elif isinstance(group, TagGroupNot):
-        return not _match_group(result, group.filter)
+        return not _match_group(result_tags, group.filter)
 
     else:
         return True
@@ -536,4 +565,24 @@ def filter_results_by_tag_groups(
     if not tag_groups:
         return results
 
-    return [r for r in results if all(_match_group(r, group) for group in tag_groups)]
+    return [r for r in results if tags_satisfy_groups(getattr(r, "tags", None), tag_groups)]
+
+
+def tags_satisfy_groups(tags: list[str] | None, tag_groups: list[TagGroup] | None) -> bool:
+    """Whether a row carrying ``tags`` passes every top-level group (no groups = passes).
+
+    The single-row form of :func:`filter_results_by_tag_groups`: reads of one item by id
+    use it to decide whether the item is inside a caller's tag scope.
+    """
+    return all(_match_group(tags, group) for group in tag_groups or [])
+
+
+def tags_writable(tags: list[str] | None, writable: list[str] | None) -> bool:
+    """Whether every one of ``tags`` matches a pattern in ``writable`` (no restriction = True).
+
+    ``writable`` holds shell-style patterns (``user:dan``, ``project:*``). An untagged item
+    belongs to everyone, so a restricted writer may not produce or change one.
+    """
+    if writable is None:
+        return True
+    return bool(tags) and all(any(fnmatchcase(t, p) for p in writable) for t in tags or [])

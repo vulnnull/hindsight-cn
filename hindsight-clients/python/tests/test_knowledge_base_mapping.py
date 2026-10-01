@@ -7,6 +7,7 @@ hand-written clients stay at parity. The interesting case is
 must not be serialized at all.
 """
 
+import json
 from unittest.mock import MagicMock
 
 from hindsight_client import Hindsight
@@ -157,3 +158,25 @@ def test_create_folder_maps_parent(monkeypatch):
     assert bank_id == "bank-1"
     assert request.name == "Operations"
     assert request.parent_id is None
+
+
+def test_tree_and_search_forward_the_tag_filter(monkeypatch):
+    client = Hindsight(base_url="http://example.invalid")
+    groups = [{"or": [{"tags": ["user:kate"], "match": "all_strict"}, {"tags": ["team"]}]}]
+    for method, call in (
+        ("get_knowledge_base_tree", lambda **kw: client.get_knowledge_base_tree("bank-1", **kw)),
+        ("search_knowledge_base", lambda **kw: client.search_knowledge_base("bank-1", "q", **kw)),
+    ):
+        captured: dict[str, object] = {}
+        _capture(monkeypatch, client, method, captured)
+        call(tags=["user:kate"], tags_match="any_strict", tag_groups=groups)
+        kwargs = captured["kwargs"]
+        assert kwargs["tags"] == ["user:kate"]
+        assert kwargs["tags_match"] == "any_strict"
+        # A GET carries the boolean tree as one JSON-encoded query param.
+        assert json.loads(kwargs["tag_groups"]) == groups
+
+        captured.clear()
+        call()
+        assert captured["kwargs"]["tags"] is None
+        assert captured["kwargs"]["tag_groups"] is None

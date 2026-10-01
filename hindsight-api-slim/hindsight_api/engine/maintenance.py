@@ -59,6 +59,7 @@ import logging
 import random
 import time
 from collections.abc import Coroutine
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -68,6 +69,7 @@ from .db_utils import acquire_with_retry
 from .schema import _is_oracle, fq_routine, fq_table, fq_table_explicit
 
 if TYPE_CHECKING:
+    from .memories.base import MemoriesExtension
     from .memory_engine import MemoryEngine
 
 logger = logging.getLogger(__name__)
@@ -99,6 +101,14 @@ _RETENTION_MAX_BATCHES = 1000
 # pods sweeping at once multiply that, which is still orders of magnitude gentler
 # than the unbounded delete this replaces.
 _RETENTION_BATCH_PAUSE_SECONDS = 0.25
+
+
+@dataclass(frozen=True)
+class _ReconcileTarget:
+    """A bank the consolidation reconcile should reschedule, and the schema it lives in."""
+
+    schema_name: str
+    bank_id: str
 
 
 class MaintenanceLoop:
@@ -416,7 +426,11 @@ class MaintenanceLoop:
         except Exception as e:
             logger.warning(f"Consolidation reconcile discovery failed: {e}")
             return
-        if not rows:
+
+        from .memories import get_memories
+
+        store = get_memories()
+        if not rows and not store.store_owned:
             return
 
         # Only enqueue into schemas the worker actually polls (tenant discovery),
@@ -431,13 +445,23 @@ class MaintenanceLoop:
         tenant_by_schema = {t.schema: t for t in tenants}
         default_schema = get_config().database_schema
 
+        targets = [_ReconcileTarget(schema_name=r["schema_name"], bank_id=r["bank_id"]) for r in rows]
+        if store.store_owned:
+            # The routine reads `memory_units`, which holds none of a store-owned bank's
+            # memories, so it never names one: a fact stranded there (or requeued by
+            # `recover_consolidation`) waited forever. Ask the store, per schema, the same
+            # question the backlog gauge asks it. One store call per bank, like that gauge.
+            targets += await self._store_banks_needing_consolidation(store, {default_schema, *tenant_by_schema})
+        if not targets:
+            return
+
         from .memory_engine import _current_schema
 
         submitted = 0
         skipped_unknown = 0
-        for row in rows:
-            schema = row["schema_name"]
-            bank_id = row["bank_id"]
+        for target in targets:
+            schema = target.schema_name
+            bank_id = target.bank_id
             tenant = tenant_by_schema.get(schema)
             if tenant is None and schema != default_schema:
                 skipped_unknown += 1
@@ -463,6 +487,42 @@ class MaintenanceLoop:
                 f"Consolidation reconcile: scheduled {submitted} bank(s)"
                 + (f", skipped {skipped_unknown} in unrecognized schema(s)" if skipped_unknown else "")
             )
+
+    async def _store_banks_needing_consolidation(
+        self, store: MemoriesExtension, schemas: set[str]
+    ) -> list[_ReconcileTarget]:
+        """The store-owned banks with a consolidation backlog.
+
+        The schema is set for each, as a request would set it: a store derives where a bank's
+        memories live from it.
+        """
+        from .memory_engine import _current_schema
+
+        engine = self._engine
+        found: list[_ReconcileTarget] = []
+        for schema in sorted(schemas):
+            token = _current_schema.set(schema)
+            try:
+                async with acquire_with_retry(engine._backend, max_retries=1) as conn:
+
+                    async def _bank_ids(schema: str = schema) -> list[str]:
+                        rows = await conn.fetch(f"SELECT bank_id FROM {fq_table_explicit('banks', schema)}")
+                        return [row["bank_id"] for row in rows]
+
+                    counts = await store.count_consolidation_backlog(
+                        conn=conn, schema=schema, per_bank=True, bank_ids=_bank_ids
+                    )
+            except Exception as e:
+                logger.warning(f"Consolidation reconcile store discovery failed for schema {schema}: {e}")
+                continue
+            finally:
+                _current_schema.reset(token)
+            found.extend(
+                _ReconcileTarget(schema_name=schema, bank_id=bank_id)
+                for bank_id, count in counts.items()
+                if bank_id is not None and count > 0 and store.store_owned_for(bank_id)
+            )
+        return found
 
     # ── scheduled mental model refresh ───────────────────────────────────────
 

@@ -138,6 +138,21 @@ pub struct FileRetainResult {
     pub operation_ids: Vec<String>,
 }
 
+/// Tag filter for the knowledge-base tree and search, with recall's semantics.
+#[derive(Debug, Default)]
+pub struct KnowledgeTagFilter {
+    pub tags: Vec<String>,
+    pub tags_match: Option<types::TagsMatch>,
+    /// JSON-encoded `tag_groups`, passed through as the query param the server parses.
+    pub tag_groups: Option<String>,
+}
+
+impl KnowledgeTagFilter {
+    fn tags(&self) -> Option<&Vec<String>> {
+        (!self.tags.is_empty()).then_some(&self.tags)
+    }
+}
+
 #[derive(Clone)]
 pub struct ApiClient {
     client: AsyncClient,
@@ -618,6 +633,9 @@ impl ApiClient {
                     limit.map(|l| l as u64),
                     offset.map(|o| o as u64),
                     None,
+                    None,
+                    None,
+                    None,
                 )
                 .humanized()
                 .await?;
@@ -634,7 +652,7 @@ impl ApiClient {
         self.runtime.block_on(async {
             let response = self
                 .client
-                .get_entity(bank_id, entity_id, None)
+                .get_entity(bank_id, entity_id, None, None, None, None)
                 .humanized()
                 .await?;
             Ok(response.into_inner())
@@ -1042,12 +1060,19 @@ impl ApiClient {
     pub fn get_knowledge_base_tree(
         &self,
         bank_id: &str,
+        filter: &KnowledgeTagFilter,
         _verbose: bool,
     ) -> Result<types::KnowledgeTreeResponse> {
         self.runtime.block_on(async {
             let response = self
                 .client
-                .get_knowledge_base_tree(bank_id, None)
+                .get_knowledge_base_tree(
+                    bank_id,
+                    filter.tag_groups.as_deref(),
+                    filter.tags(),
+                    filter.tags_match,
+                    None,
+                )
                 .humanized()
                 .await?;
             Ok(response.into_inner())
@@ -1107,12 +1132,21 @@ impl ApiClient {
         bank_id: &str,
         query: &types::Q,
         limit: Option<std::num::NonZeroU64>,
+        filter: &KnowledgeTagFilter,
         _verbose: bool,
     ) -> Result<types::KnowledgePageSearchResponse> {
         self.runtime.block_on(async {
             let response = self
                 .client
-                .search_knowledge_base(bank_id, limit, query, None)
+                .search_knowledge_base(
+                    bank_id,
+                    limit,
+                    query,
+                    filter.tag_groups.as_deref(),
+                    filter.tags(),
+                    filter.tags_match,
+                    None,
+                )
                 .humanized()
                 .await?;
             Ok(response.into_inner())
@@ -1251,9 +1285,17 @@ impl ApiClient {
 
     // --- Bank Alias Methods ---
 
-    pub fn list_bank_aliases(&self, bank_id: &str, _verbose: bool) -> Result<types::BankAliasesResponse> {
+    pub fn list_bank_aliases(
+        &self,
+        bank_id: &str,
+        _verbose: bool,
+    ) -> Result<types::BankAliasesResponse> {
         self.runtime.block_on(async {
-            let response = self.client.list_bank_aliases(bank_id, None).humanized().await?;
+            let response = self
+                .client
+                .list_bank_aliases(bank_id, None)
+                .humanized()
+                .await?;
             Ok(response.into_inner())
         })
     }

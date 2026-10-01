@@ -21,6 +21,7 @@ const mockedUpdateNode = sdk.updateKnowledgeNode as jest.MockedFunction<
   typeof sdk.updateKnowledgeNode
 >;
 const mockedSearch = sdk.searchKnowledgeBase as jest.MockedFunction<typeof sdk.searchKnowledgeBase>;
+const mockedTree = sdk.getKnowledgeBaseTree as jest.MockedFunction<typeof sdk.getKnowledgeBaseTree>;
 
 describe("createKnowledgePage mapping", () => {
   let client: HindsightClient;
@@ -158,5 +159,37 @@ describe("searchKnowledgeBase mapping", () => {
     await client.searchKnowledgeBase("bank", "deploy", { limit: 5 });
 
     expect((mockedSearch.mock.calls[0][0].query as any).limit).toBe(5);
+  });
+});
+
+describe("knowledge-base tag filter mapping", () => {
+  let client: HindsightClient;
+  const tagGroups = [
+    { or: [{ tags: ["user:kate"], match: "all_strict" as const }, { tags: ["team"] }] },
+  ];
+
+  beforeEach(() => {
+    client = new HindsightClient({ baseUrl: "http://localhost:8888" });
+    mockedSearch.mockReset();
+    mockedSearch.mockResolvedValue({ data: { results: [], total: 0 } } as any);
+    mockedTree.mockReset();
+    mockedTree.mockResolvedValue({ data: { roots: [] } } as any);
+  });
+
+  test("tree and search forward tags, tags_match and JSON-encoded tag_groups", async () => {
+    const filter = { tags: ["user:kate"], tagsMatch: "any_strict" as const, tagGroups };
+    await client.getKnowledgeBaseTree("bank", filter);
+    await client.searchKnowledgeBase("bank", "q", filter);
+
+    for (const query of [mockedTree.mock.calls[0][0].query, mockedSearch.mock.calls[0][0].query]) {
+      expect((query as any).tags).toEqual(["user:kate"]);
+      expect((query as any).tags_match).toBe("any_strict");
+      expect(JSON.parse((query as any).tag_groups)).toEqual(tagGroups);
+    }
+  });
+
+  test("omits the filter when unset", async () => {
+    await client.getKnowledgeBaseTree("bank");
+    expect(mockedTree.mock.calls[0][0].query).toEqual({});
   });
 });

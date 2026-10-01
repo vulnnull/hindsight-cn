@@ -50,7 +50,7 @@ from ...extensions.base import Extension
 # rather than `str` so a store implementing this seam is checked against the modes that
 # actually exist -- the SQL builders below take this exact type, and a bare `str` made
 # every hop between them unverifiable.
-from ..search.tags import TagsMatch
+from ..search.tags import TagGroup, TagsMatch, tag_filter_active
 from ..search.types import RetrievalResult
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -320,6 +320,9 @@ class StoredMemory:
     # written, which is the watermark a caller compares against to detect a change. Distinct
     # from `created_at`, which never moves after the first write.
     updated_at: datetime | None = None
+    # When a curation edit last changed the memory; ``None`` for one still exactly as extracted.
+    # The curation views report it, so a store has to hand it back for them to say so.
+    edited_at: datetime | None = None
     # Which observation scopes a memory is routed to. Consolidation reads it off
     # its candidates to decide which observation each one belongs in, so it has
     # to survive the round trip through the store.
@@ -453,6 +456,11 @@ class RetainDocumentPart:
     #: Entity NAMES per unit_id, unresolved. A store that owns an entity registry resolves them
     #: itself; one that does not resolves them before calling.
     entity_names: dict[str, list[str]] = field(default_factory=dict)
+    #: The subset of ``entity_names`` per unit_id the caller opted out of resolution
+    #: (``resolve_entities=False``). A store that resolves names itself must match these on the
+    #: name alone (case-insensitive) and mint a new entity otherwise — never fuzzy-merge them onto
+    #: a similar name, which is how "Alice Smyth" ended up as "Alice Smith" (#5050).
+    exact_entity_names: dict[str, list[str]] = field(default_factory=dict)
     #: What this part replaces, if anything: `None` replaces nothing, an empty list replaces the
     #: WHOLE document, and a non-empty list names the chunk ids whose facts go. Only the first part
     #: of a document may carry it — a later one would tombstone its own siblings.
@@ -1204,6 +1212,7 @@ class MemoriesExtension(Extension, ABC):
         *,
         document_id: str | None = None,
         unit_entity_names: dict[str, list[str]] | None = None,
+        unit_exact_entity_names: dict[str, list[str]] | None = None,
         replace_document_id: str = "",
         replace_chunk_ids: list[str] | None = None,
         replace_keep_chunk_ids: list[str] | None = None,
@@ -1217,6 +1226,10 @@ class MemoriesExtension(Extension, ABC):
         Only a store advertising :attr:`store_owned` implements this; the orchestrator calls it
         exactly when :meth:`store_owned_for` is true, so the default never runs. It exists on
         the interface so a routing extension delegates it automatically (see RoutingMemories).
+
+        ``unit_exact_entity_names`` is the subset of ``unit_entity_names`` the caller opted out of
+        resolution (``resolve_entities=False``): match those on the name alone and mint otherwise,
+        never fuzzy-merge them. Only passed when non-empty.
 
         ``replace_chunk_ids`` narrows the replace to named chunks of the document — the DELTA case,
         where every chunk not named keeps its facts. Pass the chunks whose facts must go: the ones
@@ -1412,6 +1425,7 @@ class MemoriesExtension(Extension, ABC):
         search_query: "str | None" = None,
         tags: "list[str] | None" = None,
         tags_match: TagsMatch = "any_strict",
+        tag_groups: "list[TagGroup] | None" = None,
         time_field: str | None = None,
         start_date: "datetime | None" = None,
         end_date: "datetime | None" = None,
@@ -1439,11 +1453,27 @@ class MemoriesExtension(Extension, ABC):
         SQL ``documents`` table instead); the engine only calls it for a store that owns its docs."""
         raise NotImplementedError
 
-    async def get_entity_graph(self, *, bank_id: str, limit: int = 1000, min_count: int = 1) -> dict:
+    async def get_entity_graph(
+        self,
+        *,
+        bank_id: str,
+        limit: int = 1000,
+        min_count: int = 1,
+        tags: "list[str] | None" = None,
+        tags_match: TagsMatch = "any",
+        tag_groups: "list | None" = None,
+    ) -> dict:
         """The entity co-occurrence graph (``{nodes, edges, ...}``) from the store's OWN aggregate.
         Only a store that owns its entities overrides this (a Postgres store reads its
         ``entity_cooccurrences`` table); the engine calls it only for a store-owned bank, whose SQL
-        table is empty."""
+        table is empty.
+
+        ``tags``/``tags_match`` and ``tag_groups`` (AND-ed, fuzzy leaves already resolved)
+        restrict the graph to the memories that match (same modes as anywhere else): an edge
+        counts only matching memories naming both entities, and a node's ``mentionCount`` only
+        matching memories naming it. A store that cannot filter must raise,
+        never return the unfiltered graph — that would hand a scoped reader every other scope's
+        entities (#5031)."""
         raise NotImplementedError
 
     async def get_chunk_text(self, *, bank_id: str, document_id: str, chunk_index: int) -> "str | None":
@@ -1800,8 +1830,11 @@ class MemoriesExtension(Extension, ABC):
         pattern: str | None = None,
         limit: int = 100,
         offset: int = 0,
+        tag_groups: "list[TagGroup] | None" = None,
     ) -> dict[str, Any]:
         """One page of a bank's tag histogram, filtered/sorted/paged by the store.
+
+        ``tag_groups`` (a caller's forced tag scope) limits the histogram to the memories it admits.
 
         Returns ``{"items": [{"tag", "count"}], "total", "limit", "offset"}``.
         ``pattern`` is a case-insensitive wildcard (``*``); ordering is count
@@ -1885,12 +1918,24 @@ class MemoriesExtension(Extension, ABC):
 
     @abstractmethod
     async def entity_memory_counts(
-        self, *, conn, fq_table, bank_id: str, entity_ids: list[str] | None = None
+        self,
+        *,
+        conn,
+        fq_table,
+        bank_id: str,
+        entity_ids: list[str] | None = None,
+        tags: list[str] | None = None,
+        tags_match: TagsMatch = "any",
+        tag_groups: list | None = None,
     ) -> dict[str, int]:
         """Live memory count per entity id.
 
         Entities with no live memories are absent, so an id passed in and not
         returned is an orphan.
+
+        ``tags``/``tags_match``/``tag_groups`` count only the memories that match (same modes as
+        anywhere else), so an entity no matching memory mentions is absent too —
+        that is how a tag-scoped entity read hides it (#5031).
         """
 
     @abstractmethod
@@ -2081,7 +2126,15 @@ class MemoriesExtension(Extension, ABC):
         raise NotImplementedError
 
     async def memories_timeseries(
-        self, *, conn, fq_table, bank_id: str, time_field: str, trunc: str, since: datetime
+        self,
+        *,
+        conn,
+        fq_table,
+        bank_id: str,
+        time_field: str,
+        trunc: str,
+        since: datetime,
+        tag_groups: "list[TagGroup] | None" = None,
     ) -> list[dict[str, Any]]:
         """``[{"bucket": datetime, "fact_type": str, "count": int}]`` since ``since``.
 
@@ -2093,7 +2146,14 @@ class MemoriesExtension(Extension, ABC):
         raise NotImplementedError
 
     async def observation_scope_counts(
-        self, *, conn, fq_table, bank_id: str, limit: int = 100, offset: int = 0
+        self,
+        *,
+        conn,
+        fq_table,
+        bank_id: str,
+        limit: int = 100,
+        offset: int = 0,
+        tag_groups: "list[TagGroup] | None" = None,
     ) -> dict[str, Any]:
         """One page of the observation scope histogram, paged by the store.
 
@@ -2129,6 +2189,7 @@ class MemoriesExtension(Extension, ABC):
         entity_id: str | None = None,
         tags: list[str] | None = None,
         tags_match: TagsMatch = "any",
+        tag_groups: "list[TagGroup] | None" = None,
         created_before: "datetime | None" = None,
         time_field: str | None = None,
         start_date: "datetime | None" = None,
@@ -2140,6 +2201,8 @@ class MemoriesExtension(Extension, ABC):
 
         ``total`` is the count matching the filters, not the page size, because
         the UI pages on it.
+
+        ``tag_groups`` (AND-ed with ``tags``) carries a caller's forced tag scope.
 
         ``time_field`` / ``start_date`` / ``end_date`` are one time window: the
         named axis filters AND orders, and memories with no value on it are left
@@ -2249,6 +2312,7 @@ class MemoriesExtension(Extension, ABC):
         entity_names: list[str] | None = None,
         embedding=None,
         current_fact_type: str | None = None,
+        exact_entity_names: bool = False,
     ) -> None:
         """Apply a curation field edit to a live memory.
 
@@ -2279,7 +2343,9 @@ class MemoriesExtension(Extension, ABC):
           (exactly as its :meth:`retain` does) and rewrites the memory's entity
           ids from the result, so a brand-new entity created by an edit lands in
           that registry. When it is not ``None`` it is the authoritative set and
-          ``entity_ids`` is ignored.
+          ``entity_ids`` is ignored. ``exact_entity_names`` set means the caller
+          opted out of resolution (``resolve_entities=False``): match the names
+          exactly and mint otherwise, never fuzzy-merge them.
         * ``entity_ids`` — the already-resolved set, for a store whose registry is
           the host's SQL (the host minted them and, for a join-table store, has
           already re-linked them, so it ignores this).
@@ -2296,13 +2362,24 @@ class MemoriesExtension(Extension, ABC):
         fq_table,
         bank_id: str,
         search: str | None = None,
+        tags: list[str] | None = None,
+        tags_match: TagsMatch = "any",
+        tag_groups: list | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> dict[str, Any]:
         """Entities in a bank with their ``mention_count``, paged and ordered by it.
 
         ``search`` is an optional case-insensitive substring match on the canonical
-        name. Returns ``{items, total, limit, offset}``."""
+        name. Returns ``{items, total, limit, offset}``.
+
+        ``tags``/``tags_match`` and ``tag_groups`` (AND-ed, fuzzy leaves already
+        resolved) filter on the memories that mention each entity (same modes as
+        anywhere else). An entity is listed only when a matching memory
+        mentions it, and its ``mention_count``, ``first_seen``, ``last_seen`` and
+        ``total`` cover matching memories only — the stored totals would reveal how
+        much out-of-scope memories talk about it (#5031). A store that cannot filter
+        must raise rather than ignore the filter."""
 
     @abstractmethod
     async def graph_units(
@@ -2317,6 +2394,7 @@ class MemoriesExtension(Extension, ABC):
         chunk_id: str | None = None,
         tags: list[str] | None = None,
         tags_match: TagsMatch = "all_strict",
+        tag_groups: "list[TagGroup] | None" = None,
         limit: int = 1000,
     ) -> dict[str, Any]:
         """Memory nodes for the graph view, plus the total matching count.
@@ -2346,6 +2424,7 @@ class MemoriesExtension(Extension, ABC):
         chunk_id: str | None = None,
         tags: list[str] | None = None,
         tags_match: TagsMatch = "all_strict",
+        tag_groups: "list[TagGroup] | None" = None,
         limit: int = 1000,
     ) -> dict[str, Any]:
         """Everything one graph render reads, in one pass:
@@ -2375,6 +2454,7 @@ class MemoriesExtension(Extension, ABC):
             chunk_id=chunk_id,
             tags=tags,
             tags_match=tags_match,
+            tag_groups=tag_groups,
             limit=limit,
         )
         units = page["units"]
@@ -2575,8 +2655,9 @@ class MemoriesExtension(Extension, ABC):
         return ObservationChunkIds(chunk_ids_by_observation=by_obs, sources_by_observation=sources_read)
 
     async def recall_chunks(self, *, backend, fq_table, bank_id: str, chunk_ids: list[str]) -> dict[str, Any]:
-        """The recall ``include_chunks`` candidates by chunk_id: rows with ``chunk_text`` and
-        ``chunk_index``. Absent chunks are omitted.
+        """The recall ``include_chunks`` candidates by chunk_id: rows with ``chunk_text``,
+        ``chunk_index`` and ``document_id`` (the last decides whether a tag-scoped reader may see
+        the chunk, #5030). Absent chunks are omitted.
 
         Default: a store that owns the document store keeps no `chunks` rows, so the metadata is
         synthesized from the chunk ids themselves — the id carries the document and the index,
@@ -2792,6 +2873,16 @@ class MemoriesExtension(Extension, ABC):
             tags=list(_record["tags"] or []) if _record is not None and "tags" in _record else None,
         )
 
+    async def documents_tags(self, *, conn, fq_table, bank_id: str, document_ids: list[str]) -> dict[str, list[str]]:
+        """document id -> the tags it carries, for the ids that exist. Read to decide whether a
+        tag-scoped reader may see a document's source text (#5030), so an id left out is hidden.
+
+        Default: the store's records; a record that does not carry a "tags" key is left out
+        rather than read as untagged, which an ``any`` filter would admit. Postgres reads the
+        `documents` rows."""
+        records = await self.get_document_records(bank_id=bank_id, document_ids=document_ids)
+        return {did: list(rec["tags"] or []) for did, rec in records.items() if "tags" in rec}
+
     async def update_document_tags(
         self, *, conn, fq_table, bank_id: str, document_id: str, tags: list[str] | None, found: bool
     ) -> bool:
@@ -2866,6 +2957,7 @@ class MemoriesExtension(Extension, ABC):
         search_query: str | None,
         tags: list[str] | None,
         tags_match: TagsMatch,
+        tag_groups: "list[TagGroup] | None",
         time_field: str | None,
         start_date: datetime | None,
         end_date: datetime | None,
@@ -2881,6 +2973,7 @@ class MemoriesExtension(Extension, ABC):
             search_query=search_query,
             tags=tags,
             tags_match=tags_match,
+            tag_groups=tag_groups,
             time_field=time_field,
             start_date=start_date,
             end_date=end_date,
@@ -3099,28 +3192,73 @@ class MemoriesExtension(Extension, ABC):
             conn=conn, fq_table=fq_table, bank_id=bank_id, unit_ids=[str(u) for u in unit_ids]
         )
 
-    async def entity_graph(self, *, conn, fq_table, bank_id: str, limit: int, min_count: int) -> dict:
+    async def entity_graph(
+        self,
+        *,
+        conn,
+        fq_table,
+        bank_id: str,
+        limit: int,
+        min_count: int,
+        tags: "list[str] | None" = None,
+        tags_match: TagsMatch = "any",
+        tag_groups: "list | None" = None,
+    ) -> dict:
         """The entity co-occurrence graph (``{nodes, edges, ...}``). Delegates to
         :meth:`get_entity_graph`, the store's own aggregate; Postgres reads its
-        ``entity_cooccurrences`` table on the caller's connection."""
-        return await self.get_entity_graph(bank_id=bank_id, limit=limit, min_count=min_count)
+        ``entity_cooccurrences`` table on the caller's connection, or recomputes the
+        edges from the matching memories when a tag filter is given (see
+        :meth:`get_entity_graph` for the filter's contract)."""
+        return await self.get_entity_graph(
+            bank_id=bank_id,
+            limit=limit,
+            min_count=min_count,
+            tags=tags,
+            tags_match=tags_match,
+            tag_groups=tag_groups,
+        )
 
     async def count_bank_documents(self, *, conn, fq_table, bank_id: str) -> int:
         """This bank's document count, for the stats page. Delegates to :meth:`count_documents`;
         Postgres counts its ``documents`` table on the caller's connection."""
         return await self.count_documents(bank_id=bank_id)
 
-    async def get_entity_detail(self, *, conn, fq_table, bank_id: str, entity_id: uuid.UUID) -> dict[str, Any] | None:
+    async def get_entity_detail(
+        self,
+        *,
+        conn,
+        fq_table,
+        bank_id: str,
+        entity_id: uuid.UUID,
+        tags: list[str] | None = None,
+        tags_match: TagsMatch = "any",
+        tag_groups: list | None = None,
+    ) -> dict[str, Any] | None:
         """One entity rendered for the entity detail view, or ``None`` if the bank has no such entity.
 
         An addressed lookup against the store's registry, not a page-and-scan, so it stays O(1) in
         the registry size. First/last seen live on the registry record, which this lookup does not
-        carry (``list_entities`` surfaces them). Postgres reads its ``entities`` row."""
+        carry (``list_entities`` surfaces them). Postgres reads its ``entities`` row.
+
+        With a tag filter (``tags``/``tags_match``/``tag_groups``, fuzzy leaves already resolved)
+        the count covers the matching memories only, and an entity no matching memory mentions is
+        ``None`` — the same answer as an unknown id, so a scoped reader cannot tell it exists in
+        another scope (#5031)."""
         eid = str(entity_id)
         names = await self.resolve_entity_names(conn=conn, fq_table=fq_table, bank_id=bank_id, entity_ids=[eid])
         if eid not in names:
             return None
-        counts = await self.entity_memory_counts(conn=conn, fq_table=fq_table, bank_id=bank_id, entity_ids=[eid])
+        counts = await self.entity_memory_counts(
+            conn=conn,
+            fq_table=fq_table,
+            bank_id=bank_id,
+            entity_ids=[eid],
+            tags=tags,
+            tags_match=tags_match,
+            tag_groups=tag_groups,
+        )
+        if tag_filter_active(tags, tags_match, tag_groups) and eid not in counts:
+            return None
         return {
             "id": eid,
             "canonical_name": names[eid],
@@ -3728,8 +3866,9 @@ class MemoriesExtension(Extension, ABC):
     # -- reflect's `expand` tool: memories by id, then their chunks and documents --
 
     async def expand_memories(self, *, conn, fq_table, bank_id: str, unit_ids: list[uuid.UUID]) -> list:
-        """``id`` (a UUID), ``text``, ``chunk_id``, ``document_id``, ``fact_type``, ``context`` for
-        each of ``unit_ids`` that exists, as mappings. Postgres returns its rows as they are."""
+        """``id`` (a UUID), ``text``, ``chunk_id``, ``document_id``, ``fact_type``, ``context``,
+        ``tags`` for each of ``unit_ids`` that exists, as mappings. Postgres returns its rows as
+        they are."""
         stored = await self.get_memories(
             conn=conn, fq_table=fq_table, bank_id=bank_id, unit_ids=[str(u) for u in unit_ids]
         )
@@ -3741,6 +3880,7 @@ class MemoriesExtension(Extension, ABC):
                 "document_id": s.document_id,
                 "fact_type": s.fact_type,
                 "context": s.context,
+                "tags": s.tags,
             }
             for s in stored
         ]

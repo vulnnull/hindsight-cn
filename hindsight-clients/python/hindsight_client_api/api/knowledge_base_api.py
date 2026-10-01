@@ -16,8 +16,8 @@ from pydantic import validate_call, Field, StrictFloat, StrictStr, StrictInt
 from typing import Any, Dict, List, Optional, Tuple, Union
 from typing_extensions import Annotated
 
-from pydantic import Field, StrictStr
-from typing import Any, Optional
+from pydantic import Field, StrictStr, field_validator
+from typing import Any, List, Optional
 from typing_extensions import Annotated
 from hindsight_client_api.models.create_folder_request import CreateFolderRequest
 from hindsight_client_api.models.create_knowledge_page_response import CreateKnowledgePageResponse
@@ -1237,6 +1237,9 @@ class KnowledgeBaseApi:
     async def get_knowledge_base_tree(
         self,
         bank_id: StrictStr,
+        tags: Annotated[Optional[List[StrictStr]], Field(description="Only return pages carrying these tags (matched per `tags_match`, like recall).")] = None,
+        tags_match: Annotated[Optional[StrictStr], Field(description="How `tags` match a page's tags: any, all, any_strict, all_strict, exact. 'any'/'all' also return untagged pages; the _strict modes and 'exact' do not.")] = None,
+        tag_groups: Annotated[Optional[StrictStr], Field(description="JSON-encoded compound tag filter, same shape as recall's `tag_groups`, e.g. `[{\"or\":[{\"tags\":[\"user:kate\"],\"match\":\"all_strict\"},{\"tags\":[\"team\"]}]}]`. Top-level groups are AND-ed, and AND-ed with `tags`.")] = None,
         authorization: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
@@ -1257,6 +1260,12 @@ class KnowledgeBaseApi:
 
         :param bank_id: (required)
         :type bank_id: str
+        :param tags: Only return pages carrying these tags (matched per `tags_match`, like recall).
+        :type tags: List[str]
+        :param tags_match: How `tags` match a page's tags: any, all, any_strict, all_strict, exact. 'any'/'all' also return untagged pages; the _strict modes and 'exact' do not.
+        :type tags_match: str
+        :param tag_groups: JSON-encoded compound tag filter, same shape as recall's `tag_groups`, e.g. `[{\"or\":[{\"tags\":[\"user:kate\"],\"match\":\"all_strict\"},{\"tags\":[\"team\"]}]}]`. Top-level groups are AND-ed, and AND-ed with `tags`.
+        :type tag_groups: str
         :param authorization:
         :type authorization: str
         :param _request_timeout: timeout setting for this request. If one
@@ -1283,6 +1292,9 @@ class KnowledgeBaseApi:
 
         _param = self._get_knowledge_base_tree_serialize(
             bank_id=bank_id,
+            tags=tags,
+            tags_match=tags_match,
+            tag_groups=tag_groups,
             authorization=authorization,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -1310,6 +1322,9 @@ class KnowledgeBaseApi:
     async def get_knowledge_base_tree_with_http_info(
         self,
         bank_id: StrictStr,
+        tags: Annotated[Optional[List[StrictStr]], Field(description="Only return pages carrying these tags (matched per `tags_match`, like recall).")] = None,
+        tags_match: Annotated[Optional[StrictStr], Field(description="How `tags` match a page's tags: any, all, any_strict, all_strict, exact. 'any'/'all' also return untagged pages; the _strict modes and 'exact' do not.")] = None,
+        tag_groups: Annotated[Optional[StrictStr], Field(description="JSON-encoded compound tag filter, same shape as recall's `tag_groups`, e.g. `[{\"or\":[{\"tags\":[\"user:kate\"],\"match\":\"all_strict\"},{\"tags\":[\"team\"]}]}]`. Top-level groups are AND-ed, and AND-ed with `tags`.")] = None,
         authorization: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
@@ -1330,6 +1345,12 @@ class KnowledgeBaseApi:
 
         :param bank_id: (required)
         :type bank_id: str
+        :param tags: Only return pages carrying these tags (matched per `tags_match`, like recall).
+        :type tags: List[str]
+        :param tags_match: How `tags` match a page's tags: any, all, any_strict, all_strict, exact. 'any'/'all' also return untagged pages; the _strict modes and 'exact' do not.
+        :type tags_match: str
+        :param tag_groups: JSON-encoded compound tag filter, same shape as recall's `tag_groups`, e.g. `[{\"or\":[{\"tags\":[\"user:kate\"],\"match\":\"all_strict\"},{\"tags\":[\"team\"]}]}]`. Top-level groups are AND-ed, and AND-ed with `tags`.
+        :type tag_groups: str
         :param authorization:
         :type authorization: str
         :param _request_timeout: timeout setting for this request. If one
@@ -1356,6 +1377,9 @@ class KnowledgeBaseApi:
 
         _param = self._get_knowledge_base_tree_serialize(
             bank_id=bank_id,
+            tags=tags,
+            tags_match=tags_match,
+            tag_groups=tag_groups,
             authorization=authorization,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -1383,6 +1407,9 @@ class KnowledgeBaseApi:
     async def get_knowledge_base_tree_without_preload_content(
         self,
         bank_id: StrictStr,
+        tags: Annotated[Optional[List[StrictStr]], Field(description="Only return pages carrying these tags (matched per `tags_match`, like recall).")] = None,
+        tags_match: Annotated[Optional[StrictStr], Field(description="How `tags` match a page's tags: any, all, any_strict, all_strict, exact. 'any'/'all' also return untagged pages; the _strict modes and 'exact' do not.")] = None,
+        tag_groups: Annotated[Optional[StrictStr], Field(description="JSON-encoded compound tag filter, same shape as recall's `tag_groups`, e.g. `[{\"or\":[{\"tags\":[\"user:kate\"],\"match\":\"all_strict\"},{\"tags\":[\"team\"]}]}]`. Top-level groups are AND-ed, and AND-ed with `tags`.")] = None,
         authorization: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
@@ -1403,6 +1430,12 @@ class KnowledgeBaseApi:
 
         :param bank_id: (required)
         :type bank_id: str
+        :param tags: Only return pages carrying these tags (matched per `tags_match`, like recall).
+        :type tags: List[str]
+        :param tags_match: How `tags` match a page's tags: any, all, any_strict, all_strict, exact. 'any'/'all' also return untagged pages; the _strict modes and 'exact' do not.
+        :type tags_match: str
+        :param tag_groups: JSON-encoded compound tag filter, same shape as recall's `tag_groups`, e.g. `[{\"or\":[{\"tags\":[\"user:kate\"],\"match\":\"all_strict\"},{\"tags\":[\"team\"]}]}]`. Top-level groups are AND-ed, and AND-ed with `tags`.
+        :type tag_groups: str
         :param authorization:
         :type authorization: str
         :param _request_timeout: timeout setting for this request. If one
@@ -1429,6 +1462,9 @@ class KnowledgeBaseApi:
 
         _param = self._get_knowledge_base_tree_serialize(
             bank_id=bank_id,
+            tags=tags,
+            tags_match=tags_match,
+            tag_groups=tag_groups,
             authorization=authorization,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -1451,6 +1487,9 @@ class KnowledgeBaseApi:
     def _get_knowledge_base_tree_serialize(
         self,
         bank_id,
+        tags,
+        tags_match,
+        tag_groups,
         authorization,
         _request_auth,
         _content_type,
@@ -1461,6 +1500,7 @@ class KnowledgeBaseApi:
         _host = None
 
         _collection_formats: Dict[str, str] = {
+            'tags': 'multi',
         }
 
         _path_params: Dict[str, str] = {}
@@ -1476,6 +1516,18 @@ class KnowledgeBaseApi:
         if bank_id is not None:
             _path_params['bank_id'] = bank_id
         # process the query parameters
+        if tags is not None:
+            
+            _query_params.append(('tags', tags))
+            
+        if tags_match is not None:
+            
+            _query_params.append(('tags_match', tags_match))
+            
+        if tag_groups is not None:
+            
+            _query_params.append(('tag_groups', tag_groups))
+            
         # process the header parameters
         if authorization is not None:
             _header_params['authorization'] = authorization
@@ -1813,6 +1865,9 @@ class KnowledgeBaseApi:
         bank_id: StrictStr,
         q: Annotated[str, Field(min_length=1, strict=True, description="Search query")],
         limit: Annotated[Optional[Annotated[int, Field(le=50, strict=True, ge=1)]], Field(description="Maximum results to return")] = None,
+        tags: Annotated[Optional[List[StrictStr]], Field(description="Only return pages carrying these tags (matched per `tags_match`, like recall).")] = None,
+        tags_match: Annotated[Optional[StrictStr], Field(description="How `tags` match a page's tags: any, all, any_strict, all_strict, exact. 'any'/'all' also return untagged pages; the _strict modes and 'exact' do not.")] = None,
+        tag_groups: Annotated[Optional[StrictStr], Field(description="JSON-encoded compound tag filter, same shape as recall's `tag_groups`, e.g. `[{\"or\":[{\"tags\":[\"user:kate\"],\"match\":\"all_strict\"},{\"tags\":[\"team\"]}]}]`. Top-level groups are AND-ed, and AND-ed with `tags`.")] = None,
         authorization: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
@@ -1837,6 +1892,12 @@ class KnowledgeBaseApi:
         :type q: str
         :param limit: Maximum results to return
         :type limit: int
+        :param tags: Only return pages carrying these tags (matched per `tags_match`, like recall).
+        :type tags: List[str]
+        :param tags_match: How `tags` match a page's tags: any, all, any_strict, all_strict, exact. 'any'/'all' also return untagged pages; the _strict modes and 'exact' do not.
+        :type tags_match: str
+        :param tag_groups: JSON-encoded compound tag filter, same shape as recall's `tag_groups`, e.g. `[{\"or\":[{\"tags\":[\"user:kate\"],\"match\":\"all_strict\"},{\"tags\":[\"team\"]}]}]`. Top-level groups are AND-ed, and AND-ed with `tags`.
+        :type tag_groups: str
         :param authorization:
         :type authorization: str
         :param _request_timeout: timeout setting for this request. If one
@@ -1865,6 +1926,9 @@ class KnowledgeBaseApi:
             bank_id=bank_id,
             q=q,
             limit=limit,
+            tags=tags,
+            tags_match=tags_match,
+            tag_groups=tag_groups,
             authorization=authorization,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -1894,6 +1958,9 @@ class KnowledgeBaseApi:
         bank_id: StrictStr,
         q: Annotated[str, Field(min_length=1, strict=True, description="Search query")],
         limit: Annotated[Optional[Annotated[int, Field(le=50, strict=True, ge=1)]], Field(description="Maximum results to return")] = None,
+        tags: Annotated[Optional[List[StrictStr]], Field(description="Only return pages carrying these tags (matched per `tags_match`, like recall).")] = None,
+        tags_match: Annotated[Optional[StrictStr], Field(description="How `tags` match a page's tags: any, all, any_strict, all_strict, exact. 'any'/'all' also return untagged pages; the _strict modes and 'exact' do not.")] = None,
+        tag_groups: Annotated[Optional[StrictStr], Field(description="JSON-encoded compound tag filter, same shape as recall's `tag_groups`, e.g. `[{\"or\":[{\"tags\":[\"user:kate\"],\"match\":\"all_strict\"},{\"tags\":[\"team\"]}]}]`. Top-level groups are AND-ed, and AND-ed with `tags`.")] = None,
         authorization: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
@@ -1918,6 +1985,12 @@ class KnowledgeBaseApi:
         :type q: str
         :param limit: Maximum results to return
         :type limit: int
+        :param tags: Only return pages carrying these tags (matched per `tags_match`, like recall).
+        :type tags: List[str]
+        :param tags_match: How `tags` match a page's tags: any, all, any_strict, all_strict, exact. 'any'/'all' also return untagged pages; the _strict modes and 'exact' do not.
+        :type tags_match: str
+        :param tag_groups: JSON-encoded compound tag filter, same shape as recall's `tag_groups`, e.g. `[{\"or\":[{\"tags\":[\"user:kate\"],\"match\":\"all_strict\"},{\"tags\":[\"team\"]}]}]`. Top-level groups are AND-ed, and AND-ed with `tags`.
+        :type tag_groups: str
         :param authorization:
         :type authorization: str
         :param _request_timeout: timeout setting for this request. If one
@@ -1946,6 +2019,9 @@ class KnowledgeBaseApi:
             bank_id=bank_id,
             q=q,
             limit=limit,
+            tags=tags,
+            tags_match=tags_match,
+            tag_groups=tag_groups,
             authorization=authorization,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -1975,6 +2051,9 @@ class KnowledgeBaseApi:
         bank_id: StrictStr,
         q: Annotated[str, Field(min_length=1, strict=True, description="Search query")],
         limit: Annotated[Optional[Annotated[int, Field(le=50, strict=True, ge=1)]], Field(description="Maximum results to return")] = None,
+        tags: Annotated[Optional[List[StrictStr]], Field(description="Only return pages carrying these tags (matched per `tags_match`, like recall).")] = None,
+        tags_match: Annotated[Optional[StrictStr], Field(description="How `tags` match a page's tags: any, all, any_strict, all_strict, exact. 'any'/'all' also return untagged pages; the _strict modes and 'exact' do not.")] = None,
+        tag_groups: Annotated[Optional[StrictStr], Field(description="JSON-encoded compound tag filter, same shape as recall's `tag_groups`, e.g. `[{\"or\":[{\"tags\":[\"user:kate\"],\"match\":\"all_strict\"},{\"tags\":[\"team\"]}]}]`. Top-level groups are AND-ed, and AND-ed with `tags`.")] = None,
         authorization: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
@@ -1999,6 +2078,12 @@ class KnowledgeBaseApi:
         :type q: str
         :param limit: Maximum results to return
         :type limit: int
+        :param tags: Only return pages carrying these tags (matched per `tags_match`, like recall).
+        :type tags: List[str]
+        :param tags_match: How `tags` match a page's tags: any, all, any_strict, all_strict, exact. 'any'/'all' also return untagged pages; the _strict modes and 'exact' do not.
+        :type tags_match: str
+        :param tag_groups: JSON-encoded compound tag filter, same shape as recall's `tag_groups`, e.g. `[{\"or\":[{\"tags\":[\"user:kate\"],\"match\":\"all_strict\"},{\"tags\":[\"team\"]}]}]`. Top-level groups are AND-ed, and AND-ed with `tags`.
+        :type tag_groups: str
         :param authorization:
         :type authorization: str
         :param _request_timeout: timeout setting for this request. If one
@@ -2027,6 +2112,9 @@ class KnowledgeBaseApi:
             bank_id=bank_id,
             q=q,
             limit=limit,
+            tags=tags,
+            tags_match=tags_match,
+            tag_groups=tag_groups,
             authorization=authorization,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -2051,6 +2139,9 @@ class KnowledgeBaseApi:
         bank_id,
         q,
         limit,
+        tags,
+        tags_match,
+        tag_groups,
         authorization,
         _request_auth,
         _content_type,
@@ -2061,6 +2152,7 @@ class KnowledgeBaseApi:
         _host = None
 
         _collection_formats: Dict[str, str] = {
+            'tags': 'multi',
         }
 
         _path_params: Dict[str, str] = {}
@@ -2083,6 +2175,18 @@ class KnowledgeBaseApi:
         if limit is not None:
             
             _query_params.append(('limit', limit))
+            
+        if tags is not None:
+            
+            _query_params.append(('tags', tags))
+            
+        if tags_match is not None:
+            
+            _query_params.append(('tags_match', tags_match))
+            
+        if tag_groups is not None:
+            
+            _query_params.append(('tag_groups', tag_groups))
             
         # process the header parameters
         if authorization is not None:

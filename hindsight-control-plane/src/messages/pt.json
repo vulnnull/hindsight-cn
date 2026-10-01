@@ -2140,14 +2140,17 @@
     "editSourceQueryHint": "Alterar isso reconstrói o conteúdo da página a partir de suas memórias.",
     "saveChanges": "Salvar alterações",
     "advancedSearchTitle": "Busca avançada",
-    "advancedSearchDescription": "Executa a busca híbrida (BM25 + vetorial) no servidor e mostra as páginas classificadas e a resposta bruta.",
+    "tagFilterTitle": "Filtrar por tags",
+    "endpointSearch": "Busca",
+    "endpointTree": "Árvore",
+    "advancedSearchDescription": "Teste os endpoints da base de conhecimento no servidor: busca híbrida (BM25 + vetor) ou a árvore de páginas, com o mesmo filtro de tags da barra lateral, e inspecione a resposta bruta.",
     "advancedQuery": "Consulta",
     "advancedLimit": "Limite",
-    "advancedRun": "Buscar",
+    "advancedRun": "Executar",
     "advancedResults": "Resultados",
     "advancedJson": "JSON bruto",
     "advancedMeta": "{total} resultados · {ms} ms",
-    "advancedIdle": "Execute uma busca para ver as páginas classificadas e a resposta bruta."
+    "advancedIdle": "Execute uma requisição para ver o resultado e a resposta bruta."
   },
   "home": {
     "title": "Início",

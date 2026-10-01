@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { client } from "@/lib/api";
+import { client, type KnowledgeTagFilter } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,8 +18,18 @@ import {
 } from "@/components/ui/dialog";
 import { Search } from "lucide-react";
 import { KnowledgeSearchResult } from "./knowledge-search-result";
+import { KnowledgeTagFilterPanel } from "./knowledge-tag-filter";
+
+function countPages(nodes: TreeResponse["roots"]): number {
+  return nodes.reduce(
+    (n, node) => n + (node.kind === "page" ? 1 : 0) + countPages(node.children ?? []),
+    0
+  );
+}
 
 type SearchResponse = Awaited<ReturnType<typeof client.searchKnowledgePages>>;
+type TreeResponse = Awaited<ReturnType<typeof client.getKnowledgeTree>>;
+type Endpoint = "search" | "tree";
 
 interface Props {
   open: boolean;
@@ -27,6 +37,9 @@ interface Props {
   bankId: string;
   /** Seed query, taken from the sidebar's search box when the dialog opens. */
   initialQuery: string;
+  /** The sidebar's tag filter. Edited here in place, so the sidebar follows. */
+  tagFilter: KnowledgeTagFilter;
+  onTagFilterChange: (filter: KnowledgeTagFilter) => void;
   /** Folder path per node id, from the loaded tree — search returns neither. */
   pathById: Map<string, string>;
   onOpenPage: (pageId: string) => void;
@@ -34,37 +47,47 @@ interface Props {
 
 /**
  * The knowledge search the sidebar runs, with its knobs exposed and the server's
- * answer shown raw beside the rendered hits. The endpoint takes a query and a
- * limit and nothing else — there is no fact-type/tag surface here as there is in
- * recall, because knowledge search has none.
+ * answer shown raw beside the rendered hits. It edits the sidebar's own tag
+ * filter and can run it against either endpoint the sidebar calls: search (with
+ * a query) or the tree (without one).
  */
 export function KnowledgeSearchDialog({
   open,
   onOpenChange,
   bankId,
   initialQuery,
+  tagFilter,
+  onTagFilterChange,
   pathById,
   onOpenPage,
 }: Props) {
   const t = useTranslations("knowledgeBase");
   const [query, setQuery] = useState(initialQuery);
   const [limit, setLimit] = useState(20);
+  const [endpoint, setEndpoint] = useState<Endpoint>("search");
   const [response, setResponse] = useState<SearchResponse | null>(null);
+  const [treeResponse, setTreeResponse] = useState<TreeResponse | null>(null);
   const [tookMs, setTookMs] = useState<number | null>(null);
   const [searching, setSearching] = useState(false);
 
   const run = async () => {
     const q = query.trim();
-    if (!q) return;
+    if (endpoint === "search" && !q) return;
     setSearching(true);
     const started = performance.now();
     try {
-      const r = await client.searchKnowledgePages(bankId, q, limit);
-      setResponse(r);
+      if (endpoint === "tree") {
+        setResponse(null);
+        setTreeResponse(await client.getKnowledgeTree(bankId, tagFilter));
+      } else {
+        setTreeResponse(null);
+        setResponse(await client.searchKnowledgePages(bankId, q, limit, tagFilter));
+      }
       setTookMs(Math.round(performance.now() - started));
     } catch {
       // toast handled by interceptor
       setResponse(null);
+      setTreeResponse(null);
     } finally {
       setSearching(false);
     }
@@ -80,8 +103,24 @@ export function KnowledgeSearchDialog({
           <DialogDescription>{t("advancedSearchDescription")}</DialogDescription>
         </DialogHeader>
 
-        <div className="flex items-end gap-2 shrink-0">
-          <div className="flex-1 space-y-1">
+        <Tabs
+          value={endpoint}
+          onValueChange={(v) => setEndpoint(v as Endpoint)}
+          className="shrink-0"
+        >
+          <TabsList>
+            <TabsTrigger value="search">{t("endpointSearch")}</TabsTrigger>
+            <TabsTrigger value="tree">{t("endpointTree")}</TabsTrigger>
+          </TabsList>
+        </Tabs>
+
+        <div className="space-y-1 shrink-0">
+          <Label>{t("tagFilterTitle")}</Label>
+          <KnowledgeTagFilterPanel bankId={bankId} value={tagFilter} onChange={onTagFilterChange} />
+        </div>
+
+        <div className="flex items-end justify-end gap-2 shrink-0">
+          <div className="flex-1 space-y-1" hidden={endpoint !== "search"}>
             <Label htmlFor="kb-adv-query">{t("advancedQuery")}</Label>
             <Input
               id="kb-adv-query"
@@ -91,7 +130,7 @@ export function KnowledgeSearchDialog({
               placeholder={t("searchPlaceholder")}
             />
           </div>
-          <div className="w-24 space-y-1">
+          <div className="w-24 space-y-1" hidden={endpoint !== "search"}>
             <Label htmlFor="kb-adv-limit">{t("advancedLimit")}</Label>
             <Input
               id="kb-adv-limit"
@@ -102,13 +141,20 @@ export function KnowledgeSearchDialog({
               onChange={(e) => setLimit(Math.max(1, Math.min(50, Number(e.target.value) || 1)))}
             />
           </div>
-          <Button onClick={run} disabled={searching || !query.trim()}>
+          <Button onClick={run} disabled={searching || (endpoint === "search" && !query.trim())}>
             {searching ? <Spinner size="sm" /> : <Search className="w-4 h-4" />}
             {t("advancedRun")}
           </Button>
         </div>
 
-        {!response ? (
+        {treeResponse ? (
+          <div className="flex-1 min-h-0 flex flex-col gap-2">
+            <span className="text-xs text-muted-foreground shrink-0">
+              {t("advancedMeta", { total: countPages(treeResponse.roots), ms: tookMs ?? 0 })}
+            </span>
+            <JsonViewer value={treeResponse} className="bg-muted flex-1 overflow-y-auto text-xs" />
+          </div>
+        ) : !response ? (
           <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
             {t("advancedIdle")}
           </div>

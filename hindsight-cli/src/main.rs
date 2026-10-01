@@ -1201,6 +1201,19 @@ enum KnowledgeBaseCommands {
     Tree {
         /// Bank ID
         bank_id: String,
+
+        /// Only pages carrying these tags (comma-separated, e.g. user:alice,team)
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
+
+        /// Tag matching mode: any, all, any_strict, all_strict, exact (default: any,
+        /// which also returns untagged pages)
+        #[arg(long)]
+        tags_match: Option<String>,
+
+        /// Compound tag filter as JSON, same shape as recall's tag_groups
+        #[arg(long)]
+        tag_groups: Option<String>,
     },
 
     /// Create a folder
@@ -1270,6 +1283,19 @@ enum KnowledgeBaseCommands {
         /// Maximum results to return (1-50)
         #[arg(long)]
         limit: Option<u64>,
+
+        /// Only pages carrying these tags (comma-separated, e.g. user:alice,team)
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
+
+        /// Tag matching mode: any, all, any_strict, all_strict, exact (default: any,
+        /// which also returns untagged pages)
+        #[arg(long)]
+        tags_match: Option<String>,
+
+        /// Compound tag filter as JSON, same shape as recall's tag_groups
+        #[arg(long)]
+        tag_groups: Option<String>,
     },
 
     /// Rename/move a node, or update a page's options
@@ -2046,9 +2072,18 @@ fn run() -> Result<()> {
 
         // Knowledge base commands
         Commands::KnowledgeBase(kb_cmd) => match kb_cmd {
-            KnowledgeBaseCommands::Tree { bank_id } => {
-                commands::knowledge_base::tree(&client, &bank_id, verbose, output_format)
-            }
+            KnowledgeBaseCommands::Tree {
+                bank_id,
+                tags,
+                tags_match,
+                tag_groups,
+            } => commands::knowledge_base::tree(
+                &client,
+                &bank_id,
+                &commands::knowledge_base::tag_filter(tags, tags_match, tag_groups)?,
+                verbose,
+                output_format,
+            ),
             KnowledgeBaseCommands::CreateFolder {
                 bank_id,
                 name,
@@ -2096,11 +2131,15 @@ fn run() -> Result<()> {
                 bank_id,
                 query,
                 limit,
+                tags,
+                tags_match,
+                tag_groups,
             } => commands::knowledge_base::search(
                 &client,
                 &bank_id,
                 &query,
                 limit,
+                &commands::knowledge_base::tag_filter(tags, tags_match, tag_groups)?,
                 verbose,
                 output_format,
             ),

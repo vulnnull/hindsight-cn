@@ -14,7 +14,8 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, cast
 
-from ..search.tags import TagsMatch
+from ..search.tags import TagGroup, TagsMatch, tags_satisfy_groups
+from ..source_scope import ids_passing, tag_filter_is_active, visible_document_ids
 from .tokenization import count_prompt_tokens
 
 if TYPE_CHECKING:
@@ -308,6 +309,7 @@ async def tool_read_mental_models(
     bank_id: str,
     mental_model_ids: list[str],
     max_tokens: int = 6000,
+    tag_scope: list[TagGroup] | None = None,
 ) -> dict[str, Any]:
     """Read the full text of mental models the search returned as snippets.
 
@@ -316,6 +318,9 @@ async def tool_read_mental_models(
     the failure ``search_mental_models`` used to have by returning five of them
     whole (#4533). A page that does not fit at all is reported by name rather
     than silently missing.
+
+    ``tag_scope`` is the caller's forced tag scope: a page outside it reads as missing,
+    even when the model asks for it by id.
     """
     from ..memory_engine import fq_table
 
@@ -338,7 +343,7 @@ async def tool_read_mental_models(
     spent = 0
     for wanted in mental_model_ids:
         row = by_id.get(str(wanted))
-        if row is None:
+        if row is None or (tag_scope and not tags_satisfy_groups(row["tags"], tag_scope)):
             omitted.append(str(wanted))
             continue
         content = row["content"] or ""
@@ -536,15 +541,28 @@ async def tool_expand(
     bank_id: str,
     memory_ids: list[str],
     depth: str,
+    *,
+    tags: list[str] | None,
+    tags_match: TagsMatch,
+    tag_groups: list[TagGroup] | None,
 ) -> dict[str, Any]:
     """
     Expand multiple memories to get chunk or document context.
+
+    The reader's tag filter applies twice (#5030): a memory outside it reads as not
+    found, and a visible memory's chunk or document is returned only when that
+    DOCUMENT passes the filter too — a fact shared through a tag such as ``kind:rule``
+    does not open the rest of a document the reader cannot see. The filter arguments
+    are required so no caller can forget them and expand the whole bank.
 
     Args:
         conn: Database connection
         bank_id: Bank identifier
         memory_ids: List of memory unit IDs
         depth: "chunk" or "document"
+        tags: The reader's tag filter (same as the recall it expands)
+        tags_match: How ``tags`` is matched
+        tag_groups: The reader's compound tag filter, already fuzzy-resolved
 
     Returns:
         Dict with results array, each containing memory, chunk, and optionally document data
@@ -576,6 +594,34 @@ async def tool_expand(
 
     _store = get_memories()
     memories = await _store.expand_memories(conn=conn, fq_table=fq_table, bank_id=bank_id, unit_ids=valid_uuids)
+    # A memory outside the reader's filter is dropped here, so below it reads as "not found"
+    # rather than revealing that it exists.
+    scoped = tag_filter_is_active(tags, tags_match, tag_groups)
+    if scoped:
+        _visible_ids = ids_passing(
+            {str(m["id"]): m["tags"] for m in memories}, tags=tags, tags_match=tags_match, tag_groups=tag_groups
+        )
+        memories = [m for m in memories if str(m["id"]) in _visible_ids]
+    # Source text follows its document's tags, not the fact's. Resolved before any chunk or
+    # document text is read, so a hidden source is never fetched at all.
+    visible_docs = await visible_document_ids(
+        conn,
+        fq_table,
+        bank_id,
+        (m["document_id"] for m in memories),
+        tags=tags,
+        tags_match=tags_match,
+        tag_groups=tag_groups,
+    )
+    # A chunk with no document on the memory cannot be checked, so under a filter it is
+    # withheld too: fail closed.
+    withheld_ids = {
+        m["id"]
+        for m in memories
+        if (m["document_id"] and m["document_id"] not in visible_docs)
+        or (scoped and m["chunk_id"] and not m["document_id"])
+    }
+    memories = [{**dict(m), "chunk_id": None, "document_id": None} if m["id"] in withheld_ids else m for m in memories]
     memory_map = {row["id"]: row for row in memories}
 
     # Collect chunk_ids and document_ids for batch fetching
@@ -626,6 +672,11 @@ async def tool_expand(
                 "context": memory["context"],
             },
         }
+
+        if memory["id"] in withheld_ids:
+            # Said outright so the agent stops asking, rather than retrying a depth that will
+            # never answer.
+            item["source_withheld"] = "The source of this memory is outside the current tag scope."
 
         # Add chunk if available
         if memory["chunk_id"] and memory["chunk_id"] in chunk_map:

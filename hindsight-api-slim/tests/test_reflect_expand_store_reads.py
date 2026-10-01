@@ -42,7 +42,9 @@ async def test_expand_returns_chunk_and_document_for_whichever_store_holds_them(
         assert memory_ids, "retain produced no memories, so the expand assertions would be vacuous"
 
         async with memory._backend.acquire() as conn:
-            result = await tool_expand(conn, bank_id, memory_ids, "document")
+            result = await tool_expand(
+                conn, bank_id, memory_ids, "document", tags=None, tags_match="any", tag_groups=None
+            )
 
         assert result["count"] == len(memory_ids)
         for item in result["results"]:

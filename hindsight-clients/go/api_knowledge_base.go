@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"reflect"
 )
 
 
@@ -541,7 +542,28 @@ type ApiGetKnowledgeBaseTreeRequest struct {
 	ctx context.Context
 	ApiService *KnowledgeBaseAPIService
 	bankId string
+	tags *[]string
+	tagsMatch *string
+	tagGroups *string
 	authorization *string
+}
+
+// Only return pages carrying these tags (matched per &#x60;tags_match&#x60;, like recall).
+func (r ApiGetKnowledgeBaseTreeRequest) Tags(tags []string) ApiGetKnowledgeBaseTreeRequest {
+	r.tags = &tags
+	return r
+}
+
+// How &#x60;tags&#x60; match a page&#39;s tags: any, all, any_strict, all_strict, exact. &#39;any&#39;/&#39;all&#39; also return untagged pages; the _strict modes and &#39;exact&#39; do not.
+func (r ApiGetKnowledgeBaseTreeRequest) TagsMatch(tagsMatch string) ApiGetKnowledgeBaseTreeRequest {
+	r.tagsMatch = &tagsMatch
+	return r
+}
+
+// JSON-encoded compound tag filter, same shape as recall&#39;s &#x60;tag_groups&#x60;, e.g. &#x60;[{\&quot;or\&quot;:[{\&quot;tags\&quot;:[\&quot;user:kate\&quot;],\&quot;match\&quot;:\&quot;all_strict\&quot;},{\&quot;tags\&quot;:[\&quot;team\&quot;]}]}]&#x60;. Top-level groups are AND-ed, and AND-ed with &#x60;tags&#x60;.
+func (r ApiGetKnowledgeBaseTreeRequest) TagGroups(tagGroups string) ApiGetKnowledgeBaseTreeRequest {
+	r.tagGroups = &tagGroups
+	return r
 }
 
 func (r ApiGetKnowledgeBaseTreeRequest) Authorization(authorization string) ApiGetKnowledgeBaseTreeRequest {
@@ -592,6 +614,26 @@ func (a *KnowledgeBaseAPIService) GetKnowledgeBaseTreeExecute(r ApiGetKnowledgeB
 	localVarQueryParams := url.Values{}
 	localVarFormParams := url.Values{}
 
+	if r.tags != nil {
+		t := *r.tags
+		if reflect.TypeOf(t).Kind() == reflect.Slice {
+			s := reflect.ValueOf(t)
+			for i := 0; i < s.Len(); i++ {
+				parameterAddToHeaderOrQuery(localVarQueryParams, "tags", s.Index(i).Interface(), "form", "multi")
+			}
+		} else {
+			parameterAddToHeaderOrQuery(localVarQueryParams, "tags", t, "form", "multi")
+		}
+	}
+	if r.tagsMatch != nil {
+		parameterAddToHeaderOrQuery(localVarQueryParams, "tags_match", r.tagsMatch, "form", "")
+	} else {
+		var defaultValue string = "any"
+		r.tagsMatch = &defaultValue
+	}
+	if r.tagGroups != nil {
+		parameterAddToHeaderOrQuery(localVarQueryParams, "tag_groups", r.tagGroups, "form", "")
+	}
 	// to determine the Content-Type header
 	localVarHTTPContentTypes := []string{}
 
@@ -791,6 +833,9 @@ type ApiSearchKnowledgeBaseRequest struct {
 	bankId string
 	q *string
 	limit *int32
+	tags *[]string
+	tagsMatch *string
+	tagGroups *string
 	authorization *string
 }
 
@@ -803,6 +848,24 @@ func (r ApiSearchKnowledgeBaseRequest) Q(q string) ApiSearchKnowledgeBaseRequest
 // Maximum results to return
 func (r ApiSearchKnowledgeBaseRequest) Limit(limit int32) ApiSearchKnowledgeBaseRequest {
 	r.limit = &limit
+	return r
+}
+
+// Only return pages carrying these tags (matched per &#x60;tags_match&#x60;, like recall).
+func (r ApiSearchKnowledgeBaseRequest) Tags(tags []string) ApiSearchKnowledgeBaseRequest {
+	r.tags = &tags
+	return r
+}
+
+// How &#x60;tags&#x60; match a page&#39;s tags: any, all, any_strict, all_strict, exact. &#39;any&#39;/&#39;all&#39; also return untagged pages; the _strict modes and &#39;exact&#39; do not.
+func (r ApiSearchKnowledgeBaseRequest) TagsMatch(tagsMatch string) ApiSearchKnowledgeBaseRequest {
+	r.tagsMatch = &tagsMatch
+	return r
+}
+
+// JSON-encoded compound tag filter, same shape as recall&#39;s &#x60;tag_groups&#x60;, e.g. &#x60;[{\&quot;or\&quot;:[{\&quot;tags\&quot;:[\&quot;user:kate\&quot;],\&quot;match\&quot;:\&quot;all_strict\&quot;},{\&quot;tags\&quot;:[\&quot;team\&quot;]}]}]&#x60;. Top-level groups are AND-ed, and AND-ed with &#x60;tags&#x60;.
+func (r ApiSearchKnowledgeBaseRequest) TagGroups(tagGroups string) ApiSearchKnowledgeBaseRequest {
+	r.tagGroups = &tagGroups
 	return r
 }
 
@@ -866,6 +929,26 @@ func (a *KnowledgeBaseAPIService) SearchKnowledgeBaseExecute(r ApiSearchKnowledg
 	} else {
 		var defaultValue int32 = 10
 		r.limit = &defaultValue
+	}
+	if r.tags != nil {
+		t := *r.tags
+		if reflect.TypeOf(t).Kind() == reflect.Slice {
+			s := reflect.ValueOf(t)
+			for i := 0; i < s.Len(); i++ {
+				parameterAddToHeaderOrQuery(localVarQueryParams, "tags", s.Index(i).Interface(), "form", "multi")
+			}
+		} else {
+			parameterAddToHeaderOrQuery(localVarQueryParams, "tags", t, "form", "multi")
+		}
+	}
+	if r.tagsMatch != nil {
+		parameterAddToHeaderOrQuery(localVarQueryParams, "tags_match", r.tagsMatch, "form", "")
+	} else {
+		var defaultValue string = "any"
+		r.tagsMatch = &defaultValue
+	}
+	if r.tagGroups != nil {
+		parameterAddToHeaderOrQuery(localVarQueryParams, "tag_groups", r.tagGroups, "form", "")
 	}
 	// to determine the Content-Type header
 	localVarHTTPContentTypes := []string{}

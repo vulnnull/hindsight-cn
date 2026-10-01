@@ -3,19 +3,15 @@
  *
  * The navbar GitHub item and the homepage hero both show the star count — it is
  * the cheapest social proof on the page and turns an unlabeled icon into a
- * target worth clicking. Fetching it at build time rather than from the browser
- * keeps it off the critical path and out of GitHub's unauthenticated rate limit,
- * which a docs site at this traffic would hit within minutes.
- *
- * The count therefore refreshes on deploy, not live. That is the point: a number
- * that is a few hours stale reads the same to a visitor, and nothing here is
- * worth a client-side request.
+ * target worth clicking. The build-time number is the first paint (no layout
+ * shift, no JS needed); `useGitHubStars` then refreshes it from the visitor's
+ * browser, so a stale or fallback build number never sticks.
  *
  * FALLBACK is what renders when the fetch fails — offline dev, a CI runner with
  * no egress, or a rate-limited IP. It is deliberately a round number below the
  * real count: a stale-low number is honest, a stale-high one is not.
  */
-const FALLBACK = 10000;
+const FALLBACK = 40000;
 const REPO = 'vectorize-io/hindsight';
 
 /* A build must not be able to hang on this. Without a deadline a slow or

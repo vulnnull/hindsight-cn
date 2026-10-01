@@ -20,6 +20,7 @@ import hindsight_api.engine.memory_engine as memory_engine_module
 from hindsight_api.api import page_markdown
 from hindsight_api.engine.db import DatabaseConnection
 from hindsight_api.engine.memory_engine import (
+    KnowledgeTagFilter,
     MemoryEngine,
     _may_need_refresh,
     fq_table,
@@ -1944,3 +1945,96 @@ class TestAuthorizationDisabled:
         export = await memory.export_knowledge_base(bank_id=bank_id, request_context=request_context)
         assert any(n["id"] == folder["id"] for n in export.nodes)
         await memory.delete_bank(bank_id, request_context=request_context)
+
+
+class TestTagFilter:
+    """Tree and search take recall's tag filter: tags + tags_match, and tag_groups."""
+
+    @pytest.mark.parametrize("match", ["any", "any_strict", "all_strict", "exact"])
+    def test_clause_survives_the_oracle_rewrite(self, match):
+        """The clause names the column bare, because Oracle's ``&&``/``@>`` rewrite only
+        matches a bare column — a qualified ``mm.tags`` came out as ``mm.EXISTS(...)``."""
+        from hindsight_api.engine.db.oracle import _rewrite_pg_to_oracle
+
+        clause = KnowledgeTagFilter(tags=["user:kate"], tags_match=match).clause(3)
+        rewritten = _rewrite_pg_to_oracle(f"SELECT 1 FROM t WHERE x = $1 {clause.sql}").query
+        assert "&&" not in rewritten and "@>" not in rewritten, rewritten
+        assert "mm." not in rewritten, rewritten
+
+    @staticmethod
+    def _names(roots: list[dict]) -> set[str]:
+        out: set[str] = set()
+        for node in roots:
+            out.add(node["name"])
+            out |= TestTagFilter._names(node.get("children") or [])
+        return out
+
+    async def _tree(self, api_client, bank_id: str, **params) -> set[str]:
+        resp = await api_client.get(f"/v1/default/banks/{_enc(bank_id)}/knowledge-base/tree", params=params)
+        assert resp.status_code == 200, resp.text
+        return self._names(resp.json()["roots"])
+
+    async def test_tree_keeps_matching_pages_and_their_folders(self, api_client, kb_bank):
+        bank_id, _ = kb_bank
+        # Strict: only tagged pages; the empty "Sub" folder goes with the untagged page.
+        assert await self._tree(api_client, bank_id, tags="type:policy", tags_match="any_strict") == {
+            "Policies",
+            "Billing",
+        }
+        # 'any' keeps untagged pages too, as recall does.
+        assert await self._tree(api_client, bank_id, tags="type:policy", tags_match="any") == {
+            "Policies",
+            "Billing",
+            "Loose",
+        }
+        assert await self._tree(api_client, bank_id, tags=["revenue", "sales"], tags_match="all_strict") == {
+            "Runbooks",
+            "Orders",
+        }
+        # No filter: the whole tree, empty folders included.
+        assert "Sub" in await self._tree(api_client, bank_id)
+
+    async def test_tree_tag_groups(self, api_client, kb_bank):
+        bank_id, _ = kb_bank
+        groups = '[{"and":[{"tags":["revenue"],"match":"any_strict"},{"not":{"tags":["sales"],"match":"any_strict"}}]}]'
+        assert await self._tree(api_client, bank_id, tag_groups=groups) == {"Policies", "Billing"}
+
+        bad = await api_client.get(
+            f"/v1/default/banks/{_enc(bank_id)}/knowledge-base/tree", params={"tag_groups": "[{"}
+        )
+        assert bad.status_code == 422
+
+    async def test_search_only_returns_matching_pages(self, api_client, kb_bank):
+        bank_id, ids = kb_bank
+        resp = await api_client.get(
+            f"/v1/default/banks/{_enc(bank_id)}/knowledge-base/search",
+            params={"q": "billing net-30 orders", "tags": "type:runbook", "tags_match": "any_strict"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert {r["id"] for r in resp.json()["results"]} == {ids.orders}
+
+        resp = await api_client.get(
+            f"/v1/default/banks/{_enc(bank_id)}/knowledge-base/search",
+            params={"q": "billing net-30 orders", "tag_groups": '[{"tags":["type:policy"],"match":"exact"}]'},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["results"] == []
+
+    async def test_validator_can_narrow_tree_and_search(self, api_client, memory: MemoryEngine, kb_bank, monkeypatch):
+        """An extension trims the reads by answering with a tag filter."""
+        bank_id, ids = kb_bank
+        seen: list[BankReadContext] = []
+
+        class _Narrowing(_RecordingValidator):
+            async def validate_bank_read(self, ctx: BankReadContext) -> ValidationResult:
+                seen.append(ctx)
+                return ValidationResult.accept_with(tags=["type:policy"], tags_match="all_strict")
+
+        monkeypatch.setattr(memory, "_operation_validator", _Narrowing())
+        assert await self._tree(api_client, bank_id, tags="sales") == {"Policies", "Billing"}
+        assert seen[-1].tags == ["sales"]
+
+        resp = await api_client.get(
+            f"/v1/default/banks/{_enc(bank_id)}/knowledge-base/search", params={"q": "orders billing net-30"}
+        )
+        assert {r["id"] for r in resp.json()["results"]} == {ids.billing}

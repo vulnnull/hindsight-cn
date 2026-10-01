@@ -319,6 +319,25 @@ function warnIfOperationIdDropped(
   }
 }
 
+/**
+ * Tag filter for the knowledge-base tree and search, with recall's semantics: the
+ * server default `tagsMatch` is "any", which also returns untagged pages.
+ */
+export interface KnowledgeTagFilterOptions {
+  tags?: string[];
+  tagsMatch?: "any" | "all" | "any_strict" | "all_strict" | "exact";
+  tagGroups?: Array<TagGroupLeaf | TagGroupAndInput | TagGroupOrInput | TagGroupNotInput>;
+}
+
+function knowledgeTagQuery(options?: KnowledgeTagFilterOptions) {
+  return {
+    ...(options?.tags?.length ? { tags: options.tags } : {}),
+    ...(options?.tagsMatch ? { tags_match: options.tagsMatch } : {}),
+    // A GET carries the boolean tree as one JSON-encoded query param.
+    ...(options?.tagGroups?.length ? { tag_groups: JSON.stringify(options.tagGroups) } : {}),
+  };
+}
+
 export class HindsightClient {
   private client: Client;
   private maxAttempts: number;
@@ -710,6 +729,10 @@ export class HindsightClient {
       startDate?: string;
       /** ISO-8601, exclusive. */
       endDate?: string;
+      /** Filter by the memories' tags. */
+      tags?: string[];
+      /** How `tags` match; the server defaults to "any". */
+      tagsMatch?: "any" | "all" | "any_strict" | "all_strict" | "exact";
       signal?: AbortSignal;
     }
   ): Promise<ListMemoryUnitsResponse> {
@@ -728,6 +751,8 @@ export class HindsightClient {
         time_field: options?.timeField,
         start_date: options?.startDate,
         end_date: options?.endDate,
+        tags: options?.tags,
+        tags_match: options?.tagsMatch,
       },
       signal: options?.signal,
     });
@@ -1462,11 +1487,12 @@ export class HindsightClient {
    */
   async getKnowledgeBaseTree(
     bankId: string,
-    options?: { signal?: AbortSignal }
+    options?: KnowledgeTagFilterOptions & { signal?: AbortSignal }
   ): Promise<KnowledgeTreeResponse> {
     const response = await sdk.getKnowledgeBaseTree({
       client: this.client,
       path: { bank_id: bankId },
+      query: knowledgeTagQuery(options),
       signal: options?.signal,
     });
 
@@ -1558,7 +1584,7 @@ export class HindsightClient {
   async searchKnowledgeBase(
     bankId: string,
     query: string,
-    options?: { limit?: number; signal?: AbortSignal }
+    options?: KnowledgeTagFilterOptions & { limit?: number; signal?: AbortSignal }
   ): Promise<KnowledgePageSearchResponse> {
     const response = await sdk.searchKnowledgeBase({
       client: this.client,
@@ -1566,6 +1592,7 @@ export class HindsightClient {
       query: {
         q: query,
         ...(options?.limit !== undefined ? { limit: options.limit } : {}),
+        ...knowledgeTagQuery(options),
       },
       signal: options?.signal,
     });

@@ -2140,14 +2140,17 @@
     "editSourceQueryHint": "これを変更すると、記憶に基づいてページの内容が再構築されます。",
     "saveChanges": "変更を保存",
     "advancedSearchTitle": "詳細検索",
-    "advancedSearchDescription": "サーバー側のハイブリッド検索（BM25 + ベクトル）を実行し、順位付けされたページと生のレスポンスを確認します。",
+    "tagFilterTitle": "タグで絞り込む",
+    "endpointSearch": "検索",
+    "endpointTree": "ツリー",
+    "advancedSearchDescription": "サーバー上のナレッジベースのエンドポイントを試します：ハイブリッド検索（BM25 + ベクトル）またはページツリーを、サイドバーと同じタグフィルターで実行し、生のレスポンスを確認できます。",
     "advancedQuery": "クエリ",
     "advancedLimit": "件数上限",
-    "advancedRun": "検索",
+    "advancedRun": "実行",
     "advancedResults": "結果",
     "advancedJson": "生の JSON",
     "advancedMeta": "{total} 件 · {ms} ミリ秒",
-    "advancedIdle": "検索を実行すると、順位付けされたページと生のレスポンスが表示されます。"
+    "advancedIdle": "リクエストを実行すると、結果と生のレスポンスが表示されます。"
   },
   "home": {
     "title": "ホーム",

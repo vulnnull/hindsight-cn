@@ -45,6 +45,7 @@ class _FakeReflectConnection:
                     "document_id": self.document_id,
                     "fact_type": "experience",
                     "context": "preference",
+                    "tags": [],
                 }
             ]
 
@@ -96,6 +97,7 @@ class _FakeMultiMemoryConnection:
                     "document_id": None,
                     "fact_type": "experience",
                     "context": "preference",
+                    "tags": [],
                 }
                 for memory_id in requested
                 if memory_id in self.texts
@@ -153,6 +155,9 @@ async def test_tool_expand_pairs_each_memory_id_with_its_own_memory() -> None:
         bank_id="test-reflect-expand-pairing",
         memory_ids=["not-a-uuid", str(first), str(second)],
         depth="chunk",
+        tags=None,
+        tags_match="any",
+        tag_groups=None,
     )
 
     assert result["count"] == 3
@@ -181,6 +186,9 @@ async def test_tool_expand_reports_a_trailing_invalid_memory_id() -> None:
         bank_id="test-reflect-expand-trailing-invalid",
         memory_ids=[str(memory_id), "bad"],
         depth="chunk",
+        tags=None,
+        tags_match="any",
+        tag_groups=None,
     )
 
     assert result["count"] == 2
@@ -206,6 +214,9 @@ async def test_tool_expand_document_depth_reads_metadata_from_retain_params() ->
         bank_id=bank_id,
         memory_ids=[str(memory_id)],
         depth="document",
+        tags=None,
+        tags_match="any",
+        tag_groups=None,
     )
 
     assert result["count"] == 1
@@ -231,6 +242,9 @@ async def test_tool_expand_document_depth_without_chunk_reads_metadata_from_reta
         bank_id=bank_id,
         memory_ids=[str(memory_id)],
         depth="document",
+        tags=None,
+        tags_match="any",
+        tag_groups=None,
     )
 
     assert result["count"] == 1

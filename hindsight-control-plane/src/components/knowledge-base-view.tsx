@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { client, type KnowledgeNode, type MentalModel } from "@/lib/api";
+import { client, type KnowledgeNode, type KnowledgeTagFilter, type MentalModel } from "@/lib/api";
 import { useBank } from "@/lib/bank-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -56,6 +56,8 @@ import { useRefreshAttempts, type RefreshAttempt } from "@/lib/use-refresh-attem
 import { FreshnessLine } from "./freshness-line";
 import { MentalModelDetailModal } from "./mental-model-detail-modal";
 import { KnowledgeSearchDialog } from "./knowledge-search-dialog";
+import { isKnowledgeTagFilterActive } from "./knowledge-tag-filter";
+import { TagChip } from "@/components/ui/facet-chip";
 import { KnowledgeSearchResult, type KnowledgeSearchHit } from "./knowledge-search-result";
 import { buildPathIndex } from "@/lib/knowledge-path";
 import { UpdateMentalModelDialog } from "./mental-models-view";
@@ -82,6 +84,7 @@ function flatten(nodes: KnowledgeNode[], out: KnowledgeNode[] = []): KnowledgeNo
 
 export function KnowledgeBaseView() {
   const t = useTranslations("knowledgeBase");
+  const tc = useTranslations("common");
   const { currentBank } = useBank();
   const searchParams = useSearchParams();
   const pageParam = searchParams.get("page");
@@ -109,6 +112,25 @@ export function KnowledgeBaseView() {
   const [searching, setSearching] = useState(false);
   // The same search with its limit exposed and the raw response beside the hits.
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  // Tag filter applied to both the tree and the search (recall's tags / tags_match).
+  // `#tag` typed in the search box becomes a chip; strict by default, so a tag
+  // filter shows only pages carrying the tag (the advanced dialog can widen it).
+  const [tagFilter, setTagFilter] = useState<KnowledgeTagFilter>({ tags_match: "any_strict" });
+  const tagFilterActive = isKnowledgeTagFilterActive(tagFilter);
+  const removeTag = (tag: string) =>
+    setTagFilter((f) => ({ ...f, tags: (f.tags ?? []).filter((x) => x !== tag) }));
+  // Enter/space/comma closes a `#tag` token into a chip; backspace on an empty box pops one.
+  const onSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    const token = query.match(/(?:^|\s)#(\S+)$/);
+    if (token && (e.key === "Enter" || e.key === " " || e.key === ",")) {
+      e.preventDefault();
+      const tag = token[1];
+      setTagFilter((f) => ({ ...f, tags: [...new Set([...(f.tags ?? []), tag])] }));
+      setQuery(query.slice(0, token.index).trimEnd() + (token.index ? " " : ""));
+    } else if (e.key === "Backspace" && !query && tagFilter.tags?.length) {
+      removeTag(tagFilter.tags[tagFilter.tags.length - 1]);
+    }
+  };
 
   // Obsidian-style editor tabs: multiple pages open at once; `activeId` is focused.
   const [tabs, setTabs] = useState<PageDetail[]>([]);
@@ -158,7 +180,7 @@ export function KnowledgeBaseView() {
       if (!opts?.silent) setLoading(true);
       let nextRoots: KnowledgeNode[] = [];
       try {
-        const result = await client.getKnowledgeTree(bank);
+        const result = await client.getKnowledgeTree(bank, tagFilter);
         nextRoots = result.roots || [];
       } catch {
         // toast handled by interceptor
@@ -170,7 +192,7 @@ export function KnowledgeBaseView() {
       // don't stay parked forever waiting for a tree that isn't coming.
       setTree({ bank, roots: nextRoots });
     },
-    [currentBank]
+    [currentBank, tagFilter]
   );
 
   useEffect(() => {
@@ -193,7 +215,7 @@ export function KnowledgeBaseView() {
     let cancelled = false;
     const handle = setTimeout(() => {
       client
-        .searchKnowledgePages(currentBank, q, 20)
+        .searchKnowledgePages(currentBank, q, 20, tagFilter)
         .then((r) => {
           if (!cancelled) setResults(r.results);
         })
@@ -208,7 +230,7 @@ export function KnowledgeBaseView() {
       cancelled = true;
       clearTimeout(handle);
     };
-  }, [query, currentBank]);
+  }, [query, currentBank, tagFilter]);
 
   // Auto-refresh: silently re-poll the tree (freshness badges) and refresh every
   // open tab's content on the same tick.
@@ -487,20 +509,36 @@ export function KnowledgeBaseView() {
       {/* Obsidian-style workspace: one frame, a file-explorer sidebar + editor pane. */}
       <div className="flex items-stretch overflow-hidden h-[calc(100vh-13rem)] min-h-[520px]">
         <aside className="w-1/3 flex-shrink-0 bg-muted/30 border-r border-border flex flex-col">
-          {/* Hybrid search box — a query swaps the tree for ranked results. */}
+          {/* One box for both filters: free text runs the hybrid search, `#tag` tokens
+              become chips that filter the tree and the search alike. The sliders open
+              the same filter against the raw endpoints. */}
           <div className="shrink-0 border-b border-border p-2 flex items-stretch gap-1">
-            <div className="relative flex-1">
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+            <div className="relative flex-1 flex flex-wrap items-center gap-1 pl-7 pr-7 py-1 rounded-md bg-background border border-border focus-within:ring-1 focus-within:ring-primary">
+              <Search className="absolute left-2 top-2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+              {(tagFilter.tags ?? []).map((tag) => (
+                <TagChip
+                  key={tag}
+                  tag={tag}
+                  size="xs"
+                  onRemove={() => removeTag(tag)}
+                  removeLabel={tc("removeTag", { tag })}
+                />
+              ))}
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder={t("searchPlaceholder")}
-                className="w-full pl-7 pr-7 py-1.5 text-sm rounded-md bg-background border border-border focus:outline-none focus:ring-1 focus:ring-primary"
+                onKeyDown={onSearchKeyDown}
+                placeholder={tagFilter.tags?.length ? "" : t("searchPlaceholder")}
+                aria-label={t("searchPlaceholder")}
+                className="flex-1 min-w-[6rem] py-0.5 text-sm bg-transparent focus:outline-none"
               />
-              {query && (
+              {(query || tagFilterActive) && (
                 <button
-                  onClick={() => setQuery("")}
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted"
+                  onClick={() => {
+                    setQuery("");
+                    setTagFilter({ ...tagFilter, tags: [] });
+                  }}
+                  className="absolute right-1.5 top-1.5 rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted"
                   aria-label={t("clearSearch")}
                 >
                   <X className="w-3.5 h-3.5" />
@@ -511,7 +549,11 @@ export function KnowledgeBaseView() {
               onClick={() => setAdvancedOpen(true)}
               title={t("advancedSearchTitle")}
               aria-label={t("advancedSearchTitle")}
-              className="flex items-center justify-center rounded-md border border-border px-1.5 text-muted-foreground hover:text-foreground hover:bg-muted"
+              className={`relative flex items-center justify-center rounded-md border px-1.5 hover:bg-muted ${
+                tagFilterActive
+                  ? "border-primary text-primary"
+                  : "border-border text-muted-foreground hover:text-foreground"
+              }`}
             >
               <SlidersHorizontal className="w-3.5 h-3.5" />
             </button>
@@ -522,6 +564,8 @@ export function KnowledgeBaseView() {
               onOpenChange={setAdvancedOpen}
               bankId={currentBank}
               initialQuery={query}
+              tagFilter={tagFilter}
+              onTagFilterChange={setTagFilter}
               pathById={pathById}
               onOpenPage={openPage}
             />

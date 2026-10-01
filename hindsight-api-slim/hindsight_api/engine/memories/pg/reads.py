@@ -33,6 +33,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ...search.tags import (
+    TagGroup,
     TagsMatch,
     build_tag_groups_where_clause,
     build_tags_where_clause,
@@ -299,6 +300,7 @@ async def list_tags(
     pattern: str | None = None,
     limit: int = 100,
     offset: int = 0,
+    tag_groups: list[TagGroup] | None = None,
 ) -> dict[str, Any]:
     """One page of a bank's tag histogram: ``{"items": [{tag, count}], "total", "limit", "offset"}``.
 
@@ -323,13 +325,16 @@ async def list_tags(
         # '*' is the wildcard, matched case-insensitively — same anchored ILIKE semantics as before.
         params.append(pattern.replace("*", "%"))
         pattern_clause = f"AND {tag_col} ILIKE $2"
+    # A caller's forced tag scope: only memories it admits contribute tags or counts.
+    groups = build_tag_groups_where_clause(tag_groups, len(params) + 1, table_alias=bank_prefix)
+    params.extend(groups.params)
 
     total_row = await conn.fetchrow(
         f"""
         SELECT COUNT(DISTINCT {tag_col}) as total
         FROM {tag_source}
         WHERE {bank_prefix}bank_id = $1 {non_empty_check}
-        {pattern_clause}
+        {pattern_clause} {groups.sql}
         """,
         *params,
     )
@@ -343,7 +348,7 @@ async def list_tags(
         SELECT {tag_col} as tag, COUNT(*) as count
         FROM {tag_source}
         WHERE {bank_prefix}bank_id = $1 {non_empty_check}
-        {pattern_clause}
+        {pattern_clause} {groups.sql}
         GROUP BY {tag_col}
         ORDER BY count DESC, {tag_col} ASC
         LIMIT ${limit_param} OFFSET ${offset_param}
