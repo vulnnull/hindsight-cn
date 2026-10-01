@@ -16,10 +16,12 @@ from types import SimpleNamespace
 
 import pytest
 
+import hindsight_api.engine.memories.pg.recall as recall_module
 import hindsight_api.engine.search.retrieval as retrieval_module
+from hindsight_api.engine.memories.base import SemanticBm25Result
 from hindsight_api.engine.search.types import GraphRetrieval
-from hindsight_api.engine.search.retrieval import _select_with_temporal_coverage, retrieve_temporal_combined_sql
-from hindsight_api.engine.task_backend import fq_table
+from hindsight_api.engine.memories.pg.recall import _select_with_temporal_coverage, retrieve_temporal_combined_sql
+from hindsight_api.engine.schema import fq_store_table_explicit
 
 EMBED_DIM = 384
 
@@ -85,7 +87,7 @@ def test_coverage_degenerate_dates_fall_back_to_similarity():
 
 
 async def _insert_unit(conn, bank_id: str, text: str, fact_type: str, when: datetime, embedding: str) -> str:
-    table = fq_table("memory_units")
+    table = fq_store_table_explicit("memory_units")
     row = await conn.fetchrow(
         f"""
         INSERT INTO {table} (bank_id, text, fact_type, embedding, event_date, mentioned_at)
@@ -111,7 +113,7 @@ async def test_temporal_recall_selects_by_similarity_not_recency(memory):
 
     pool = await memory._get_pool()
     async with pool.acquire() as conn:
-        await conn.execute(f"DELETE FROM {fq_table('memory_units')} WHERE bank_id = $1", bank_id)
+        await conn.execute(f"DELETE FROM {fq_store_table_explicit('memory_units')} WHERE bank_id = $1", bank_id)
 
         # Oldest in-window unit, perfect similarity.
         oldest_relevant = await _insert_unit(
@@ -151,7 +153,7 @@ async def test_temporal_recall_covers_window_range(memory):
 
     pool = await memory._get_pool()
     async with pool.acquire() as conn:
-        await conn.execute(f"DELETE FROM {fq_table('memory_units')} WHERE bank_id = $1", bank_id)
+        await conn.execute(f"DELETE FROM {fq_store_table_explicit('memory_units')} WHERE bank_id = $1", bank_id)
 
         # A dense January cluster at the highest similarity.
         for i in range(20):
@@ -186,7 +188,7 @@ async def test_min_semantic_does_not_tighten_temporal_seed_threshold(monkeypatch
         yield object()
 
     async def fake_semantic_bm25_combined_sql(*args, **kwargs):
-        return {"world": retrieval_module.SemanticBm25Result(semantic=[], bm25=[], graph_seeds=None)}
+        return {"world": SemanticBm25Result(semantic=[], bm25=[], graph_seeds=None)}
 
     async def fake_temporal_combined_sql(*args, **kwargs):
         temporal_thresholds.append(kwargs["semantic_threshold"])
@@ -206,8 +208,8 @@ async def test_min_semantic_does_not_tighten_temporal_seed_threshold(monkeypatch
 
     monkeypatch.setattr("hindsight_api.engine.memories._memories", PostgresMemories({}))
     monkeypatch.setattr("hindsight_api.engine.db_utils.acquire_with_retry", fake_acquire_with_retry)
-    monkeypatch.setattr(retrieval_module, "retrieve_semantic_bm25_combined_sql", fake_semantic_bm25_combined_sql)
-    monkeypatch.setattr(retrieval_module, "retrieve_temporal_combined_sql", fake_temporal_combined_sql)
+    monkeypatch.setattr(recall_module, "retrieve_semantic_bm25_combined_sql", fake_semantic_bm25_combined_sql)
+    monkeypatch.setattr(recall_module, "retrieve_temporal_combined_sql", fake_temporal_combined_sql)
     monkeypatch.setattr(retrieval_module, "_default_graph_retriever", FakeGraphRetriever())
     monkeypatch.setattr(retrieval_module, "get_config", lambda: fake_config)
     monkeypatch.setattr("hindsight_api.config.get_config", lambda: fake_config)

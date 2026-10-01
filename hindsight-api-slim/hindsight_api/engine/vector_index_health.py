@@ -208,27 +208,18 @@ async def _capped_row_counts(
     The cap is a query parameter rather than an outer-column reference on
     purpose: PostgreSQL rejects a LIMIT/OFFSET expression containing a variable
     from an outer query level, and the bounds are global anyway, not per-fact-type.
+
+    The count itself belongs to the memories store, which owns `memory_units`
+    (#4969); the Postgres store runs the capped scan described here — and it is asked directly,
+    because the only caller has already established the bank is SQL-backed
+    (``bank_indexes_are_store_owned`` returned False above), and the count is of Postgres's own
+    rows — so it is a Postgres-only method, not part of the store interface.
     """
-    if not fact_types:
-        return {}
-    qschema = _quote_identifier(schema)
-    rows = await conn.fetch(
-        f"""
-        SELECT t.fact_type,
-               (
-                   SELECT count(*) FROM (
-                       SELECT 1 FROM {qschema}.memory_units
-                       WHERE bank_id = $1 AND fact_type = t.fact_type
-                       LIMIT $2
-                   ) capped
-               ) AS row_count
-        FROM unnest($3::text[]) AS t(fact_type)
-        """,  # noqa: S608 — schema is a quoted identifier
-        bank_id,
-        cap,
-        fact_types,
+    from .memories import sql_memories
+
+    return await sql_memories().capped_memory_counts(
+        conn=conn, schema=schema, bank_id=bank_id, fact_types=fact_types, cap=cap
     )
-    return {row["fact_type"]: int(row["row_count"]) for row in rows}
 
 
 async def plan_bank_vector_indexes(

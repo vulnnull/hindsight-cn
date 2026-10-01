@@ -19,18 +19,24 @@ from difflib import SequenceMatcher
 from functools import lru_cache
 from typing import Any, Final, cast
 
-from .db_utils import acquire_with_retry
-from .memory_engine import fq_table
-from .retain.entity_labels import (
+from ...db_utils import acquire_with_retry
+from ...retain.entity_labels import (
     build_labels_lookup as _build_labels_lookup_from_config,
 )
-from .retain.entity_labels import (
+from ...retain.entity_labels import (
     is_label_entity as _is_label_entity,
 )
-from .retain.entity_labels import (
+from ...retain.entity_labels import (
     parse_entity_labels as _parse_entity_labels,
 )
-from .retain.types import ResolvedEntity
+from ...retain.types import ResolvedEntity
+
+# The guard-free resolver, named `fq_table` like every pg/ function's resolver parameter:
+# this module is the Postgres entity registry, so the store tables are its own (#4969).
+from ...schema import fq_store_table as fq_table
+
+# The trigram helpers live outside the store because fuzzy tag matching shares them.
+from ...trigram import TRGM_WORD, trigram_set, trigram_set_similarity
 
 logger = logging.getLogger(__name__)
 
@@ -71,52 +77,6 @@ _INTRABATCH_MAX_NAMES = 250
 # punctuation or decoration — pg_trgm builds its trigrams per word, so identical sets means the
 # separators are all that differ. Name evidence that strong stands on its own.
 _IDENTICAL_TRIGRAMS: Final[float] = 1.0
-
-# A pg_trgm "word" is a maximal run of alphanumerics (Unicode letters/digits, underscore excluded);
-# everything else (space, punctuation, emoji) is a separator. This is why decoration variants like
-# "Wren <emoji>" collapse to the same trigram set.
-_TRGM_WORD = re.compile(r"[^\W_]+", re.UNICODE)
-
-
-def _trigram_set(text: str) -> set[str]:
-    """Trigrams of ``text`` the way PostgreSQL pg_trgm generates them: lowercase, split into words,
-    pad each word with two leading + one trailing blank, and take every 3-char window."""
-    trigrams: set[str] = set()
-    for word in _TRGM_WORD.findall(text.lower()):
-        padded = f"  {word} "
-        for i in range(len(padded) - 2):
-            trigrams.add(padded[i : i + 3])
-    return trigrams
-
-
-def _trigram_set_similarity(ta: set[str], tb: set[str]) -> float:
-    """Jaccard index of two already-computed trigram sets.
-
-    Split out from ``trigram_similarity`` so callers that compare one name against many
-    (the candidate scoring loop, the O(N^2) in-batch pass) build each set once instead of
-    once per comparison — the loop runs up to ``entity_resolution_max_candidates`` times per
-    mention on the retain hot path (GH-3211).
-    """
-    intersection = len(ta & tb)
-    union = len(ta) + len(tb) - intersection
-    return intersection / union if union else 0.0
-
-
-def trigram_similarity(a: str, b: str) -> float:
-    """pg_trgm ``similarity(a, b)`` computed in-memory — the Jaccard index of the trigram sets.
-
-    Public because two subsystems share it: entity resolution here, and fuzzy tag matching in
-    ``search.tag_resolution``. One notion of "similar name" for both, so a change to it is a
-    deliberate change to both — see ``tests/test_entity_intrabatch_clustering.py``, which pins
-    the values against Postgres.
-
-    Verified byte-for-byte against Postgres pg_trgm across emoji / accent / CJK / hyphen /
-    apostrophe cases (issue #3107), so the merge cutoff calibrated on pg_trgm transfers exactly.
-    Doing it in Python keeps the in-batch dedup off the retain transaction's DB connection and makes
-    it backend-agnostic (Postgres, Oracle, and the pg_trgm-absent "full" fallback all behave alike).
-    """
-    return _trigram_set_similarity(_trigram_set(a), _trigram_set(b))
-
 
 # Sequence ratio at/above which two *words* count as the same word. Calibrated on the pair this
 # exists to reject — "John Smith" vs "Jane Smith", where john/jane is 0.50 — against the legitimate
@@ -183,7 +143,7 @@ def _tokens_are_compatible(a: str, b: str) -> bool:
     numbers_a, numbers_b = _numbers_in(a), _numbers_in(b)
     if numbers_a - numbers_b and numbers_b - numbers_a:
         return False
-    ta, tb = _TRGM_WORD.findall(a.lower()), _TRGM_WORD.findall(b.lower())
+    ta, tb = TRGM_WORD.findall(a.lower()), TRGM_WORD.findall(b.lower())
     if len(ta) < 2 and len(tb) < 2:
         return True
     short, rest = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
@@ -292,7 +252,7 @@ def _find_intrabatch_similar_pairs(names: list[str], threshold: float) -> list[_
     if len(names) < 2:
         return []
 
-    trigrams = [_trigram_set(n) for n in names]
+    trigrams = [trigram_set(n) for n in names]
 
     # How common each trigram is in this batch. Sorting each set by it puts the tokens that
     # discriminate best up front, which is what keeps the indexed prefixes small.
@@ -1283,7 +1243,7 @@ class EntityResolver:
             best_score = 0.0
 
             nearby_entity_set = {e["text"].lower() for e in nearby_entities if e["text"] != entity_text}
-            mention_trigrams = _trigram_set(entity_text_lower)
+            mention_trigrams = trigram_set(entity_text_lower)
             # Weight each nearby name by how selective it is, once per mention rather than
             # once per candidate. Only the numerator is weighted: dividing by the weights too
             # would normalise the damping straight back out whenever the hub is the *only*
@@ -1325,9 +1285,9 @@ class EntityResolver:
                 canonical_lower = canonical_name.lower()
                 candidate_trigrams = candidate_trigram_map.get(canonical_name)
                 if candidate_trigrams is None:
-                    candidate_trigrams = _trigram_set(canonical_name)
+                    candidate_trigrams = trigram_set(canonical_name)
                     candidate_trigram_map[canonical_name] = candidate_trigrams
-                name_trigram_similarity = _trigram_set_similarity(mention_trigrams, candidate_trigrams)
+                name_trigram_similarity = trigram_set_similarity(mention_trigrams, candidate_trigrams)
                 if name_trigram_similarity < self._merge_min_similarity:
                     continue
 
@@ -1637,11 +1597,11 @@ class EntityResolver:
 
         # The unit→entity posting belongs to whoever stores the memory, so the
         # memories store records it. Co-occurrence below is separate and unaffected:
-        # it references only `entities`, which stays in Postgres either way, and is
-        # read by the entity-graph endpoint and by resolution's disambiguation signal.
+        # it references only this store's `entities` registry, and is read by the
+        # entity-graph endpoint and by resolution's disambiguation signal.
         # `store_write=False` means the caller already wrote the postings inline with the
         # memories, so we skip the (redundant) second store write and keep only co-occurrence.
-        from .memories import get_memories
+        from .. import get_memories
 
         if store_write:
             await get_memories().record_unit_entities(

@@ -6,10 +6,13 @@ import Layout from '@theme/Layout';
 import {usePluginData} from '@docusaurus/useGlobalData';
 import IntegrationsBanner from '@site/src/components/IntegrationsBanner';
 import {integrationsSorted, CATEGORY_LABELS, groupByCategory} from '@site/src/lib/integrations';
-// Agents covered by the Coding Agents plugin, drawn on its card: the whole pitch of that package
-// is "one install, every agent", which a single icon cannot convey — the row of logos is the pitch.
-// Shared with the sidebar preview so the two cannot drift.
-import {CODING_AGENT_HARNESSES} from '@site/src/lib/coding-agent-harnesses';
+// Agents covered by the Coding Agents plugin. Shared with the sidebar preview so the two cannot
+// drift.
+import {
+  CODING_AGENT_HARNESSES,
+  harnessDocLink,
+  harnessIconPath,
+} from '@site/src/lib/coding-agent-harnesses';
 import styles from './index.module.css';
 
 /**
@@ -43,8 +46,7 @@ interface Integration {
  * description — grouped by category so the shape of the catalogue is visible at a glance.
  *
  * Featured uses the same row, tinted and spanning wider tracks, so the page reads as one list with
- * three entries lifted out of it rather than two competing card designs. The coding-agents card
- * keeps its harness strip: "one install, every agent" is a claim a single icon cannot make.
+ * three entries lifted out of it rather than two competing card designs.
  */
 function IntegrationCard({
   integration,
@@ -55,7 +57,6 @@ function IntegrationCard({
   changelogSlug?: string;
   featured?: boolean;
 }) {
-  const harnessBase = useBaseUrl('/img/harness/');
   const iconSrc = useBaseUrl(integration.icon ?? '');
   const isExternal = integration.link.startsWith('http');
 
@@ -81,21 +82,6 @@ function IntegrationCard({
       </div>
 
       <p className={styles.compactDescription}>{integration.description}</p>
-
-      {featured && integration.id === 'coding-agents' && (
-        <div className={styles.harnessStrip} aria-label="Supported coding agents">
-          {CODING_AGENT_HARNESSES.map((h) => (
-            <img
-              key={h.id}
-              src={`${harnessBase}${h.file}`}
-              alt={h.label}
-              title={h.label}
-              className={styles.harnessLogo}
-              loading="lazy"
-            />
-          ))}
-        </div>
-      )}
 
       <div className={styles.compactActions}>
         <Link
@@ -161,6 +147,20 @@ export default function IntegrationsHub(): React.ReactElement {
     [filtered, showFeatured],
   );
 
+  // The individual coding agents are not catalogue entries — one plugin installs all of them — but
+  // people search this page for the agent they use, not for the plugin's name, and found nothing.
+  // A card each, pointing at that agent's install section on the plugin page. All official, so the
+  // community filter hides the section rather than showing an empty one.
+  const harnesses = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    if (selectedType === 'community') return [];
+    return CODING_AGENT_HARNESSES.filter((h) => !q || h.label.toLowerCase().includes(q));
+  }, [search, selectedType]);
+
+  // Counts what the page is showing, harness cards included — searching "Codex" matches no
+  // catalogue entry, and a toolbar reading "0 integrations" above a matching card is just wrong.
+  const resultCount = filtered.length + harnesses.length;
+
   const officialCount = integrations.filter((i) => i.type === 'official').length;
   const communityCount = integrations.filter((i) => i.type === 'community').length;
 
@@ -214,7 +214,9 @@ export default function IntegrationsHub(): React.ReactElement {
               </button>
             ))}
           </div>
-          <span className={styles.resultCount}>{filtered.length} integration{filtered.length !== 1 ? 's' : ''}</span>
+          <span className={styles.resultCount}>
+            {resultCount} integration{resultCount !== 1 ? 's' : ''}
+          </span>
         </div>
 
         {showFeatured && featured.length > 0 && (
@@ -233,6 +235,33 @@ export default function IntegrationsHub(): React.ReactElement {
           </section>
         )}
 
+        {harnesses.length > 0 && (
+          <section className={styles.group}>
+            <h3 className={styles.groupTitle}>
+              Coding agents
+              <span className={styles.groupCount}>{harnesses.length}</span>
+            </h3>
+            <p className={styles.harnessNote}>
+              Each installed by the one{' '}
+              <Link to="/sdks/integrations/coding-agents">Coding Agents</Link> plugin.
+            </p>
+            <div className={styles.harnessGrid}>
+              {harnesses.map((h) => (
+                <Link key={h.id} to={harnessDocLink(h)} className={styles.harnessCard}>
+                  <img
+                    src={harnessIconPath(h)}
+                    alt=""
+                    className={styles.compactIcon}
+                    aria-hidden
+                    loading="lazy"
+                  />
+                  <span className={styles.compactName}>{h.label}</span>
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
+
         {showFeatured && (
           <>
             <hr className={styles.sectionDivider} />
@@ -240,7 +269,7 @@ export default function IntegrationsHub(): React.ReactElement {
           </>
         )}
 
-        {filtered.length === 0 ? (
+        {filtered.length === 0 && harnesses.length === 0 ? (
           <div className={styles.empty}>
             <p>No integrations match your search.</p>
             <button className={styles.resetButton} onClick={() => { setSearch(''); setSelectedType('all'); }}>

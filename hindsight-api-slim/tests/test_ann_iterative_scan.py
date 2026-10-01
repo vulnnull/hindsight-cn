@@ -31,8 +31,8 @@ import pytest
 from hindsight_api._vector_index import ann_max_scan_tuples, ann_search_tuning_settings
 from hindsight_api.engine.memories.postgres import PostgresMemories
 from hindsight_api.engine.search import bm25_term_selection as bm25_mod
-from hindsight_api.engine.search import retrieval as retrieval_mod
-from hindsight_api.engine.search.link_expansion_retrieval import GRAPH_SEED_LIMIT
+from hindsight_api.engine.memories.pg import recall as recall_mod
+from hindsight_api.engine.memories.base import GRAPH_SEED_LIMIT
 
 BUDGET_MID = 300
 
@@ -118,9 +118,9 @@ def search_path(monkeypatch):
         text_search_extension="native",
         text_search_extension_native_language="english",
     )
-    monkeypatch.setattr(retrieval_mod, "create_sql_dialect", lambda backend: dialect)
-    monkeypatch.setattr(retrieval_mod, "get_config", lambda: config)
-    monkeypatch.setattr(retrieval_mod, "fq_table", lambda name: name)
+    monkeypatch.setattr(recall_mod, "create_sql_dialect", lambda backend: dialect)
+    monkeypatch.setattr(recall_mod, "get_config", lambda: config)
+    monkeypatch.setattr(recall_mod, "fq_table", lambda name: name)
     monkeypatch.setattr(bm25_mod, "get_current_schema", lambda: None)
     return dialect
 
@@ -203,13 +203,13 @@ async def test_the_kill_switch_flips_real_retrieval_depth(memory, request_contex
     """
     from hindsight_api._vector_index import uses_per_bank_vector_indexes
     from hindsight_api.config import get_config
-    from hindsight_api.engine.search.retrieval import retrieve_semantic_bm25_combined_sql
+    from hindsight_api.engine.memories.pg.recall import retrieve_semantic_bm25_combined_sql
     from hindsight_api.engine.retain.bank_utils import (
         _bank_index_name,
         create_bank_vector_indexes,
         get_or_create_bank_profile,
     )
-    from hindsight_api.engine.task_backend import fq_table
+    from hindsight_api.engine.schema import fq_store_table_explicit
 
     if not uses_per_bank_vector_indexes(get_config().vector_extension):
         pytest.skip("backend uses a global vector index, so there is no per-bank ANN index to name")
@@ -221,11 +221,11 @@ async def test_the_kill_switch_flips_real_retrieval_depth(memory, request_contex
     await get_or_create_bank_profile(memory._backend, bank_id)
     pool = await memory._get_pool()
     probe = _near_query_vector(0)
-    table = fq_table("memory_units")
+    table = fq_store_table_explicit("memory_units")
     try:
         async with pool.acquire() as conn:
             internal_id = await conn.fetchval(
-                f"SELECT internal_id FROM {fq_table('banks')} WHERE bank_id = $1", bank_id
+                f"SELECT internal_id FROM {fq_store_table_explicit('banks')} WHERE bank_id = $1", bank_id
             )
             assert internal_id is not None, f"bank {bank_id} was created without an internal_id"
             # The plan is asserted against this exact name below. "Index Scan" alone is

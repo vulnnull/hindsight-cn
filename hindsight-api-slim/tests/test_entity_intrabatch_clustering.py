@@ -10,14 +10,12 @@ import random
 
 import pytest
 
-from hindsight_api.engine.entity_resolver import (
+from hindsight_api.engine.memories.pg.entity_resolver import (
     _cluster_new_entity_names,
     _find_intrabatch_similar_pairs,
     _SimilarNamePair,
-    _trigram_set,
-    _trigram_set_similarity,
-    trigram_similarity,
 )
+from hindsight_api.engine.trigram import trigram_set, trigram_set_similarity, trigram_similarity
 
 
 # Expected values are what Postgres `SELECT similarity(lower(a), lower(b))` returns for each pair —
@@ -128,12 +126,12 @@ def test_separate_clusters_stay_separate():
 
 def _pairs_by_exhaustive_comparison(names: list[str], threshold: float) -> set[tuple[str, str]]:
     """Every qualifying pair, found by comparing all of them — the pre-optimisation behaviour."""
-    trigrams = [_trigram_set(n) for n in names]
+    trigrams = [trigram_set(n) for n in names]
     return {
         (names[i], names[j])
         for i in range(len(names))
         for j in range(i + 1, len(names))
-        if _trigram_set_similarity(trigrams[i], trigrams[j]) >= threshold
+        if trigram_set_similarity(trigrams[i], trigrams[j]) >= threshold
     }
 
 
