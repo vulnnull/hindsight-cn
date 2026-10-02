@@ -163,6 +163,10 @@ INTEGRATIONS: dict[str, IntegrationMeta] = {
     "vapi": IntegrationMeta("hindsight-vapi", "Vapi"),
     "gemini-spark": IntegrationMeta("hindsight-gemini-spark", "Gemini Spark"),
     "meta-muse": IntegrationMeta("hindsight-meta-muse", "Meta Muse"),
+    # Marketplace-distributed: Grok Bot and Cursor install the plugin from the Cursor
+    # Marketplace at an approved commit of this repo, so `package_name` is the plugin id
+    # rather than a registry package, and _package_url points at the source tree.
+    "grok-bot": IntegrationMeta("hindsight", "Grok Bot"),
     "flowise": IntegrationMeta("@vectorize-io/flowise-nodes-hindsight", "Flowise"),
     "google-adk": IntegrationMeta("hindsight-google-adk", "Google ADK"),
     "superagent": IntegrationMeta("hindsight-superagent", "Superagent"),
@@ -1139,7 +1143,7 @@ def _get_package_name(integration: str) -> str:
 def _package_url(integration: str, package_name: str) -> str:
     # Git-distributed plugin bundles have no npm/pypi package — link to the
     # source tree instead of a registry page.
-    if integration in ("claude-code", "agent-plugin", "hermes"):
+    if integration in ("claude-code", "agent-plugin", "hermes", "grok-bot"):
         return f"https://github.com/vectorize-io/hindsight/tree/main/hindsight-integrations/{integration}"
     if package_name.startswith("@"):
         return f"https://www.npmjs.com/package/{package_name}"

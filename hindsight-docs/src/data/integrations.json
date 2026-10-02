@@ -581,6 +581,16 @@
       "icon": "/img/icons/gemini.svg"
     },
     {
+      "id": "grok-bot",
+      "name": "Grok Bot",
+      "description": "Long-term memory for Grok Bot and Cursor. Each Bot keeps its own memory bank plus a shared one, carries state between routine runs, and reads the banks your other AI tools write to. Connects with OAuth; no API key.",
+      "type": "official",
+      "by": "hindsight",
+      "category": "tool",
+      "link": "/sdks/integrations/grok-bot",
+      "icon": "/img/icons/grok-build.svg"
+    },
+    {
       "id": "meta-muse",
       "name": "Meta Muse",
       "description": "Bring the memory from your other AI tools into Meta Muse. Muse signs in to Hindsight with OAuth, keeps its own memory bank, and reads the banks your other agents write to \u2014 recall, retain and reflect over MCP.",

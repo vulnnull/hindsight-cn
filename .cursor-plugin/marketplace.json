@@ -1,0 +1,13 @@
+{
+  "name": "hindsight",
+  "owner": { "name": "Vectorize", "email": "support@vectorize.io" },
+  "metadata": { "description": "Official Hindsight plugins" },
+  "plugins": [
+    {
+      "name": "hindsight",
+      "source": "./hindsight-integrations/grok-bot",
+      "description": "Long-term memory for Grok Bot and Cursor, shared across your Bots and your other AI tools.",
+      "version": "0.1.0"
+    }
+  ]
+}
