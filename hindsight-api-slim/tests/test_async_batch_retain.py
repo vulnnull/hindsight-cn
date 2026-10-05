@@ -136,6 +136,46 @@ async def test_shared_and_distinct_document_ids_sync(memory, request_context):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("queued", [False, True], ids=["sync", "async"])
+async def test_item_without_document_id_not_absorbed(memory, request_context, queued):
+    """An item without a document_id next to ONE item that has one gets its own
+    document; it is not folded into the other item's document, whose replace
+    would otherwise delete its facts too (issue #4931). The queued and in-process
+    paths must agree."""
+    bank_id = f"test_idless_not_absorbed_{uuid.uuid4().hex}"
+    contents = [
+        {"content": "Alice works at Google", "document_id": "report-2024"},
+        {"content": "Bob loves Python"},
+    ]
+    try:
+        if queued:
+            submitted = await memory.submit_async_retain(
+                bank_id=bank_id, contents=contents, request_context=request_context
+            )
+            # SyncTaskBackend runs the children on submit.
+            await asyncio.sleep(0.1)
+            status = await memory.get_operation_status(
+                bank_id=bank_id, operation_id=submitted["operation_id"], request_context=request_context
+            )
+            assert status["status"] == "completed"
+        else:
+            result = await memory.retain_batch_async(
+                bank_id=bank_id, contents=contents, request_context=request_context
+            )
+            assert len(result) == 2
+            assert result[1]
+
+        docs = await memory.list_documents(bank_id=bank_id, request_context=request_context)
+        assert docs["total"] == 2
+
+        report = await memory.get_document("report-2024", bank_id, request_context=request_context)
+        assert "Alice works at Google" in report["original_text"]
+        assert "Bob loves Python" not in report["original_text"]
+    finally:
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+
+@pytest.mark.asyncio
 async def test_shared_document_id_folds_sync_large_batch(memory, request_context):
     """A shared-document batch large enough to exceed the auto-split token
     threshold still folds into one document with NO lost content. Splitting one

@@ -2257,6 +2257,83 @@ const traecode: HarnessInstaller = {
   },
 };
 
+/**
+ * WorkBuddy and CodeBuddy Code run the same `@genie/agent-cli` engine, one home folder apart
+ * (`~/.workbuddy` vs `~/.codebuddy`). Both read the nested Claude-shaped hooks block from
+ * `<home>/settings.json`, so `mergeHarnessHooks` writes it unchanged, and both take the MCP server
+ * from a plain FILE (no external CLI involved). The companion skill lands in each host's own root
+ * (see SKILL_DIRS).
+ *
+ * `mcpPaths` is the host's MCP file lookup, highest priority first: the installer writes the FIRST
+ * one that exists (or the first one when none do), and uninstall sweeps them all — an entry
+ * installed before a higher-priority file appeared would otherwise survive as a dormant duplicate.
+ */
+const genieInstaller = (
+  name: "workbuddy" | "codebuddy",
+  homeDir: string,
+  mcpPaths: (home: string) => string[]
+): HarnessInstaller => ({
+  name,
+  detect: (c) => existsSync(join(c.home, homeDir)),
+  install(c) {
+    const settingsPath = join(c.home, homeDir, "settings.json");
+    const settings = readJson(settingsPath);
+    settings.hooks = settings.hooks ?? {};
+    mergeHarnessHooks(settings.hooks, name, c.dist);
+    writeJson(settingsPath, settings);
+    c.log?.(`${name}: hooks merged into ${settingsPath}`);
+
+    const paths = mcpPaths(c.home);
+    const mcpPath = paths.find((p) => existsSync(p)) ?? paths[0];
+    const mcp = readJson(mcpPath);
+    mcp.mcpServers = mcp.mcpServers ?? {};
+    mcp.mcpServers.hindsight = mcpServerEntry(c.dist, name);
+    writeJson(mcpPath, mcp);
+    c.log?.(`${name}: MCP server registered in ${mcpPath}`);
+
+    installSkill(c, name);
+  },
+  uninstall(c) {
+    const settingsPath = join(c.home, homeDir, "settings.json");
+    if (existsSync(settingsPath)) {
+      const settings = readJson(settingsPath);
+      if (settings.hooks) {
+        stripHarnessHooks(settings.hooks, name);
+        if (!Object.keys(settings.hooks).length) delete settings.hooks;
+        writeJson(settingsPath, settings);
+      }
+    }
+    for (const mcpPath of mcpPaths(c.home)) {
+      if (!existsSync(mcpPath)) continue;
+      const mcp = readJson(mcpPath);
+      if (isOurMcpEntry(mcp.mcpServers?.hindsight)) {
+        delete mcp.mcpServers.hindsight;
+        if (!Object.keys(mcp.mcpServers).length) delete mcp.mcpServers;
+        writeJson(mcpPath, mcp);
+      }
+    }
+    uninstallSkill(c, name);
+    c.log?.(`${name}: hooks + MCP registration + skill removed`);
+  },
+});
+
+/** WorkBuddy (Tencent's AI workbench): one MCP file, `~/.workbuddy/mcp.json`. */
+const workbuddy = genieInstaller("workbuddy", ".workbuddy", (home) => [
+  join(home, ".workbuddy", "mcp.json"),
+]);
+
+/**
+ * CodeBuddy resolves its user-scope MCP file by priority — ~/.codebuddy/.mcp.json (recommended),
+ * then ~/.codebuddy/mcp.json (deprecated), then ~/.codebuddy.json (legacy) — reading and writing
+ * the FIRST one that exists (codebuddy.ai/docs/cli/mcp). Writing the recommended path
+ * unconditionally would shadow a user whose servers live in the deprecated file.
+ */
+const codebuddy = genieInstaller("codebuddy", ".codebuddy", (home) => [
+  join(home, ".codebuddy", ".mcp.json"),
+  join(home, ".codebuddy", "mcp.json"),
+  join(home, ".codebuddy.json"),
+]);
+
 export const INSTALLERS: HarnessInstaller[] = [
   opencode,
   opencode2,
@@ -2278,6 +2355,8 @@ export const INSTALLERS: HarnessInstaller[] = [
   factoryDroid,
   zcode,
   traecode,
+  workbuddy,
+  codebuddy,
 ];
 
 // The public executable was renamed from Gemini CLI to Antigravity's `agy`. Keep the

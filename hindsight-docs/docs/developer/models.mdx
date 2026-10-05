@@ -585,6 +585,16 @@ an API key from the [Anthropic Console](https://console.anthropic.com/).
    # No API key needed - uses claude auth login credentials
    ```
 
+   **Server-held token (recommended for headless/Docker/Linux hosts):** instead of relying on
+   the host's `claude auth login` session, generate a long-lived token once and give it to Hindsight:
+   ```bash
+   claude setup-token            # prints sk-ant-oat01-...
+   export HINDSIGHT_API_LLM_API_KEY=sk-ant-oat01-...
+   ```
+   Hindsight passes it to every spawned CLI as `CLAUDE_CODE_OAUTH_TOKEN`, so the auth session lives
+   in the server's config (and can be set per operation or per bank like any other LLM key).
+   With no key set, the CLI's own login is used.
+
 5. **Start Hindsight:**
    ```bash
    hindsight-api
@@ -1101,6 +1111,9 @@ that cuts the ranked list where relevance ends, so recall returns the relevant
 candidates and nothing else. It is off by default because it meaningfully shrinks what
 recall returns. See [Configuration](/developer/configuration#typesafe) for the full
 behaviour and its trade-offs.
+
+TypeSafe's scores are rank positions within one recall, not relevance scores, so recall
+publishes no `scores.reranker` under it and rejects `min_scores.reranker` with HTTP 400.
 
 ### Alibaba Cloud Models
 

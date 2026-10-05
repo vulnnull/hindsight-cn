@@ -29,8 +29,31 @@ from hindsight_api.engine.reflect.agent import (
     _normalize_tool_name,
     run_reflect_agent,
 )
+from hindsight_api.engine.reflect.structured_doc import DocumentSectionsInvalidError
 from hindsight_api.engine.response_models import LLMCallResult, LLMToolCall, LLMToolCallResult, TokenUsage
 from tests.llm_judge import assert_meets_criteria
+
+
+@pytest.fixture
+def mock_functions():
+    """The agent's tool callbacks, all stubbed.
+
+    Module-level and shared by every class in this file on purpose. These are
+    REQUIRED keyword arguments of run_reflect_agent, so a per-class copy that
+    misses one is invisible until that class runs: three copies had drifted when
+    read_mental_models_fn was added, and the class whose copy went unupdated died
+    on a TypeError in every one of its tests (#4774). One definition, so a new
+    callback is added once and reaches every class. A class or test that needs a
+    different return value overrides that one key on top of this dict instead of
+    writing out the whole set again.
+    """
+    return {
+        "search_mental_models_fn": AsyncMock(return_value={"mental_models": []}),
+        "read_mental_models_fn": AsyncMock(return_value={"mental_models": []}),
+        "search_observations_fn": AsyncMock(return_value={"observations": []}),
+        "recall_fn": AsyncMock(return_value={"memories": [{"id": "mem-1", "content": "test memory"}]}),
+        "expand_fn": AsyncMock(return_value={"memories": []}),
+    }
 
 
 class TestToolNameNormalization:
@@ -304,17 +327,6 @@ class TestReflectAgentMocked:
             )
         )
         return llm
-
-    @pytest.fixture
-    def mock_functions(self):
-        """Create mock search/recall functions."""
-        return {
-            "search_mental_models_fn": AsyncMock(return_value={"mental_models": []}),
-            "read_mental_models_fn": AsyncMock(return_value={"mental_models": []}),
-            "search_observations_fn": AsyncMock(return_value={"observations": []}),
-            "recall_fn": AsyncMock(return_value={"memories": [{"id": "mem-1", "content": "test memory"}]}),
-            "expand_fn": AsyncMock(return_value={"memories": []}),
-        }
 
     @staticmethod
     def _mm_call(call_id: str = "1", query: str = "test query") -> LLMToolCallResult:
@@ -887,6 +899,50 @@ class TestReflectAgentMocked:
         mock_functions["recall_fn"].assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_empty_reply_on_forced_step_retries_that_step(self, mock_llm, mock_functions):
+        """A forced step that comes back with no tool call is asked for again, not skipped (#4564)."""
+        mock_functions["search_mental_models_fn"].return_value = {"query": "test query", "mental_models": []}
+        mock_llm.call_with_tools.side_effect = [
+            self._mm_call(),
+            # Endpoint ignores the forced ``search_observations`` once.
+            LLMToolCallResult(tool_calls=[], finish_reason="tool_calls"),
+            LLMToolCallResult(
+                tool_calls=[LLMToolCall(id="2", name="search_observations", arguments={"query": "q"})],
+                finish_reason="tool_calls",
+            ),
+            LLMToolCallResult(
+                tool_calls=[LLMToolCall(id="3", name="recall", arguments={"query": "q"})],
+                finish_reason="tool_calls",
+            ),
+            LLMToolCallResult(
+                tool_calls=[LLMToolCall(id="4", name="done", arguments={"answer": "Done.", "memory_ids": ["mem-1"]})],
+                finish_reason="tool_calls",
+            ),
+        ]
+
+        result = await run_reflect_agent(
+            llm_config=mock_llm,
+            bank_id="test-bank",
+            query="test query",
+            bank_profile={"name": "Test", "mission": "Testing"},
+            has_mental_models=True,
+            budget="low",
+            max_iterations=10,
+            **mock_functions,
+        )
+
+        assert result.text == "Done."
+        choices = [c.kwargs["tool_choice"] for c in mock_llm.call_with_tools.call_args_list]
+        assert choices[:4] == [
+            LLMToolChoice.named("search_mental_models"),
+            LLMToolChoice.named("search_observations"),
+            LLMToolChoice.named("search_observations"),
+            LLMToolChoice.named("recall"),
+        ]
+        mock_functions["search_observations_fn"].assert_called_once()
+        mock_functions["recall_fn"].assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_handles_functions_prefix_in_done(self, mock_llm, mock_functions):
         """Test that 'functions.done' is handled correctly."""
         # First call: LLM calls recall
@@ -1154,6 +1210,9 @@ class TestReflectAgentMocked:
         )
 
         assert result.text == "Recovered after a blip"
+        # The retry asks for the step that failed, not the next one (#4564).
+        choices = [c.kwargs["tool_choice"] for c in mock_llm.call_with_tools.call_args_list]
+        assert choices[0] == choices[1] == LLMToolChoice.named("search_observations")
 
     @pytest.mark.asyncio
     async def test_cancellation_from_a_tool_is_not_wrapped(self, mock_llm, mock_functions):
@@ -1556,6 +1615,266 @@ class TestReflectAgentMocked:
         assert [m["tool_call_id"] for m in messages if m.get("role") == "tool"] == tool_use_ids
 
 
+class TestMalformedDoneDocumentIsFedBack:
+    """A ``document`` whose shape the schema refuses is re-asked, never guessed (#4910).
+
+    ``str()`` of a block object is its Python repr, so a block emitted as
+    ``{"text": ...}`` used to be stored as the literal ``{'text': '...'}`` and
+    rendered into ``mental_models.content``. The payload is refused instead, and
+    the per-field errors go back as the done call's tool result so the model can
+    re-emit the same content in the declared shape.
+    """
+
+    @pytest.fixture
+    def mock_llm(self):
+        llm = MagicMock()
+        llm.call_with_tools = AsyncMock()
+        llm.call = AsyncMock(
+            return_value=LLMCallResult(
+                content="Fallback answer",
+                usage=TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15),
+            )
+        )
+        return llm
+
+    @pytest.fixture
+    def mock_functions(self, mock_functions):
+        """The shared callbacks, with a fresh mental model to find and nothing to recall."""
+        return {
+            **mock_functions,
+            "search_mental_models_fn": AsyncMock(
+                return_value={
+                    "mental_models": [{"id": "mm-1", "name": "P", "content": "Fresh.", "is_stale": False}],
+                }
+            ),
+            "recall_fn": AsyncMock(return_value={"memories": []}),
+        }
+
+    @staticmethod
+    def _done(call_id: str, blocks: list) -> LLMToolCallResult:
+        return LLMToolCallResult(
+            tool_calls=[
+                LLMToolCall(
+                    id=call_id,
+                    name="done",
+                    arguments={
+                        "document": {"sections": [{"heading": "Ops", "level": 2, "blocks": blocks}]},
+                        "mental_model_ids": ["mm-1"],
+                    },
+                )
+            ],
+            finish_reason="tool_calls",
+        )
+
+    @pytest.mark.asyncio
+    async def test_object_blocks_are_rejected_and_the_retry_answers(self, mock_llm, mock_functions):
+        mock_llm.call_with_tools.side_effect = [
+            LLMToolCallResult(
+                tool_calls=[
+                    LLMToolCall(id="1", name="search_mental_models", arguments={"reason": "curated", "query": "q"})
+                ],
+                finish_reason="tool_calls",
+            ),
+            self._done("2", [{"text": "Intro."}]),
+            self._done("3", ["Intro."]),
+        ]
+
+        result = await run_reflect_agent(
+            llm_config=mock_llm,
+            bank_id="test-bank",
+            query="q",
+            bank_profile={"name": "Test", "mission": ""},
+            has_mental_models=True,
+            budget="low",
+            max_iterations=5,
+            answer_as_document=True,
+            **mock_functions,
+        )
+
+        assert result.text == "## Ops\n\nIntro."
+        assert "{'text'" not in result.text
+        # The rejection went back as the done call's own tool result.
+        messages = mock_llm.call_with_tools.await_args_list[2].kwargs["messages"]
+        rejection = messages[-1]
+        assert rejection["role"] == "tool"
+        assert "sections[0].blocks[0]" in rejection["content"]
+
+    @pytest.mark.asyncio
+    async def test_a_model_that_keeps_the_bad_shape_fails_rather_than_storing_it(self, mock_llm, mock_functions):
+        mock_llm.call_with_tools.side_effect = [
+            LLMToolCallResult(
+                tool_calls=[
+                    LLMToolCall(id="1", name="search_mental_models", arguments={"reason": "curated", "query": "q"})
+                ],
+                finish_reason="tool_calls",
+            ),
+            self._done("2", [{"text": "Intro."}]),
+            self._done("3", [{"text": "Intro."}]),
+        ]
+
+        with pytest.raises(DocumentSectionsInvalidError):
+            await run_reflect_agent(
+                llm_config=mock_llm,
+                bank_id="test-bank",
+                query="q",
+                bank_profile={"name": "Test", "mission": ""},
+                has_mental_models=True,
+                budget="low",
+                max_iterations=5,
+                answer_as_document=True,
+                **mock_functions,
+            )
+
+    @pytest.mark.asyncio
+    async def test_the_closing_done_call_is_re_asked_not_answered_as_prose(self, mock_llm, mock_functions):
+        """The model stops with prose, the closing done() is malformed, and the re-ask lands.
+
+        The standalone prose synthesis (``llm.call``) must not be reached: it
+        would answer by re-reading markdown the model wrote, which is the one
+        thing document mode exists to avoid.
+        """
+        mock_llm.call_with_tools.side_effect = [
+            LLMToolCallResult(
+                tool_calls=[
+                    LLMToolCall(id="1", name="search_mental_models", arguments={"reason": "curated", "query": "q"})
+                ],
+                finish_reason="tool_calls",
+            ),
+            # Stops with prose -> the closing done() call is asked for.
+            LLMToolCallResult(tool_calls=[], content="I have enough to answer.", finish_reason="stop"),
+            self._done("2", [{"text": "Intro."}]),
+            self._done("3", ["Intro."]),
+        ]
+
+        result = await run_reflect_agent(
+            llm_config=mock_llm,
+            bank_id="test-bank",
+            query="q",
+            bank_profile={"name": "Test", "mission": ""},
+            has_mental_models=True,
+            budget="low",
+            max_iterations=5,
+            answer_as_document=True,
+            **mock_functions,
+        )
+
+        assert result.text == "## Ops\n\nIntro."
+        mock_llm.call.assert_not_called()
+        # The rejection was fed back on the same prefix.
+        retry_messages = mock_llm.call_with_tools.await_args_list[3].kwargs["messages"]
+        assert "sections[0].blocks[0]" in retry_messages[-1]["content"]
+
+    @pytest.mark.asyncio
+    async def test_a_closing_call_that_stays_malformed_never_answers_as_prose(self, mock_llm, mock_functions):
+        mock_llm.call_with_tools.side_effect = [
+            LLMToolCallResult(
+                tool_calls=[
+                    LLMToolCall(id="1", name="search_mental_models", arguments={"reason": "curated", "query": "q"})
+                ],
+                finish_reason="tool_calls",
+            ),
+            LLMToolCallResult(tool_calls=[], content="I have enough to answer.", finish_reason="stop"),
+            self._done("2", [{"text": "Intro."}]),
+            self._done("3", [{"text": "Intro."}]),
+        ]
+
+        with pytest.raises(DocumentSectionsInvalidError):
+            await run_reflect_agent(
+                llm_config=mock_llm,
+                bank_id="test-bank",
+                query="q",
+                bank_profile={"name": "Test", "mission": ""},
+                has_mental_models=True,
+                budget="low",
+                max_iterations=5,
+                answer_as_document=True,
+                **mock_functions,
+            )
+        mock_llm.call.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_an_over_budget_document_keeps_its_structure_when_the_trim_is_malformed(
+        self, mock_llm, mock_functions
+    ):
+        """A shortening response that is not a document is re-asked, then dropped.
+
+        The full document stands -- over the length budget is a reported outcome.
+        What must not happen is the trim being read back as prose, which is how
+        unvalidated model markdown would become the stored document.
+        """
+        long_blocks = ["important detail " * 40, "second detail " * 40]
+        mock_llm.call_with_tools.side_effect = [
+            LLMToolCallResult(
+                tool_calls=[
+                    LLMToolCall(id="1", name="search_mental_models", arguments={"reason": "curated", "query": "q"})
+                ],
+                finish_reason="tool_calls",
+            ),
+            self._done("2", long_blocks),
+        ]
+        mock_llm.call = AsyncMock(
+            return_value=LLMCallResult(
+                # Prose where a document was asked for, every attempt.
+                content="## Ops\n\nshortened prose\n",
+                usage=TokenUsage(input_tokens=30, output_tokens=10, total_tokens=40),
+            )
+        )
+
+        result = await run_reflect_agent(
+            llm_config=mock_llm,
+            bank_id="test-bank",
+            query="q",
+            bank_profile={"name": "Test", "mission": ""},
+            has_mental_models=True,
+            budget="low",
+            max_iterations=5,
+            answer_as_document=True,
+            max_tokens=32,
+            **mock_functions,
+        )
+
+        assert "shortened prose" not in result.text
+        assert long_blocks[0].strip() in result.text
+        # Re-asked once before giving up, and both calls are billed.
+        assert mock_llm.call.await_count == 2
+        rewrite_trace = [call for call in result.llm_trace if call.scope == "final_rewrite"]
+        assert rewrite_trace and rewrite_trace[0].input_tokens == 60
+
+    @pytest.mark.asyncio
+    async def test_a_valid_document_trim_is_applied(self, mock_llm, mock_functions):
+        mock_llm.call_with_tools.side_effect = [
+            LLMToolCallResult(
+                tool_calls=[
+                    LLMToolCall(id="1", name="search_mental_models", arguments={"reason": "curated", "query": "q"})
+                ],
+                finish_reason="tool_calls",
+            ),
+            self._done("2", ["important detail " * 40]),
+        ]
+        mock_llm.call = AsyncMock(
+            return_value=LLMCallResult(
+                content='{"sections": [{"heading": "Ops", "level": 2, "blocks": ["Short."]}]}',
+                usage=TokenUsage(input_tokens=30, output_tokens=10, total_tokens=40),
+            )
+        )
+
+        result = await run_reflect_agent(
+            llm_config=mock_llm,
+            bank_id="test-bank",
+            query="q",
+            bank_profile={"name": "Test", "mission": ""},
+            has_mental_models=True,
+            budget="low",
+            max_iterations=5,
+            answer_as_document=True,
+            max_tokens=32,
+            **mock_functions,
+        )
+
+        assert result.text == "## Ops\n\nShort."
+        assert mock_llm.call.await_count == 1
+
+
 class TestContextOverflowHelpers:
     """Unit tests for context-overflow detection helpers."""
 
@@ -1632,16 +1951,10 @@ class TestContextOverflowBehavior:
         return llm
 
     @pytest.fixture
-    def mock_functions_with_large_output(self):
-        """Mock functions that return a large enough payload to exceed a tiny token budget."""
+    def mock_functions_with_large_output(self, mock_functions):
+        """The shared callbacks, with a recall payload big enough to exceed a tiny token budget."""
         large_memories = [{"id": f"mem-{i}", "content": f"Memory fact number {i}: " + "A" * 200} for i in range(20)]
-        return {
-            "search_mental_models_fn": AsyncMock(return_value={"mental_models": []}),
-            "read_mental_models_fn": AsyncMock(return_value={"mental_models": []}),
-            "search_observations_fn": AsyncMock(return_value={"observations": []}),
-            "recall_fn": AsyncMock(return_value={"memories": large_memories}),
-            "expand_fn": AsyncMock(return_value={"memories": []}),
-        }
+        return {**mock_functions, "recall_fn": AsyncMock(return_value={"memories": large_memories})}
 
     @pytest.mark.asyncio
     async def test_proactive_guard_fires_when_budget_exceeded(self, mock_llm, mock_functions_with_large_output):
@@ -1723,16 +2036,6 @@ class TestNoAnswerFailsHard:
         )
         return llm
 
-    @pytest.fixture
-    def mock_functions(self):
-        return {
-            "search_mental_models_fn": AsyncMock(return_value={"mental_models": []}),
-            "read_mental_models_fn": AsyncMock(return_value={"mental_models": []}),
-            "search_observations_fn": AsyncMock(return_value={"observations": []}),
-            "recall_fn": AsyncMock(return_value={"memories": [{"id": "mem-1", "content": "test memory"}]}),
-            "expand_fn": AsyncMock(return_value={"memories": []}),
-        }
-
     @staticmethod
     def _recall_then(done_arguments: dict) -> list[LLMToolCallResult]:
         """Gather evidence first, so ``done`` is not rejected by the evidence guardrail."""
@@ -1801,6 +2104,8 @@ class TestNoAnswerFailsHard:
                 tool_calls=[LLMToolCall(id="1", name="recall", arguments={"query": "test query"})],
                 finish_reason="tool_calls",
             ),
+            # Empty while a forced step is still pending: retried once, then given up.
+            LLMToolCallResult(content="", tool_calls=[], finish_reason="stop"),
             LLMToolCallResult(content="", tool_calls=[], finish_reason="stop"),
         ]
 
@@ -1857,16 +2162,6 @@ class TestDoneToolStringDocument:
             )
         )
         return llm
-
-    @pytest.fixture
-    def mock_functions(self):
-        return {
-            "search_mental_models_fn": AsyncMock(return_value={"mental_models": []}),
-            "read_mental_models_fn": AsyncMock(return_value={"mental_models": []}),
-            "search_observations_fn": AsyncMock(return_value={"observations": []}),
-            "recall_fn": AsyncMock(return_value={"memories": [{"id": "mem-1", "content": "test memory"}]}),
-            "expand_fn": AsyncMock(return_value={"memories": []}),
-        }
 
     @staticmethod
     def _recall_then(done_arguments: dict) -> list[LLMToolCallResult]:
@@ -2067,22 +2362,22 @@ class TestMentalModelShortCircuitRealLLM:
     """
 
     @staticmethod
-    def _stub_functions(mental_models, recall_memories=None, observations=None):
+    def _stub_functions(base, mental_models, recall_memories=None, observations=None):
         async def search_mental_models_fn(query, max_results):
             return {"query": query, "count": len(mental_models), "mental_models": mental_models}
 
         return {
+            **base,
             "search_mental_models_fn": AsyncMock(side_effect=search_mental_models_fn),
-            "read_mental_models_fn": AsyncMock(return_value={"mental_models": []}),
             "search_observations_fn": AsyncMock(return_value={"observations": observations or []}),
             "recall_fn": AsyncMock(return_value={"memories": recall_memories or []}),
-            "expand_fn": AsyncMock(return_value={"memories": []}),
         }
 
     @pytest.mark.asyncio
-    async def test_real_fresh_mental_model_answers_without_lower_retrieval(self, llm_config):
+    async def test_real_fresh_mental_model_answers_without_lower_retrieval(self, llm_config, mock_functions):
         """A fresh, sufficient mental model lets the real agent answer without obs/recall."""
         functions = self._stub_functions(
+            mock_functions,
             mental_models=[
                 {
                     "id": "mm-comm",
@@ -2095,7 +2390,7 @@ class TestMentalModelShortCircuitRealLLM:
                     "relevance": 0.94,
                     "is_stale": False,
                 }
-            ]
+            ],
         )
 
         result = await run_reflect_agent(
@@ -2126,7 +2421,7 @@ class TestMentalModelShortCircuitRealLLM:
         )
 
     @pytest.mark.asyncio
-    async def test_real_stale_mental_model_forces_and_grounds_in_deeper_evidence(self, llm_config):
+    async def test_real_stale_mental_model_forces_and_grounds_in_deeper_evidence(self, llm_config, mock_functions):
         """A stale mental model must NOT short-circuit: the agent is forced deeper and grounds its answer there.
 
         This is the safety side of the guard. Forcing the lower layers is
@@ -2135,6 +2430,7 @@ class TestMentalModelShortCircuitRealLLM:
         agent corrects the stale summary using the freshly retrieved raw fact.
         """
         functions = self._stub_functions(
+            mock_functions,
             mental_models=[
                 {
                     "id": "mm-aurora",
@@ -2255,13 +2551,11 @@ class TestReflectIncrementalCache:
     turn's full input, and every per-reflect cache is deleted at the end."""
 
     @pytest.mark.asyncio
-    async def test_each_auto_turn_reuses_previous_step_cache_and_cleans_up(self):
+    async def test_each_auto_turn_reuses_previous_step_cache_and_cleans_up(self, mock_functions):
         functions = {
+            **mock_functions,
             "search_observations_fn": AsyncMock(return_value={"observations": [{"id": "obs-1"}]}),
             "recall_fn": AsyncMock(return_value={"memories": [{"id": "mem-1", "content": "x"}]}),
-            "search_mental_models_fn": AsyncMock(return_value={"mental_models": []}),
-            "read_mental_models_fn": AsyncMock(return_value={"mental_models": []}),
-            "expand_fn": AsyncMock(return_value={"memories": []}),
         }
 
         def _tc(cid, name):
@@ -2340,15 +2634,13 @@ class TestReflectShortIdAliases:
     """The model reads short aliases (presentation.py); what it cites must come back as real ids."""
 
     @pytest.mark.asyncio
-    async def test_done_citations_written_as_aliases_resolve_to_real_ids(self):
+    async def test_done_citations_written_as_aliases_resolve_to_real_ids(self, mock_functions):
         functions = {
+            **mock_functions,
             "search_observations_fn": AsyncMock(
                 return_value={"observations": [{"id": "obs-uuid-1", "text": "an observation"}]}
             ),
             "recall_fn": AsyncMock(return_value={"memories": [{"id": "mem-uuid-1", "text": "a fact"}]}),
-            "search_mental_models_fn": AsyncMock(return_value={"mental_models": []}),
-            "read_mental_models_fn": AsyncMock(return_value={"mental_models": []}),
-            "expand_fn": AsyncMock(return_value={"memories": []}),
         }
 
         def _tc(cid, name):
@@ -2403,13 +2695,11 @@ class TestReflectFinishesThroughDone:
     """
 
     @staticmethod
-    def _functions():
+    def _functions(base):
         return {
+            **base,
             "search_observations_fn": AsyncMock(return_value={"observations": [{"id": "obs-1", "text": "o"}]}),
             "recall_fn": AsyncMock(return_value={"memories": [{"id": "mem-1", "text": "m"}]}),
-            "search_mental_models_fn": AsyncMock(return_value={"mental_models": []}),
-            "read_mental_models_fn": AsyncMock(return_value={"mental_models": []}),
-            "expand_fn": AsyncMock(return_value={"memories": []}),
         }
 
     @staticmethod
@@ -2422,7 +2712,7 @@ class TestReflectFinishesThroughDone:
         ]
 
     @pytest.mark.asyncio
-    async def test_prose_stop_is_asked_to_say_it_through_done(self):
+    async def test_prose_stop_is_asked_to_say_it_through_done(self, mock_functions):
         provider = _StepCacheProvider(
             scripted=[
                 *self._searches(),
@@ -2443,7 +2733,7 @@ class TestReflectFinishesThroughDone:
             has_mental_models=False,
             budget="high",
             max_iterations=8,
-            **self._functions(),
+            **self._functions(mock_functions),
         )
 
         assert result.text == "A"
@@ -2460,7 +2750,7 @@ class TestReflectFinishesThroughDone:
         assert closing["n_messages"] == previous["n_messages"] + 1
 
     @pytest.mark.asyncio
-    async def test_a_provider_that_will_not_call_done_falls_back_to_the_standalone_prompt(self):
+    async def test_a_provider_that_will_not_call_done_falls_back_to_the_standalone_prompt(self, mock_functions):
         provider = _StepCacheProvider(
             scripted=[
                 *self._searches(),
@@ -2483,7 +2773,7 @@ class TestReflectFinishesThroughDone:
             has_mental_models=False,
             budget="high",
             max_iterations=8,
-            **self._functions(),
+            **self._functions(mock_functions),
         )
 
         assert result.text == "synthesized"
@@ -2503,7 +2793,7 @@ class TestReflectKeepsItsPrefixStable:
     """
 
     @pytest.mark.asyncio
-    async def test_the_system_prompt_and_tools_never_change_within_one_reflect(self):
+    async def test_the_system_prompt_and_tools_never_change_within_one_reflect(self, mock_functions):
         def _tc(cid, name):
             return LLMToolCallResult(
                 tool_calls=[LLMToolCall(id=cid, name=name, arguments={"query": "q"})], finish_reason="tool_calls"
@@ -2530,16 +2820,19 @@ class TestReflectKeepsItsPrefixStable:
 
         provider.call_with_tools = _record
 
+        functions = {
+            **mock_functions,
+            "search_mental_models_fn": AsyncMock(return_value={"mental_models": [{"id": "mm-1", "content": "c"}]}),
+            "search_observations_fn": AsyncMock(return_value={"observations": [{"id": "obs-1", "text": "o"}]}),
+            "recall_fn": AsyncMock(return_value={"memories": [{"id": "mem-1", "text": "m"}]}),
+        }
+
         await run_reflect_agent(
             llm_config=provider,
             bank_id="b",
             query="q",
             bank_profile={"name": "T", "mission": "M"},
-            search_mental_models_fn=AsyncMock(return_value={"mental_models": [{"id": "mm-1", "content": "c"}]}),
-            read_mental_models_fn=AsyncMock(return_value={"mental_models": []}),
-            search_observations_fn=AsyncMock(return_value={"observations": [{"id": "obs-1", "text": "o"}]}),
-            recall_fn=AsyncMock(return_value={"memories": [{"id": "mem-1", "text": "m"}]}),
-            expand_fn=AsyncMock(return_value={"memories": []}),
+            **functions,
             has_mental_models=True,
             budget="high",
             max_iterations=8,

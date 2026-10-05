@@ -1153,6 +1153,152 @@ describe("traecode installer", () => {
   });
 });
 
+// WorkBuddy and CodeBuddy share one installer (same engine, different home folder and MCP file).
+describe.each([
+  { harness: "workbuddy", home: ".workbuddy", mcpFile: "mcp.json" },
+  { harness: "codebuddy", home: ".codebuddy", mcpFile: ".mcp.json" },
+])("$harness installer", ({ harness, home, mcpFile }) => {
+  const settingsPath = (ctx: InstallCtx) => join(ctx.home, home, "settings.json");
+  const mcpPath = (ctx: InstallCtx) => join(ctx.home, home, mcpFile);
+
+  it("registers the three hooks in settings.json, in Claude's nested shape", () => {
+    const ctx = makeCtx();
+    expect(run(["install", harness], ctx)).toBe(0);
+    const hooks = readJson(settingsPath(ctx)).hooks;
+    expect(Object.keys(hooks).sort()).toEqual(["SessionStart", "Stop", "UserPromptSubmit"]);
+    const entry = (ev: string) => hooks[ev][0].hooks[0];
+    for (const ev of ["SessionStart", "Stop", "UserPromptSubmit"]) {
+      expect(entry(ev).type).toBe("command");
+      expect(entry(ev).command).toContain(ctx.dist);
+    }
+    expect(entry("SessionStart").command).toContain(`${harness}-sessionstart-hook.js`);
+    expect(entry("UserPromptSubmit").command).toContain(`${harness}-hook.js`);
+    expect(entry("Stop").command).toContain(`${harness}-stop-hook.js`);
+    expect(entry("SessionStart").timeout).toBe(30);
+    expect(entry("Stop").timeout).toBe(60);
+  });
+
+  it("registers the stdio MCP server in the host MCP file, tagged with its harness", () => {
+    const ctx = makeCtx();
+    expect(run(["install", harness], ctx)).toBe(0);
+    const server = readJson(mcpPath(ctx)).mcpServers.hindsight;
+    expect(server).toMatchObject({ command: "node", env: { HINDSIGHT_MCP_HARNESS: harness } });
+    expect(server.args[0]).toContain("mcp-server.js");
+  });
+
+  it("preserves the rest of the settings and any foreign hooks", () => {
+    const ctx = makeCtx();
+    writeJsonAt(settingsPath(ctx), {
+      enabledPlugins: { "pptx@codebuddy-plugins-official": true },
+      hooks: { PreToolUse: [{ hooks: [{ type: "command", command: "their-hook" }] }] },
+    });
+    expect(run(["install", harness], ctx)).toBe(0);
+    const settings = readJson(settingsPath(ctx));
+    expect(settings.enabledPlugins).toBeDefined();
+    expect(JSON.stringify(settings.hooks)).toContain("their-hook");
+    expect(settings.hooks.PreToolUse).toBeDefined();
+    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
+  });
+
+  it("is idempotent — a second install replaces our entries rather than stacking them", () => {
+    const ctx = makeCtx();
+    expect(run(["install", harness], ctx)).toBe(0);
+    expect(run(["install", harness], ctx)).toBe(0);
+    expect(readJson(settingsPath(ctx)).hooks.UserPromptSubmit).toHaveLength(1);
+  });
+
+  it("preserves a foreign MCP server while adding ours", () => {
+    const ctx = makeCtx();
+    writeJsonAt(mcpPath(ctx), {
+      mcpServers: { affine: { command: "npx", args: ["-y", "affine-mcp-server"] } },
+    });
+    expect(run(["install", harness], ctx)).toBe(0);
+    const servers = readJson(mcpPath(ctx)).mcpServers;
+    expect(servers.affine).toBeDefined();
+    expect(servers.hindsight).toBeDefined();
+  });
+
+  it("uninstall removes our hooks and MCP entry, keeping a foreign server", () => {
+    const ctx = makeCtx();
+    writeJsonAt(mcpPath(ctx), { mcpServers: { affine: { command: "npx" } } });
+    expect(run(["install", harness], ctx)).toBe(0);
+    expect(run(["uninstall", harness], ctx)).toBe(0);
+    expect(readJson(settingsPath(ctx)).hooks).toBeUndefined();
+    const servers = readJson(mcpPath(ctx)).mcpServers;
+    expect(servers.affine).toBeDefined();
+    expect(servers.hindsight).toBeUndefined();
+  });
+});
+
+describe("codebuddy installer MCP file chain", () => {
+  const settingsPath = (ctx: InstallCtx) => join(ctx.home, ".codebuddy", "settings.json");
+  const mcpPath = (ctx: InstallCtx) => join(ctx.home, ".codebuddy", ".mcp.json"); // recommended
+  const deprecatedMcpPath = (ctx: InstallCtx) => join(ctx.home, ".codebuddy", "mcp.json");
+  const legacyMcpPath = (ctx: InstallCtx) => join(ctx.home, ".codebuddy.json");
+
+  it("creates only the recommended ~/.codebuddy/.mcp.json on a fresh home", () => {
+    const ctx = makeCtx();
+    expect(run(["install", "codebuddy"], ctx)).toBe(0);
+    expect(readJson(mcpPath(ctx)).mcpServers.hindsight).toBeDefined();
+    // Fresh home: the recommended file is created, no older link of the chain appears.
+    expect(existsSync(deprecatedMcpPath(ctx))).toBe(false);
+    expect(existsSync(legacyMcpPath(ctx))).toBe(false);
+  });
+
+  // CodeBuddy reads the FIRST existing file of its chain, so creating the recommended file when a
+  // deprecated one already exists would shadow the user's servers. Mirror the host's write rule.
+  it("merges into an existing deprecated ~/.codebuddy/mcp.json instead of shadowing it", () => {
+    const ctx = makeCtx();
+    writeJsonAt(deprecatedMcpPath(ctx), {
+      mcpServers: { affine: { command: "npx", args: ["-y", "affine-mcp-server"] } },
+    });
+    expect(run(["install", "codebuddy"], ctx)).toBe(0);
+    expect(existsSync(mcpPath(ctx))).toBe(false);
+    const servers = readJson(deprecatedMcpPath(ctx)).mcpServers;
+    expect(servers.affine).toBeDefined();
+    expect(servers.hindsight).toBeDefined();
+  });
+
+  it("falls through to the legacy ~/.codebuddy.json when it is the only file present", () => {
+    const ctx = makeCtx();
+    writeJsonAt(legacyMcpPath(ctx), { mcpServers: { affine: { command: "npx" } }, projects: {} });
+    expect(run(["install", "codebuddy"], ctx)).toBe(0);
+    const cfg = readJson(legacyMcpPath(ctx));
+    expect(cfg.mcpServers.hindsight).toBeDefined();
+    expect(cfg.projects).toEqual({});
+    expect(existsSync(mcpPath(ctx))).toBe(false);
+  });
+
+  it("uninstall clears our entry from the deprecated mcp.json, keeping a foreign server", () => {
+    const ctx = makeCtx();
+    writeJsonAt(deprecatedMcpPath(ctx), { mcpServers: { affine: { command: "npx" } } });
+    expect(run(["install", "codebuddy"], ctx)).toBe(0);
+    expect(run(["uninstall", "codebuddy"], ctx)).toBe(0);
+    expect(readJson(settingsPath(ctx)).hooks).toBeUndefined();
+    const servers = readJson(deprecatedMcpPath(ctx)).mcpServers;
+    expect(servers.affine).toBeDefined();
+    expect(servers.hindsight).toBeUndefined();
+  });
+
+  it("uninstall sweeps our entry from every chain link, keeping foreign servers", () => {
+    const ctx = makeCtx();
+    expect(run(["install", "codebuddy"], ctx)).toBe(0); // lands in the recommended file
+    // A stale entry from an install under the old convention, dormant once the recommended
+    // file appeared — CodeBuddy no longer reads it, but it must not survive an uninstall.
+    writeJsonAt(deprecatedMcpPath(ctx), {
+      mcpServers: {
+        affine: { command: "npx" },
+        hindsight: { command: "node", args: [join(ctx.dist, "mcp-server.js")] },
+      },
+    });
+    expect(run(["uninstall", "codebuddy"], ctx)).toBe(0);
+    expect(readJson(mcpPath(ctx)).mcpServers).toBeUndefined();
+    const deprecated = readJson(deprecatedMcpPath(ctx)).mcpServers;
+    expect(deprecated.affine).toBeDefined();
+    expect(deprecated.hindsight).toBeUndefined();
+  });
+});
+
 describe("codex installer", () => {
   const hooksPath = (ctx: InstallCtx) => join(ctx.home, ".codex", "hooks.json");
   const tomlPath = (ctx: InstallCtx) => join(ctx.home, ".codex", "config.toml");
@@ -2321,6 +2467,8 @@ describe("run() CLI behavior", () => {
       "factory-droid",
       "zcode",
       "traecode",
+      "workbuddy",
+      "codebuddy",
     ]);
   });
 });

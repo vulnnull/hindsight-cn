@@ -39,7 +39,7 @@ from ...metrics import get_metrics_collector
 from ...worker.stage import set_stage
 from ..db import DatabaseBackend
 from ..db_utils import acquire_with_retry
-from ..llm_interface import OutputTooLongError, ProviderRateLimitResetError
+from ..llm_interface import OutputTooLongError, PromptCachePrefix, ProviderRateLimitResetError
 from ..llm_trace import (
     record_created_memory_ids,
     record_source_memory_ids,
@@ -2793,9 +2793,19 @@ async def _apply_update_action(
         return None
     live_ids = live_source_memory_ids
 
+    # Recall predates the LLM/embedding work, so the snapshot's tags may be stale (#4831):
+    # merging them would drop tags added since and bring back tags removed since. Merge
+    # into the observation's current tags, held until the caller commits.
+    current_tags = await store.lock_observation_tags(
+        conn=conn, fq_table=fq_table, bank_id=bank_id, observation_id=observation_id
+    )
+    if current_tags is None:
+        logger.debug(f"Update skipped: observation {observation_id} no longer exists")
+        return None
+
     history_entry = _ObservationHistorySnapshot(
         previous_text=model.text,
-        previous_tags=list(model.tags or []),
+        previous_tags=current_tags,
         previous_occurred_start=model.occurred_start,
         previous_occurred_end=model.occurred_end,
         previous_mentioned_at=model.mentioned_at,
@@ -2807,7 +2817,7 @@ async def _apply_update_action(
     source_ids = [uuid.UUID(s) for s in merged]
 
     # SECURITY: Merge source fact's tags into existing observation tags so all contributors can see it
-    existing_tags = set(model.tags or [])
+    existing_tags = set(current_tags)
     source_tags = set(source_fact_tags or [])
     merged_tags = list(existing_tags | source_tags)
 
@@ -3235,20 +3245,10 @@ async def _consolidate_batch_with_llm(
         observation_capacity_note=observation_capacity_note,
     )
 
-    # Opt into context caching of the stable system prefix when the provider
-    # supports it (gemini/vertexai with the flag on). response_schema is NOT
-    # passed to the fingerprint: it varies per batch (max_creates) but is not
-    # part of the cached prefix, so keying on it would needlessly bust the cache.
-    cached_prefix_name: str | None = None
-    provider_impl = getattr(llm_config, "_provider_impl", None)
-    if provider_impl is not None and provider_impl.supports_prompt_caching():
-        try:
-            cached_prefix_name = await provider_impl.get_or_create_cached_prefix(
-                system_instruction=system_prompt,
-            )
-        except Exception:
-            logger.exception("Consolidation cache prefix lookup failed; falling back to uncached call")
-            cached_prefix_name = None
+    # Opt into context caching of the stable system prefix. response_schema is
+    # NOT part of the cache key: it varies per batch (max_creates) but is not part
+    # of the cached prefix, so keying on it would needlessly bust the cache.
+    prompt_cache = PromptCachePrefix(system_instruction=system_prompt)
 
     # Use a constrained response model when observation limit is active
     response_model = _build_response_model(
@@ -3287,6 +3287,7 @@ async def _consolidate_batch_with_llm(
                 # structured output -- which narrows the raw-JSON failure mode behind #2668 --
                 # without forcing strict schema on operations whose model can't satisfy it.
                 "strict_schema": config.llm_strict_schema_consolidation,
+                "prompt_cache": prompt_cache,
             }
             # Only request an explicit output budget when configured. Left unset by default the key is
             # omitted, so each provider keeps its implicit default (backwards compatible). Operators on
@@ -3296,8 +3297,6 @@ async def _consolidate_batch_with_llm(
                 call_kwargs["max_completion_tokens"] = config.consolidation_max_completion_tokens
             if inner_max_retries is not None:
                 call_kwargs["max_retries"] = inner_max_retries
-            if cached_prefix_name is not None:
-                call_kwargs["cached_prefix"] = cached_prefix_name
             batch_call = await llm_config.call(**call_kwargs)
             response: _ConsolidationBatchResponse = batch_call.content
             # Defensive truncation: some LLM providers may not enforce JSON schema max_length
@@ -3404,7 +3403,9 @@ async def _apply_create_observation(
     if not live_source_memory_ids:
         logger.debug(f"Create skipped: all {len(source_memory_ids)} source memories were deleted concurrently")
         return {"action": "skipped", "reason": "sources_deleted"}
-    source_memory_ids = live_source_memory_ids
+    # Each source once: the store stores len() of this list as proof_count. It used to
+    # write a literal 1, so a multi-source observation was undercounted until updated (#4955).
+    source_memory_ids = list(dict.fromkeys(live_source_memory_ids))
 
     t0 = time.time()
     created_id = await store.insert_observation(

@@ -2,8 +2,9 @@
 Claude Code LLM provider using Claude Agent SDK.
 
 This provider enables using Claude Pro/Max subscriptions for API calls
-via the Claude CLI authentication. It uses the Claude Agent SDK which
-automatically handles authentication via `claude auth login` credentials.
+via the Claude CLI authentication. It uses the Claude Agent SDK, which
+authenticates with a server-held `claude setup-token` token when one is
+configured as the API key, and otherwise with the host's `claude auth login`.
 """
 
 import asyncio
@@ -45,6 +46,8 @@ logger = logging.getLogger(__name__)
 # back to the canonical un-suffixed entry that `claude auth login` wrote;
 # otherwise it would be namespaced by sha256(CLAUDE_CONFIG_DIR) and OAuth
 # lookup would fail. Requires bundled CLI >= 2.1.150 (claude-agent-sdk 0.2.82).
+# When a setup-token is configured, _claude_env() below drops that override on
+# purpose so the host login is NOT found and the token is used instead.
 _isolated_claude_env: dict[str, str] | None = None
 
 
@@ -59,6 +62,28 @@ def _get_isolated_claude_env() -> dict[str, str]:
         }
         logger.debug(f"Claude Code: isolated CLAUDE_CONFIG_DIR={path}")
     return _isolated_claude_env
+
+
+def _claude_env(oauth_token: str | None) -> dict[str, str]:
+    """Isolation env, plus the server-held ``claude setup-token`` token when one is configured.
+
+    With a token in ``HINDSIGHT_API_LLM_API_KEY`` (or a per-operation / per-bank
+    key) the server owns the auth session: the CLI authenticates from
+    ``CLAUDE_CODE_OAUTH_TOKEN`` instead of the host's ``claude auth login``.
+    The CLI prefers a stored login over that variable, so the token path drops
+    CLAUDE_SECURESTORAGE_CONFIG_DIR="": the storage lookup stays namespaced to the
+    empty isolated dir, finds no login, and falls through to the token.
+
+    Built by copying the isolation env and removing that one key, rather than
+    re-listing the keys to keep: a third isolation variable added above would
+    otherwise be silently missing from the token path only.
+    """
+    if not oauth_token:
+        return _get_isolated_claude_env()
+    env = dict(_get_isolated_claude_env())
+    del env["CLAUDE_SECURESTORAGE_CONFIG_DIR"]
+    env["CLAUDE_CODE_OAUTH_TOKEN"] = oauth_token
+    return env
 
 
 def _result_error_detail(message: Any) -> str:
@@ -107,7 +132,7 @@ class ClaudeCodeLLM(LLMInterface):
     def __init__(
         self,
         provider: str,
-        api_key: str,  # Will be ignored, uses CLI auth
+        api_key: str,  # Optional `claude setup-token` token; empty = CLI login
         base_url: str,
         model: str,
         reasoning_effort: str | None = None,
@@ -116,17 +141,30 @@ class ClaudeCodeLLM(LLMInterface):
         """Initialize Claude Code LLM provider."""
         super().__init__(provider, api_key, base_url, model, reasoning_effort, **kwargs)
         self._warn_reasoning_effort_unsupported()
+        self._env = _claude_env(api_key.strip() if api_key else None)
+        # The key can also come from a per-operation or per-bank LLM config, so the
+        # hint names the config rather than only the env var an operator may not have set.
+        self._auth_hint = (
+            "The configured Claude Code API key was rejected. Generate a new token with "
+            "'claude setup-token' and update HINDSIGHT_API_LLM_API_KEY (or the bank/operation LLM key)."
+            if "CLAUDE_CODE_OAUTH_TOKEN" in self._env
+            else "Run 'claude auth login', or set HINDSIGHT_API_LLM_API_KEY to a token from 'claude setup-token'."
+        )
 
         # Verify Claude Agent SDK is available
         try:
             self._verify_claude_code_available()
-            logger.info("Claude Code: Using Claude Agent SDK (authentication via claude auth login)")
+            auth = (
+                "CLAUDE_CODE_OAUTH_TOKEN from config" if "CLAUDE_CODE_OAUTH_TOKEN" in self._env else "claude auth login"
+            )
+            logger.info(f"Claude Code: Using Claude Agent SDK (authentication via {auth})")
         except Exception as e:
             raise RuntimeError(
                 f"Failed to initialize Claude Code provider: {e}\n\n"
                 "To set up Claude Code authentication:\n"
                 "1. Install Claude Code CLI: npm install -g @anthropics/claude-code\n"
                 "2. Login with your Pro/Max plan: claude auth login\n"
+                "   (or run 'claude setup-token' and set HINDSIGHT_API_LLM_API_KEY to the token)\n"
                 "3. Verify authentication: claude --version\n\n"
                 "Or use a different provider (anthropic, openai, gemini) with API keys."
             ) from e
@@ -276,7 +314,7 @@ class ClaudeCodeLLM(LLMInterface):
             # (fresh temp dir) means a host settings.json can't reach the CLI either,
             # so passing it through here is the only channel.
             model=self.model or None,
-            env=_get_isolated_claude_env(),
+            env=self._env,
         )
 
         # Call Claude Agent SDK
@@ -405,10 +443,7 @@ class ClaudeCodeLLM(LLMInterface):
                 error_str = str(e).lower()
                 if "auth" in error_str or "login" in error_str or "credential" in error_str:
                     logger.error(f"Claude Code authentication error: {e}")
-                    raise RuntimeError(
-                        f"Claude Code authentication failed: {e}\n\n"
-                        "Run 'claude auth login' to authenticate with Claude Pro/Max."
-                    ) from e
+                    raise RuntimeError(f"Claude Code authentication failed: {e}\n\n{self._auth_hint}") from e
 
                 if attempt < max_retries:
                     backoff = min(initial_backoff * (2**attempt), max_backoff)
@@ -601,7 +636,7 @@ class ClaudeCodeLLM(LLMInterface):
             allowed_tools=allowed_tool_names,
             # Pin the configured model (issue #2881) — see the call() options block.
             model=self.model or None,
-            env=_get_isolated_claude_env(),
+            env=self._env,
         )
 
         # Call Claude Agent SDK with retry logic
@@ -698,10 +733,7 @@ class ClaudeCodeLLM(LLMInterface):
                 error_str = str(e).lower()
                 if "auth" in error_str or "login" in error_str or "credential" in error_str:
                     logger.error(f"Claude Code authentication error: {e}")
-                    raise RuntimeError(
-                        f"Claude Code authentication failed: {e}\n\n"
-                        "Run 'claude auth login' to authenticate with Claude Pro/Max."
-                    ) from e
+                    raise RuntimeError(f"Claude Code authentication failed: {e}\n\n{self._auth_hint}") from e
 
                 if attempt < max_retries:
                     backoff = min(initial_backoff * (2**attempt), max_backoff)

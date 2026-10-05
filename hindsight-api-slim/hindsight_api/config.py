@@ -203,6 +203,13 @@ ENV_LLM_STRUCTURED_OUTPUT_FORCED_TOOL = "HINDSIGHT_API_LLM_STRUCTURED_OUTPUT_FOR
 # identify — and the off switch for an endpoint that rejects images despite its
 # model name.
 ENV_LLM_VISION = "HINDSIGHT_API_LLM_VISION"
+# Whether the backend honours OpenAI's ``response_format={"type": "json_object"}``.
+# Tri-state like ENV_LLM_VISION: unset lets the provider decide (LM Studio, Ollama
+# and Volcano say no; llama.cpp follows HINDSIGHT_API_LLAMACPP_NO_GRAMMAR; the rest
+# say yes). When false, the soft path sends the schema in the prompt only. Needed
+# for ``provider=openai`` pointed at a local server that can't constrain output and
+# instead rewrites the prompt in ways a thinking model can loop on (issue #4935).
+ENV_LLM_OPENAI_COMPATIBLE_JSON_MODE = "HINDSIGHT_API_LLM_OPENAI_COMPATIBLE_JSON_MODE"
 ENV_LLM_SEND_BANK_AS_USER = "HINDSIGHT_API_LLM_SEND_BANK_AS_USER"
 ENV_LLM_OLLAMA_NUM_CTX = "HINDSIGHT_API_LLM_OLLAMA_NUM_CTX"
 
@@ -3061,6 +3068,9 @@ class HindsightConfig:
     # Tri-state override for "can this LLM read images?". None defers to the
     # provider's own answer; True/False overrides it. See ENV_LLM_VISION.
     llm_vision: bool | None = field(default=None, kw_only=True)
+    # Tri-state override for "does the backend honour json_object?". None defers to
+    # the provider's default. See ENV_LLM_OPENAI_COMPATIBLE_JSON_MODE.
+    llm_openai_compatible_json_mode: bool | None = field(default=None, kw_only=True)
 
     # Per-operation sampling temperature. None means the temperature parameter is
     # omitted from the call (for models that reject explicit temperatures). See
@@ -4248,6 +4258,9 @@ class HindsightConfig:
             llm_send_bank_as_user=os.getenv(ENV_LLM_SEND_BANK_AS_USER, str(DEFAULT_LLM_SEND_BANK_AS_USER)).lower()
             in ("true", "1"),
             llm_vision=_parse_tristate_bool(ENV_LLM_VISION, os.getenv(ENV_LLM_VISION)),
+            llm_openai_compatible_json_mode=_parse_tristate_bool(
+                ENV_LLM_OPENAI_COMPATIBLE_JSON_MODE, os.getenv(ENV_LLM_OPENAI_COMPATIBLE_JSON_MODE)
+            ),
             llm_ollama_num_ctx=_parse_optional_positive_int(
                 ENV_LLM_OLLAMA_NUM_CTX,
                 os.getenv(ENV_LLM_OLLAMA_NUM_CTX),

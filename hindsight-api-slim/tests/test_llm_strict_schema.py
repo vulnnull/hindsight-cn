@@ -36,6 +36,7 @@ from hindsight_api.config import (
     ENV_LLM_STRICT_SCHEMA_CONSOLIDATION,
     ENV_LLM_STRICT_SCHEMA_REFLECT,
     ENV_LLM_STRICT_SCHEMA_RETAIN,
+    ENV_LLM_OPENAI_COMPATIBLE_JSON_MODE,
     HindsightConfig,
 )
 from hindsight_api.engine.llm_wrapper import LLMProvider
@@ -226,6 +227,47 @@ async def test_openai_soft_uses_json_object():
     assert rf is not None and rf["type"] == "json_object"
 
 
+@pytest.mark.parametrize(
+    "provider,override,expected",
+    [
+        ("openai", None, True),
+        ("lmstudio", None, False),
+        ("openai", False, False),  # local server behind provider=openai (#4935)
+        ("lmstudio", True, True),
+    ],
+)
+@pytest.mark.asyncio
+async def test_openai_compatible_json_mode_picks_soft_path(provider, override, expected):
+    """json_object is sent only when the backend honours it; otherwise the schema rides in the prompt alone."""
+    from hindsight_api.config import _get_raw_config
+
+    cfg = dataclasses.replace(_get_raw_config(), llm_openai_compatible_json_mode=override)
+    llm = OpenAICompatibleLLM(
+        provider=provider, api_key="test-key", base_url="https://example.test/v1", model="local-model"
+    )
+    create = AsyncMock(return_value=_openai_response())
+    llm._client.chat.completions.create = create
+    with (
+        patch("hindsight_api.config.get_config", lambda: cfg),
+        patch("hindsight_api.engine.providers.openai_compatible_llm.get_metrics_collector"),
+    ):
+        await llm.call(
+            messages=[{"role": "user", "content": "Return whether this worked."}],
+            response_format=_Resp,
+            max_retries=0,
+        )
+    kwargs = create.call_args.kwargs
+    assert ("response_format" in kwargs) is expected
+    assert "valid JSON matching this schema" in kwargs["messages"][0]["content"]
+
+
+def test_openai_compatible_json_mode_env(monkeypatch):
+    monkeypatch.delenv(ENV_LLM_OPENAI_COMPATIBLE_JSON_MODE, raising=False)
+    assert HindsightConfig.from_env().llm_openai_compatible_json_mode is None
+    monkeypatch.setenv(ENV_LLM_OPENAI_COMPATIBLE_JSON_MODE, "false")
+    assert HindsightConfig.from_env().llm_openai_compatible_json_mode is False
+
+
 # --------------------------------------------------------------------------- #
 # litellm: strict_schema -> response_format strict flag
 # --------------------------------------------------------------------------- #
@@ -331,7 +373,6 @@ async def test_retain_chunk_extraction_threads_retain_flag(strict):
 
     llm_config = MagicMock(spec=LLMProvider)
     llm_config.provider = "mock"
-    llm_config._provider_impl = SimpleNamespace(supports_prompt_caching=lambda: False)
     token_usage = TokenUsage()
     llm_config.call = AsyncMock(return_value=LLMCallResult(content={"facts": []}, usage=token_usage))
 

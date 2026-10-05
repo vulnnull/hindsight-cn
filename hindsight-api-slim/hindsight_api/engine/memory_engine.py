@@ -590,7 +590,7 @@ def validate_sql_schema(sql: str) -> None:
                         )
 
 
-from .cross_encoder import CrossEncoderModel
+from .cross_encoder import RANK_SCORE_PROVIDERS, CrossEncoderModel
 from .embeddings import Embeddings, create_embeddings_from_env
 from .interface import BankConfigState, BankTemplateImportWrite, MemoryEngineInterface
 
@@ -8814,6 +8814,22 @@ class MemoryEngine(MemoryEngineInterface):
                 status_code=422,
             )
 
+        if (
+            min_scores is not None
+            and min_scores.reranker is not None
+            and reranking == "cross_encoder"
+            and self._cross_encoder_reranker.cross_encoder.primary_provider_name in RANK_SCORE_PROVIDERS
+        ):
+            from hindsight_api.extensions.operation_validator import OperationValidationError
+
+            provider = self._cross_encoder_reranker.cross_encoder.primary_provider_name
+            raise OperationValidationError(
+                f"min_scores.reranker is not supported with the '{provider}' reranker: its scores are rank "
+                "positions within each result set, so a floor would keep a fixed share of results regardless "
+                "of relevance. Use min_scores.final, or a pointwise reranker.",
+                status_code=400,
+            )
+
         # Validate operation if validator is configured
         if self._operation_validator:
             from hindsight_api.extensions import RecallContext
@@ -9903,6 +9919,13 @@ class MemoryEngine(MemoryEngineInterface):
             # (a clearly-relevant match can score ~0.001 while its *ranking* is right).
             min_reranker = min_scores.reranker if min_scores else None
             min_final = min_scores.final if min_scores else None
+            if min_reranker is not None and served_provider in RANK_SCORE_PROVIDERS:
+                # Recall entry rejects this floor when the primary scores by rank; getting
+                # here means the chain failed over to such a member. Its scores are rank
+                # positions, so the floor would only keep a fixed share of the pool (#4901).
+                # Skipped rather than rejected: the caller did nothing wrong, the primary failed.
+                log_buffer.append(f"  [4.9] min_scores.reranker ignored: '{served_provider}' scores by rank")
+                min_reranker = None
             if (min_reranker is not None or min_final is not None) and scored_results:
                 before_min_score = len(scored_results)
                 scored_results = [
@@ -10362,10 +10385,13 @@ class MemoryEngine(MemoryEngineInterface):
             # Convert results to MemoryFact objects
             # Build per-result scores (final/reranker/semantic/text) keyed by id.
             # reranker is None when the configured reranker is a passthrough (rrf /
-            # interleave modes, or the RRFPassthroughCrossEncoder), since its
+            # interleave modes, or the RRFPassthroughCrossEncoder) or scores by rank
+            # position (RANK_SCORE_PROVIDERS, #4901), since its
             # cross_encoder_score_normalized is then a rank-derived placeholder, not a
             # true relevance score.
-            reranker_passthrough = (reranking != "cross_encoder") or served_provider == "rrf"
+            reranker_passthrough = (
+                (reranking != "cross_encoder") or served_provider == "rrf" or served_provider in RANK_SCORE_PROVIDERS
+            )
             scores_by_id: dict[str, RecallScores] = {
                 sr.id: RecallScores(
                     final=sr.weight,
@@ -19596,9 +19622,10 @@ class MemoryEngine(MemoryEngineInterface):
                 # config (see migrations), so its stats are read with 'english' too.
                 from .search.bm25_term_selection import build_bm25_query_text
 
+                backend_type = getattr(conn, "backend_type", "postgresql")
                 bm25_text = await build_bm25_query_text(
                     conn,
-                    create_sql_dialect(getattr(conn, "backend_type", "postgresql")),
+                    create_sql_dialect(backend_type),
                     tokens=tokens,
                     query_text=query,
                     table="mental_models",
@@ -19614,6 +19641,7 @@ class MemoryEngine(MemoryEngineInterface):
                         pg_search_function_schema=pg_search_function_schema,
                         pg_search_tokenizer=cfg.text_search_extension_pg_search_tokenizer,
                         max_query_terms=cfg.bm25_max_query_terms,
+                        backend_type=backend_type,
                     )
                     # Vector arm (ANN over mm.embedding) + BM25 arm, each ranked
                     # independently, then RRF-fused (k=60) in SQL.
@@ -19661,6 +19689,7 @@ class MemoryEngine(MemoryEngineInterface):
                         pg_search_function_schema=pg_search_function_schema,
                         pg_search_tokenizer=cfg.text_search_extension_pg_search_tokenizer,
                         max_query_terms=cfg.bm25_max_query_terms,
+                        backend_type=backend_type,
                     )
                     # Ranked, not raw: each backend's BM25 operator returns its own scale
                     # (ts_rank_cd, a negated distance, paradedb.score), and those have

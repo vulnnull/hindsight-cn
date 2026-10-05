@@ -1440,6 +1440,11 @@ class PostgresMemories(MemoriesExtension):
             conn=conn, fq_table=fq_store_table, bank_id=bank_id, unit_ids=unit_ids
         )
 
+    async def lock_observation_tags(self, *, conn, fq_table, bank_id: str, observation_id: str) -> list[str] | None:
+        return await pg_consolidation.lock_observation_tags(
+            conn=conn, fq_table=fq_store_table, bank_id=bank_id, observation_id=observation_id
+        )
+
     async def memories_changed_since(self, *, conn, fq_table, bank_id: str, read_at: dict[str, datetime]) -> list[str]:
         return await pg_consolidation.memories_changed_since(
             conn=conn, fq_table=fq_store_table, bank_id=bank_id, read_at=read_at

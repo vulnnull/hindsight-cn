@@ -221,9 +221,23 @@ def _strip_reasoning_tags(text: str) -> str:
     (e.g. a mental-model markdown blob from MiniMax-M3) leaks the raw
     ``<think>...</think>`` verbatim into stored memories.
 
-    Handles two cases:
-    1. Closed blocks: ``<think>...</think>`` removed wherever they appear.
-    2. Unclosed blocks: a dangling ``<think>`` with no closing tag (model output
+    Handles three cases:
+    1. Orphan close tag: ``reasoning</think>answer`` with no open tag. Chat
+       templates that prefill ``<think>`` into the generation prompt (Qwen3
+       thinking models, DeepSeek-R1-0528, Spark-X2.5) produce this whenever the
+       server runs without a reasoning parser, since the open tag was part of
+       the prompt rather than the completion. Everything up to the first close
+       tag is dropped, unless the response *starts* with ``{``, ``[`` or a code
+       fence -- there the close tag is a quoted literal, not a reasoning
+       boundary. The guard is deliberately that narrow: a stricter one (any
+       fence anywhere before the tag) would stop stripping the common case
+       where the reasoning itself drafts a fenced block. So a close tag quoted
+       inside an answer that opens with prose is still read as a boundary and
+       cuts the prose -- accepted, since it needs the model to talk about the
+       closing tag on its own, against leaking reasoning into every mental
+       model for this family of templates.
+    2. Closed blocks: ``<think>...</think>`` removed wherever they appear.
+    3. Unclosed blocks: a dangling ``<think>`` with no closing tag (model output
        truncated mid-thought) is removed to end-of-string, but only when it starts
        its own line (line-start, possibly indented). Inline occurrences (e.g. a
        JSON value quoting ``<think>`` verbatim) are real content and must be kept
@@ -238,7 +252,13 @@ def _strip_reasoning_tags(text: str) -> str:
     for open_tag, close_tag in _REASONING_TAG_PAIRS:
         open_re = re.escape(open_tag)
         close_re = re.escape(close_tag)
-        # Closed blocks first.
+        # Orphan close tag from a prefilled open tag (see case 1 above).
+        close_at = text.find(close_tag)
+        if close_at != -1:
+            head = text[:close_at]
+            if open_tag not in head and not head.lstrip().startswith(("{", "[", "```")):
+                text = text[close_at + len(close_tag) :]
+        # Closed blocks.
         text = re.sub(rf"{open_re}.*?{close_re}", "", text, flags=re.DOTALL)
         # Unclosed (truncated) blocks: strip only when the open tag starts its own
         # line, from there to end-of-string. The line-start anchor preserves inline
@@ -1256,13 +1276,7 @@ class OpenAICompatibleLLM(LLMInterface):
                         first_msg = call_params["messages"][0]
                         if isinstance(first_msg, dict) and isinstance(first_msg.get("content"), str):
                             first_msg["content"] = schema_msg + "\n\n" + first_msg["content"]
-                # Providers that skip json_object grammar enforcement
-                skip_grammar = self.provider in ("lmstudio", "ollama", "volcano")
-                if self.provider == "llamacpp":
-                    from hindsight_api.config import get_config
-
-                    skip_grammar = get_config().llamacpp_no_grammar
-                if not skip_grammar:
+                if self._supports_json_mode():
                     call_params["messages"] = _ensure_json_word_in_user_message(call_params["messages"])
                     call_params["response_format"] = {"type": "json_object"}
 
@@ -2129,6 +2143,18 @@ class OpenAICompatibleLLM(LLMInterface):
         if last_exception:
             raise last_exception
         raise RuntimeError("Ollama call failed after all retries")
+
+    def _supports_json_mode(self) -> bool:
+        """Whether to send ``json_object`` on the soft path, or the schema in the prompt only."""
+        from hindsight_api.config import get_config
+
+        config = get_config()
+        if config.llm_openai_compatible_json_mode is not None:
+            return config.llm_openai_compatible_json_mode
+        if self.provider == "llamacpp":
+            return not config.llamacpp_no_grammar
+        # These don't honour json_object reliably.
+        return self.provider not in ("lmstudio", "ollama", "volcano")
 
     def supports_vision(self) -> bool | None:
         """Known only for OpenAI itself; unknown for every other backend here.

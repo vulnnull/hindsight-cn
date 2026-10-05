@@ -3633,6 +3633,16 @@ class MemoriesExtension(Extension, ABC):
         )
         return {str(m.unit_id) for m in present}
 
+    async def lock_observation_tags(self, *, conn, fq_table, bank_id: str, observation_id: str) -> list[str] | None:
+        """The observation's current tags, held so a concurrent tag edit cannot land before the
+        caller's transaction commits. None when the observation is gone.
+
+        Postgres locks the row. A store that keeps memories outside SQL has its own concurrency
+        model, so this default is an unlocked read.
+        """
+        current = await self.get_memories(conn=conn, fq_table=fq_table, bank_id=bank_id, unit_ids=[observation_id])
+        return list(current[0].tags or []) if current else None
+
     async def memories_changed_since(self, *, conn, fq_table, bank_id: str, read_at: dict[str, datetime]) -> list[str]:
         """Ids in ``read_at`` (id -> the ``updated_at`` it was read with) edited since (#4831).
 
@@ -3706,7 +3716,7 @@ class MemoriesExtension(Extension, ABC):
                 embedding=cast("list[float] | str", embedding),
                 fact_type="observation",
                 tags=list(tags),
-                proof_count=1,
+                proof_count=len(source_memory_ids),
                 source_memory_ids=[str(s) for s in source_memory_ids],
                 event_date=event_date,
                 occurred_start=occurred_start,

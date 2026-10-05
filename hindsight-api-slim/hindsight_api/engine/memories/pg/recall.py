@@ -310,6 +310,12 @@ _TEMPORAL_POOL_SIZE = 60  # ANN candidates fetched per fact_type before coverage
 _TEMPORAL_ENTRY_POINTS = 10  # entry points kept per fact_type after coverage selection
 _TEMPORAL_COVERAGE_BUCKETS = 8  # time-buckets the window is divided into for coverage
 
+# Relation strength multiplier applied to a link's stored weight when propagating a
+# temporal score across it. A causal edge carries more about "what happened next" than
+# mere co-occurrence in time, so it propagates further.
+_CAUSAL_BOOST = {"causes": 2.0, "caused_by": 2.0, "enables": 1.5, "prevents": 1.5}
+_TEMPORAL_DECAY = 0.7  # per-hop decay on a propagated temporal score
+
 
 def _coalesce_date(row: Any) -> datetime | None:
     """The unit's effective time — matches COALESCE(occurred_start, mentioned_at, occurred_end)."""
@@ -530,6 +536,17 @@ async def retrieve_temporal_combined_sql(
         visited = set()
         node_scores = {}
 
+        def propagated_temporal(link_row: Any, scores: dict[str, tuple[float, float]] = node_scores) -> float:
+            """The temporal score a link carries from its source to its target.
+
+            The source's own temporal score decayed by one hop, scaled by the link's stored
+            weight and by how much its relation says about temporal succession. `scores` is
+            bound as a default so the closure keeps this fact_type's dict (B023).
+            """
+            _, parent_temporal_score = scores.get(str(link_row["from_unit_id"]), (0.5, 0.5))
+            boost = _CAUSAL_BOOST.get(link_row["link_type"], 1.0)
+            return parent_temporal_score * link_row["weight"] * boost * _TEMPORAL_DECAY
+
         # Process entry points
         for ep in ft_entry_points:
             unit_id = str(ep["id"])
@@ -636,16 +653,28 @@ async def retrieve_temporal_combined_sql(
                 *spreading_params,
             )
 
+            # Several eligible links can reach the same target (e.g. a `temporal` and a
+            # `caused_by` edge from the same source). Keep the strongest path per target
+            # before scoring: the rows are already in hand, and the outer query has no
+            # ORDER BY, so taking whichever arrived first would make the target's score —
+            # and whether it clears the continuation threshold below — depend on the query
+            # plan. Ranking on the propagated part alone is enough: the target's own date
+            # proximity is identical across its rows, so it cannot change which row wins.
+            best_by_target: dict[str, Any] = {}
             for n in neighbors:
                 neighbor_id = str(n["id"])
                 if neighbor_id in visited:
                     continue
+                incumbent = best_by_target.get(neighbor_id)
+                if incumbent is None or propagated_temporal(n) > propagated_temporal(incumbent):
+                    best_by_target[neighbor_id] = n
 
+            # Strongest path first, so the `budget_remaining <= 0` cutoff below drops the
+            # weakest targets rather than whichever ones the planner happened to return last.
+            ranked_targets = sorted(best_by_target.items(), key=lambda kv: propagated_temporal(kv[1]), reverse=True)
+            for neighbor_id, n in ranked_targets:
                 visited.add(neighbor_id)
                 budget_remaining -= 1
-
-                parent_id = str(n["from_unit_id"])
-                _, parent_temporal_score = node_scores.get(parent_id, (0.5, 0.5))
 
                 neighbor_best_date = None
                 if n["occurred_start"] is not None and n["occurred_end"] is not None:
@@ -667,16 +696,7 @@ async def retrieve_temporal_combined_sql(
                 else:
                     neighbor_temporal_proximity = 0.3
 
-                link_type = n["link_type"]
-                if link_type in ("causes", "caused_by"):
-                    causal_boost = 2.0
-                elif link_type in ("enables", "prevents"):
-                    causal_boost = 1.5
-                else:
-                    causal_boost = 1.0
-
-                propagated_temporal = parent_temporal_score * n["weight"] * causal_boost * 0.7
-                combined_temporal = max(neighbor_temporal_proximity, propagated_temporal)
+                combined_temporal = max(neighbor_temporal_proximity, propagated_temporal(n))
 
                 neighbor_result = RetrievalResult.from_db_row(dict(n))
                 neighbor_result.temporal_score = combined_temporal
