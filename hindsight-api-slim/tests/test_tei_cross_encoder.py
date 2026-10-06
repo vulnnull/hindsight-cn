@@ -332,6 +332,34 @@ class TestRemoteTEICrossEncoderRetry:
         assert wrapper.attempts == 3  # 2 failures + 1 success
 
     @pytest.mark.asyncio
+    async def test_retry_on_dropped_connection(self):
+        """A peer that closes before the response headers is an interruption, not a bad answer.
+
+        Unlike the embeddings client, this loop only catches ``ClientConnectorError``
+        (connect-time) directly, so a mid-request disconnect reaches the shared
+        classifier in ``tei_retry`` — and it carries no OSError cause for the errno
+        check to see.
+        """
+        attempts = 0
+
+        async def handler(request: web.Request) -> web.StreamResponse:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                assert request.transport is not None
+                request.transport.close()
+                return web.Response()
+            body = await request.json()
+            return web.json_response(constant_scores(body))
+
+        async with stub_server(handler) as base_url:
+            encoder = ready_encoder(base_url, max_retries=3, retry_delay=0)
+            scores = await encoder.predict([("Query", "Doc 1")])
+
+        assert len(scores) == 1
+        assert attempts == 2
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         ("status_code", "error_message"),
         [(429, "Too many requests"), (503, "Service unavailable")],

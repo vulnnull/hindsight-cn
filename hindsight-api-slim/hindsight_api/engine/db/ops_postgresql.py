@@ -83,6 +83,38 @@ class PostgreSQLOps(DataAccessOps):
     def uses_observation_sources_table(self) -> bool:
         return False  # PG uses native array ops on source_memory_ids
 
+    async def fetch_reconcilable_batch_parents(self, conn: DatabaseConnection, table: str) -> list[ResultRow]:
+        # Matches children with `->>` equality rather than the `@>` containment the
+        # locked recheck (and the result_metadata GIN index) uses: `@>` against a
+        # per-parent expression forces a nested loop of index probes, one per
+        # pending parent, which is the cost this discovery pass exists to remove
+        # (51k parents took 7m46s before #5178). `->>` lets the planner hash the
+        # child set once and anti-join it.
+        #
+        # The two predicates are not identical, and the asymmetry is deliberately
+        # the safe way round: every child `->>` matches, `@>` matches too, so a
+        # parent this query skips is one the recheck would also have left alone.
+        # The reverse can happen (`@>` also matches a child whose result_metadata
+        # is a JSON array wrapping the object), which only makes discovery
+        # over-inclusive — the locked recheck below is authoritative and leaves
+        # such a parent pending.
+        return await conn.fetch(
+            f"""
+            SELECT parent.operation_id, parent.bank_id
+            FROM {table} parent
+            WHERE parent.operation_type = 'batch_retain'
+              AND parent.status = 'pending'
+              AND parent.task_payload IS NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM {table} child
+                  WHERE child.bank_id = parent.bank_id
+                    AND child.result_metadata->>'parent_operation_id' = parent.operation_id::text
+                    AND child.status NOT IN ('completed', 'failed')
+              )
+            """
+        )
+
     async def bulk_upsert_chunks(
         self,
         conn: DatabaseConnection,

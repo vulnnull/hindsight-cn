@@ -56,4 +56,43 @@ describe("HindsightServer construction", () => {
       expect.objectContaining({ stdio: "pipe", windowsHide: true })
     );
   });
+
+  it("uses the same caller-supplied environment for startup and shutdown", async () => {
+    const child = {
+      stdout: { on: vi.fn() },
+      stderr: { on: vi.fn() },
+      on: vi.fn((event: string, handler: (code?: number) => void) => {
+        if (event === "exit") handler(0);
+        return child;
+      }),
+    };
+    spawnMock.mockReset();
+    spawnMock.mockReturnValue(child);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("ready")));
+    try {
+      const server = new HindsightServer({
+        env: {
+          PATH: "/caller-toolchain/bin",
+          HINDSIGHT_TEST_SENTINEL: "same-environment",
+          HINDSIGHT_OMITTED: undefined,
+        },
+        platformCpuWorkaround: false,
+      });
+      await server.start();
+      await server.stop();
+      expect(spawnMock).toHaveBeenCalledTimes(3);
+      for (const call of spawnMock.mock.calls) {
+        expect(call[2].env).toEqual(
+          expect.objectContaining({
+            PATH: "/caller-toolchain/bin",
+            HINDSIGHT_TEST_SENTINEL: "same-environment",
+          })
+        );
+        expect(call[2].env.HINDSIGHT_OMITTED).toBeUndefined();
+      }
+    } finally {
+      vi.unstubAllGlobals();
+      spawnMock.mockReset();
+    }
+  });
 });

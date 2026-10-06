@@ -142,6 +142,7 @@ describe("withHindsightChat", () => {
             budget: "high",
             maxTokens: 500,
             types: ["experience"],
+            tags: ["team-a"],
             includeEntities: false,
           },
         },
@@ -154,6 +155,7 @@ describe("withHindsightChat", () => {
         budget: "high",
         maxTokens: 500,
         types: ["experience"],
+        tags: ["team-a"],
         includeEntities: false,
       });
     });

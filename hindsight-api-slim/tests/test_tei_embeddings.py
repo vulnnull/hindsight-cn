@@ -42,6 +42,38 @@ def _drop_connection(request: web.Request) -> web.Response:
     return web.Response()
 
 
+async def _truncate_body(request: web.Request) -> web.StreamResponse:
+    """Promise 100 bytes of JSON, send 5, then close — the client sees a truncated body.
+
+    aiohttp reports this as ``ClientPayloadError``, which carries no OSError cause, so
+    the errno check in ``is_retryable_tei_transport_error`` cannot see it.
+    """
+    response = web.StreamResponse(headers={"Content-Type": "application/json"})
+    response.content_length = 100
+    await response.prepare(request)
+    await response.write(b"[0.1]")
+    assert request.transport is not None
+    request.transport.close()
+    return response
+
+
+async def test_truncated_body_retries_then_succeeds() -> None:
+    """A body cut short mid-transfer is an interruption, not a bad response: retry it."""
+    attempts = 0
+
+    async def handler(request: web.Request) -> web.StreamResponse:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return await _truncate_body(request)
+        return web.json_response([[0.1, 0.2]])
+
+    async with _tei(handler, max_retries=3, retry_delay=0) as embeddings:
+        assert await embeddings.encode(["text"]) == [[0.1, 0.2]]
+
+    assert attempts == 2
+
+
 async def test_dropped_connection_retries_then_succeeds() -> None:
     attempts = 0
 

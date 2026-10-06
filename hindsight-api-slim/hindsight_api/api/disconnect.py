@@ -9,15 +9,22 @@ the recall/reflect cancellation in #2122/#2127 never actually fired in
 production — the disconnect was never observed.
 
 This pure-ASGI middleware sits *outside* the ``BaseHTTPMiddleware`` layer, where
-it still owns the real ``receive`` channel. For the recall and reflect routes it
-drains ``receive`` in a background task and trips a :class:`CancellationToken`
-the moment ``http.disconnect`` arrives, stashing the token on the ASGI ``scope``.
-The route copies that token onto its ``RequestContext`` and the engine checks it
-at stage boundaries — so abandoned work stops instead of running to completion.
+it still owns the real ``receive`` channel. For the routes it monitors (see
+``_should_monitor``) it drains ``receive`` in a background task and trips a
+:class:`CancellationToken` the moment ``http.disconnect`` arrives, stashing the
+token on the ASGI ``scope``.
+Recall and reflect copy that token onto their ``RequestContext`` and the engine
+checks it at stage boundaries. The retain POST cancels its task outright instead,
+because a sync retain spends its wall time inside one await (the LLM semaphore,
+then the provider) where no checkpoint gets a turn — see
+``run_task_cancellable_on_disconnect``. Either way, abandoned work stops instead
+of running to completion.
 
-It only wraps recall/reflect (small JSON bodies); every other request — uploads,
-MCP streams, etc. — passes straight through untouched, so there is no buffering
-or latency cost elsewhere.
+It only wraps recall, reflect and the retain POST (small-to-moderate JSON
+bodies); every other request — uploads, MCP streams, etc. — passes straight
+through untouched, so there is no buffering or latency cost elsewhere. The pump
+queue is bounded at one message so a monitored request's body is never held in
+memory ahead of the app reading it.
 """
 
 from __future__ import annotations
@@ -41,9 +48,19 @@ Receive = Callable[[], Awaitable[MutableMapping[str, Any]]]
 Send = Callable[[MutableMapping[str, Any]], Awaitable[None]]
 
 
-def _should_monitor(path: str) -> bool:
-    """Only the two long-running, abandon-prone read endpoints need monitoring."""
-    return path.endswith("/memories/recall") or path.endswith("/reflect")
+def _should_monitor(scope: Scope) -> bool:
+    """Which requests get a disconnect token: the long-running, abandon-prone ones.
+
+    Recall and reflect are the reads. A synchronous retain (``async: false``) is the
+    write: it runs the whole extraction inline, so an abandoned one keeps its place
+    in the admission queue, then holds an LLM slot for its full run and commits —
+    possibly into a bank deleted while it ran (issue #4526). DELETE shares the same
+    path and is not a retain, hence the method check.
+    """
+    path = scope.get("path", "")
+    if path.endswith("/memories/recall") or path.endswith("/reflect"):
+        return True
+    return path.endswith("/memories") and scope.get("method") == "POST"
 
 
 class ClientDisconnectCancellationMiddleware:
@@ -57,7 +74,7 @@ class ClientDisconnectCancellationMiddleware:
         self.app = app
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or not _should_monitor(scope.get("path", "")):
+        if scope["type"] != "http" or not _should_monitor(scope):
             await self.app(scope, receive, send)
             return
 

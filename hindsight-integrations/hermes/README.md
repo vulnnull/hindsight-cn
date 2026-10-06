@@ -206,9 +206,29 @@ Config file: `~/.hermes/hindsight/config.json`
 | Key | Default | Description |
 |-----|---------|-------------|
 | `bank_id` | `hermes` | Memory bank name (static fallback used when `bank_id_template` is unset or resolves empty) |
-| `bank_id_template` | — | Optional template to derive the bank name dynamically. Placeholders: `{profile}`, `{workspace}`, `{platform}`, `{user}`, `{session}`. Example: `hermes-{profile}` isolates memory per active Hermes profile. Empty placeholders collapse cleanly (e.g. `hermes-{user}` with no user becomes `hermes`). |
+| `bank_id_template` | — | Optional template to derive the bank name dynamically. Placeholders: `{profile}`, `{workspace}`, `{project}`, `{platform}`, `{user}`, `{session}`. `{project}` is the name of the git repository Hermes runs in; every worktree of a repository resolves to the same name, and it is empty outside a repository or for one rooted at your home directory. Example: `hermes-{profile}` isolates memory per active Hermes profile, `{project}` gives each repository its own bank. Empty placeholders collapse cleanly (e.g. `hermes-{user}` with no user becomes `hermes`). |
+| `mirror_to_own_bank` | `false` | Also write to `bank_id` when the template resolves to a different bank, so a profile keeps its own memory while working in project banks. |
+| `additional_banks` | — | Extra banks to write to and recall from, in priority order. |
+| `recall_additional_banks` | — | Extra banks to recall from but never write to, searched after the write banks. Alias `recallAdditionalBanks`, the name the Claude Code integration uses. A bank also listed in `additional_banks` stays writable. |
+| `trusted_project_dirs` | — | Absolute folders whose git repositories may choose their own bank with a `.hindsight/config.toml`. Empty by default, so a cloned repository cannot redirect your memory. |
 | `bank_mission` | — | Reflect mission (identity/framing for reflect reasoning). Applied via Banks API. |
 | `bank_retain_mission` | — | Retain mission (steers what gets extracted). Applied via Banks API. |
+
+#### Multiple banks
+
+The primary bank is chosen in this order: a `.hindsight/config.toml` in a trusted repository, then `bank_id_template`, then `bank_id`. Writes go to the primary, then `bank_id` when `mirror_to_own_bank` is on, then each `additional_banks` entry. Recall searches the same banks and then each `recall_additional_banks` entry, all at once, each with the configured budget and `recall_max_tokens`; results are merged in that order and deduplicated by text. Reflect uses the primary bank only.
+
+The three list settings take a JSON list or comma-separated text; use the JSON form for a value that contains a comma.
+
+A failing extra bank is skipped for five minutes, with one warning when it goes down and one info line when it answers again; recall and writes cool down separately, and a bank misses the writes made while its writes are cooling down. An extra bank that has not answered after 80% of `timeout` counts as failing, so it never costs the primary its results. A failing primary bank fails the call exactly as it does with a single bank, and a write stops there, before any extra bank is touched.
+
+A repository that is itself inside one of the `trusted_project_dirs` (a linked worktree is judged by where the worktree is) can name its bank in `.hindsight/config.toml` at its root or in any folder below it:
+
+```toml
+bank_id = "acme-billing"
+```
+
+The lookup stops at the repository root. Only `bank_id` is read.
 
 ### Recall
 
@@ -222,6 +242,7 @@ Config file: `~/.hermes/hindsight/config.json`
 | `recall_tags` | — | Tags to filter when searching memories |
 | `recall_tags_match` | `any` | Tag matching mode: `any` / `all` / `any_strict` / `all_strict` |
 | `recall_types` | `observation` | Fact types surfaced by recall (both auto-recall and the `hindsight_recall` tool). Comma-separated string or JSON list. **Default narrowed to `observation` only** (see "Behavior change" below). Set to `observation,world,experience` to also include raw facts. |
+| `recall_min_scores` | — | Minimum relevance per score field, as a JSON object (e.g. `{"reranker": 0.25}` or `{"semantic": 0.5}`). Applies to both auto-recall and the `hindsight_recall` tool. See the tip below. |
 | `auto_recall` | `true` | Automatically recall memories before each turn |
 | `recall_sync` | `false` | Recall synchronously against the *current* message each turn (higher relevance, adds recall latency). Default off: recall runs in the background and is injected on the next turn. |
 | `recall_indicator` | `true` | Show a `👁️ Hindsight — recalled N memories` status line when auto-recall injects memory. Turn off for customer-facing agents. |
@@ -234,6 +255,17 @@ Config file: `~/.hermes/hindsight/config.json`
 >
 > Restore the broad recall with `"recall_types": "observation,world,experience"` (string or JSON list) in `~/.hermes/hindsight/config.json`. This applies to **both** auto-recall and the `hindsight_recall` tool — both read the same `recall_types` setting (the tool schema has no per-call `types` argument), so narrowing the default narrows both paths.
 
+> **Tip — `recall_min_scores` against off-topic recall.** Recall ranks, it does not judge relevance: a question
+> unrelated to anything stored still comes back with up to `recall_max_tokens` of the least-bad memories. The
+> `reranker` score separates the two cleanly — on a small bank relevant hits scored 0.7-0.97 and unrelated ones
+> 0.0-0.1 — so `"recall_min_scores": {"reranker": 0.25}` in `~/.hermes/hindsight/config.json` turns that noise
+> into an empty recall. The server only guarantees `reranker` and `final` floors; a `semantic` or `keyword` floor
+> prunes just its own retrieval arm there, and a result found by another arm still comes back with a `null` score
+> for that stage. The plugin therefore also checks every floor against the scores each result reports, and rejects
+> a result that does not report the floored stage. Check the scores on your own bank before tuning a floor: with a
+> multilingual embedding model, `{"semantic": 0.5}` separated relevant from unrelated queries better than the
+> reranker did. Unset by default, so nothing changes unless you opt in.
+
 ### Retain
 
 | Key | Default | Description |
@@ -244,6 +276,7 @@ Config file: `~/.hermes/hindsight/config.json`
 | `retain_context` | `conversation between Hermes Agent and the User` | Context label for retained memories |
 | `retain_tags` | — | Default tags applied to retained memories; merged with per-call tool tags |
 | `retain_source` | — | Opt-in `metadata.source` attached to retained memories (identifies the storing client, e.g. `hermes`). Empty by default — no attribution tag ships unless you set it. |
+| `retain_strategy` | — | Named retain strategy sent with every stored item (`HINDSIGHT_RETAIN_STRATEGY`). The bank must define it under `retain_strategies`; an unknown name is ignored by the server. Empty lets the bank decide. |
 | `retain_indicator` | `true` | Show a `👁️ Hindsight — saving to memory…` status line when a turn is saved. Turn off for customer-facing agents. |
 | `retain_user_prefix` | `User` | Label used before user turns in auto-retained transcripts |
 | `retain_assistant_prefix` | `Assistant` | Label used before assistant turns in auto-retained transcripts |
@@ -276,6 +309,11 @@ order is explicit config → secret scope → the on-disk profile env, and the
 rewrite path is fail-closed: a build with no key never clobbers a profile
 file that already holds one.
 
+The plugin owns only the LLM, log-level and idle-timeout keys in that file. Anything else in it
+(the port hindsight-embed records, a tenant extension and its `HINDSIGHT_API_TENANT_API_KEY`) is
+left alone and never counts as a config change, and the plugin's client sends that tenant key to
+the daemon.
+
 ## Tools
 
 Available in `hybrid` and `tools` memory modes:
@@ -297,6 +335,10 @@ Available in `hybrid` and `tools` memory modes:
 | `HINDSIGHT_BANK_ID` | Override bank name |
 | `HINDSIGHT_BUDGET` | Override recall budget |
 | `HINDSIGHT_MODE` | Override mode (`cloud`, `local_embedded`, `local_external`) |
+| `HINDSIGHT_RETAIN_CONTEXT` | Label stored with each retained conversation (`retain_context`) |
+| `HINDSIGHT_RETAIN_INDICATOR` | `false` hides the "saving to memory" status line (`retain_indicator`) |
+| `HINDSIGHT_RECALL_INDICATOR` | `false` hides the "recalled N memories" status line (`recall_indicator`) |
+| `HINDSIGHT_RECALL_SYNC` | `true` recalls against the current message before answering (`recall_sync`) |
 
 ## Client Version
 
@@ -329,6 +371,10 @@ hermes config set memory.user_profile_enabled false   # optional: the USER.md pr
 
 Setting both to `false` removes the built-in `memory` tool from the agent entirely. Re-enable later
 by setting the same flags back to `true`.
+
+If you keep the built-in stores on, every entry the agent adds or replaces in them is also saved to
+every bank Hindsight writes to, tagged `builtin-memory`, `builtin-target:<memory|user>` and `builtin-action:<add|replace>`,
+so a fact pruned from the size-capped file is not lost. Removals are not mirrored.
 
 ## Troubleshooting
 

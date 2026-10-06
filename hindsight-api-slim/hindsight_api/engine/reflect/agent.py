@@ -148,6 +148,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_ITERATIONS = 10
+_COMPACTED_TOOL_RESULT = "[Earlier tool result omitted to fit the context budget; it is kept for the final answer.]"
 
 #: How many times a ``done`` document whose shape the schema refuses is fed back
 #: for the model to re-emit before the run fails. One retry is what moved the
@@ -156,21 +157,24 @@ DEFAULT_MAX_ITERATIONS = 10
 #: rest of the iteration budget on it costs a reflect either way.
 _MAX_DOCUMENT_REJECTIONS = 1
 
-#: Temperature for split synthesis's map calls. They copy claims and ids out of one
-#: chunk — the mechanical half of the job, like consolidation's extraction passes,
-#: which also run at 0. The reflect temperature (0.9 by default) belongs to the calls
-#: that reason and write; at that setting a map call sometimes answered a plainly
-#: relevant chunk with the six-token "(no relevant evidence)" sentinel and
-#: finish_reason=stop, dropping that chunk's evidence from the reduce (#4054).
+#: Temperature for reflect's mechanical passes: split synthesis's map calls, which copy
+#: claims and ids out of one chunk, and the structured-output extraction pass, which
+#: parses an answer into a response_schema. Like consolidation's extraction passes they
+#: run at 0. The reflect temperature (0.9 by default) belongs to the calls that reason
+#: and write; at that setting a map call sometimes answered a plainly relevant chunk
+#: with the six-token "(no relevant evidence)" sentinel and finish_reason=stop, dropping
+#: that chunk's evidence from the reduce (#4054).
 #:
 #: Applied only when a reflect temperature is configured at all: ``none`` resolves the
 #: whole chain to None so the parameter is omitted, which is how reasoning models that
-#: reject any temperature are run. Hardcoding 0 here would put it back for them.
-_MAP_TEMPERATURE = 0.0
+#: reject any temperature are run. Hardcoding 0 here would put it back for them — a
+#: mental-model refresh against Bedrock GPT-6 Luna failed with structured_output_failed
+#: and kept the previous page content for exactly that reason.
+_DETERMINISTIC_TEMPERATURE = 0.0
 
 
-def _map_temperature() -> float | None:
-    return None if get_config().llm_temperature_reflect is None else _MAP_TEMPERATURE
+def _deterministic_temperature() -> float | None:
+    return None if get_config().llm_temperature_reflect is None else _DETERMINISTIC_TEMPERATURE
 
 
 class ReflectNoAnswerError(RuntimeError):
@@ -382,9 +386,7 @@ OUTPUT:"""
             response_format=DynamicModel,
             scope="reflect_structured",
             strict_schema=get_config().llm_strict_schema_reflect,
-            # Schema extraction should be deterministic. The configured reflect
-            # temperature applies to answer generation, not this parsing pass.
-            temperature=0.0,
+            temperature=_deterministic_temperature(),
             max_completion_tokens=max_tokens,
             max_retries=1,
             initial_backoff=0.25,
@@ -701,6 +703,10 @@ async def _run_reflect_agent_inner(
     # What the model reads of each tool result, and the alias table that maps the
     # short ids it writes back to real ones — see presentation.py.
     presenter = ToolResultPresenter()
+    # A UUID the caller wrote (in the question, a directive, the mission) is one
+    # the answer may repeat.
+    for message in messages:
+        presenter.see(message["content"])
 
     # Step-by-step context caching for the agentic tool loop.
     #
@@ -1011,6 +1017,7 @@ async def _run_reflect_agent_inner(
                     llm_config=llm_config,
                     response_schema=response_schema,
                     max_tokens=max_tokens,
+                    presenter=presenter,
                 )
             except DocumentSectionsInvalidError as exc:
                 # Re-ask on the same prefix with the field errors attached, the
@@ -1046,7 +1053,9 @@ async def _run_reflect_agent_inner(
         if len(chunks) <= 1:
             prompt = build_final_prompt(
                 query,
-                context_history,
+                # The splitter's one chunk, not the raw history: it token-cuts an
+                # indivisible over-budget result that build_final_prompt would drop.
+                chunks[0] if chunks else context_history,
                 bank_profile,
                 context,
                 max_context_tokens=max_context_tokens,
@@ -1068,7 +1077,7 @@ async def _run_reflect_agent_inner(
                         f"final_map_{i}",
                         CLAIMS_SYSTEM_PROMPT,
                         synthesis_max_completion_tokens,
-                        temperature=_map_temperature(),
+                        temperature=_deterministic_temperature(),
                     )
                     for i, chunk in enumerate(chunks, 1)
                 )
@@ -1113,6 +1122,8 @@ async def _run_reflect_agent_inner(
                     "output_tokens": rewrite.output_tokens,
                 }
             )
+        # After the rewrite, which can garble an id it was handed intact (#5166).
+        answer = presenter.drop_unseen_ids(answer)
 
         structured_output = None
         structured_output_error = None
@@ -1163,6 +1174,10 @@ async def _run_reflect_agent_inner(
     # shape, but a model that cannot will otherwise re-spend the whole iteration
     # budget on the same malformed payload.
     document_rejections = 0
+    # Set once earlier tool results were blanked in ``messages`` to fit a forced
+    # step. The model then saw a shortened conversation, so the answer must come
+    # from the full ``context_history`` via the standalone synthesis prompt.
+    compacted = False
     for iteration in range(max_iterations):
         # Cooperative cancellation checkpoint: abort the agent loop between
         # iterations if the caller (e.g. an HTTP client) has gone away, rather
@@ -1170,29 +1185,6 @@ async def _run_reflect_agent_inner(
         # (issue #2122). Raises OperationCancelledError when fired.
         if cancel_check is not None:
             cancel_check()
-
-        is_last = iteration == max_iterations - 1
-
-        if is_last:
-            # Out of iterations: no more retrieval, just the answer.
-            return await _finish(iteration + 1)
-
-        # Proactive context-window guard: if accumulated messages would exceed the
-        # configured token budget, bail out early and synthesize from what we have.
-        estimated_tokens = _count_messages_tokens(messages)
-        if estimated_tokens >= max_context_tokens and (
-            bool(available_memory_ids) or bool(available_mental_model_ids) or bool(available_observation_ids)
-        ):
-            logger.warning(
-                f"[REFLECT {reflect_id}] Context budget exceeded on iteration {iteration + 1}: "
-                f"~{estimated_tokens} tokens >= {max_context_tokens} limit. Forcing final synthesis."
-            )
-            # Not ``_finish``: asking for ``done`` appends to a conversation that is
-            # already over the budget. The standalone prompt splits the evidence.
-            return await _forced_final_synthesis(iteration + 1)
-
-        # Call LLM with tools
-        llm_start = time.time()
 
         # Determine tool_choice for this iteration.
         # Force the full hierarchical retrieval path (only for enabled tools) before allowing auto.
@@ -1211,6 +1203,47 @@ async def _run_reflect_agent_inner(
             iter_tool_choice = LLMToolChoice.named(forced_sequence[forced_steps_done])
         else:
             iter_tool_choice = LLM_TOOL_CHOICE_AUTO
+
+        is_last = iteration == max_iterations - 1
+
+        if is_last:
+            # Out of iterations: no more retrieval, just the answer.
+            return await (_forced_final_synthesis if compacted else _finish)(iteration + 1)
+
+        if compacted and not forced_step_pending:
+            # The forced path is complete; answer from the full evidence rather than
+            # letting the model keep going on a conversation with blanked results.
+            return await _forced_final_synthesis(iteration + 1)
+
+        estimated_tokens = _count_messages_tokens(messages)
+        if forced_step_pending and estimated_tokens >= max_context_tokens:
+            # A big result from an earlier layer (e.g. observations) must not skip a
+            # still-required step such as raw-fact recall (#4563). Blank the earlier
+            # tool results, oldest first, until the forced call fits. Only the
+            # model-facing copy changes: context_history keeps the full results.
+            for index, message in enumerate(messages):
+                if estimated_tokens < max_context_tokens:
+                    break
+                if message.get("role") == "tool":
+                    messages[index] = {**message, "content": _COMPACTED_TOOL_RESULT}
+                    compacted = True
+                    estimated_tokens = _count_messages_tokens(messages)
+
+        # Proactive context-window guard: if accumulated messages would exceed the
+        # configured token budget, bail out early and synthesize from what we have.
+        if estimated_tokens >= max_context_tokens and (
+            bool(available_memory_ids) or bool(available_mental_model_ids) or bool(available_observation_ids)
+        ):
+            logger.warning(
+                f"[REFLECT {reflect_id}] Context budget exceeded on iteration {iteration + 1}: "
+                f"~{estimated_tokens} tokens >= {max_context_tokens} limit. Forcing final synthesis."
+            )
+            # Not ``_finish``: asking for ``done`` appends to a conversation that is
+            # already over the budget. The standalone prompt splits the evidence.
+            return await _forced_final_synthesis(iteration + 1)
+
+        # Call LLM with tools
+        llm_start = time.time()
 
         # Will the NEXT turn be an ``auto`` turn (the only kind that references a
         # cache)? The cache we schedule this turn covers this turn's input and is
@@ -1420,6 +1453,7 @@ async def _run_reflect_agent_inner(
                         llm_config=llm_config,
                         response_schema=response_schema,
                         max_tokens=max_tokens,
+                        presenter=presenter,
                     )
                 except DocumentSectionsInvalidError as exc:
                     # The document did not match the declared shape. Hand the
@@ -1497,8 +1531,8 @@ async def _run_reflect_agent_inner(
             # create latency. Only schedule when the next turn is ``auto`` (the
             # only kind that references it); the next turn's pre-call resolve then
             # adopts it. Resolve any prior in-flight create first so we don't drop
-            # its handle.
-            if incremental_caching and next_is_auto:
+            # its handle. Not after compaction: no auto turn follows it.
+            if incremental_caching and next_is_auto and not compacted:
                 await _resolve_pending_cache()
                 _schedule_cache(call_msg_count)
 
@@ -1773,6 +1807,23 @@ class _RewriteUsage:
         self.thoughts_tokens += usage.thoughts_tokens
 
 
+def _map_document_text(document: StructuredDocument, fn: Callable[[str], str]) -> StructuredDocument:
+    """``document`` with ``fn`` applied to every heading and block."""
+    return document.model_copy(
+        update={
+            "sections": [
+                section.model_copy(
+                    update={
+                        "heading": fn(section.heading),
+                        "blocks": [b.model_copy(update={"text": fn(b.text)}) for b in section.blocks],
+                    }
+                )
+                for section in document.sections
+            ]
+        }
+    )
+
+
 async def _rewrite_to_length_budget(
     answer: str,
     document: StructuredDocument | None,
@@ -1904,6 +1955,7 @@ async def _process_done_tool(
     log_completion: Callable,
     reflect_id: str,
     directives_applied: list[DirectiveInfo],
+    presenter: ToolResultPresenter,
     llm_config: "AnyLLMProvider | None" = None,
     response_schema: dict | None = None,
     max_tokens: int | None = None,
@@ -1972,6 +2024,11 @@ async def _process_done_tool(
                 output_tokens=rewrite.output_tokens,
             )
         )
+
+    # After the rewrite, which can garble an id it was handed intact (#5166).
+    answer = presenter.drop_unseen_ids(answer)
+    if document is not None:
+        document = _map_document_text(document, presenter.drop_unseen_ids)
 
     # Validate IDs (only include IDs that were actually retrieved)
     used_memory_ids = [mid for mid in (args.get("memory_ids") or []) if mid in available_memory_ids]

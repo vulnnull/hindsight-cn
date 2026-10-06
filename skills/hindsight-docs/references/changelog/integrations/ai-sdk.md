@@ -8,6 +8,14 @@ import PageHero from '@site/src/components/PageHero';
 
 [← Vercel AI SDK integration](../../sdks/integrations/ai-sdk.md)
 
+## [0.5.2](https://github.com/vectorize-io/hindsight/tree/integrations/ai-sdk/v0.5.2)
+
+[Commits in this release →](https://github.com/vectorize-io/hindsight/commits/integrations/ai-sdk/v0.5.2)
+
+**Bug Fixes**
+
+- Recall results now preserve the source chunks requested by callers.<span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/rudycelekli" target="_blank" rel="noopener noreferrer" style={{color: "var(--ifm-color-primary)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px", verticalAlign: "middle"}}>@rudycelekli</a><span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/vectorize-io/hindsight/commit/f3fa28166" target="_blank" rel="noopener noreferrer" style={{fontFamily: "var(--ifm-font-family-monospace, monospace)", fontSize: "0.85em", color: "var(--ifm-color-emphasis-600)"}}>f3fa28166</a>
+
 ## [0.5.1](https://github.com/vectorize-io/hindsight/tree/integrations/ai-sdk/v0.5.1)
 
 **Bug Fixes**

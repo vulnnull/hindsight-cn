@@ -8,6 +8,14 @@ import PageHero from '@site/src/components/PageHero';
 
 [← LangGraph integration](/sdks/integrations/langgraph)
 
+## [0.3.1](https://github.com/vectorize-io/hindsight/tree/integrations/langgraph/v0.3.1)
+
+[Commits in this release →](https://github.com/vectorize-io/hindsight/commits/integrations/langgraph/v0.3.1)
+
+**Bug Fixes**
+
+- Clear stale recalled memory context when a conversation turn has no new user input, preventing outdated memories from being reused.<span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/rudycelekli" target="_blank" rel="noopener noreferrer" style={{color: "var(--ifm-color-primary)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px", verticalAlign: "middle"}}><img src="https://github.com/rudycelekli.png?size=40" alt="@rudycelekli" width="18" height="18" style={{borderRadius: "50%"}} />@rudycelekli</a><span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/vectorize-io/hindsight/commit/7ba944aa4" target="_blank" rel="noopener noreferrer" style={{fontFamily: "var(--ifm-font-family-monospace, monospace)", fontSize: "0.85em", color: "var(--ifm-color-emphasis-600)"}}>7ba944aa4</a>
+
 ## [0.3.0](https://github.com/vectorize-io/hindsight/tree/integrations/langgraph/v0.3.0)
 
 **Bug Fixes**

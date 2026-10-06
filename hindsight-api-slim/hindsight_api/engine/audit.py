@@ -6,7 +6,6 @@ Provides fire-and-forget audit logging of all mutating and core operations
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import uuid
@@ -21,9 +20,13 @@ from pydantic import BaseModel, Field
 
 from ..engine.db_utils import acquire_with_retry
 from ..models import RequestContext
+from .background_writes import PendingWrites
 from .schema import fq_table_explicit
 
 logger = logging.getLogger(__name__)
+
+# How long close() waits for in-flight audit writes before giving up on them.
+_DRAIN_TIMEOUT_SECONDS = 5.0
 
 
 class AuditLogEntry(BaseModel):
@@ -143,6 +146,7 @@ class AuditLogger:
         # (env -> tenant -> bank). None means "no per-bank resolution wired",
         # in which case the global value alone decides.
         self._bank_enabled_resolver = bank_enabled_resolver
+        self._writes = PendingWrites("audit log write")
 
     def action_allowed(self, action: str) -> bool:
         """Global action-allowlist check. Cheap, synchronous, bank-independent.
@@ -188,11 +192,15 @@ class AuditLogger:
         """
         if not self.action_allowed(entry.action):
             return
-        try:
-            asyncio.create_task(self._safe_log(entry))
-        except RuntimeError:
-            # No running event loop (e.g. during shutdown)
-            logger.debug("Cannot schedule audit log write: no running event loop")
+        self._writes.schedule(self._safe_log(entry))
+
+    async def drain(self) -> None:
+        """Wait for audit writes already scheduled; call before the database pool is closed.
+
+        Bounded, so a stuck database cannot hang shutdown. Writes still running
+        at the deadline are abandoned and counted in a warning.
+        """
+        await self._writes.drain_all(_DRAIN_TIMEOUT_SECONDS)
 
     async def _safe_log(self, entry: AuditEntry) -> None:
         """Write audit entry to DB. Errors are logged, never raised."""

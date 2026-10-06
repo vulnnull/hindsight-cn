@@ -190,12 +190,6 @@ def main():
         default=config.worker_poll_interval_ms,
         help=f"Poll interval in milliseconds (default: {config.worker_poll_interval_ms}, env: HINDSIGHT_API_WORKER_POLL_INTERVAL_MS)",
     )
-    parser.add_argument(
-        "--max-retries",
-        type=int,
-        default=config.worker_max_retries,
-        help=f"Max retries before marking failed (default: {config.worker_max_retries}, env: HINDSIGHT_API_WORKER_MAX_RETRIES)",
-    )
 
     # HTTP server options
     parser.add_argument(
@@ -210,15 +204,19 @@ def main():
         help="HTTP host to bind (default: 0.0.0.0)",
     )
 
-    # Logging options
-    parser.add_argument(
-        "--log-level",
-        default=config.log_level,
-        choices=["critical", "error", "warning", "info", "debug", "trace"],
-        help=f"Log level (default: {config.log_level}, env: HINDSIGHT_API_LOG_LEVEL)",
-    )
+    # Retired: these only ever changed the startup banner, never the poller, the engine
+    # or logging. Still accepted so existing launch commands keep starting.
+    for retired_flag in ("--max-retries", "--log-level"):
+        parser.add_argument(retired_flag, default=None, help=argparse.SUPPRESS)
 
     args = parser.parse_args()
+
+    for flag, env_var, value in (
+        ("--max-retries", "HINDSIGHT_API_WORKER_MAX_RETRIES", args.max_retries),
+        ("--log-level", "HINDSIGHT_API_LOG_LEVEL", args.log_level),
+    ):
+        if value is not None:
+            print(f"{flag} {value} is ignored: set {env_var} instead.", file=sys.stderr)
 
     # Configure logging
     config.configure_logging()
@@ -243,7 +241,7 @@ def main():
 
     print(f"Starting Hindsight Worker: {worker_id}")
     print(f"  Poll interval: {args.poll_interval}ms")
-    print(f"  Max retries: {args.max_retries}")
+    print(f"  Max retries: {config.worker_max_retries}")
     print(f"  Max slots: {config.worker_max_slots}")
     reservations = config.worker_slot_reservations
     reservations_str = ", ".join(f"{k}={v}" for k, v in reservations.items()) if reservations else "none"

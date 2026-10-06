@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import uuid4
 
@@ -29,6 +30,25 @@ if TYPE_CHECKING:
     from google.adk.sessions.session import Session
 
 logger = logging.getLogger(__name__)
+
+
+def _retainable_timestamp(timestamp: Optional[str]) -> Optional[str]:
+    """Return the ADK timestamp if the API accepts it, else None (dated at ingestion).
+
+    ADK only *prefers* ISO 8601 for MemoryEntry.timestamp; any other text is
+    rejected by the API with a 422, which would drop the whole memory.
+    """
+    if not timestamp:
+        return None
+    if timestamp.lower() == "unset":
+        return timestamp
+    try:
+        # Same parse the API applies; the "Z" swap keeps Python 3.10 in step with it.
+        datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        logger.warning("ignoring non-ISO MemoryEntry.timestamp %r; retaining without it", timestamp)
+        return None
+    return timestamp
 
 
 class HindsightMemoryService(BaseMemoryService):
@@ -153,7 +173,9 @@ class HindsightMemoryService(BaseMemoryService):
             await self._client.acreate_bank(bank_id=bank_id, mission=self._mission)
         except Exception as exc:  # noqa: BLE001 — never raise to caller
             logger.error("hindsight create_bank failed for %s: %s", bank_id, exc)
-        finally:
+        else:
+            # A failed setup did not apply the mission. Keep best-effort retention
+            # working, but let the next write retry rather than caching failure forever.
             self._banks_with_mission_set.add(bank_id)
 
     # ---- BaseMemoryService implementation ----------------------------------
@@ -241,6 +263,9 @@ class HindsightMemoryService(BaseMemoryService):
                 await self._client.aretain(
                     bank_id=bank_id,
                     content=text,
+                    # Keep the original event time (or explicit timeless sentinel),
+                    # rather than silently dating every imported entry at ingestion.
+                    timestamp=_retainable_timestamp(memory.timestamp),
                     context=self._context,
                     document_id=memory.id,
                     tags=self._base_tags(app_name, user_id),

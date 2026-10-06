@@ -6232,6 +6232,10 @@ class MemoryEngine(MemoryEngineInterface):
         # Shutdown task backend
         await self._task_backend.shutdown()
 
+        # The work that just finished schedules its audit rows as background
+        # tasks; let them land before the pool they write through is closed below.
+        await self._audit_logger.drain()
+
         # Release the memories store's own resources (client/pool). No-op for the
         # default Postgres store; symmetric with init_memories() at startup.
         try:
@@ -8521,6 +8525,16 @@ class MemoryEngine(MemoryEngineInterface):
         parse_archive(archive_bytes)
 
         await self._authenticate_tenant(request_context)
+        # Gate every import, not just one that creates the bank: _ensure_bank_exists only
+        # runs validate_create_bank for a missing bank, so an import into an existing bank
+        # used to reach no validator hook at all (#5137).
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext, BankWriteOperation
+
+            ctx = BankWriteContext(
+                bank_id=bank_id, operation=BankWriteOperation.IMPORT_DOCUMENTS, request_context=request_context
+            )
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         await self._refuse_bank_wide_if_scoped(bank_id, request_context, "import documents")
         await self._get_backend()
         # Ensure the bank (and its per-bank vector indexes) exist before inserts.

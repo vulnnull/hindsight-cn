@@ -286,6 +286,9 @@ class Hindsight:
                 retrying. Waits honour ``Retry-After`` and are jittered; writes are
                 never retried here.
         """
+        # Generated routes already start with a slash, like the handwritten bank
+        # routes. Normalize once so a URL copied with a trailing slash works for both.
+        base_url = base_url.rstrip("/")
         config = hindsight_client_api.Configuration(host=base_url, access_token=api_key)
         self._api_client = hindsight_client_api.ApiClient(config)
         self._api_client.user_agent = user_agent or DEFAULT_USER_AGENT
@@ -294,8 +297,7 @@ class Hindsight:
         # Per-client RNG so jitter is injectable in tests and independent of any
         # seeding the calling application does to the global `random` module.
         self._retry_rng = random.Random()
-        self._base_url = base_url.rstrip("/")
-        self._api_key = api_key
+        self._base_url = base_url
         self._retain_suspended: ContextVar[bool] = ContextVar("retain_suspended", default=False)
         if api_key:
             self._api_client.set_default_header("Authorization", f"Bearer {api_key}")
@@ -461,7 +463,7 @@ class Hindsight:
         self,
         bank_id: str,
         content: str | list[ContentBlock],
-        timestamp: datetime | None = None,
+        timestamp: datetime | str | None = None,
         context: str | None = None,
         document_id: str | None = None,
         metadata: dict[str, str] | None = None,
@@ -471,6 +473,8 @@ class Hindsight:
         update_mode: str | None = None,
         retain_async: bool = False,
         operation_id: str | None = None,
+        observation_scopes: Literal["per_tag", "combined", "all_combinations", "shared"] | list[list[str]] | None = None,
+        strategy: str | None = None,
     ) -> RetainResponse:
         """
         Store a single memory (sync wrapper — prefer :meth:`aretain` in async code).
@@ -481,7 +485,7 @@ class Hindsight:
                 content blocks so an image sits inline where it actually appears —
                 see :data:`ContentBlock`. The block form needs a vision-capable
                 retain LLM server-side.
-            timestamp: Optional event timestamp
+            timestamp: Optional event timestamp (datetime, ISO string, or "unset" for timeless content)
             context: Optional context description
             document_id: Optional document ID for grouping
             metadata: Optional user-defined metadata
@@ -492,6 +496,8 @@ class Hindsight:
             update_mode: How to handle existing documents ('replace' or 'append')
             retain_async: If True, process asynchronously in background (default: False)
             operation_id: Optional caller-supplied UUID for idempotent async retries; ignored by sync retain
+            observation_scopes: Observation grouping mode or explicit tag scopes, as in retain_batch items
+            strategy: Named extraction strategy configured on the bank
 
         Returns:
             RetainResponse with success status
@@ -508,6 +514,10 @@ class Hindsight:
             item["resolve_entities"] = resolve_entities
         if update_mode is not None:
             item["update_mode"] = update_mode
+        if observation_scopes is not None:
+            item["observation_scopes"] = observation_scopes
+        if strategy is not None:
+            item["strategy"] = strategy
         batch_kwargs: dict[str, Any] = {
             "bank_id": bank_id,
             "items": [item],
@@ -803,6 +813,9 @@ class Hindsight:
         offset: int = 0,
         tags: list[str] | None = None,
         tags_match: str | None = None,
+        document_id: str | None = None,
+        state: Literal["valid", "invalidated"] | None = None,
+        consolidation_state: Literal["failed", "pending", "done"] | None = None,
     ) -> ListMemoryUnitsResponse:
         """
         List memory units with pagination (sync wrapper — prefer :meth:`alist_memories` in async code).
@@ -822,6 +835,9 @@ class Hindsight:
                 offset=offset,
                 tags=tags,
                 tags_match=tags_match,
+                document_id=document_id,
+                state=state,
+                consolidation_state=consolidation_state,
             )
         )
 
@@ -838,6 +854,9 @@ class Hindsight:
         offset: int = 0,
         tags: list[str] | None = None,
         tags_match: str | None = None,
+        document_id: str | None = None,
+        state: Literal["valid", "invalidated"] | None = None,
+        consolidation_state: Literal["failed", "pending", "done"] | None = None,
     ) -> ListMemoryUnitsResponse:
         """List memory units with pagination (async — preferred over :meth:`list_memories`).
 
@@ -853,6 +872,10 @@ class Hindsight:
 
         tags / tags_match filter by the memories' tags ('any', 'all', 'any_strict',
         'all_strict', 'exact'; the server defaults to 'any').
+
+        document_id restricts results to one retained document. state selects
+        valid or invalidated facts; consolidation_state selects failed, pending,
+        or done consolidation. Omitted filters preserve the server defaults.
         """
         return await self._memory_api.list_memories(
             bank_id=bank_id,
@@ -866,6 +889,9 @@ class Hindsight:
             offset=offset,
             tags=tags,
             tags_match=tags_match,
+            document_id=document_id,
+            state=state,
+            consolidation_state=consolidation_state,
             _request_timeout=self._timeout,
         )
 
@@ -1023,7 +1049,8 @@ class Hindsight:
             body["enable_reranking"] = enable_reranking
 
         url = f"{self._base_url}/v1/default/banks/{quote(bank_id, safe='')}"
-        headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
+        # Keep integration attribution and configured headers consistent with generated calls.
+        headers = self._api_client.default_headers.copy()
         async with aiohttp.ClientSession(trust_env=True) as session:
             async with session.put(
                 url, json=body, headers=headers, timeout=aiohttp.ClientTimeout(total=self._timeout)
@@ -1211,7 +1238,7 @@ class Hindsight:
         self,
         bank_id: str,
         content: str | list[ContentBlock],
-        timestamp: datetime | None = None,
+        timestamp: datetime | str | None = None,
         context: str | None = None,
         document_id: str | None = None,
         metadata: dict[str, str] | None = None,
@@ -1221,6 +1248,8 @@ class Hindsight:
         update_mode: str | None = None,
         retain_async: bool = False,
         operation_id: str | None = None,
+        observation_scopes: Literal["per_tag", "combined", "all_combinations", "shared"] | list[list[str]] | None = None,
+        strategy: str | None = None,
     ) -> RetainResponse:
         """
         Store a single memory (async — preferred over :meth:`retain`).
@@ -1231,7 +1260,7 @@ class Hindsight:
                 content blocks so an image sits inline where it actually appears —
                 see :data:`ContentBlock`. The block form needs a vision-capable
                 retain LLM server-side.
-            timestamp: Optional event timestamp
+            timestamp: Optional event timestamp (datetime, ISO string, or "unset" for timeless content)
             context: Optional context description
             document_id: Optional document ID for grouping
             metadata: Optional user-defined metadata
@@ -1242,6 +1271,8 @@ class Hindsight:
             update_mode: How to handle existing documents ('replace' or 'append')
             retain_async: If True, process asynchronously in background (default: False)
             operation_id: Optional caller-supplied UUID for idempotent async retries; ignored by sync retain
+            observation_scopes: Observation grouping mode or explicit tag scopes, as in retain_batch items
+            strategy: Named extraction strategy configured on the bank
 
         Returns:
             RetainResponse with success status
@@ -1258,6 +1289,10 @@ class Hindsight:
             item["resolve_entities"] = resolve_entities
         if update_mode is not None:
             item["update_mode"] = update_mode
+        if observation_scopes is not None:
+            item["observation_scopes"] = observation_scopes
+        if strategy is not None:
+            item["strategy"] = strategy
         batch_kwargs: dict[str, Any] = {
             "bank_id": bank_id,
             "items": [item],
@@ -2807,7 +2842,8 @@ class Hindsight:
 
     async def _aget_bank_config(self, bank_id: str) -> dict[str, Any]:
         url = f"{self._base_url}/v1/default/banks/{quote(bank_id, safe='')}/config"
-        headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
+        # Keep integration attribution and configured headers consistent with generated calls.
+        headers = self._api_client.default_headers.copy()
         async with aiohttp.ClientSession(trust_env=True) as session:
             async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=self._timeout)) as resp:
                 resp.raise_for_status()
@@ -3146,7 +3182,8 @@ class Hindsight:
 
     async def _aupdate_bank_config(self, bank_id: str, updates: dict[str, Any]) -> dict[str, Any]:
         url = f"{self._base_url}/v1/default/banks/{quote(bank_id, safe='')}/config"
-        headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
+        # Keep integration attribution and configured headers consistent with generated calls.
+        headers = self._api_client.default_headers.copy()
         async with aiohttp.ClientSession(trust_env=True) as session:
             async with session.patch(
                 url, json={"updates": updates}, headers=headers, timeout=aiohttp.ClientTimeout(total=self._timeout)
@@ -3178,7 +3215,8 @@ class Hindsight:
 
     async def _areset_bank_config(self, bank_id: str) -> dict[str, Any]:
         url = f"{self._base_url}/v1/default/banks/{quote(bank_id, safe='')}/config"
-        headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
+        # Keep integration attribution and configured headers consistent with generated calls.
+        headers = self._api_client.default_headers.copy()
         async with aiohttp.ClientSession(trust_env=True) as session:
             async with session.delete(url, headers=headers, timeout=aiohttp.ClientTimeout(total=self._timeout)) as resp:
                 resp.raise_for_status()

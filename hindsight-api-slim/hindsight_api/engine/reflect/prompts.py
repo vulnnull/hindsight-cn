@@ -328,7 +328,9 @@ def build_system_prompt_for_tools(
                     "- Search returns the best match in full and a SNIPPET of the others; call "
                     "read_mental_models on any id whose snippet looks like it answers the question, and read it "
                     "before answering from it",
-                    "- If a relevant mental model exists and is FRESH, it may fully answer the question",
+                    "- A FRESH mental model may fully answer the question — but only if it actually STATES the "
+                    "answer. One that shares the question's topic without stating the answer (e.g. it describes a "
+                    "process, or names the thing without its status) has not answered it: go to the next level",
                     "- Check `is_stale` field - if stale, also verify with lower levels",
                 ],
             )
@@ -349,7 +351,10 @@ def build_system_prompt_for_tools(
         recall_body.extend(
             [
                 "- Use when: no mental models/observations exist, they're stale, or you need specific details",
-                "- MANDATORY: If search_mental_models and search_observations both return 0 results, you MUST call recall() before giving up",
+                "- MANDATORY: If search_mental_models and search_observations return 0 results, OR return results that "
+                "do not STATE the answer, you MUST call recall() before giving up. Never report that the bank holds "
+                "nothing about something until recall() has run with the question's key terms (an issue key, name or "
+                "identifier) verbatim",
                 "- This is the source of truth that other levels are built from",
                 "",
                 "**Tool result ordering:** `recall()` and `search_observations()` return their `memories` / `observations` arrays sorted by SEMANTIC RELEVANCE to the query, NOT by time. The POSITION of an entry tells you nothing about when it was retained. For any temporal reasoning — recency, supersession, applying events on top of a state — IGNORE the position and read the per-entry `mentioned_at` field (and `occurred_start` / `occurred_end` for events).",
@@ -360,7 +365,9 @@ def build_system_prompt_for_tools(
         recall_body.extend(
             [
                 "- Use when: no mental model exists, it's stale, or you need specific details",
-                "- MANDATORY: If search_mental_models returns 0 results, you MUST call recall() before giving up",
+                "- MANDATORY: If search_mental_models returns 0 results, OR returns a model that does not STATE the "
+                "answer, you MUST call recall() before giving up. Never report that the bank holds nothing about "
+                "something until recall() has run with the question's key terms verbatim",
                 "- This is the source of truth that mental models are built from",
             ]
         )
@@ -368,7 +375,9 @@ def build_system_prompt_for_tools(
         recall_body.extend(
             [
                 "- Use when: no observations exist, they're stale, or you need specific details",
-                "- MANDATORY: If search_observations returns 0 results or count=0, you MUST call recall() before giving up",
+                "- MANDATORY: If search_observations returns 0 results or count=0, OR returns observations that do "
+                "not STATE the answer, you MUST call recall() before giving up. Never report that the bank holds "
+                "nothing about something until recall() has run with the question's key terms verbatim",
                 "- This is the source of truth that observations are built from",
                 "",
                 "**Tool result ordering:** `recall()` and `search_observations()` return their `memories` / `observations` arrays sorted by SEMANTIC RELEVANCE to the query, NOT by time. The POSITION of an entry tells you nothing about when it was retained. For any temporal reasoning — recency, supersession, applying events on top of a state — IGNORE the position and read the per-entry `mentioned_at` field (and `occurred_start` / `occurred_end` for events).",
@@ -440,18 +449,32 @@ def build_system_prompt_for_tools(
         ]
     )
 
-    # Add budget guidance
+    # Add budget guidance. The budget bounds how LONG the answer is and how many
+    # searches get spent on it — never whether the lower retrieval layers are
+    # consulted at all. The earlier low/mid wording ("if mental models or
+    # observations provide a reasonable answer, stop there") did the latter:
+    # combined with the fresh-mental-model short-circuit in agent.py, which stops
+    # forcing the lower layers once a page search returns fresh non-empty pages,
+    # it let a reflect answer "the bank holds nothing about X" off the page layer
+    # while recall() on the same bank returned the facts (#4567). Freshness and
+    # topical overlap are not coverage, so both levels now say to go deeper when
+    # what came back does not answer the question. The absence rule itself is NOT
+    # repeated here: it lives once in the RAW FACTS level above and once on the
+    # ``done`` tool, because every line here is paid for on every reflect (#4716).
     if budget:
         budget_lower = budget.lower()
         if budget_lower == "low":
             parts.extend(
                 [
                     "## RESEARCH DEPTH: SHALLOW (Quick Response)",
-                    "- Prioritize speed over completeness",
-                    "- If mental models or observations provide a reasonable answer, stop there",
-                    "- Only dig deeper if the initial results are clearly insufficient",
-                    "- Prefer a quick overview rather than exhaustive details",
-                    "- Answer promptly with available information",
+                    "- Keep the ANSWER short: a quick overview, not exhaustive detail. Depth is what you cut, "
+                    "not coverage",
+                    "- Spend few searches, but make them count: vary the query instead of repeating one that "
+                    "already ran",
+                    "- A mental model or observation that ANSWERS the question is enough to stop; one that is "
+                    "merely on the same topic is not",
+                    "- If what you found does not cover the question, go on to the next level rather than "
+                    "answering from it",
                     "",
                 ]
             )
@@ -462,6 +485,8 @@ def build_system_prompt_for_tools(
                     "- Balance thoroughness with efficiency",
                     "- Check multiple sources when the question warrants it",
                     "- Verify stale data if it's central to the answer",
+                    "- A result that is merely on the same topic does not answer the question: when it does not "
+                    "cover it, go on to the next level",
                     "- Don't over-explore, but ensure reasonable coverage",
                     "",
                 ]
@@ -487,18 +512,26 @@ def build_system_prompt_for_tools(
         steps.append("First, try search_mental_models() - check if a curated summary exists")
     if include_observations:
         if has_mental_models:
-            steps.append("If no mental model or it's stale, try search_observations() for consolidated knowledge")
+            steps.append(
+                "If there is no mental model, it's stale, OR it does not state the answer, "
+                "try search_observations() for consolidated knowledge"
+            )
         else:
             steps.append("First, try search_observations() - check for consolidated knowledge")
     # Recall step phrasing varies with whichever upstream tool(s) precede it.
     if include_observations:
         steps.append(
-            "If observations are stale OR you need specific details, use recall() for raw facts"
+            "If the levels above are stale, do not state the answer, OR you need specific details, "
+            "use recall() for raw facts. Reporting that nothing is known requires recall() first"
             if has_mental_models
-            else "If search_observations returns 0 results OR observations are stale, you MUST call recall() for raw facts"
+            else "If search_observations returns 0 results, is stale, OR does not state the answer, you MUST call "
+            "recall() for raw facts"
         )
     elif has_mental_models:
-        steps.append("If no mental model or it's stale, use recall() for raw facts")
+        steps.append(
+            "If there is no mental model, it's stale, OR it does not state the answer, use recall() for raw facts. "
+            "Reporting that nothing is known requires recall() first"
+        )
     else:
         steps.append("Call recall() to gather raw facts")
     steps.append("Use expand() if you need more context on specific memories")

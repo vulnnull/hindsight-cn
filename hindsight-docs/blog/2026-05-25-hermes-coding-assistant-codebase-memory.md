@@ -10,6 +10,13 @@ hide_table_of_contents: true
 
 ![Building a Hermes Coding Assistant That Remembers Your Codebase](/img/blog/hermes-coding-assistant-codebase-memory.png)
 
+:::info Setup has changed since this post
+Hindsight is no longer bundled with Hermes. Nous Research moved every memory provider out of the
+Hermes core tree, so new installs now run `hermes plugins install hindsight` before
+`hermes memory setup`. Existing setups migrate themselves. See
+[What Changes Now That Hindsight Is a Hermes Plugin](/blog/2026/10/01/hindsight-hermes-plugin-what-changed).
+:::
+
 Every AI coding session starts from zero.
 
 You open a new chat, paste in context, your stack, your conventions, the architectural decision you made last week, the bug you spent two days on in March. Then you do it again next session. And the one after that. The problem isn't that AI coding tools are bad at coding. It's that they have no memory of your codebase.

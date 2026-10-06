@@ -239,3 +239,93 @@ async def test_dry_run_multimodal_extraction_via_client(client, llm, bank_id):
 
     documents = await client.documents.list_documents(bank_id)
     assert len(documents.items) == 0
+
+
+# --- Two images in one retain, one document each -----------------------------
+#
+# A multi-document batch takes a different path through retain: it is split by
+# document and each slice is re-entered as its own retain. Until #4928 that
+# split dropped the attachment loader, so every image in a multi-document batch
+# reached the model as a bare placeholder and the facts were drawn from prose
+# alone. None of the stories above can see it — the bug needs two documents, and
+# a client that sends an image without naming a document gets a generated
+# document id per item, so "two screenshots in one call" is the common case.
+
+RED_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+)
+
+RACK_CAPTION = "Bob sent a photo of the datacentre:"
+RACK_FACT = "Bob stood in front of the server rack | Involving: Bob"
+
+RACK_CONTENT = [
+    {"type": "text", "text": RACK_CAPTION},
+    {
+        "type": "image",
+        "source": {"type": "base64", "media_type": "image/png", "data": base64.b64encode(RED_PNG).decode()},
+    },
+]
+
+
+@pytest.fixture
+async def bank_with_two_photographed_documents(client, llm, bank_id, settled) -> str:
+    """One retain, two documents, a different image in each."""
+    llm.on_step("extract_facts", contains=CAPTION).returns(
+        extracted(
+            fact(
+                "Alice stood in front of the Brandenburg Gate",
+                who="Alice",
+                entities=["Alice"],
+                from_attachments=[1],
+            )
+        )
+    )
+    llm.on_step("extract_facts", contains=RACK_CAPTION).returns(
+        extracted(fact("Bob stood in front of the server rack", who="Bob", entities=["Bob"], from_attachments=[1]))
+    )
+    llm.on_step("consolidate").returns(consolidation())
+
+    # No batch-level document_id: the per-item ids are what make this a
+    # multi-document batch, which is the path under test.
+    await client.aretain_batch(
+        bank_id=bank_id,
+        items=[
+            {"content": CONTENT, "document_id": "gate"},
+            {"content": RACK_CONTENT, "document_id": "rack"},
+        ],
+    )
+    await settled(bank_id)
+    return bank_id
+
+
+async def test_every_document_in_one_batch_sends_its_own_image(client, llm, bank_with_two_photographed_documents):
+    """Each slice of the batch has to carry its own picture to the model.
+
+    Dropped, the prompt keeps the caption and loses the image, so extraction
+    answers about a photo it never saw — the same silent failure as the
+    single-document case, reached by a path the single-document stories miss.
+    """
+    for caption in (CAPTION, RACK_CAPTION):
+        call = next((call for call in llm.calls if caption in call.all_text), None)
+        assert call is not None, f"extraction never ran for {caption!r}"
+        assert _parts(call.messages) == ["text", "image_url"], f"{caption!r} reached the model without its image"
+
+
+async def test_each_document_keeps_the_image_it_arrived_with(client, bank_with_two_photographed_documents):
+    """Distinct bytes per document, so a shared loader cannot blur them together."""
+    for document_id, expected in [("gate", PNG), ("rack", RED_PNG)]:
+        document = await client.documents.get_document(bank_with_two_photographed_documents, document_id)
+        assert [a.kind for a in document.attachments] == ["image"], f"{document_id} lost its image"
+        fetched = await client.memory.get_bank_attachment(
+            bank_with_two_photographed_documents, document.attachments[0].id
+        )
+        assert fetched == expected
+
+
+async def test_both_facts_read_off_the_images_are_recallable(client, bank_with_two_photographed_documents):
+    """Neither document's image was a dead end: both produced a retrievable memory."""
+    # Worded to overlap both facts lexically, which is what the deterministic
+    # embedding stub ranks on.
+    response = await client.arecall(bank_id=bank_with_two_photographed_documents, query="who stood in front of what")
+
+    assert sorted(r.text for r in response.results) == sorted([FACT, RACK_FACT])

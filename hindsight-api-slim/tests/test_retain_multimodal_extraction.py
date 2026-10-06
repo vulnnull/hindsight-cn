@@ -15,6 +15,7 @@ import uuid
 
 import pytest
 
+from hindsight_api import LLMConfig
 from hindsight_api.engine.retain.attachment_content import compute_attachment_hash
 
 PNG_BYTES = base64.b64decode(
@@ -140,3 +141,74 @@ async def test_a_text_only_retain_is_unaffected_by_a_non_vision_llm(api_client, 
     monkeypatch.setattr(type(memory._retain_llm_config), "supports_vision", lambda self: False)
 
     assert (await _retain(api_client, bank_id, "plain text", document_id="t")).status_code == 200
+
+
+# A batch whose items name different documents is split by document and each slice
+# re-entered as its own retain. That recursion used to drop the attachment loader
+# and the vision slot, so every image in such a batch reached the model as a bare
+# placeholder. Both shapes below take that path: explicit per-item document_ids,
+# and anonymous items -- which the API gives a generated document id each as soon
+# as they carry an attachment, making "two screenshots in one call" the common case.
+_GROUPED_BATCHES = {
+    "explicit document ids": [
+        {
+            "content": [_text_block("Doc 1 intro:"), _image_block(), _text_block("...Doc 1 end.")],
+            "document_id": "doc-1",
+        },
+        {
+            "content": [_text_block("Doc 2 intro:"), _image_block(), _text_block("...Doc 2 end.")],
+            "document_id": "doc-2",
+        },
+    ],
+    "generated document ids": [
+        {"content": [_text_block("Item 1 intro:"), _image_block(), _text_block("...Item 1 end.")]},
+        {"content": [_text_block("Item 2 intro:"), _image_block(), _text_block("...Item 2 end.")]},
+    ],
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("items", _GROUPED_BATCHES.values(), ids=_GROUPED_BATCHES.keys())
+async def test_every_document_of_a_batch_sends_its_image_in_position(api_client, memory, items):
+    bank_id = f"vis-{uuid.uuid4().hex[:8]}"
+    memory._retain_llm_config._provider_impl.clear_mock_calls()
+
+    response = await api_client.post(f"/v1/default/banks/{bank_id}/memories", json={"items": items, "async": False})
+    assert response.status_code == 200, response.text
+
+    messages = _retain_messages(memory)
+    assert len(messages) == len(items), f"expected one extraction call per document, got {len(messages)}"
+
+    for call_messages in messages:
+        user_content = call_messages[-1]["content"]
+        assert isinstance(user_content, list), "the user message stayed a plain string; the image was dropped"
+        assert [part["type"] for part in user_content] == ["text", "image_url", "text"]
+        assert "intro:" in user_content[0]["text"]
+        assert "end." in user_content[2]["text"]
+
+
+@pytest.mark.asyncio
+async def test_a_batch_spanning_documents_still_reaches_the_dedicated_vision_slot(api_client, memory):
+    """A separate VLM is configured precisely so the retain LLM never sees images."""
+    bank_id = f"vis-{uuid.uuid4().hex[:8]}"
+    memory._vlm_config = LLMConfig(provider="mock", api_key="", base_url="", model="custom-vision-slot")
+
+    memory._retain_llm_config._provider_impl.clear_mock_calls()
+    memory._vlm_config._provider_impl.clear_mock_calls()
+
+    items = _GROUPED_BATCHES["explicit document ids"]
+    response = await api_client.post(f"/v1/default/banks/{bank_id}/memories", json={"items": items, "async": False})
+    assert response.status_code == 200, response.text
+
+    def _extraction_calls(config) -> list[list[dict]]:
+        provider = config._provider_impl
+        return [call["messages"] for call in provider.get_mock_calls() if call["scope"] == "retain_extract_facts"]
+
+    vlm_calls = _extraction_calls(memory._vlm_config)
+    assert len(vlm_calls) == len(items), f"expected one VLM extraction call per document, got {len(vlm_calls)}"
+    assert _extraction_calls(memory._retain_llm_config) == [], "the retain LLM handled a multimodal chunk"
+
+    for call_messages in vlm_calls:
+        user_content = call_messages[-1]["content"]
+        assert isinstance(user_content, list), "the VLM message stayed a plain string"
+        assert [part["type"] for part in user_content] == ["text", "image_url", "text"]

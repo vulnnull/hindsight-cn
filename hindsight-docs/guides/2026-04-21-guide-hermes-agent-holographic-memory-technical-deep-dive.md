@@ -152,7 +152,8 @@ That local-first setup is part of the provider's appeal.
 To use Hindsight instead:
 
 ```bash
-hermes memory setup
+hermes plugins install hindsight
+hermes memory setup           # select "hindsight"
 ```
 
 Then select `hindsight`.

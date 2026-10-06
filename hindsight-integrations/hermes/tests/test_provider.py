@@ -2,9 +2,12 @@
 sends to Hindsight (a recording fake client stands in for the real SDK)."""
 
 import json
+import sys
+from types import SimpleNamespace
 
 import hindsight_hermes as plugin
 from conftest import FakeClient
+from hindsight_client_api.exceptions import NotFoundException
 
 
 def _retain_item(fake: FakeClient, index: int = 0) -> dict:
@@ -64,6 +67,65 @@ def test_recall_tool_queries_the_bank_and_formats_results(provider):
     instance.shutdown()
 
 
+def test_recall_sends_no_score_floor_by_default(provider):
+    instance, fake = provider({}, client=FakeClient(recall_texts=["fact one"]))
+    instance.handle_tool_call("hindsight_recall", {"query": "who am I?"})
+    assert "min_scores" not in fake.recalls[0]
+    instance.shutdown()
+
+
+def test_recall_min_scores_reaches_the_tool_and_the_prefetch(provider):
+    instance, fake = provider(
+        {"recall_sync": True, "recall_min_scores": {"reranker": 0.25}}, client=FakeClient(recall_texts=["fact one"])
+    )
+    instance.handle_tool_call("hindsight_recall", {"query": "who am I?"})
+    instance.prefetch("what do you know?")
+    assert [call["min_scores"] for call in fake.recalls] == [{"reranker": 0.25}] * 2
+    instance.shutdown()
+
+
+def test_recall_min_scores_accepts_the_json_string_the_setup_wizard_writes(provider):
+    instance, fake = provider({"recall_min_scores": '{"reranker": 0.25}'}, client=FakeClient(recall_texts=["x"]))
+    instance.handle_tool_call("hindsight_recall", {"query": "q"})
+    assert fake.recalls[0]["min_scores"] == {"reranker": 0.25}
+    instance.shutdown()
+
+
+def test_recall_with_an_empty_answer_stays_an_empty_block(provider):
+    # The server drops what falls under a reranker/final floor; an empty answer must stay empty.
+    instance, fake = provider({"recall_sync": True, "recall_min_scores": {"reranker": 0.9}}, client=FakeClient())
+    assert instance.prefetch("something off topic") == ""
+    assert fake.recalls[0]["min_scores"] == {"reranker": 0.9}
+    assert json.loads(instance.handle_tool_call("hindsight_recall", {"query": "q"}))["result"] == (
+        "No relevant memories found."
+    )
+    instance.shutdown()
+
+
+def test_recall_min_scores_is_enforced_on_each_result_the_server_returns(provider):
+    # The server prunes only the retrieval arm a `semantic` floor names, so weak results (and ones
+    # another arm found, with no semantic score) can still come back; the plugin drops them so the
+    # floor really abstains.
+    results = [("kept", {"semantic": 0.7}), ("weak", {"semantic": 0.3}), ("other arm", {"semantic": None})]
+    instance, fake = provider({"recall_min_scores": {"semantic": 0.5}}, client=FakeClient(recall_texts=results))
+    result = json.loads(instance.handle_tool_call("hindsight_recall", {"query": "q"}))
+    assert result["result"] == "1. kept"
+    assert fake.recalls[0]["min_scores"] == {"semantic": 0.5}
+    instance.shutdown()
+
+
+def test_recall_min_scores_drops_the_whole_block_when_nothing_clears_it(provider):
+    results = [("weak", {"semantic": 0.3}), ("other arm", {"semantic": None})]
+    instance, _ = provider(
+        {"recall_sync": True, "recall_min_scores": {"semantic": 0.5}}, client=FakeClient(recall_texts=results)
+    )
+    assert instance.prefetch("something off topic") == ""
+    assert json.loads(instance.handle_tool_call("hindsight_recall", {"query": "q"}))["result"] == (
+        "No relevant memories found."
+    )
+    instance.shutdown()
+
+
 def test_reflect_tool_uses_reflect(provider):
     instance, fake = provider({}, client=FakeClient(reflect_text="You are Ada."))
     result = json.loads(instance.handle_tool_call("hindsight_reflect", {"query": "who am I?"}))
@@ -81,10 +143,41 @@ def test_retain_tool_stores_content_with_per_call_tags(provider):
     instance.shutdown()
 
 
+def test_builtin_memory_adds_and_replaces_are_retained(provider):
+    instance, fake = provider({"bank_id": "team", "retain_tags": "base"})
+    instance.on_memory_write("add", "memory", "Deploys go through Fly.io")
+    instance.on_memory_write("replace", "user", "Ada prefers tea", metadata={"previous_content": "Ada likes tea"})
+    instance.on_memory_write("remove", "memory", "", metadata={"previous_content": "Deploys go through Fly.io"})
+    instance.shutdown()
+
+    assert [call["bank_id"] for call in fake.retains] == ["team", "team"]
+    first, second = _retain_item(fake, 0), _retain_item(fake, 1)
+    assert first["content"] == "Deploys go through Fly.io"
+    assert first["tags"] == ["base", "builtin-memory", "builtin-target:memory", "builtin-action:add"]
+    assert second["content"] == "Ada prefers tea"
+    assert second["tags"] == ["base", "builtin-memory", "builtin-target:user", "builtin-action:replace"]
+
+
 def test_tool_call_errors_are_reported_not_raised(provider):
     instance, _ = provider({})
     assert instance.handle_tool_call("hindsight_recall", {}).startswith("ERROR:")
     assert instance.handle_tool_call("nope", {"query": "x"}).startswith("ERROR:")
+    instance.shutdown()
+
+
+class _EmptyServerClient(FakeClient):
+    async def arecall(self, **kwargs):
+        raise NotFoundException(status=404, reason="Not Found")
+
+    async def areflect(self, **kwargs):
+        raise NotFoundException(status=404, reason="Not Found")
+
+
+def test_searching_a_bank_nothing_was_saved_to_finds_nothing(provider):
+    instance, _ = provider({}, client=_EmptyServerClient())
+    for tool in ("hindsight_recall", "hindsight_reflect"):
+        result = json.loads(instance.handle_tool_call(tool, {"query": "who am I?"}))
+        assert result == {"result": "No relevant memories found."}
     instance.shutdown()
 
 
@@ -279,7 +372,9 @@ def test_building_the_embedded_client_announces_before_it_waits(provider, monkey
     """The notice has to fire from the path that actually blocks — asserting the helper in
     isolation would keep passing if nothing called it."""
     seen = []
-    instance, _ = provider({"mode": "local_embedded", "profile": "hermes"}, warning_callback=seen.append)
+    # Mode is switched after init: configuring local_embedded would also start the background
+    # daemon worker, which builds a client too and made this test announce twice at random.
+    instance, _ = provider({"profile": "hermes"}, warning_callback=seen.append)
     instance._mode = "local_embedded"
     order = []
     from hindsight_hermes.embedded import LocalRuntimeStatus
@@ -298,3 +393,60 @@ def test_building_the_embedded_client_announces_before_it_waits(provider, monkey
 
     assert order == ["announced", "started"], order
     instance.shutdown()
+
+
+def test_the_embedded_client_sends_the_daemons_tenant_key(provider, monkeypatch):
+    """#5023: a daemon running ApiKeyTenantExtension answers 401 to a keyless client."""
+    instance, _ = provider({"profile": "hermes"})
+    instance._mode = "local_embedded"
+    from hindsight_hermes.embedded import LocalRuntimeStatus, _embedded_profile_env_path
+
+    profile_env = _embedded_profile_env_path({"profile": "hermes"})
+    profile_env.parent.mkdir(parents=True, exist_ok=True)
+    profile_env.write_text("HINDSIGHT_API_TENANT_API_KEY=tenant-secret\n")
+    built = {}
+
+    class _Client:
+        def __init__(self, **kwargs):
+            built.update(kwargs)
+
+    monkeypatch.setattr(plugin, "_check_local_runtime", lambda: LocalRuntimeStatus(available=True))
+    monkeypatch.setattr(plugin, "_start_daemon", lambda config, profile: "http://127.0.0.1:1")
+    monkeypatch.setattr(plugin, "_installed_api_binary_exists", lambda: True)
+    monkeypatch.setitem(sys.modules, "hindsight_client", SimpleNamespace(Hindsight=_Client))
+
+    instance._new_embedded_client()
+
+    assert built == {"base_url": "http://127.0.0.1:1", "api_key": "tenant-secret"}
+    instance.shutdown()
+
+
+def test_retain_omits_strategy_by_default(provider):
+    """No strategy configured means no key on the item, so the bank keeps deciding."""
+    instance, fake = provider()
+    instance.sync_turn("hello", "hi")
+    instance.shutdown()
+
+    assert fake.retains
+    for call in fake.retains:
+        for item in call["items"]:
+            assert "strategy" not in item
+
+
+def test_retain_sends_the_configured_strategy(provider):
+    """A configured strategy rides on every stored item."""
+    instance, fake = provider({"retain_strategy": "agent-session"})
+    instance.sync_turn("hello", "hi")
+    instance.shutdown()
+
+    assert fake.retains
+    for call in fake.retains:
+        for item in call["items"]:
+            assert item["strategy"] == "agent-session"
+
+
+def test_retain_strategy_is_exposed_as_a_setting(provider):
+    """Operators must be able to set it without editing code."""
+    instance, _ = provider()
+    keys = {option["key"] for option in instance.get_config_schema()}
+    assert "retain_strategy" in keys

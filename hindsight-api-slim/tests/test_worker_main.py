@@ -4,6 +4,8 @@ import asyncio
 import signal
 from unittest.mock import MagicMock
 
+import pytest
+
 from hindsight_api.worker.main import _install_shutdown_signal_handlers
 
 
@@ -70,3 +72,31 @@ def test_main_bootstraps_tracing_for_the_worker_process(monkeypatch):
     worker_main.main()
 
     assert bootstrap_calls == [{"default_service_name": "hindsight-worker"}]
+
+
+def test_main_warns_on_retired_flags_and_keeps_env_config(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--max-retries/--log-level never took effect; they still parse but only warn."""
+    import dataclasses
+    import sys
+
+    from hindsight_api import tracing
+    from hindsight_api.config import _get_raw_config
+    from hindsight_api.worker import main as worker_main
+
+    config = dataclasses.replace(_get_raw_config(), worker_id="test-worker", worker_max_retries=7)
+    monkeypatch.setattr(config, "configure_logging", lambda: None)
+    monkeypatch.setattr(worker_main, "get_config", lambda: config)
+    monkeypatch.setattr(worker_main, "load_dotenv_for_entrypoint", lambda: None)
+    monkeypatch.setattr(sys, "argv", ["hindsight-worker", "--max-retries", "2", "--log-level", "debug"])
+    monkeypatch.setattr(tracing, "initialize_tracing_from_config", lambda *args, **kwargs: False)
+    monkeypatch.setattr(worker_main.asyncio, "run", lambda coro: coro.close())
+
+    worker_main.main()
+
+    out = capsys.readouterr()
+    assert "--max-retries 2 is ignored: set HINDSIGHT_API_WORKER_MAX_RETRIES instead." in out.err
+    assert "--log-level debug is ignored: set HINDSIGHT_API_LOG_LEVEL instead." in out.err
+    assert "Max retries: 7" in out.out
+    assert config.worker_max_retries == 7
