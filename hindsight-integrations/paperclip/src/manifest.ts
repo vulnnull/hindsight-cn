@@ -3,7 +3,7 @@ import type { PaperclipPluginManifestV1 } from "@paperclipai/plugin-sdk";
 const manifest: PaperclipPluginManifestV1 = {
   id: "paperclip-plugin-hindsight",
   apiVersion: 1,
-  version: "0.4.0",
+  version: "0.4.1",
   displayName: "Hindsight Memory",
   author: "Vectorize <support@vectorize.io>",
   description:
@@ -94,8 +94,9 @@ const manifest: PaperclipPluginManifestV1 = {
       },
       autoRetain: {
         type: "boolean",
-        title: "Auto-retain on Run Finished",
-        description: "Automatically retain agent run output to Hindsight when a run completes.",
+        title: "Auto-retain Issue Comments",
+        description:
+          "Automatically retain the full body of every issue comment to Hindsight. Agents can still store memories explicitly with the hindsight_retain tool when this is off.",
         default: true,
       },
       enabledAgentIds: {

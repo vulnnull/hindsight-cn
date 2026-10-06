@@ -10,6 +10,15 @@ For the source code, see [`hindsight-integrations/paperclip`](https://github.com
 
 ← [Back to main changelog](/changelog)
 
+## [0.4.1](https://github.com/vectorize-io/hindsight/tree/integrations/paperclip/v0.4.1)
+
+[Commits in this release →](https://github.com/vectorize-io/hindsight/commits/integrations/paperclip/v0.4.1)
+
+**Bug Fixes**
+
+- The enabledAgentIds allowlist is now enforced on the hindsight_recall and hindsight_retain tools, not just the automatic recall and retention. An agent left out of the list can no longer reach its memory bank by calling the tools directly.<span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/benfrank241" target="_blank" rel="noopener noreferrer" style={{color: "var(--ifm-color-primary)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px", verticalAlign: "middle"}}><img src="https://github.com/benfrank241.png?size=40" alt="@benfrank241" width="18" height="18" style={{borderRadius: "50%"}} />@benfrank241</a><span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/vectorize-io/hindsight/commit/d4cabadb8" target="_blank" rel="noopener noreferrer" style={{fontFamily: "var(--ifm-font-family-monospace, monospace)", fontSize: "0.85em", color: "var(--ifm-color-emphasis-600)"}}>d4cabadb8</a>
+- The autoRetain setting is now labelled for what it does. It gates retention of issue comments; it was previously described as retaining agent run output when a run completes, which the plugin does not do.<span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/benfrank241" target="_blank" rel="noopener noreferrer" style={{color: "var(--ifm-color-primary)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px", verticalAlign: "middle"}}><img src="https://github.com/benfrank241.png?size=40" alt="@benfrank241" width="18" height="18" style={{borderRadius: "50%"}} />@benfrank241</a><span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/vectorize-io/hindsight/commit/d4cabadb8" target="_blank" rel="noopener noreferrer" style={{fontFamily: "var(--ifm-font-family-monospace, monospace)", fontSize: "0.85em", color: "var(--ifm-color-emphasis-600)"}}>d4cabadb8</a>
+
 ## [0.4.0](https://github.com/vectorize-io/hindsight/tree/integrations/paperclip/v0.4.0)
 
 [Commits in this release →](https://github.com/vectorize-io/hindsight/commits/integrations/paperclip/v0.4.0)
