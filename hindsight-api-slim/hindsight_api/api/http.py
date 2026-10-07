@@ -282,7 +282,6 @@ def _parse_tag_groups_query(raw: str | None, tags: list[str] | None) -> list[Tag
 
 from hindsight_api.engine.structured_output import validate_response_schema
 from hindsight_api.engine.time_filter import DocumentTimeField, MemoryTimeField
-from hindsight_api.engine.token_encoding import count_tokens
 from hindsight_api.extensions import HttpExtension, OperationValidationError, load_extension
 from hindsight_api.liveness import LivenessResponse, liveness_response
 from hindsight_api.metrics import (
@@ -4271,7 +4270,7 @@ async def apply_bank_template_manifest(
             provisioned = await memory.list_mental_models(
                 bank_id=bank_id,
                 limit=None,
-                detail="metadata",
+                detail="config",
                 request_context=request_context,
             )
             existing_by_id = {item["id"]: item for item in provisioned.items}
@@ -4332,7 +4331,7 @@ async def apply_default_bank_template_resources(
     existing_by_id: dict[str, dict[str, Any]] = {}
     if manifest.mental_models:
         existing = await memory.list_mental_models(
-            bank_id=bank_id, limit=None, detail="metadata", request_context=request_context
+            bank_id=bank_id, limit=None, detail="config", request_context=request_context
         )
         existing_by_id = {model["id"]: model for model in existing.items}
 
@@ -4357,6 +4356,37 @@ async def apply_default_bank_template_resources(
     )
 
 
+def _mental_model_matches_template(stored: dict[str, Any], mm: "BankTemplateMentalModel") -> bool:
+    """True when re-applying ``mm`` would leave the stored model as it is.
+
+    Mirrors what the update writes: empty manifest tags leave the stored tags
+    alone, so they never count as a difference. The stored trigger goes through
+    ``MentalModelTrigger`` so its unset fields get the same defaults as the
+    manifest's; one that no longer parses counts as changed.
+    """
+    try:
+        stored_trigger = MentalModelTrigger.model_validate(stored["trigger"] or {})
+    except ValidationError:
+        return False
+    return (
+        stored["name"] == mm.name
+        and stored["source_query"] == mm.source_query
+        and stored["max_tokens"] == mm.max_tokens
+        and (not mm.tags or set(stored["tags"]) == set(mm.tags))
+        and stored_trigger == mm.trigger
+    )
+
+
+def _directive_matches_template(stored: dict[str, Any], directive: "BankTemplateDirective") -> bool:
+    """True when re-applying ``directive`` would leave the stored one as it is."""
+    return (
+        stored["content"] == directive.content
+        and stored["priority"] == directive.priority
+        and stored["is_active"] == directive.is_active
+        and (not directive.tags or set(stored["tags"]) == set(directive.tags))
+    )
+
+
 async def _apply_bank_template_resources(
     memory: MemoryEngine,
     bank_id: str,
@@ -4375,6 +4405,10 @@ async def _apply_bank_template_resources(
     if manifest.mental_models:
         for mm in manifest.mental_models:
             if mm.id in existing_mental_models:
+                # Unchanged: skip it, or every re-apply of the same manifest would
+                # regenerate the model with an LLM call for nothing (#5271).
+                if _mental_model_matches_template(existing_mental_models[mm.id], mm):
+                    continue
                 await memory.update_mental_model(
                     bank_id=bank_id,
                     mental_model_id=mm.id,
@@ -4418,6 +4452,8 @@ async def _apply_bank_template_resources(
     if manifest.directives:
         for directive in manifest.directives:
             if directive.name in existing_directives:
+                if _directive_matches_template(existing_directives[directive.name], directive):
+                    continue
                 await memory.update_directive(
                     bank_id=bank_id,
                     directive_id=existing_directives[directive.name]["id"],
@@ -6137,16 +6173,6 @@ def _register_routes(app: FastAPI):
                 metrics.record_recall_phase("deps_total", max(0.0, _deps_done - _deps_t0))
             if _deps_done:
                 metrics.record_recall_phase("body_parse", max(0.0, handler_start - _deps_done))
-
-        # Validate query length to prevent expensive operations on oversized queries
-        max_query_tokens = get_config().recall_max_query_tokens
-        if max_query_tokens > 0:  # 0 (or negative) disables the cap
-            query_tokens = count_tokens(request.query)
-            if query_tokens > max_query_tokens:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Query too long: {query_tokens} tokens exceeds maximum of {max_query_tokens}. Please shorten your query.",
-                )
 
         try:
             # Default to all fact types if not specified

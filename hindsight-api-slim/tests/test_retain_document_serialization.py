@@ -790,7 +790,6 @@ async def _append(memory, request_context, bank_id: str, document_id: str, body:
 
 
 @pytest.mark.asyncio
-@pytest.mark.memory_backend_incompatible
 async def test_concurrent_appends_keep_every_turn(memory_stub_emb, request_context):
     """Regression: parallel appends used to drop all but one turn.
 
@@ -798,13 +797,29 @@ async def test_concurrent_appends_keep_every_turn(memory_stub_emb, request_conte
     Before the compare-and-swap, three appends that all read the same base each
     replaced the document with their own version — the last writer won, the
     other two turns were deleted, and all three calls returned success.
+
+    The bank takes retains of OTHER documents while the appends race. Those must
+    not cost an append anything: a precondition that any write to the bank could
+    fail (rather than only a write to this document) made every retry lose again
+    on a busy bank, until the append gave up and its turn was dropped.
+
+    Asserts only on public reads, so it runs against every memories store.
     """
     bank_id = f"test_append_race_{_ts()}"
     document_id = "conversation"
 
     await _append(memory_stub_emb, request_context, bank_id, document_id, "TURN_ONE Alice works at Google.")
 
+    async def other_documents() -> None:
+        for i in range(6):
+            await memory_stub_emb.retain_batch_async(
+                bank_id=bank_id,
+                contents=[{"content": f"Unrelated note {i} about Erin.", "document_id": f"other-{i}"}],
+                request_context=request_context,
+            )
+
     await asyncio.gather(
+        other_documents(),
         _append(memory_stub_emb, request_context, bank_id, document_id, "TURN_TWO Bob works at Microsoft."),
         _append(memory_stub_emb, request_context, bank_id, document_id, "TURN_THREE Carol works at Amazon."),
         _append(memory_stub_emb, request_context, bank_id, document_id, "TURN_FOUR Dave works at Meta."),
@@ -822,6 +837,52 @@ async def test_concurrent_appends_keep_every_turn(memory_stub_emb, request_conte
     )
     stored = " ".join(item["text"] for item in listing["items"])
     assert "TURN_ONE" in stored and "TURN_FOUR" in stored
+
+
+@pytest.mark.asyncio
+async def test_an_append_whose_session_commit_loses_its_race_is_redone(memory_stub_emb, request_context):
+    """A store that owns its documents writes an append through a retain session, and the
+    session's commit is a compare-and-set on the content hash the append read. When another
+    append lands between the read and that commit, the commit loses — after the pipeline's own
+    retry has returned. The append must be redone on the newer document, in a fresh session,
+    keeping both turns; failing it would drop the turn."""
+    from hindsight_api.engine.memories import get_memories, set_memories
+    from tests.test_memories_extension import InMemoryMemories
+
+    bank_id = f"test_append_session_race_{_ts()}"
+    document_id = "conversation"
+
+    class RacedOnce(InMemoryMemories):
+        sessions = 0
+
+        async def begin_retain(self, *, bank_id, config):
+            session = await super().begin_retain(bank_id=bank_id, config=config)
+            self.sessions += 1
+            if self.sessions == 2:  # the second append's first attempt
+                commit = session.commit
+
+                async def raced_commit():
+                    doc = self.documents[document_id]
+                    doc["original_text"] += "\nTURN_RACER Erin joined the team."
+                    doc["content_hash"] = "moved-by-a-concurrent-append"
+                    return await commit()
+
+                session.commit = raced_commit
+            return session
+
+    store = RacedOnce({})
+    previous = get_memories()
+    set_memories(store)
+    try:
+        await _append(memory_stub_emb, request_context, bank_id, document_id, "TURN_ONE Alice works at Google.")
+        await _append(memory_stub_emb, request_context, bank_id, document_id, "TURN_TWO Bob works at Microsoft.")
+    finally:
+        set_memories(previous)
+
+    text = store.documents[document_id]["original_text"]
+    missing = [marker for marker in ("TURN_ONE", "TURN_RACER", "TURN_TWO") if marker not in text]
+    assert not missing, f"turns lost: {missing}; document is {text!r}"
+    assert store.sessions == 3, "the lost attempt is redone in a fresh session"
 
 
 @pytest.mark.asyncio

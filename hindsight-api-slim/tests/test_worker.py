@@ -1394,6 +1394,91 @@ class TestWorkerRecovery:
             assert row["status"] == "processing"
 
     @pytest.mark.asyncio
+    async def test_recover_own_tasks_spares_rows_claimed_after_cutoff(self, pool, backend, clean_operations):
+        """Recovery runs while the restarted worker is already claiming under the
+        same id (#5407): rows claimed after startup must stay 'processing', or they
+        would be handed back and run twice. Covers the batch-API path too."""
+        from hindsight_api.worker import WorkerPoller
+
+        bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(pool, bank_id)
+        worker_id = "restarted-worker"
+        cutoff = await pool.fetchval("SELECT now()")
+
+        async def insert(claimed_at_sql: str, metadata: dict) -> uuid.UUID:
+            op_id = uuid.uuid4()
+            await pool.execute(
+                f"""
+                INSERT INTO async_operations
+                    (operation_id, bank_id, operation_type, status, task_payload, worker_id, claimed_at, result_metadata)
+                VALUES ($1, $2, 'test', 'processing', $3::jsonb, $4, {claimed_at_sql}, $5::jsonb)
+                """,
+                op_id,
+                bank_id,
+                json.dumps({"type": "test_task", "bank_id": bank_id}),
+                worker_id,
+                json.dumps(metadata),
+            )
+            return op_id
+
+        stale = await insert(f"'{cutoff.isoformat()}'::timestamptz - interval '1 minute'", {})
+        fresh = await insert(f"'{cutoff.isoformat()}'::timestamptz + interval '1 second'", {})
+        never_stamped = await insert("NULL", {})
+        stale_batch = await insert(f"'{cutoff.isoformat()}'::timestamptz - interval '1 minute'", {"batch_id": "b-old"})
+        fresh_batch = await insert(f"'{cutoff.isoformat()}'::timestamptz + interval '1 second'", {"batch_id": "b-new"})
+
+        poller = WorkerPoller(backend=backend, worker_id=worker_id, executor=lambda x: None)
+        assert await poller.recover_own_tasks(claimed_before=cutoff) == 3
+
+        rows = await pool.fetch("SELECT operation_id, status FROM async_operations WHERE bank_id = $1", bank_id)
+        status = {r["operation_id"]: r["status"] for r in rows}
+        assert status[stale] == "pending"
+        assert status[stale_batch] == "pending"
+        assert status[never_stamped] == "pending"
+        assert status[fresh] == "processing"
+        assert status[fresh_batch] == "processing"
+
+    @pytest.mark.asyncio
+    async def test_run_claims_before_recovery_finishes(self, pool, backend):
+        """A restarting worker must start claiming at once, not after walking every
+        tenant schema (#5407). Recovery runs in the background with the DB start time."""
+        from hindsight_api.worker import WorkerPoller
+
+        poller = WorkerPoller(backend=backend, worker_id="w-bg", executor=lambda x: None, poll_interval_ms=10)
+        recovery_started = asyncio.Event()
+        release_recovery = asyncio.Event()
+        seen_cutoff = []
+
+        async def slow_recovery(claimed_before=None):
+            seen_cutoff.append(claimed_before)
+            recovery_started.set()
+            await release_recovery.wait()
+            return 0
+
+        claimed = asyncio.Event()
+
+        async def claim_batch():
+            claimed.set()
+            return []
+
+        poller.recover_own_tasks = slow_recovery
+        poller.claim_batch = claim_batch
+        run = asyncio.create_task(poller.run())
+        try:
+            await asyncio.wait_for(claimed.wait(), timeout=5)
+            await asyncio.wait_for(recovery_started.wait(), timeout=5)
+            assert not release_recovery.is_set()
+            # A UTC-tagged DB time, comparable with timestamptz columns.
+            db_now = await pool.fetchval("SELECT now()")
+            assert seen_cutoff[0].tzinfo is not None
+            assert abs((db_now - seen_cutoff[0]).total_seconds()) < 60
+        finally:
+            poller._shutdown.set()
+            await asyncio.wait_for(run, timeout=5)
+        # Leaving run() cancels a recovery that is still going.
+        assert poller._recovery_task is not None and poller._recovery_task.cancelled()
+
+    @pytest.mark.asyncio
     async def test_recover_own_tasks_returns_zero_when_no_stale_tasks(self, pool, backend, clean_operations):
         """Test that recover_own_tasks returns 0 when there are no stale tasks."""
         from hindsight_api.worker import WorkerPoller
@@ -2087,9 +2172,9 @@ class TestBatchParentRecoveryCandidates:
 class TestTaskReleaseOnStop:
     """A task that stops running must not leave its operation 'processing'.
 
-    Both paths strand the row under a worker id that is never coming back:
-    shutdown cancelling in-flight work past the drain timeout, and _mark_failed
-    (itself a DB write) failing. See issue #3228.
+    Both paths strand the row: shutdown cancelling in-flight work past the
+    drain timeout, and a final status write (itself a DB write) failing.
+    See issues #3228 and #5377.
     """
 
     async def _insert_pending(self, pool, bank_id: str) -> uuid.UUID:
@@ -2249,8 +2334,8 @@ class TestTaskReleaseOnStop:
         assert row["worker_id"] == "other-worker"
 
     @pytest.mark.asyncio
-    async def test_failed_terminal_write_releases_operation(self, pool, backend, clean_operations):
-        """If _mark_failed itself raises, the row is reconciled, not stranded."""
+    async def test_failed_terminal_write_is_retried_until_it_lands(self, pool, backend, clean_operations):
+        """A 'failed' write that hits a dropped connection is retried, not abandoned (#3228, #5377)."""
         from hindsight_api.worker import WorkerPoller
 
         bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
@@ -2261,20 +2346,91 @@ class TestTaskReleaseOnStop:
             raise RuntimeError("executor blew up")
 
         poller = WorkerPoller(backend=backend, worker_id="release-worker", executor=failing_executor)
+        real_mark_failed = poller._mark_failed
+        calls = 0
 
-        async def broken_mark_failed(operation_id, error_message, schema):
-            raise RuntimeError("pool exhausted")
+        async def flaky_mark_failed(operation_id, error_message, schema):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise ConnectionResetError("connection lost")
+            await real_mark_failed(operation_id, error_message, schema)
 
-        poller._mark_failed = broken_mark_failed
+        poller._mark_failed = flaky_mark_failed
 
         task = await self._claim_ours(poller, op_id)
         await poller.execute_task(task)
 
-        row = await self._wait_for_status(pool, op_id, "pending")
-        assert row["status"] == "pending", "a failed terminal write must not strand the row"
-        assert row["worker_id"] is None
-        assert row["claimed_at"] is None
-        assert row["retry_count"] == 1
+        row = await self._wait_for_status(pool, op_id, "failed")
+        assert row["status"] == "failed"
+        assert calls == 2
+
+    @pytest.mark.asyncio
+    async def test_lost_completed_write_does_not_mark_finished_work_failed(self, pool, backend, clean_operations):
+        """Work that ran must end 'completed' even if the first 'completed' write fails (#5377).
+
+        Before, the failing write fell into the failure path and a retain whose
+        facts were already stored could be recorded as 'failed'.
+        """
+        from hindsight_api.worker import WorkerPoller
+
+        bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(pool, bank_id)
+        op_id = await self._insert_pending(pool, bank_id)
+
+        async def ok_executor(task_dict):
+            return None
+
+        poller = WorkerPoller(backend=backend, worker_id="release-worker", executor=ok_executor)
+        real_mark_completed = poller._mark_completed
+        calls = 0
+
+        async def flaky_mark_completed(operation_id, schema):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise ConnectionResetError("connection lost")
+            await real_mark_completed(operation_id, schema)
+
+        poller._mark_completed = flaky_mark_completed
+
+        task = await self._claim_ours(poller, op_id)
+        await poller.execute_task(task)
+
+        row = await self._wait_for_status(pool, op_id, "completed")
+        assert row["status"] == "completed"
+        assert calls == 2
+
+    @pytest.mark.asyncio
+    async def test_terminal_write_past_deadline_shuts_worker_down(self, pool, backend, clean_operations, monkeypatch):
+        """If the status can never be written, the worker exits so restart recovery hands the row back."""
+        from hindsight_api.worker import WorkerPoller
+        from hindsight_api.worker import poller as poller_module
+
+        monkeypatch.setattr(poller_module, "TERMINAL_WRITE_DEADLINE_S", 0.0)
+        bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(pool, bank_id)
+        op_id = await self._insert_pending(pool, bank_id)
+
+        async def ok_executor(task_dict):
+            return None
+
+        poller = WorkerPoller(backend=backend, worker_id="release-worker", executor=ok_executor)
+
+        async def broken_mark_completed(operation_id, schema):
+            raise ConnectionResetError("connection lost")
+
+        poller._mark_completed = broken_mark_completed
+        exited = asyncio.Event()
+        poller._exit_process = exited.set
+
+        task = await self._claim_ours(poller, op_id)
+        await poller.execute_task(task)
+        await asyncio.wait_for(exited.wait(), timeout=5.0)
+
+        row = await pool.fetchrow("SELECT status FROM async_operations WHERE operation_id = $1", op_id)
+        assert row["status"] == "processing", "finished work must not be marked failed or requeued here"
+        assert await poller.recover_own_tasks() == 1
 
 
 class TestConcurrentWorkers:

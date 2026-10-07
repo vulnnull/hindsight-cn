@@ -238,7 +238,7 @@ async def test_entity_resolution_case(case: Case, strategy: str, pg0_db_url):
             # fewer candidates than production does.
             await conn.execute(
                 "SELECT set_config('pg_trgm.similarity_threshold', $1, false)",
-                str(config.entity_trgm_similarity_threshold),
+                str(config.entity_trgm_probe_threshold),
             )
             await _seed(conn, bank_id, case.existing)
             await _seed(conn, other_bank_id, case.other_bank)

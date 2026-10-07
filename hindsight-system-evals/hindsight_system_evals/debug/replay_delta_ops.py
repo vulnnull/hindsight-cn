@@ -180,7 +180,7 @@ def main() -> None:
     parser.add_argument("--must-keep", required=True, help="pipe-separated tokens that must survive in the document")
     parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument("--variants", type=Path, help="JSON file of {name: system_prompt} to try")
-    parser.add_argument("--model", default=os.getenv("HINDSIGHT_EVAL_LLM_MODEL", "gemini-3.7-flash"))
+    parser.add_argument("--model", default=os.getenv("HINDSIGHT_EVAL_LLM_MODEL", "gemini-3.8-flash"))
     parser.add_argument("--interrogate", action="store_true", help="continue the chat: why, then how to fix")
     parser.add_argument("--expected", default="", help="the correct result, for --interrogate")
     args = parser.parse_args()

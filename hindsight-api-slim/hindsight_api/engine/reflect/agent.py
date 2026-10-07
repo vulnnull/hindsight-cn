@@ -143,7 +143,7 @@ def _build_directives_applied(directives: list[dict[str, Any]] | None) -> list[D
 
 if TYPE_CHECKING:
     from ..llm_wrapper import AnyLLMProvider
-    from ..response_models import LLMToolCall, TokenUsage
+    from ..response_models import LLMToolCall, LLMToolCallResult, TokenUsage
 
 logger = logging.getLogger(__name__)
 
@@ -460,6 +460,12 @@ def _is_context_overflow_error(exc: Exception) -> bool:
             "too many tokens",
         )
     )
+
+
+_FRESH_PAGES_GUIDANCE = (
+    "These pages are fresh. If they answer the question, call done now and answer from them alone; "
+    "search further only for a specific detail they lack."
+)
 
 
 def _all_mental_models_are_usable_and_fresh(tool_output: dict[str, Any]) -> bool:
@@ -922,7 +928,7 @@ async def _run_reflect_agent_inner(
             },
         ]
 
-    async def _ask_for_done(feedback: "Sequence[dict[str, Any]]" = ()) -> "LLMToolCall | None":
+    async def _ask_for_done(feedback: "Sequence[dict[str, Any]]" = ()) -> "LLMToolCallResult | None":
         """Ask for the answer as a ``done`` call, in the conversation it was gathered in.
 
         The model stopping with prose is the common case (measured: only ~29% of
@@ -938,8 +944,10 @@ async def _run_reflect_agent_inner(
         after the request prompt, so a document the schema refused is fixed on
         the same prefix instead of being read back some looser way.
 
-        Returns None when the provider will not produce the call, and the caller
-        falls back to the standalone prompt.
+        Returns the whole reply (the caller needs its ``finish_reason`` to decide
+        whether a malformed document may be repaired), or None when the provider
+        will not produce the call, and the caller falls back to the standalone
+        prompt.
         """
         nonlocal total_input_tokens, total_output_tokens, total_cached_tokens, total_thoughts_tokens
         if not messages or messages[-1].get("role") != "tool":
@@ -979,7 +987,7 @@ async def _run_reflect_agent_inner(
                 "output_tokens": result.output_tokens,
             }
         )
-        return next((tc for tc in result.tool_calls if _is_done_tool(tc.name)), None)
+        return result
 
     async def _finish(iterations_completed: int) -> ReflectAgentResult:
         """Produce the answer for a loop that has stopped retrieving.
@@ -991,8 +999,9 @@ async def _run_reflect_agent_inner(
         feedback: Sequence[dict[str, Any]] = ()
         rejections = 0
         while True:
-            closing = await _ask_for_done(feedback)
-            if closing is None:
+            reply = await _ask_for_done(feedback)
+            closing = next((tc for tc in reply.tool_calls if _is_done_tool(tc.name)), None) if reply else None
+            if reply is None or closing is None:
                 if feedback:
                     # A document was already refused on this path. Dropping to
                     # the standalone prose prompt would answer the question by
@@ -1002,7 +1011,9 @@ async def _run_reflect_agent_inner(
                 return await _forced_final_synthesis(iterations_completed)
             try:
                 return await _process_done_tool(
-                    closing.model_copy(update={"arguments": presenter.resolve(closing.arguments)}),
+                    closing.model_copy(
+                        update={"arguments": presenter.resolve(_done_arguments(closing, reply.finish_reason))}
+                    ),
                     available_memory_ids,
                     available_mental_model_ids,
                     available_observation_ids,
@@ -1018,6 +1029,7 @@ async def _run_reflect_agent_inner(
                     response_schema=response_schema,
                     max_tokens=max_tokens,
                     presenter=presenter,
+                    finish_reason=reply.finish_reason,
                 )
             except DocumentSectionsInvalidError as exc:
                 # Re-ask on the same prefix with the field errors attached, the
@@ -1438,7 +1450,9 @@ async def _run_reflect_agent_inner(
                 span.set_attribute("hindsight.operation", "reflect_tool_call")
                 try:
                     return await _process_done_tool(
-                        done_call.model_copy(update={"arguments": presenter.resolve(done_call.arguments)}),
+                        done_call.model_copy(
+                            update={"arguments": presenter.resolve(_done_arguments(done_call, result.finish_reason))}
+                        ),
                         available_memory_ids,
                         available_mental_model_ids,
                         available_observation_ids,
@@ -1454,6 +1468,7 @@ async def _run_reflect_agent_inner(
                         response_schema=response_schema,
                         max_tokens=max_tokens,
                         presenter=presenter,
+                        finish_reason=result.finish_reason,
                     )
                 except DocumentSectionsInvalidError as exc:
                     # The document did not match the declared shape. Hand the
@@ -1585,6 +1600,7 @@ async def _run_reflect_agent_inner(
                         f"{result_data}"
                     ) from result_data
                 output, duration_ms = result_data
+                releases_forcing = False
 
                 # Normalize tool name for consistent tracking
                 normalized_tool_name = _normalize_tool_name(tc.name)
@@ -1619,6 +1635,7 @@ async def _run_reflect_agent_inner(
                         and _all_mental_models_are_usable_and_fresh(output)
                     ):
                         forcing_released = True
+                        releases_forcing = True
                         logger.info(
                             f"[REFLECT {reflect_id}] Fresh mental models sufficient on iteration {iteration + 1}; "
                             "releasing forced lower-level retrieval to auto."
@@ -1646,6 +1663,13 @@ async def _run_reflect_agent_inner(
                 # model reads the presented form (see presentation.py); the trace
                 # below keeps the raw output.
                 presented = presenter.present(output)
+                if releases_forcing and isinstance(presented, dict):
+                    # Releasing the forcing only changes tool_choice; the model was
+                    # never told why. qwen3.8-flash kept descending to recall after a
+                    # fresh page had answered, and padded the answer with whatever the
+                    # raw facts added — details the page never stated (#5272). Saying
+                    # it here, on the result it is about, costs one line.
+                    presented = {**presented, "guidance": _FRESH_PAGES_GUIDANCE}
                 tool_outputs[position] = json.dumps(presented, default=str, ensure_ascii=False)
 
                 # Track for logging and context history
@@ -1942,6 +1966,51 @@ async def _rewrite_to_length_budget(
     return _rewrite(rewritten.strip() or answer, None)
 
 
+def _decode_json_argument(raw: str, finish_reason: str | None, field: str) -> Any:
+    """Decode a JSON-encoded tool argument: ``done``'s ``document``, or its whole payload.
+
+    A completed generation that is merely malformed (Qwen swapping or dropping a
+    closing ``]``/``}``, #5272) is repaired with ``json_repair``. Repair is gated on
+    the same completed ``finish_reason`` as structured output: json_repair closes
+    an unterminated body by inventing the terminator, so a cut-off document would
+    come back short and look complete. Anything still unparseable raises
+    :class:`DocumentSectionsInvalidError`, so the caller re-asks with the parse
+    error instead of failing the run on the first bad emission.
+    """
+    from json_repair import repair_json
+
+    from ..providers.openai_compatible_llm import COMPLETED_FINISH_REASONS
+
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        if finish_reason in COMPLETED_FINISH_REASONS:
+            repaired = repair_json(raw, return_objects=True)
+            if isinstance(repaired, dict) and repaired:
+                logger.warning(f"[REFLECT] repaired malformed done {field} ({exc.msg} at char {exc.pos})")
+                return repaired
+        raise DocumentSectionsInvalidError(
+            [f"{field}: not valid JSON ({exc.msg} at char {exc.pos} of {len(raw)}); check the closing brackets"]
+        ) from exc
+
+
+def _done_arguments(done_call: "LLMToolCall", finish_reason: str | None) -> dict[str, Any]:
+    """``done``'s arguments, decoding a payload the provider could not parse.
+
+    Providers keep an unparseable arguments string as ``{"_raw": ...}``. When the
+    error is in the outer payload rather than inside ``document`` (#5272: a block
+    list closed with ``"}`` instead of ``"]}``), nothing else would ever look at it
+    and the run failed as "no answer". Decoded before the presenter resolves the
+    short ids, which live in that same payload.
+    """
+    args = done_call.arguments
+    if set(args) != {"_raw"} or not isinstance(args["_raw"], str):
+        return args
+    # Repair only ever returns a dict, and a plain parse of what the provider
+    # already failed to parse fails again — so this is a dict or it raised.
+    return _decode_json_argument(args["_raw"], finish_reason, "arguments")
+
+
 async def _process_done_tool(
     done_call: "LLMToolCall",
     available_memory_ids: set[str],
@@ -1959,6 +2028,7 @@ async def _process_done_tool(
     llm_config: "AnyLLMProvider | None" = None,
     response_schema: dict | None = None,
     max_tokens: int | None = None,
+    finish_reason: str | None = None,
 ) -> ReflectAgentResult:
     """Process the done tool call and return the result."""
     args = done_call.arguments
@@ -1978,10 +2048,7 @@ async def _process_done_tool(
     document: StructuredDocument | None = None
     raw_document = args.get("document")
     if isinstance(raw_document, str):
-        try:
-            raw_document = json.loads(raw_document)
-        except json.JSONDecodeError:
-            raw_document = None
+        raw_document = _decode_json_argument(raw_document, finish_reason, "document")
     if isinstance(raw_document, dict):
         document = document_from_sections(raw_document)
         answer = render_document(document).strip()
@@ -1992,7 +2059,8 @@ async def _process_done_tool(
         # field and no decodable ``document`` object. Typically its output was
         # cut off mid-tool-call by the completion cap (finish_reason "length"),
         # but the same signature also comes from a well-formed completion whose
-        # ``document`` argument never parsed to an object, so truncation is one
+        # ``document`` argument decoded to something other than an object (an
+        # undecodable string is re-asked before reaching here), so truncation is one
         # possible cause, not the only one. Fail instead of standing in
         # a placeholder: it is non-empty, so every downstream emptiness guard reads
         # it as a real answer and stores it over working content (#2959).
@@ -2001,8 +2069,7 @@ async def _process_done_tool(
             f"{total_tools_called} tool call(s) made): the done call carried no usable "
             "answer and no decodable document object. If the model's output was cut off "
             "mid-tool-call, the answer field may have arrived empty; a document argument "
-            "that is not a JSON object (e.g. a string-encoded document) produces the "
-            "same signature."
+            "that is not a JSON object produces the same signature."
         )
 
     final_usage = usage

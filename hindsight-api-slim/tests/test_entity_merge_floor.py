@@ -1,6 +1,6 @@
 """Existing entities must not be merged onto by history alone (#3751).
 
-The trigram probe admits candidates at a deliberately loose recall threshold (0.15) and the
+The candidate probes (Oracle, the "full" fallback, a low trigram threshold) can admit loose names and the
 composite score's non-name signals total 0.5 of the 0.6 needed, so before the floor a name
 the probe merely *considered* similar could be reused purely because the bank had seen it
 recently alongside the same entities — putting a new person's facts on an unrelated entity.
@@ -62,7 +62,7 @@ async def _resolve_one(
 async def test_coincidental_short_name_is_not_absorbed_by_a_recent_well_connected_entity():
     """The reported shape: a new person named Tigran, a country named Iran already in the bank.
 
-    similarity('tigran','iran') is 0.20 — above the 0.15 that admits it as a candidate, below
+    similarity('tigran','iran') is 0.20 — loose enough for a candidate probe to admit it, below
     anything that should merge it. Every other signal is maxed out: Iran co-occurs with both
     of the other entities in the fact and was mentioned today. It must still not win.
     """

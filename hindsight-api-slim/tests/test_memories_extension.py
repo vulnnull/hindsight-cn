@@ -40,6 +40,7 @@ from hindsight_api.engine.memories.base import (
     RetainSession,
     ScanPage,
     StoredMemory,
+    StoreWriteConflict,
 )
 from hindsight_api.engine.memories.postgres import PostgresMemories
 from hindsight_api.engine.schema import fq_store_table
@@ -671,9 +672,13 @@ class InMemoryMemories(MemoriesExtension):
         file_bytes=None,
         file_content_type="",
         file_original_name="",
-        expect_watermark=None,
+        expect_content_hash=None,
     ):
         self.calls.append("put_document")
+        if expect_content_hash is not None:
+            stored = self.documents.get(str(document_id), {}).get("content_hash", "")
+            if stored != expect_content_hash:
+                raise StoreWriteConflict(f"document {document_id} holds {stored!r}, not {expect_content_hash!r}")
         self.documents[str(document_id)] = {
             "id": str(document_id),
             "content_hash": content_hash,
@@ -889,6 +894,13 @@ class _InMemoryRetainSession(RetainSession):
 
     async def commit(self) -> RetainResult:
         self._store.calls.append("session.commit")
+        # The append precondition, checked for every part BEFORE anything is written: a store's
+        # commit is one atomic entry, so a lost race writes nothing at all.
+        for part in self._parts:
+            if part.expect_content_hash is not None:
+                stored = self._store.documents.get(part.document_id, {}).get("content_hash", "")
+                if stored != part.expect_content_hash:
+                    raise StoreWriteConflict(f"document {part.document_id} moved under this retain")
         unit_ids: dict[str, list[str]] = {}
         for part in self._parts:
             # Session parts carry FactRecord objects and the store's document schema,

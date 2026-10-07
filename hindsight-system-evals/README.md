@@ -392,7 +392,7 @@ stay where they are.
 ```bash
 # the model under test (api key, or vertexai with a service account)
 export HINDSIGHT_EVAL_LLM_PROVIDER=gemini
-export HINDSIGHT_EVAL_LLM_MODEL=gemini-3.7-flash
+export HINDSIGHT_EVAL_LLM_MODEL=gemini-3.8-flash
 export HINDSIGHT_EVAL_LLM_API_KEY=...
 
 # The judge is configured separately ON PURPOSE — a model grading its own output

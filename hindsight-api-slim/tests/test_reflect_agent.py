@@ -405,6 +405,38 @@ class TestReflectAgentMocked:
         assert tool_result["role"] == "tool"
         assert tool_result["tool_call_id"] == "1"
         assert "name" not in tool_result
+        # And the model is told why (#5272): releasing tool_choice alone left a
+        # model that kept descending and padded the answer with raw facts.
+        assert "call done now" in json.loads(tool_result["content"])["guidance"]
+
+    @pytest.mark.asyncio
+    async def test_stale_mental_model_gets_no_answer_now_guidance(self, mock_llm, mock_functions):
+        mock_functions["search_mental_models_fn"].return_value = {
+            "mental_models": [{"id": "mm-1", "name": "P", "content": "Old.", "is_stale": True}]
+        }
+        mock_llm.call_with_tools.side_effect = [
+            self._mm_call(),
+            LLMToolCallResult(
+                tool_calls=[
+                    LLMToolCall(id="2", name="done", arguments={"answer": "Old.", "mental_model_ids": ["mm-1"]})
+                ],
+                finish_reason="tool_calls",
+            ),
+        ]
+
+        await run_reflect_agent(
+            llm_config=mock_llm,
+            bank_id="test-bank",
+            query="test query",
+            bank_profile={"name": "Test", "mission": "Testing"},
+            has_mental_models=True,
+            budget="low",
+            max_iterations=5,
+            **mock_functions,
+        )
+
+        tool_result = mock_llm.call_with_tools.await_args_list[1].kwargs["messages"][-1]
+        assert "guidance" not in json.loads(tool_result["content"])
 
     @pytest.mark.asyncio
     async def test_output_language_reaches_the_done_path(self, mock_llm, mock_functions):
@@ -2289,15 +2321,102 @@ class TestDoneToolStringDocument:
         with pytest.raises(ReflectNoAnswerError):
             await self._run(mock_llm, mock_functions)
 
+    @staticmethod
+    def _swapped_closers() -> str:
+        """The #5272 Qwen emission: complete, but the final ``"]}]}`` written as ``"}]}]``."""
+        good = json.dumps(_DOCUMENT)
+        assert good.endswith('"]}]}')
+        return good[:-5] + '"}]}]'
+
+    def _done(self, call_id: str, document: str, finish_reason: str | None) -> LLMToolCallResult:
+        return LLMToolCallResult(
+            tool_calls=[
+                LLMToolCall(id=call_id, name="done", arguments={"document": document, "memory_ids": ["mem-1"]})
+            ],
+            finish_reason=finish_reason,
+        )
+
     @pytest.mark.asyncio
-    async def test_unparseable_string_document_without_answer_raises(self, mock_llm, mock_functions):
-        """An unparseable ``document`` string with no ``answer`` must raise, not slip through."""
-        mock_llm.call_with_tools.side_effect = self._recall_then({"document": "not json", "memory_ids": ["mem-1"]})
+    async def test_swapped_closers_from_a_completed_call_are_repaired(self, mock_llm, mock_functions):
+        """#5272: a finished generation with mis-ordered closing brackets renders, no re-ask."""
+        mock_llm.call_with_tools.side_effect = [
+            self._recall_then({})[0],
+            self._done("2", self._swapped_closers(), "tool_calls"),
+        ]
 
-        with pytest.raises(ReflectNoAnswerError) as exc_info:
+        result = await self._run(mock_llm, mock_functions)
+
+        mock_llm.call_with_tools.side_effect = self._recall_then({"document": _DOCUMENT, "memory_ids": ["mem-1"]})
+        expected = await self._run(mock_llm, mock_functions)
+        assert result.text == expected.text
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("finish_reason", [None, "length"])
+    async def test_swapped_closers_without_a_completion_signal_are_re_asked(
+        self, mock_llm, mock_functions, finish_reason
+    ):
+        """No completed finish_reason, no repair (it could be a cut-off body): re-ask with the parse error."""
+        mock_llm.call_with_tools.side_effect = [
+            self._recall_then({})[0],
+            self._done("2", self._swapped_closers(), finish_reason),
+            self._done("3", json.dumps(_DOCUMENT), "tool_calls"),
+        ]
+
+        result = await self._run(mock_llm, mock_functions)
+
+        assert "Quarterly planning is owned by the platform team." in result.text
+        rejection = mock_llm.call_with_tools.await_args_list[2].kwargs["messages"][-1]
+        assert rejection["role"] == "tool"
+        assert "not valid JSON" in rejection["content"]
+
+    @staticmethod
+    def _raw_with_dropped_bracket() -> str:
+        """The #5272 qwen3.8-flash emission: the whole payload unparseable, a block list closed ``"}``."""
+        good = json.dumps({"document": _DOCUMENT, "memory_ids": ["mem-1"]})
+        assert '"]}' in good
+        return good.replace('"]}', '"}', 1)
+
+    def _raw_done(self, call_id: str, finish_reason: str | None) -> LLMToolCallResult:
+        return LLMToolCallResult(
+            tool_calls=[LLMToolCall(id=call_id, name="done", arguments={"_raw": self._raw_with_dropped_bracket()})],
+            finish_reason=finish_reason,
+        )
+
+    @pytest.mark.asyncio
+    async def test_unparseable_payload_from_a_completed_call_is_repaired(self, mock_llm, mock_functions):
+        """#5272: the provider could not parse done's arguments at all; repair them, no re-ask."""
+        mock_llm.call_with_tools.side_effect = [self._recall_then({})[0], self._raw_done("2", "tool_calls")]
+
+        result = await self._run(mock_llm, mock_functions)
+
+        assert "Quarterly planning is owned by the platform team." in result.text
+        assert mock_llm.call_with_tools.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_unparseable_payload_without_a_completion_signal_is_re_asked(self, mock_llm, mock_functions):
+        mock_llm.call_with_tools.side_effect = [
+            self._recall_then({})[0],
+            self._raw_done("2", None),
+            self._done("3", json.dumps(_DOCUMENT), "tool_calls"),
+        ]
+
+        result = await self._run(mock_llm, mock_functions)
+
+        assert "Quarterly planning is owned by the platform team." in result.text
+        rejection = mock_llm.call_with_tools.await_args_list[2].kwargs["messages"][-1]
+        assert "arguments: not valid JSON" in rejection["content"]
+
+    @pytest.mark.asyncio
+    async def test_unparseable_string_document_that_is_never_fixed_raises(self, mock_llm, mock_functions):
+        """A model that keeps sending garbage still fails the run loudly."""
+        mock_llm.call_with_tools.side_effect = [
+            self._recall_then({})[0],
+            self._done("2", "not json", "tool_calls"),
+            self._done("3", "not json", "tool_calls"),
+        ]
+
+        with pytest.raises(DocumentSectionsInvalidError, match="not valid JSON"):
             await self._run(mock_llm, mock_functions)
-
-        assert "no answer" in str(exc_info.value)
 
 
 class TestDirectiveLeakageOnEmptyBank:

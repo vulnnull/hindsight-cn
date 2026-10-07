@@ -318,7 +318,7 @@ def _summarize_provider_error_payload(error: Any, max_len: int = 400) -> str:
 # and gateways this provider fronts. Losing the repair there is the cheaper mistake:
 # a JSONDecodeError is loud and the caller can split, while a silently short answer
 # is indistinguishable from a complete one. Same reasoning as #3827.
-_COMPLETED_FINISH_REASONS = frozenset({"stop", "tool_calls", "function_call", "end_turn"})
+COMPLETED_FINISH_REASONS = frozenset({"stop", "tool_calls", "function_call", "end_turn"})
 
 
 def _finish_reason_for_choice(choice: Any) -> Any:
@@ -591,6 +591,19 @@ def _asks_for_reasoning_effort_none(e: APIStatusError) -> bool:
     # The remedy lives in the response body, not in the exception's own message.
     message = _summarize_status_error(e, body_max=1000)
     return "reasoning_effort" in message and "'none'" in message
+
+
+def _rejects_tool_choice(e: APIStatusError) -> bool:
+    """Whether the endpoint refused the request because of its ``tool_choice``.
+
+    The static lists above cover endpoints that always refuse a forced choice. Some
+    refuse it only in one mode, so no model name can tell: Alibaba's Qwen 3.8 host
+    (direct or through OpenRouter) answers "The tool_choice parameter does not
+    support being set to required or object in thinking mode", while vLLM and Groq
+    serve the same weights and accept it. Reflect forces its first retrieval call,
+    so without this every reflect against that host failed on its first request.
+    """
+    return e.status_code == 400 and "tool_choice" in _summarize_status_error(e, body_max=1000)
 
 
 def _parse_go_duration_seconds(text: str) -> float | None:
@@ -1379,7 +1392,7 @@ class OpenAICompatibleLLM(LLMInterface):
                             # a provider that omits finish_reason would have a
                             # truncated body repaired into schema-valid partial
                             # data.
-                            if _finish_reason_for_choice(first_choice) not in _COMPLETED_FINISH_REASONS:
+                            if _finish_reason_for_choice(first_choice) not in COMPLETED_FINISH_REASONS:
                                 logger.error(
                                     f"JSON parse error after {attempt + 1} attempts and no "
                                     f"completion signal (finish_reason="
@@ -1860,6 +1873,17 @@ class OpenAICompatibleLLM(LLMInterface):
                     call_params["reasoning_effort"] = "none"
                     attempts_allowed += 1
                     continue
+                if "tool_choice" in call_params and _rejects_tool_choice(e):
+                    # Same downgrade as the static Meta/Z.AI branch above: a named
+                    # choice was already narrowed to its one tool, so "auto" keeps
+                    # the call practically forced.
+                    logger.warning(
+                        f"{self.provider}/{self.model} rejected tool_choice={call_params['tool_choice']!r}; "
+                        f"retrying with auto (scope={scope}): {_summarize_status_error(e)}"
+                    )
+                    del call_params["tool_choice"]
+                    attempts_allowed += 1
+                    continue
 
                 if attempt + 1 < attempts_allowed:
                     logger.warning(
@@ -2047,7 +2071,7 @@ class OpenAICompatibleLLM(LLMInterface):
                             # OpenAI-compatible path above, gated the same
                             # way: only a generation that reported reaching
                             # its own end gets structurally repaired.
-                            if result.get("done_reason") not in _COMPLETED_FINISH_REASONS:
+                            if result.get("done_reason") not in COMPLETED_FINISH_REASONS:
                                 logger.error(
                                     f"Ollama JSON parse error after {attempt + 1} attempts and no "
                                     f"completion signal (done_reason={result.get('done_reason')!r}); "

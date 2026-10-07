@@ -10,6 +10,7 @@ import pytest
 
 from hindsight_api.config import (
     DEFAULT_ENTITY_TRGM_SIMILARITY_THRESHOLD,
+    ENV_ENTITY_MERGE_MIN_SIMILARITY,
     ENV_ENTITY_TRGM_SIMILARITY_THRESHOLD,
     HindsightConfig,
 )
@@ -36,3 +37,13 @@ class TestEntityTrgmThresholdConfig:
         monkeypatch.setenv(ENV_ENTITY_TRGM_SIMILARITY_THRESHOLD, value)
         with pytest.raises(ValueError, match="entity_trgm_similarity_threshold"):
             HindsightConfig.from_env()
+
+    @pytest.mark.parametrize(
+        ("probe", "merge_floor", "expected"),
+        [("0.15", "0.3", 0.3), ("0.5", "0.3", 0.5), ("0.2", "0.2", 0.2)],
+    )
+    def test_probe_never_runs_below_merge_floor(self, monkeypatch, probe, merge_floor, expected):
+        # A candidate under the merge floor is always discarded, so probing below it is pure cost (#5367).
+        monkeypatch.setenv(ENV_ENTITY_TRGM_SIMILARITY_THRESHOLD, probe)
+        monkeypatch.setenv(ENV_ENTITY_MERGE_MIN_SIMILARITY, merge_floor)
+        assert HindsightConfig.from_env().entity_trgm_probe_threshold == expected

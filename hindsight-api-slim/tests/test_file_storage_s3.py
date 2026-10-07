@@ -19,6 +19,8 @@ import httpx
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from hindsight_api.engine.storage import key_segment
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -237,6 +239,32 @@ async def test_s3_storage_get_download_url(s3_storage):
     assert isinstance(url, str)
     assert url.startswith("http")
     assert key in url
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bank_id", ["plain-bank", "Express AI — Trial", "team.notes", "100% done"])
+async def test_s3_download_url_fetches_keys_with_encoded_segments(s3_storage, bank_id):
+    """The presigned URL must download the object, not just look like a URL.
+
+    Storage keys percent-encode the bank id (``key_segment``), so a bank named with a
+    space, a dot or non-ASCII is stored under an object name that literally contains
+    ``%``. The URL has to address that literal name: if the ``%`` reaches the store
+    unescaped it is decoded as an escape sequence and the request names a different
+    object, failing with NoSuchKey.
+
+    tests/test_file_storage_signed_urls.py pins the same contract offline for all three
+    obstore backends; this one proves it against a running S3 server.
+    """
+    content = b"PK\x03\x04 export archive bytes"
+    key = f"tenants/tenant_test/banks/{key_segment(bank_id)}/exports/{uuid.uuid4()}/transfer.zip"
+    await s3_storage.store(file_data=content, key=key)
+
+    url = await s3_storage.get_download_url(key, expires_in=300)
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(url)
+
+    assert resp.status_code == 200, f"{bank_id!r}: {resp.status_code} {resp.text[:200]}"
+    assert resp.content == content
 
 
 @pytest.mark.asyncio

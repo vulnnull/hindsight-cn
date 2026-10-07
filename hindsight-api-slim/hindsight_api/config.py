@@ -916,6 +916,7 @@ ENV_DB_POOL_MIN_SIZE = "HINDSIGHT_API_DB_POOL_MIN_SIZE"
 ENV_DB_POOL_MAX_SIZE = "HINDSIGHT_API_DB_POOL_MAX_SIZE"
 ENV_DB_COMMAND_TIMEOUT = "HINDSIGHT_API_DB_COMMAND_TIMEOUT"
 ENV_DB_ACQUIRE_TIMEOUT = "HINDSIGHT_API_DB_ACQUIRE_TIMEOUT"
+ENV_DB_POOL_SLOW_ACQUIRE_THRESHOLD_SECONDS = "HINDSIGHT_API_DB_POOL_SLOW_ACQUIRE_THRESHOLD_SECONDS"
 ENV_DB_STATEMENT_TIMEOUT = "HINDSIGHT_API_DB_STATEMENT_TIMEOUT"
 ENV_DB_MAX_PARALLEL_WORKERS_PER_GATHER = "HINDSIGHT_API_DB_MAX_PARALLEL_WORKERS_PER_GATHER"
 ENV_DB_SESSION_SETUP_ON_ACQUIRE = "HINDSIGHT_API_DB_SESSION_SETUP_ON_ACQUIRE"
@@ -1809,6 +1810,7 @@ DEFAULT_DB_POOL_MIN_SIZE = 5
 DEFAULT_DB_POOL_MAX_SIZE = 100
 DEFAULT_DB_COMMAND_TIMEOUT = 60  # seconds
 DEFAULT_DB_ACQUIRE_TIMEOUT = 30  # seconds
+DEFAULT_DB_POOL_SLOW_ACQUIRE_THRESHOLD_SECONDS = 0.05  # 0 disables the warning
 DEFAULT_DB_STATEMENT_TIMEOUT = 600  # seconds (Postgres statement_timeout applied on every pool connection; 0 disables)
 # Optional cap on Postgres planner parallelism for this process's pool
 # connections (SET max_parallel_workers_per_gather). None leaves the server
@@ -1842,9 +1844,11 @@ DEFAULT_DB_MAX_PARALLEL_WORKERS_PER_GATHER: int | None = None
 DEFAULT_DB_SESSION_SETUP_ON_ACQUIRE = True
 # pg_trgm similarity threshold applied on every pool connection (SET
 # pg_trgm.similarity_threshold). Governs how close a name must be for the `%`
-# operator to treat it as a candidate during entity resolution: lower catches
-# more substring-ish matches at higher CPU cost, higher is stricter and cheaper.
-DEFAULT_ENTITY_TRGM_SIMILARITY_THRESHOLD = 0.15
+# operator to treat it as a candidate during entity resolution. Never applied below
+# ENTITY_MERGE_MIN_SIMILARITY (see HindsightConfig.entity_trgm_probe_threshold). It used to
+# default to 0.15 while the merge floor is 0.3, so about half the candidates were fetched,
+# scored and always discarded (#5367). Raise it above the floor to look at fewer, closer names.
+DEFAULT_ENTITY_TRGM_SIMILARITY_THRESHOLD = 0.3
 # pg_trgm similarity at/above which two brand-new names created by the SAME retain are merged
 # into one entity (in-batch dedup — surface-form variants that would otherwise each create a
 # distinct row). pg_trgm ignores non-alphanumerics, so decoration variants score ~1.0 and
@@ -1854,14 +1858,14 @@ DEFAULT_ENTITY_TRGM_SIMILARITY_THRESHOLD = 0.15
 DEFAULT_ENTITY_INTRABATCH_MERGE_SIMILARITY = 0.5
 # Minimum pg_trgm similarity a name must have with an EXISTING entity before that entity can
 # be reused for it. The composite resolution score (name + co-occurrence + recency) has no
-# floor of its own, so without this a name the trigram probe merely admitted as a candidate
-# (>= ENTITY_TRGM_SIMILARITY_THRESHOLD, 0.15) could still be merged onto purely because the
-# bank had seen it recently alongside the same entities — attributing a new person's facts to
-# an unrelated entity (#3751). Applied as a gate, not as a replacement for the name score, so
-# anything that merges above it is unaffected. Sits between the recall threshold (0.15) and the
-# stricter same-batch fold-in cutoff (ENTITY_INTRABATCH_MERGE_SIMILARITY, 0.5). Lower it for
-# corpora of very short names, where trigram similarity is unavoidably low ("Jon"/"John" is
-# 0.29); raise it to merge only clear surface variants.
+# floor of its own, so without this a name a candidate probe merely admitted could still be
+# merged onto purely because the bank had seen it recently alongside the same entities —
+# attributing a new person's facts to an unrelated entity (#3751). Applied as a gate, not as a
+# replacement for the name score, so anything that merges above it is unaffected. Also the
+# lowest threshold the pg_trgm probe runs at; below the stricter same-batch fold-in cutoff
+# (ENTITY_INTRABATCH_MERGE_SIMILARITY, 0.5). Lower it for corpora of very short names, where
+# trigram similarity is unavoidably low ("Jon"/"John" is 0.29); raise it to merge only clear
+# surface variants.
 DEFAULT_ENTITY_MERGE_MIN_SIMILARITY = 0.3
 DEFAULT_MODEL_INIT_TIMEOUT = 300  # seconds (cap on startup model/connection init; covers first-time downloads)
 
@@ -3533,6 +3537,7 @@ class HindsightConfig:
     db_pool_max_size: int
     db_command_timeout: int
     db_acquire_timeout: int
+    db_pool_slow_acquire_threshold_seconds: float
     db_statement_timeout: int
     db_max_parallel_workers_per_gather: int | None
     db_session_setup_on_acquire: bool
@@ -3846,6 +3851,12 @@ class HindsightConfig:
         # Memory Defense policy (validated against DefensePolicy schema on write)
         "memory_defense",
     }
+
+    @property
+    def entity_trgm_probe_threshold(self) -> float:
+        """The pg_trgm threshold the entity probe actually runs at: never below the merge floor,
+        since a candidate under it can never be merged and would only cost work (#5367)."""
+        return max(self.entity_trgm_similarity_threshold, self.entity_merge_min_similarity)
 
     @property
     def file_conversion_max_batch_size_bytes(self) -> int:
@@ -5105,6 +5116,11 @@ class HindsightConfig:
             db_pool_max_size=int(os.getenv(ENV_DB_POOL_MAX_SIZE, str(DEFAULT_DB_POOL_MAX_SIZE))),
             db_command_timeout=int(os.getenv(ENV_DB_COMMAND_TIMEOUT, str(DEFAULT_DB_COMMAND_TIMEOUT))),
             db_acquire_timeout=int(os.getenv(ENV_DB_ACQUIRE_TIMEOUT, str(DEFAULT_DB_ACQUIRE_TIMEOUT))),
+            db_pool_slow_acquire_threshold_seconds=float(
+                os.getenv(
+                    ENV_DB_POOL_SLOW_ACQUIRE_THRESHOLD_SECONDS, str(DEFAULT_DB_POOL_SLOW_ACQUIRE_THRESHOLD_SECONDS)
+                )
+            ),
             db_statement_timeout=int(os.getenv(ENV_DB_STATEMENT_TIMEOUT, str(DEFAULT_DB_STATEMENT_TIMEOUT))),
             db_max_parallel_workers_per_gather=_parse_optional_non_negative_int(
                 ENV_DB_MAX_PARALLEL_WORKERS_PER_GATHER,
