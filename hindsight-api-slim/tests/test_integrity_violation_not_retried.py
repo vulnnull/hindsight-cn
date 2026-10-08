@@ -241,7 +241,11 @@ def _patch_update_action_deps(consolidator, conn, source_ids, append_mock) -> Ex
     stack.enter_context(patch.object(pg_consolidation, "get_config", _fake_config))
     stack.enter_context(patch.object(consolidator, "acquire_with_retry", MagicMock(return_value=_AsyncNullCtx(conn))))
     stack.enter_context(patch.object(consolidator, "get_memories", MagicMock(return_value=store)))
-    stack.enter_context(patch.object(consolidator, "_any_live_source_memory", AsyncMock(return_value=True)))
+    stack.enter_context(
+        patch.object(
+            consolidator, "_live_source_ids", AsyncMock(side_effect=lambda _pool, _bank, ids: {str(i) for i in ids})
+        )
+    )
     stack.enter_context(patch.object(consolidator, "_filter_live_source_memories", AsyncMock(return_value=source_ids)))
     stack.enter_context(
         patch.object(

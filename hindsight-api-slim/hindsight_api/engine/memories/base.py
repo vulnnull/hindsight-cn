@@ -518,6 +518,41 @@ class RetainSession:
         return None
 
 
+class WriteBatch:
+    """A group of writes the store may apply as one unit, opened by
+    :meth:`MemoriesExtension.begin_write_batch`.
+
+    The engine opens one where several writes are decided together and must land together — the
+    actions derived from one consolidation response are the case it exists for. A SQL store already
+    gets that from the caller's transaction, so its batch does nothing. A store whose every write
+    is its own atomic call does not, and without a batch it applies such a group as N independent
+    writes: N round trips, and a failure part-way leaves the first writes applied and the rest not.
+
+    Reads made while a batch is open must still see the batch's own writes. A store that holds
+    writes back has to account for that itself (for instance by sending what it holds before a read
+    that could observe it); the engine does not order its reads around the batch.
+    """
+
+    async def prefetch(self, unit_ids: list[str]) -> None:
+        """Say which memories the batch's writes are about to read.
+
+        The engine names, up front, every memory the batch's actions will read one at a time, so a
+        store whose reads are round trips can fetch them in one and answer the rest from that. The
+        default does nothing: a SQL store reads them cheaply as it goes. A hint only — a store must
+        still answer a read of any id correctly, prefetched or not, and a read must still see the
+        batch's own writes.
+        """
+        return None
+
+    async def commit(self) -> None:
+        """Apply every write made in the batch. After this returns they are durable and visible."""
+        return None
+
+    async def abort(self) -> None:
+        """Discard whatever the batch still holds. Writes a store already applied stay applied."""
+        return None
+
+
 @dataclass
 class FactRecord:
     """One memory unit, as an implementation that owns the store needs to see it.
@@ -1117,6 +1152,15 @@ class MemoriesExtension(Extension, ABC):
             if rec is not None:
                 out[did] = rec
         return out
+
+    async def begin_write_batch(self, *, bank_id: str) -> WriteBatch:
+        """Open a :class:`WriteBatch` for writes to ``bank_id`` made from this task.
+
+        Default is a batch that does nothing, so every write goes out as it is made — right for a
+        store whose writes already share the caller's SQL transaction. A coroutine rather than a
+        context manager so a store that dispatches per bank forwards it like any other method.
+        """
+        return WriteBatch()
 
     async def begin_retain(self, *, bank_id: str, config: Any) -> "RetainSession":
         """Open a retain session. Only a store advertising :attr:`store_owned`

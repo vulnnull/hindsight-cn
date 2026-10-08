@@ -226,3 +226,90 @@ async def test_successful_batch_commits_observations_and_stamps(memory: MemoryEn
         assert await _pending_facts(memory, bank_id) == []
     finally:
         await memory.delete_bank(bank_id, request_context=request_context)
+
+
+class _RecordingBatch:
+    """A store write batch that records what the engine did with it."""
+
+    def __init__(self) -> None:
+        self.commits = 0
+        self.aborts = 0
+        self.prefetched: list[list[str]] = []
+
+    async def prefetch(self, unit_ids: list[str]) -> None:
+        self.prefetched.append(list(unit_ids))
+
+    async def commit(self) -> None:
+        self.commits += 1
+
+    async def abort(self) -> None:
+        self.aborts += 1
+
+
+def _record_batches():
+    """Patch the installed store so every batch the engine opens is recorded."""
+    from hindsight_api.engine.memories import get_memories
+
+    opened: list[_RecordingBatch] = []
+
+    async def begin_write_batch(*, bank_id: str) -> _RecordingBatch:
+        batch = _RecordingBatch()
+        opened.append(batch)
+        return batch
+
+    return opened, patch.object(get_memories(), "begin_write_batch", new=begin_write_batch)
+
+
+@pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
+async def test_each_response_is_handed_to_the_store_as_one_committed_batch(memory: MemoryEngine, request_context):
+    """A store whose writes are separate calls is told which writes belong together: one batch per
+    LLM response, committed once, never aborted on the happy path."""
+    bank_id = f"atomic-batch-{uuid.uuid4().hex[:8]}"
+    await memory.ensure_bank_profile(bank_id=bank_id, request_context=request_context)
+    try:
+        async with memory._pool.acquire() as conn:
+            for i in range(6):
+                await _insert_memory(conn, bank_id, f"Alice fact {i}", ["user:alice"])
+
+        opened, patched = _record_batches()
+        with patched:
+            await _run(memory, bank_id, request_context, _create_one_per_fact())
+
+        # consolidation_llm_batch_size=4 → two responses for six facts.
+        assert len(opened) == 2
+        assert [(b.commits, b.aborts) for b in opened] == [(1, 0), (1, 0)]
+        # Each response names the memories its actions read before reading any: one prefetch per
+        # batch, covering every create's sources (4 facts, then 2).
+        assert [len(b.prefetched) for b in opened] == [1, 1]
+        assert sorted(len(b.prefetched[0]) for b in opened) == [2, 4]
+    finally:
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+
+@pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
+async def test_a_response_that_fails_to_apply_aborts_its_batch(memory: MemoryEngine, request_context):
+    """The store must drop what it holds when the response fails part-way, exactly as the SQL
+    transaction rolls back — a commit here would land the half the engine just discarded."""
+    bank_id = f"atomic-abort-{uuid.uuid4().hex[:8]}"
+    await memory.ensure_bank_profile(bank_id=bank_id, request_context=request_context)
+    try:
+        async with memory._pool.acquire() as conn:
+            await _insert_memory(conn, bank_id, "Alice moved to Berlin", ["user:alice"])
+
+        opened, patched = _record_batches()
+        with (
+            patched,
+            patch.object(
+                consolidator_module,
+                "_apply_create_observation",
+                new=AsyncMock(side_effect=RuntimeError("write failed mid-batch")),
+            ),
+        ):
+            with pytest.raises(RuntimeError, match="write failed mid-batch"):
+                await _run(memory, bank_id, request_context, _create_one_per_fact())
+
+        assert [(b.commits, b.aborts) for b in opened] == [(0, 1)]
+    finally:
+        await memory.delete_bank(bank_id, request_context=request_context)

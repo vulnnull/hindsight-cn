@@ -38,9 +38,8 @@ async def create_observation(
     perf=None,
 ) -> dict[str, Any]:
     """Preflight + embed off-connection, then insert in one short transaction."""
-    async with C.acquire_with_retry(pool) as conn:
-        if not await C._any_live_source_memory(conn, bank_id, source_memory_ids):
-            return {"action": "skipped", "reason": "sources_deleted"}
+    if not await C._live_source_ids(pool, bank_id, source_memory_ids):
+        return {"action": "skipped", "reason": "sources_deleted"}
     embedding_str = await C._embed_observation_text(memory_engine, observation_text, perf)
     async with C.acquire_with_retry(pool) as conn:
         async with conn.transaction():
@@ -111,9 +110,8 @@ async def execute_update_action(
     model = next((m for m in observations if str(m.id) == observation_id), None)
     if model is None:
         return None
-    async with C.acquire_with_retry(pool) as conn:
-        if not await C._any_live_source_memory(conn, bank_id, source_memory_ids):
-            return None
+    if not await C._live_source_ids(pool, bank_id, source_memory_ids):
+        return None
     embedding_str = await C._embed_observation_text(memory_engine, new_text, perf)
     prepared = C._PreparedUpdate(
         update=C._UpdateAction(
