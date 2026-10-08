@@ -310,8 +310,32 @@ Document-level hybrid search: a full-text (BM25) match and a vector-similarity m
 |---|---|---|---|
 | `q` | string | — | Required. Search query (min length 1). |
 | `limit` | int | `10` | Maximum results, 1–50. |
+| `tags` | string[] | — | Only pages carrying these tags, matched per `tags_match`. See [Filter by Tags](#filter-by-tags). |
+| `tags_match` | string | `any` | `any`, `all`, `any_strict`, `all_strict`, or `exact`. |
+| `tag_groups` | string | — | JSON-encoded compound filter, same shape as recall's `tag_groups`. |
 
 This searches whole pages. To search individual memories, use [recall](./recall).
+
+### Filter by Tags
+
+The tree and search take the same tag filter as [recall](./recall): `tags` with `tags_match`, or a compound `tag_groups` expression (JSON-encoded in the query string, since both are `GET` requests). It matches each page's own tags. Search ranks only among the pages that match, and the tree keeps only matching pages plus the folders above them. A folder with no matching page under it is left out, because its name can reveal as much as its pages.
+
+As in recall, `any` and `all` also return **untagged** pages. Use `any_strict`, `all_strict`, or `exact` when only tagged pages should come back, for example to show a user only their own pages.
+
+<Tabs>
+<TabItem value="python" label="Python">
+<CodeSnippet code={knowledgePagesPy} section="filter-by-tags" language="python" />
+</TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={knowledgePagesMjs} section="filter-by-tags" language="javascript" />
+</TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={knowledgePagesSh} section="filter-by-tags" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={knowledgePagesGo} section="filter-by-tags" language="go" />
+</TabItem>
+</Tabs>
 
 ---
 

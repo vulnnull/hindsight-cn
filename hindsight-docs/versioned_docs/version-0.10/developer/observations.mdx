@@ -223,6 +223,13 @@ How a strategy is matched:
 
   Because the mode is per alternative, one strategy can mix them — `[{"tags": ["company:*"], "tags_match": "exact"}, {"tags": ["team:*"]}]` claims scopes that are *only* a company, or that have a team among other tags. To match *any one* of several tags, give each its own alternative: `[{"tags": ["company:*"]}, {"tags": ["team:*"]}]`. Excluding a tag ("has a company but no user") is not expressible.
 
+  :::caution The untagged scope can never be claimed
+  No pattern matches a scope with no tags, including a bare `["*"]`. That means a bank using
+  [`observation_scopes: "shared"`](./api/retain#observation_scopes), which consolidates over the single untagged
+  scope, has one scope that no strategy can reach: it always uses the bank-wide values. If you need a
+  differently-briefed catch-all, give it a real tag and target that instead of relying on `shared`.
+  :::
+
   Remember that a strategy matches **observation scopes** — the tag sets consolidation groups observations under, set by [`observation_scopes`](./api/retain#observation_scopes) at retain time — not the tags of individual memories. A memory tagged with a user, a team and a company but retained with `observation_scopes: [["user:dana"], ["team:exec"], ["company:acme"]]` produces three single-tag scopes, none of which has both a company and a team.
 - **What a strategy can set:** `observations_mission`, `max_observations_per_scope`, `consolidation_source_facts_max_tokens` and `consolidation_source_facts_max_tokens_per_observation`. Every one is optional.
 - **Anything a strategy leaves unset, and every scope no strategy matches,** uses the bank-wide value. The control plane shows these bank-wide values as the **Default** strategy.
@@ -246,11 +253,25 @@ To see which strategy a scope uses, open the strategy in the control plane: each
 
 A strategy that sets nothing is ignored: it matches no scope and doesn't block later ones.
 
-A malformed strategy is rejected when you save it — an unknown key (`"scope"` for `"scopes"`), a tag list that is not a list of strings, an unknown `tags_match` — with a 400 naming the offending entry. An *incomplete* one is accepted, because the control plane saves strategies as you type them: a rule with no tags yet, or a strategy with no setting yet, is stored and simply ignored until you finish it. Strategies survive [bank template](/developer/api/memory-banks) export and import unchanged.
+A malformed strategy is rejected when you save it through the control plane or the bank config API — an unknown key
+(`"scope"` for `"scopes"`), a tag list that is not a list of strings, an unknown `tags_match` — with a 400 naming the
+offending entry. The `HINDSIGHT_API_CONSOLIDATION_STRATEGIES` environment variable is **not** validated this way: a
+malformed entry is dropped silently, and an unrecognised `tags_match` falls back to `"all"` rather than erroring. If you
+configure strategies by environment variable, check the preview afterwards to confirm each one claims what you expect. An *incomplete* one is accepted, because the control plane saves strategies as you type them: a rule with no tags yet, or a strategy with no setting yet, is stored and simply ignored until you finish it. Strategies survive [bank template](/developer/api/memory-banks) export and import unchanged.
 
 Each scope is consolidated in its own LLM call, so one scope's mission never reaches another scope's call.
 
-Set `consolidation_strategies` in the control plane (bank **Configuration → Observations**), via the [bank config API](/developer/api/memory-banks#observations-configuration), or with the [`HINDSIGHT_API_CONSOLIDATION_STRATEGIES`](/developer/configuration#observations) environment variable. It replaces the older `observation_scope_limits`, which still works but is checked only after the strategies.
+Set `consolidation_strategies` in the control plane (bank **Configuration → Observations**), via the [bank config API](/developer/api/memory-banks#observations-configuration), or with the [`HINDSIGHT_API_CONSOLIDATION_STRATEGIES`](/developer/configuration#observations) environment variable. It replaces the older `observation_scope_limits`, which still works but is checked only after the strategies, and only
+ever carried the observation cap.
+
+:::note Porting a rule from `observation_scope_limits`
+The two fields match differently. `observation_scope_limits` is exact-cover only: its pattern must account for every tag
+in the scope. A strategy defaults to `tags_match: "all"`, which allows extra tags. Copying a pattern across unchanged
+therefore widens what it matches. Add `"tags_match": "exact"` to keep the old behaviour.
+
+Note also that a strategy claiming a scope without setting `max_observations_per_scope` leaves the cap to
+`observation_scope_limits`, falling back past any later strategy that would have set one.
+:::
 
 ---
 

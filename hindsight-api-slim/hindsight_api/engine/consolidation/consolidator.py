@@ -69,9 +69,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-#: How many of one response's actions are prepared at once (see `_process_memory_batch`). Each holds
-#: a pooled connection only for its brief liveness preflight, so this bounds those as well as the
-#: embedder and dedup calls one response puts in flight.
+#: How many of one response's actions are prepared at once (see `_process_memory_batch`). Bounds the
+#: embedder calls and, with semantic dedup on, the nearest-observation probes (each takes a pooled
+#: connection) and their LLM verdicts one response puts in flight. The liveness preflight is one read
+#: for the whole response, done before any action is prepared.
 _PREPARE_CONCURRENCY = 8
 
 

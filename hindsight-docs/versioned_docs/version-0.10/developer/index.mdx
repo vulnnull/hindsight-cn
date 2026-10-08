@@ -3,6 +3,7 @@ sidebar_position: 1
 slug: /
 title: Overview
 hide_title: true
+description: State of the art long-term memory for your agents. Hindsight gives AI agents memory that learns across sessions.
 hide_table_of_contents: true
 ---
 
@@ -18,13 +19,6 @@ import whatHindsightDoes from '@site/figures/what-hindsight-does.json';
     The sidebar and page metadata still read "Overview" from the frontmatter. */}
 
 <HomeHero />
-
-{/* The router, directly under the hero. Three kinds of visitor land here — one
-    who has never heard of agent memory, one looking for the coding-agent
-    plugin, one looking for the Hermes/OpenClaw plugin — and only the first was
-    served by opening on prose. This used to sit under "How It Works", four
-    screens down, which is past where the other two had already left. */}
-<HomeFlow />
 
 ## Benchmarks
 
@@ -55,6 +49,13 @@ Hindsight solves these problems with a memory system designed specifically for A
 
 ## How It Works
 
+{/* The router: three kinds of visitor land on this page — one who has never
+    heard of agent memory, one looking for the coding-agent plugin, one looking
+    for the Hermes/OpenClaw plugin — and this is where each of them can see
+    their own path. It opens "How It Works" because the cards answer "what does
+    this look like for me" before the sections below answer "how". */}
+<HomeFlow />
+
 ### Memory Types
 
 Hindsight does not store conversations. It extracts what was said into typed
@@ -70,7 +71,7 @@ facts and then builds on them:
 Facts are not a list. Each is linked to the entities it mentions and to the other
 facts that share them, which is what makes "where does Alice work?" answerable
 from two facts that were never stored together — the graph at the top of this
-page is one bank's.
+page is a sample bank's; hover a memory to see what it links to.
 
 ### Multi-Strategy Retrieval
 

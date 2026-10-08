@@ -198,7 +198,7 @@ Search memories to provide personalized responses.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `query` | string | Yes | Natural language search query |
-| `max_tokens` | integer | No | Maximum tokens to return (default: 4096) |
+| `max_tokens` | integer | No | Token budget for the facts' text (default: 4096). Per-result metadata (id, tags, scores, dates) is not counted, so the response is several times larger |
 | `budget` | string | No | Search thoroughness: `low`, `mid`, or `high` (default: `high`) |
 | `types` | list[string] | No | Filter by fact type: `world`, `experience`, `observation`. Defaults to all |
 | `tags` | list[string] | No | Filter memories by tags. Omit for no filter |

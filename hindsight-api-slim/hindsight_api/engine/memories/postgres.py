@@ -1450,11 +1450,6 @@ class PostgresMemories(MemoriesExtension):
             conn=conn, fq_table=fq_store_table, bank_id=bank_id, read_at=read_at
         )
 
-    async def any_memory_exists(self, *, conn, fq_table, bank_id: str, unit_ids: list[uuid.UUID]) -> bool:
-        return await pg_consolidation.any_memory_exists(
-            conn=conn, fq_table=fq_store_table, bank_id=bank_id, unit_ids=unit_ids
-        )
-
     async def count_observations_with_tags(self, *, conn, fq_table, bank_id: str, tags: list[str]) -> int:
         return await pg_consolidation.count_observations_with_tags(
             conn=conn, fq_table=fq_store_table, bank_id=bank_id, tags=tags

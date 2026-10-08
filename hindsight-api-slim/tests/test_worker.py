@@ -911,6 +911,67 @@ class TestWorkerPoller:
         assert abs((row["next_retry_at"] - defer_until).total_seconds()) < 1
 
     @pytest.mark.asyncio
+    async def test_a_lost_append_race_defers_and_counts_up(self, pool, backend, clean_operations):
+        """An append that lost its race is deferred, not failed (issue #5393).
+
+        Nothing was written — the precondition rejects the write whole — so the turn the append
+        carried is only safe if the operation survives to re-read the document. Failing it here is
+        what dropped it. The deferral count rises in `result_metadata`, which is what makes an
+        append that keeps conflicting a visible old pending operation rather than a vanished one.
+        """
+        from hindsight_api.engine.retain.types import ConcurrentAppendConflict
+        from hindsight_api.worker import WorkerPoller
+        from hindsight_api.worker.poller import ClaimedTask
+
+        bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+        op_id = uuid.uuid4()
+        payload = json.dumps(
+            {
+                "type": "batch_retain",
+                "operation_id": str(op_id),
+                "bank_id": bank_id,
+                "contents": [{"document_id": "chat-1", "update_mode": "append"}],
+            }
+        )
+        await _ensure_bank(pool, bank_id)
+
+        async def losing_executor(task_dict):
+            raise ConcurrentAppendConflict("Document chat-1 was updated by a concurrent retain")
+
+        poller = WorkerPoller(backend=backend, worker_id="test-worker-1", executor=losing_executor)
+
+        for expected_count in (1, 2):
+            await pool.execute(
+                """
+                INSERT INTO async_operations
+                    (operation_id, bank_id, operation_type, status, task_payload, worker_id, claimed_at, retry_count)
+                VALUES ($1, $2, 'retain', 'processing', $3::jsonb, 'test-worker-1', now(), 0)
+                ON CONFLICT (operation_id) DO UPDATE
+                    SET status = 'processing', worker_id = 'test-worker-1', claimed_at = now()
+                """,
+                op_id,
+                bank_id,
+                payload,
+            )
+            claimed_task = ClaimedTask(operation_id=str(op_id), task_dict=json.loads(payload), schema=None)
+            await poller.execute_task(claimed_task)
+            assert await poller.wait_for_active_tasks(timeout=5.0), "Task did not complete within timeout"
+
+            row = await pool.fetchrow(
+                "SELECT status, retry_count, error_message, next_retry_at, result_metadata "
+                "FROM async_operations WHERE operation_id = $1",
+                op_id,
+            )
+            assert row["status"] == "pending", "a lost append race must be requeued, not failed"
+            assert row["retry_count"] == 0, "a deferral must not spend a retry"
+            assert row["error_message"] is None
+            assert row["next_retry_at"] > datetime.now(UTC)
+            metadata = row["result_metadata"]
+            if isinstance(metadata, str):
+                metadata = json.loads(metadata)
+            assert metadata["append_conflict_defers"] == expected_count
+
+    @pytest.mark.asyncio
     async def test_deferred_task_not_picked_up_until_exec_date(self, pool, backend, clean_operations):
         """A deferred task is invisible to claim_batch until next_retry_at <= NOW()."""
         from datetime import datetime, timedelta, timezone

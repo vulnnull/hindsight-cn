@@ -82,16 +82,6 @@ async def memories_changed_since(
     return [str(r["id"]) for r in rows if r["updated_at"] != read_at[str(r["id"])]]
 
 
-async def any_memory_exists(*, conn, fq_table: Callable[[str], str], bank_id: str, unit_ids: list[uuid.UUID]) -> bool:
-    """Whether any of ``unit_ids`` still exists. Non-locking."""
-    found = await conn.fetchval(
-        f"SELECT 1 FROM {fq_table('memory_units')} WHERE id = ANY($1::uuid[]) AND bank_id = $2 LIMIT 1",
-        unit_ids,
-        bank_id,
-    )
-    return found is not None
-
-
 async def count_observations_with_tags(*, conn, fq_table: Callable[[str], str], bank_id: str, tags: list[str]) -> int:
     """Observations whose tags contain every one of ``tags``."""
     return await conn.fetchval(

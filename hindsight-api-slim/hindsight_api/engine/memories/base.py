@@ -3699,13 +3699,6 @@ class MemoriesExtension(Extension, ABC):
         """
         return []
 
-    async def any_memory_exists(self, *, conn, fq_table, bank_id: str, unit_ids: list[uuid.UUID]) -> bool:
-        """Whether any of ``unit_ids`` still exists. A cheap, non-locking preflight."""
-        present = await self.get_memories(
-            conn=conn, fq_table=fq_table, bank_id=bank_id, unit_ids=[str(mid) for mid in unit_ids]
-        )
-        return bool(present)
-
     async def count_observations_with_tags(self, *, conn, fq_table, bank_id: str, tags: list[str]) -> int:
         """Observations whose tags contain every one of ``tags``. Postgres runs one ``COUNT``."""
         total = 0

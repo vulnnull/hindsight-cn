@@ -13,6 +13,7 @@ import io
 import json
 import logging
 import os
+import random
 import signal
 import time
 from collections import Counter
@@ -29,7 +30,7 @@ from ..config import (
 )
 from ..engine.schema import fq_table_explicit as fq_table
 from ..metrics import get_metrics_collector
-from .backpressure import is_store_backpressure
+from .backpressure import is_append_conflict, is_store_backpressure
 from .exceptions import DeferOperation, RetryTaskAt, format_task_error
 
 
@@ -46,6 +47,22 @@ def _backpressure_defer_seconds() -> int:
 
 
 from .stage import StageHolder, bind_holder
+
+# How a lost append race backs off. An append that loses is told "the document moved, read it
+# again"; the writer that won is normally done within seconds, so the first redo is quick, and the
+# delay doubles (jittered, so simultaneous losers don't line up and collide again) up to a ceiling
+# for the pathological case. Deliberately uncapped in count: deferring forever shows up as an old
+# pending operation with a rising defer count, which is recoverable, where a cap drops the turn.
+_APPEND_CONFLICT_DEFER_BASE_SECONDS = 2.0
+_APPEND_CONFLICT_DEFER_MAX_SECONDS = 300.0
+_APPEND_CONFLICT_DEFER_COUNT_KEY = "append_conflict_defers"
+
+
+def _append_conflict_defer_seconds(defer_count: int) -> float:
+    """Jittered exponential backoff for the ``defer_count``-th deferral (1-based)."""
+    delay = _APPEND_CONFLICT_DEFER_BASE_SECONDS * (2 ** max(0, defer_count - 1))
+    return min(delay, _APPEND_CONFLICT_DEFER_MAX_SECONDS) * random.uniform(0.5, 1.5)
+
 
 # Map DB operation_type -> metric `operation` label, collapsing the retain
 # variants onto "retain" so async worker completions land on the same
@@ -867,9 +884,11 @@ class WorkerPoller:
         for operation_id in task.all_operation_ids:
             await self._mark_failed(operation_id, error_message, task.schema)
 
-    async def _defer_all(self, task: ClaimedTask, exec_date, reason: str) -> None:
+    async def _defer_all(
+        self, task: ClaimedTask, exec_date, reason: str, metadata: dict[str, Any] | None = None
+    ) -> None:
         for operation_id in task.all_operation_ids:
-            await self._defer_operation(operation_id, exec_date, reason, task.schema)
+            await self._defer_operation(operation_id, exec_date, reason, task.schema, metadata)
 
     async def _schedule_retry_all(self, task: ClaimedTask, retry_at, reason: str) -> None:
         for operation_id in task.all_operation_ids:
@@ -1053,11 +1072,39 @@ class WorkerPoller:
             return
         logger.warning(f"Task {operation_id} scheduled for retry at {retry_at}: {error_message}")
 
-    async def _defer_operation(self, operation_id: str, exec_date: "Any", reason: str, schema: str | None):
+    async def _append_conflict_defer_count(self, task: ClaimedTask) -> int:
+        """How many times this task has already been deferred for a lost append race.
+
+        Only drives the backoff and the log line, so a read that fails is not worth failing the
+        task over — it falls back to 0, i.e. the shortest delay.
+        """
+        table = fq_table("async_operations", task.schema)
+        try:
+            async with self._backend.acquire() as conn:
+                value = await conn.fetchval(
+                    f"SELECT result_metadata->>'{_APPEND_CONFLICT_DEFER_COUNT_KEY}' FROM {table} "
+                    "WHERE operation_id = $1",
+                    task.operation_id,
+                )
+            return int(value or 0)
+        except Exception:
+            logger.debug(f"Could not read defer count for {task.operation_id}", exc_info=True)
+            return 0
+
+    async def _defer_operation(
+        self,
+        operation_id: str,
+        exec_date: "Any",
+        reason: str,
+        schema: str | None,
+        metadata: dict[str, Any] | None = None,
+    ):
         """Reset task to pending for re-pickup at exec_date without counting as a retry.
 
         Unlike `_schedule_retry`, this does not bump `retry_count` and does not
         populate `error_message` — defer is intentional backpressure, not a failure.
+        `metadata` is merged into `result_metadata`, which is how a deferral that
+        keeps repeating stays visible (see `_APPEND_CONFLICT_DEFER_COUNT_KEY`).
         """
         table = fq_table("async_operations", schema)
         async with self._backend.acquire() as conn:
@@ -1065,11 +1112,13 @@ class WorkerPoller:
                 f"""
                 UPDATE {table}
                 SET status = 'pending', next_retry_at = $2, worker_id = NULL, claimed_at = NULL,
-                    updated_at = now()
+                    updated_at = now(),
+                    result_metadata = COALESCE(result_metadata, '{{}}'::jsonb) || $3::jsonb
                 WHERE operation_id = $1 AND status <> 'cancelled'
                 """,
                 operation_id,
                 exec_date,
+                json.dumps(metadata or {}),
             )
         if not _updated_row_count(result):
             logger.info(f"Task {operation_id} was cancelled or deleted, not deferring")
@@ -1263,6 +1312,37 @@ class WorkerPoller:
                 )
                 reason = f"store backpressure: {str(e)[:400]}"
                 await self._write_terminal(task, "deferred", lambda: self._defer_all(task, retry_at, reason))
+                return
+            # An append that lost its race is the same shape of answer: "the document moved, read
+            # it again". Nothing was written — the precondition rejects the write whole — so the
+            # redo is always safe, and failing it here is what drops the turn the append carried
+            # (issue #5393). The pipeline already redoes it a few times in-process; reaching the
+            # worker means the contention outlasted that, which a later attempt usually clears.
+            if is_append_conflict(e):
+                defers = await self._append_conflict_defer_count(task) + 1
+                retry_at = datetime.now(timezone.utc) + timedelta(seconds=_append_conflict_defer_seconds(defers))
+                documents = sorted(
+                    {
+                        item["document_id"]
+                        for item in task.task_dict.get("contents") or []
+                        if isinstance(item, dict) and item.get("document_id")
+                    }
+                )
+                logger.warning(
+                    "Task %s deferred until %s: append lost its race (deferral #%d, bank=%s, documents=%s): %s",
+                    task.operation_id,
+                    retry_at,
+                    defers,
+                    bank_id,
+                    ",".join(documents) or "unknown",
+                    str(e)[:200],
+                )
+                await self._defer_all(
+                    task,
+                    retry_at,
+                    f"append conflict (deferral #{defers}): {str(e)[:400]}",
+                    {_APPEND_CONFLICT_DEFER_COUNT_KEY: defers},
+                )
                 return
             # exc_info rather than print_exc(): the stderr copy carries no task id
             # and is the first thing lost to log rotation (issue #3218).
@@ -1729,10 +1809,15 @@ class WorkerPoller:
         The DB clock is read first: recovery only touches rows claimed before
         it, never the ones this run claims meanwhile.
         """
-        # Read in UTC and tag it: Oracle hands back SYSTIMESTAMP without its zone,
-        # and the backends treat naive timestamps as UTC.
-        async with self._backend.acquire() as conn:
-            started_at = await conn.fetchval("SELECT now() AT TIME ZONE 'UTC'")
+        # Read in UTC and tag it: Oracle hands back SYS_EXTRACT_UTC(SYSTIMESTAMP), a naive
+        # UTC timestamp, and the backends treat naive timestamps as UTC.
+        try:
+            async with self._backend.acquire() as conn:
+                started_at = await conn.fetchval("SELECT now() AT TIME ZONE 'UTC'")
+        except Exception:
+            # Callers run this as a bare task: without a log a dead poller is silent (#5413).
+            logger.exception(f"Worker {self._worker_id} failed to start polling")
+            raise
         started_at = started_at.replace(tzinfo=timezone.utc)
         self._recovery_task = asyncio.create_task(self._run_recovery(started_at))
         try:
