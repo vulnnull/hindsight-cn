@@ -143,7 +143,7 @@ Optional settings in `~/.openclaw/openclaw.json`:
 - `recallPromptPreamble` - Custom preamble text placed above recalled memories. Overrides the built-in guidance text.
 - `recallInjectionPosition` - Where to inject recalled memories: `"user"` (default), `"prepend"`, or `"append"`. The default injects before the user message and preserves the system prompt cache. Use `"prepend"` or `"append"` when memories need system-level context.
 - `recallRoles` - Which message roles to include when composing the contextual recall query (default: `["user", "assistant"]`).
-- `retainEveryNTurns` - Retain every Nth turn (default: `1` = every turn). Values > 1 enable chunked retention.
+- `retainEveryNTurns` - Retain every Nth turn (default: `1` = every turn). Values > 1 enable chunked retention. When a session ends (`/new`, `/reset`, gateway stop) the turns since the last retain are flushed; on SQLite-backed OpenClaw this needs 2026.10.1 or newer.
 - `senderPrefixPattern` - Regex matching a human display-name prefix that some channels prepend to the user's text (e.g. `Alice: today weather?`). Supply the name part only — `Alice|Bob` or `[A-Za-z ]{1,20}` — the `:` separator and anchoring are added by the plugin. When set, the prefix is stripped from both the recall query and the retained transcript, so the sender's name no longer pollutes vector search or get extracted as a fact. Unset (default) strips nothing; an invalid regex is ignored.
 - `retainOverlapTurns` - Extra prior turns included when chunked retention fires (default: `0`).
 - `debug` - Enable debug logging (default: `false`).
@@ -430,7 +430,7 @@ uvx hindsight-embed@latest -p openclaw ui
 ## OpenClaw compatibility
 
 The plugin is tested against the current OpenClaw release and against older ones.
-Version 0.12.0 and later work with **OpenClaw 2026.7.x through 2026.9.x**.
+Version 0.12.0 and later work with **OpenClaw 2026.7.x through 2026.10.x**.
 
 **If you are on OpenClaw 2026.8.1 or later, upgrade to plugin 0.12.0.** OpenClaw
 2026.8.1 changed how it labels the conversation metadata it attaches to each
@@ -521,6 +521,15 @@ openclaw config get plugins.entries.hindsight-openclaw.config.llmProvider
 
 If you used `--ref-source env`, double-check that the referenced env var
 (e.g. `OPENAI_API_KEY`) is exported in the shell that runs `openclaw gateway`.
+
+## OpenClaw's memory page, status and search
+
+On OpenClaw 2026.10 or later, the plugin registers as OpenClaw's native memory provider. OpenClaw's own memory surfaces then read from Hindsight instead of reporting "memory plugin unavailable":
+
+- `memory.status` and the Memory page report Hindsight's health.
+- Gateway `memory.search` (with `version: 2`) and `memory.get` return Hindsight memories.
+
+Search is read-only and answers only callers allowed to see the whole bank: an operator, or the agent owner's private session. It works when an agent's bank depends on the agent alone: `dynamicBankGranularity: ["agent"]`, a static `bankId`, or an `agentBankMap` entry. When banks are keyed by user or channel (the default granularity), OpenClaw can't tell which user's bank to search, so search is refused and status still reports ready. Prompt-side recall stays with `autoRecall`, so turning this on never injects memories twice. Older OpenClaw versions ignore it.
 
 ## Limitations
 

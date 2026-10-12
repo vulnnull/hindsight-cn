@@ -10,6 +10,18 @@ For the source code, see [`hindsight-integrations/opencode`](https://github.com/
 
 ← [Back to main changelog](/changelog)
 
+## [0.2.9](https://github.com/vectorize-io/hindsight/tree/integrations/opencode/v0.2.9)
+
+[Commits in this release →](https://github.com/vectorize-io/hindsight/commits/integrations/opencode/v0.2.9)
+
+**Features**
+
+- The OpenCode integration now identifies itself with its own User-Agent for service requests.<span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/nicoloboschi" target="_blank" rel="noopener noreferrer" style={{color: "var(--ifm-color-primary)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px", verticalAlign: "middle"}}><img src="https://github.com/nicoloboschi.png?size=40" alt="@nicoloboschi" width="18" height="18" style={{borderRadius: "50%"}} />@nicoloboschi</a><span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/vectorize-io/hindsight/commit/5d4f5cfcd" target="_blank" rel="noopener noreferrer" style={{fontFamily: "var(--ifm-font-family-monospace, monospace)", fontSize: "0.85em", color: "var(--ifm-color-emphasis-600)"}}>5d4f5cfcd</a>
+
+**Bug Fixes**
+
+- Fixed project resolution for bare Hub project names in the OpenCode integration.<span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/Sanderhoff-alt" target="_blank" rel="noopener noreferrer" style={{color: "var(--ifm-color-primary)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px", verticalAlign: "middle"}}><img src="https://github.com/Sanderhoff-alt.png?size=40" alt="@Sanderhoff-alt" width="18" height="18" style={{borderRadius: "50%"}} />@Sanderhoff-alt</a><span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/vectorize-io/hindsight/commit/1e4583478" target="_blank" rel="noopener noreferrer" style={{fontFamily: "var(--ifm-font-family-monospace, monospace)", fontSize: "0.85em", color: "var(--ifm-color-emphasis-600)"}}>1e4583478</a>
+
 ## [0.2.8](https://github.com/vectorize-io/hindsight/tree/integrations/opencode/v0.2.8)
 
 **Bug Fixes**

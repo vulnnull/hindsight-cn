@@ -8,6 +8,14 @@ Changelog for [`@vectorize-io/n8n-nodes-hindsight`](https://www.npmjs.com/packag
 
 For the source code, see [`hindsight-integrations/n8n`](https://github.com/vectorize-io/hindsight/tree/main/hindsight-integrations/n8n).
 
+## [0.1.4](https://github.com/vectorize-io/hindsight/tree/integrations/n8n/v0.1.4)
+
+[Commits in this release →](https://github.com/vectorize-io/hindsight/commits/integrations/n8n/v0.1.4)
+
+**Improvements**
+
+- The n8n integration now identifies its requests with a dedicated User-Agent, improving service-side request attribution and supportability.<span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/nicoloboschi" target="_blank" rel="noopener noreferrer" style={{color: "var(--ifm-color-primary)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px", verticalAlign: "middle"}}>@nicoloboschi</a><span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/vectorize-io/hindsight/commit/5d4f5cfcd" target="_blank" rel="noopener noreferrer" style={{fontFamily: "var(--ifm-font-family-monospace, monospace)", fontSize: "0.85em", color: "var(--ifm-color-emphasis-600)"}}>5d4f5cfcd</a>
+
 ## [0.1.3](https://github.com/vectorize-io/hindsight/tree/integrations/n8n/v0.1.3)
 
 **Improvements**

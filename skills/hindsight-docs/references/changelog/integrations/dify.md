@@ -8,6 +8,14 @@ Changelog for [`hindsight-dify`](https://pypi.org/project/hindsight-dify/).
 
 For the source code, see [`hindsight-integrations/dify`](https://github.com/vectorize-io/hindsight/tree/main/hindsight-integrations/dify).
 
+## [0.1.2](https://github.com/vectorize-io/hindsight/tree/integrations/dify/v0.1.2)
+
+[Commits in this release →](https://github.com/vectorize-io/hindsight/commits/integrations/dify/v0.1.2)
+
+**Improvements**
+
+- Dify integration requests now use an integration-specific User-Agent for clearer service identification and support diagnostics.<span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/nicoloboschi" target="_blank" rel="noopener noreferrer" style={{color: "var(--ifm-color-primary)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px", verticalAlign: "middle"}}>@nicoloboschi</a><span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/vectorize-io/hindsight/commit/5d4f5cfcd" target="_blank" rel="noopener noreferrer" style={{fontFamily: "var(--ifm-font-family-monospace, monospace)", fontSize: "0.85em", color: "var(--ifm-color-emphasis-600)"}}>5d4f5cfcd</a>
+
 ## [0.1.1](https://github.com/vectorize-io/hindsight/tree/integrations/dify/v0.1.1)
 
 **Features**

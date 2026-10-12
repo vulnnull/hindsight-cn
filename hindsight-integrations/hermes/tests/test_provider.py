@@ -1,12 +1,16 @@
 """The provider driven through the Hermes MemoryProvider interface, asserting what it
 sends to Hindsight (a recording fake client stands in for the real SDK)."""
 
+import asyncio
 import json
 import sys
+import threading
 from types import SimpleNamespace
 
+import pytest
+
 import hindsight_hermes as plugin
-from conftest import FakeClient
+from conftest import FakeClient, FakeRecallResponse
 from hindsight_client_api.exceptions import NotFoundException
 
 
@@ -14,10 +18,10 @@ def _retain_item(fake: FakeClient, index: int = 0) -> dict:
     return fake.retains[index]["items"][0]
 
 
-def _turns_of(fake: FakeClient, index: int = 0) -> list[list[str]]:
-    """Message texts per turn in one retain. Content is ``"[" + ",".join(turns) + "]"``
-    where each turn is itself a JSON array, so the whole payload is a list of turns."""
-    return [[m["content"] for m in turn] for turn in json.loads(_retain_item(fake, index)["content"])]
+def _messages_of(fake: FakeClient, index: int = 0) -> list[str]:
+    """Message texts in one retain. Content is one flat JSON array of messages (#5262):
+    a list of per-turn lists would keep the server from chunking by turn."""
+    return [m["content"] for m in json.loads(_retain_item(fake, index)["content"])]
 
 
 def test_sync_turn_retains_the_turn(provider):
@@ -32,8 +36,7 @@ def test_sync_turn_retains_the_turn(provider):
     item = _retain_item(fake)
     assert item["update_mode"] == "append"
     assert "hermes" in item["tags"] and "session:session-1" in item["tags"]
-    messages = json.loads(item["content"][1:-1])
-    assert [m["content"] for m in messages] == ["User: what is my name?", "Assistant: Ada."]
+    assert _messages_of(fake) == ["User: what is my name?", "Assistant: Ada."]
 
 
 def test_retain_every_n_turns_buffers_then_ships_the_batch(provider):
@@ -45,6 +48,31 @@ def test_retain_every_n_turns_buffers_then_ships_the_batch(provider):
 
     assert len(fake.retains) == 1
     assert _retain_item(fake)["metadata"]["message_count"] == "4"
+
+
+def test_shutdown_flushes_turns_below_the_retain_cadence(provider):
+    """#5493: turns waiting for the next every-N retain must not die with the process."""
+    instance, fake = provider({"retain_every_n_turns": 3})
+    instance.sync_turn("one", "1")
+    instance.sync_turn("two", "2")
+    instance.shutdown()
+
+    assert len(fake.retains) == 1
+    assert _messages_of(fake) == ["User: one", "Assistant: 1", "User: two", "Assistant: 2"]
+
+
+def test_turn_timestamp_is_taken_when_queued_not_when_written(provider, monkeypatch):
+    """#5189: a busy writer must not move the turn's event time to when it finally ran."""
+    instance, fake = provider({})
+    release = threading.Event()
+    instance._enqueue_retain(release.wait)  # hold the writer until the clock has moved on
+    monkeypatch.setattr(plugin, "_event_timestamp", lambda: "2026-01-01T00:00:00Z")
+    instance.sync_turn("one", "1")
+    monkeypatch.setattr(plugin, "_event_timestamp", lambda: "2026-01-01T00:05:00Z")
+    release.set()
+    instance.shutdown()
+
+    assert _retain_item(fake)["timestamp"] == "2026-01-01T00:00:00Z"
 
 
 def test_auto_retain_off_stores_nothing(provider):
@@ -221,6 +249,28 @@ def test_session_switch_starts_a_new_document(provider):
     assert [call["document_id"] for call in fake.retains] == ["session-1", "session-2"]
 
 
+def test_session_switch_follows_a_session_bank_template(provider):
+    """#4824: a {session} bank template names one bank per session, so a switch moves
+    writes to the new session's bank."""
+    instance, fake = provider({"bank_id_template": "hermes-{session}"})
+    instance.sync_turn("one", "1")
+    instance.on_session_switch("session-2")
+    instance.sync_turn("two", "2")
+    instance.shutdown()
+
+    assert [call["bank_id"] for call in fake.retains] == ["hermes-session-1", "hermes-session-2"]
+
+
+def test_a_session_named_as_its_own_parent_gets_no_parent_tag(provider):
+    """#5422: in-place compaction reports the session as its own parent; tagging it would
+    flip the document's tag set and re-consolidate it from scratch."""
+    instance, fake = provider({}, parent_session_id="session-1")
+    instance.sync_turn("one", "1")
+    instance.shutdown()
+
+    assert _retain_item(fake)["tags"] == ["session:session-1"]
+
+
 def test_register_exposes_the_provider_to_hermes():
     registered = []
     plugin.register(type("Ctx", (), {"register_memory_provider": lambda _self, p: registered.append(p)})())
@@ -244,8 +294,8 @@ def test_append_mode_drops_retained_turns_from_the_buffer(provider):
     instance.shutdown()
 
     # Each retain still carries only its own un-retained tail, never a replay.
-    assert _turns_of(fake, 0) == [["User: one", "Assistant: 1"]]
-    assert _turns_of(fake, 1) == [["User: two", "Assistant: 2"]]
+    assert _messages_of(fake, 0) == ["User: one", "Assistant: 1"]
+    assert _messages_of(fake, 1) == ["User: two", "Assistant: 2"]
 
 
 def test_overwrite_mode_keeps_every_turn(provider, monkeypatch):
@@ -262,7 +312,9 @@ def test_overwrite_mode_keeps_every_turn(provider, monkeypatch):
     instance.shutdown()
 
     # The second retain resends the whole session, which is what overwrite means.
-    assert _turns_of(fake, 1) == [["User: one", "Assistant: 1"], ["User: two", "Assistant: 2"]]
+    assert _messages_of(fake, 1) == ["User: one", "Assistant: 1", "User: two", "Assistant: 2"]
+    # Shutdown on a cadence boundary sends nothing more: every turn already went out.
+    assert len(fake.retains) == 2
 
 
 def test_root_warning_goes_through_the_hosts_warning_callback(provider, monkeypatch):
@@ -450,3 +502,295 @@ def test_retain_strategy_is_exposed_as_a_setting(provider):
     instance, _ = provider()
     keys = {option["key"] for option in instance.get_config_schema()}
     assert "retain_strategy" in keys
+
+
+def test_version_probe_sends_plugin_user_agent(monkeypatch):
+    import urllib.request
+
+    sent = {}
+
+    def fake_urlopen(req, timeout):
+        sent.update(req.headers)
+        raise OSError("offline")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(plugin._VersionProbeUnreachable):
+        plugin._fetch_hindsight_api_version("http://hs.test")
+    assert sent["User-agent"] == plugin._USER_AGENT
+    assert plugin._USER_AGENT != "hindsight-hermes/0.0.0"
+
+
+class _VersionServer:
+    """urlopen stand-in: maps a path to a JSON body, an HTTP status, or an exception."""
+
+    def __init__(self, routes):
+        self.routes, self.calls = routes, []
+
+    def __call__(self, req, timeout):
+        import io
+        import urllib.error
+
+        path = req.full_url.split("hs.test", 1)[1]
+        self.calls.append(path)
+        answer = self.routes.get(path, 404)
+        if isinstance(answer, Exception):
+            raise answer
+        if isinstance(answer, int):
+            raise urllib.error.HTTPError(req.full_url, answer, "", {}, io.BytesIO(b""))
+        return io.BytesIO(json.dumps(answer).encode())
+
+
+@pytest.fixture
+def version_probe(monkeypatch):
+    import urllib.request
+
+    monkeypatch.setitem(sys.modules, "agent.credential_persistence", SimpleNamespace(fingerprint_secret_value=str))
+    monkeypatch.setattr(plugin, "_append_capability_cache", {})
+    monkeypatch.setattr(plugin, "_append_probe_unreachable_at", {})
+
+    def _serve(routes):
+        server = _VersionServer(routes)
+        monkeypatch.setattr(urllib.request, "urlopen", server)
+        return server
+
+    return _serve
+
+
+def test_an_unreachable_server_is_asked_again_not_cached(version_probe, monkeypatch):
+    """#5221: one failed probe at startup used to disable append for the whole process."""
+    down = version_probe({"/v1/version": OSError("refused"), "/version": OSError("refused")})
+    assert plugin._check_api_supports_update_mode_append("http://hs.test") is False
+    # Inside the retry window a hung server is not asked again on every turn.
+    assert plugin._check_api_supports_update_mode_append("http://hs.test") is False
+    assert down.calls == ["/v1/version", "/version"]
+
+    monkeypatch.setattr(plugin, "_APPEND_PROBE_RETRY_S", 0.0)
+    up = version_probe({"/v1/version": {"api_version": "0.10.3"}})
+    assert plugin._check_api_supports_update_mode_append("http://hs.test") is True
+    assert up.calls == ["/v1/version"]
+
+
+def test_a_server_error_counts_as_unreachable(version_probe, monkeypatch):
+    version_probe({"/v1/version": 503, "/version": 502})
+    assert plugin._check_api_supports_update_mode_append("http://hs.test") is False
+    monkeypatch.setattr(plugin, "_APPEND_PROBE_RETRY_S", 0.0)
+    version_probe({"/v1/version": {"api_version": "0.10.3"}})
+    assert plugin._check_api_supports_update_mode_append("http://hs.test") is True
+
+
+def test_one_failed_path_keeps_the_answer_unknown(version_probe, monkeypatch):
+    """A 404 on /v1/version and a timeout on /version is not proof of an old server."""
+    version_probe({"/v1/version": 404, "/version": TimeoutError()})
+    assert plugin._check_api_supports_update_mode_append("http://hs.test") is False
+    monkeypatch.setattr(plugin, "_APPEND_PROBE_RETRY_S", 0.0)
+    version_probe({"/v1/version": 404, "/version": {"version": "0.10.3"}})
+    assert plugin._check_api_supports_update_mode_append("http://hs.test") is True
+
+
+def test_an_old_server_answer_is_cached(version_probe):
+    """A server that answers without a version is old, not down: that answer is kept."""
+    old = version_probe({"/v1/version": 404, "/version": 404})
+    assert plugin._check_api_supports_update_mode_append("http://hs.test") is False
+    assert plugin._check_api_supports_update_mode_append("http://hs.test") is False
+    assert old.calls == ["/v1/version", "/version"]
+
+
+def test_version_falls_back_to_the_bare_path(version_probe):
+    """Servers that predate the /v1 alias still answer /version (coding-agents order, #5286)."""
+    server = version_probe({"/v1/version": 404, "/version": {"version": "0.5.0"}})
+    assert plugin._check_api_supports_update_mode_append("http://hs.test") is True
+    assert server.calls == ["/v1/version", "/version"]
+
+
+def test_retain_tool_honours_retain_async(provider):
+    """#4662: the tool blocked on a sync retain whatever retain_async said."""
+    instance, fake = provider({})
+    result = json.loads(instance.handle_tool_call("hindsight_retain", {"content": "Ada likes tea"}))
+    assert fake.retains[0]["retain_async"] is True
+    assert result["result"] == "Memory queued for storage."
+
+    instance, fake = provider({"retain_async": False})
+    result = json.loads(instance.handle_tool_call("hindsight_retain", {"content": "Ada likes tea"}))
+    assert fake.retains[0]["retain_async"] is False
+    assert result["result"] == "Memory stored successfully."
+
+
+def test_a_tool_error_with_no_message_still_says_what_failed(provider):
+    """#4662: a timeout's str() is empty, which left the agent a bare 'Failed to search memory: '."""
+
+    class TimingOut(FakeClient):
+        async def arecall(self, **kwargs):
+            raise TimeoutError()
+
+    instance, _ = provider({}, client=TimingOut())
+    result = instance.handle_tool_call("hindsight_recall", {"query": "q"})
+    assert result.endswith("Failed to search memory: TimeoutError")
+
+
+def test_a_slow_prefetch_never_overwrites_a_newer_one(provider):
+    """#4662: an older background recall that finishes last must not replace the newer result."""
+    release_first = threading.Event()
+
+    class SlowFirst(FakeClient):
+        async def arecall(self, **kwargs):
+            if kwargs["query"] == "old":
+                while not release_first.is_set():
+                    await asyncio.sleep(0.01)
+                return FakeRecallResponse(["stale memory"])
+            return FakeRecallResponse(["fresh memory"])
+
+    instance, _ = provider({"prefetch_waits_for_retain": False}, client=SlowFirst())
+    instance.queue_prefetch("old")
+    old_worker = instance._prefetch_thread
+    instance.queue_prefetch("new")
+    instance._prefetch_thread.join(5)
+    release_first.set()
+    old_worker.join(5)
+
+    assert "fresh memory" in instance.prefetch("next")
+    instance.shutdown()
+
+
+def test_recall_tags_accept_the_documented_comma_separated_form(provider):
+    """#4662: the string went to the client as-is and the API rejected it (422)."""
+    instance, fake = provider({"recall_tags": "team, project-x"})
+    instance.handle_tool_call("hindsight_recall", {"query": "q"})
+    assert fake.recalls[0]["tags"] == ["team", "project-x"]
+
+
+def test_a_mistyped_number_in_config_falls_back_to_its_default(provider):
+    """#4662: a plain int()/float() on these crashed initialize, so memory was off entirely."""
+    instance, _ = provider(
+        {
+            "retain_every_n_turns": "two",
+            "recall_max_tokens": "lots",
+            "recall_max_input_chars": "",
+            "prefetch_retain_drain_timeout": "soon",
+        }
+    )
+    assert instance._retain_every_n_turns == 1
+    assert instance._recall_max_tokens == 4096
+    assert instance._recall_max_input_chars == 800
+    assert instance._prefetch_retain_drain_timeout == 10.0
+
+
+def test_prompt_does_not_promise_injected_memories_when_auto_recall_is_off(provider):
+    """#4662: hybrid mode told the model memories were injected even with auto_recall off."""
+    on, _ = provider({})
+    off, _ = provider({"auto_recall": False})
+    assert plugin._CONTEXT_NOTE in on.system_prompt_block()
+    assert plugin._CONTEXT_NOTE not in off.system_prompt_block()
+    assert plugin._TOOL_GUIDANCE in off.system_prompt_block()
+
+
+def test_reconnect_closes_the_client_it_replaces(provider, monkeypatch):
+    """#4662: the retry after a dead embedded daemon dropped the old client unclosed."""
+
+    class Dead(FakeClient):
+        closed = False
+
+        async def arecall(self, **kwargs):
+            raise RuntimeError("Cannot connect to host 127.0.0.1:8888")
+
+        async def aclose(self):
+            Dead.closed = True
+
+    dead, fresh = Dead(), FakeClient(recall_texts=["back"])
+    instance, _ = provider({}, client=dead)
+    instance._mode, instance._client = "local_embedded", dead
+    monkeypatch.setattr(instance, "_new_embedded_client", lambda: fresh)
+
+    result = json.loads(instance.handle_tool_call("hindsight_recall", {"query": "q"}))
+    assert result["result"] == "1. back"
+    assert Dead.closed
+
+
+def test_shutdown_drops_its_atexit_hook(provider, monkeypatch):
+    """#4662: the hook kept every provider alive until exit; the gateway makes one per chat session.
+    Hooks are recorded rather than counted: atexit._ncallbacks() does not drop on unregister on
+    every Python the plugin supports."""
+    hooks: list = []
+    monkeypatch.setattr(plugin.atexit, "register", hooks.append)
+    monkeypatch.setattr(plugin.atexit, "unregister", hooks.remove)
+
+    instance, _ = provider({})
+    instance.sync_turn("hi", "hello")
+    assert hooks == [instance._atexit_shutdown]
+    instance.shutdown()
+    assert hooks == []
+    assert not instance._atexit_registered
+
+
+def test_availability_failure_is_logged(hermes_env, caplog):
+    """#4662: is_available swallowed the error, so a broken config showed no reason anywhere."""
+    (hermes_env / "hindsight").mkdir(parents=True, exist_ok=True)
+    (hermes_env / "hindsight" / "config.json").write_text(json.dumps({"mode": ["cloud"]}))
+    with caplog.at_level("DEBUG"):
+        assert plugin.HindsightMemoryProvider().is_available() is False
+    assert "availability check failed" in caplog.text
+
+
+def test_desktop_panel_offers_every_mode_the_plugin_runs():
+    """#4662: without local_embedded the panel could not hold that mode and saving rewrote it."""
+    from hindsight_hermes.config_schema import CONFIG_SCHEMA
+
+    mode = next(field for field in CONFIG_SCHEMA["fields"] if field["key"] == "mode")
+    assert {option[0] for option in mode["options"]} == {"cloud", "local_embedded", "local_external"}
+
+
+def test_cron_runs_are_not_auto_retained(provider):
+    """#4945: Hermes passes agent_context="cron" for scheduled jobs; the contract is to skip writes."""
+    cron, fake = provider({}, agent_context="cron")
+    cron.sync_turn("daily digest", "here is the news")
+    cron.handle_tool_call("hindsight_retain", {"content": "an explicit note"})  # the tool still works
+    cron.shutdown()
+    assert [call["items"][0]["content"] for call in fake.retains] == ["an explicit note"]
+
+
+def test_retain_cron_opts_cron_runs_back_in(provider):
+    cron, fake = provider({"retain_cron": True}, agent_context="cron")
+    cron.sync_turn("daily digest", "here is the news")
+    cron.shutdown()
+    assert len(fake.retains) == 1
+
+
+def test_primary_runs_are_auto_retained(provider):
+    primary, fake = provider({}, agent_context="primary")
+    primary.sync_turn("hello", "hi")
+    primary.shutdown()
+    assert len(fake.retains) == 1
+
+
+def test_bank_id_env_wins_over_config_json(provider):
+    """#5171: HINDSIGHT_BANK_ID is documented as an override; config.json used to shadow it."""
+    from conftest import SECRETS
+
+    SECRETS["HINDSIGHT_BANK_ID"] = "env-bank"
+    instance, fake = provider({"bank_id": "config-bank"})
+    instance.sync_turn("hello", "hi")
+    instance.shutdown()
+    assert fake.retains[0]["bank_id"] == "env-bank"
+
+
+def test_config_bank_is_kept_without_the_env_var(provider):
+    instance, fake = provider({"bank_id": "config-bank"})
+    instance.sync_turn("hello", "hi")
+    instance.shutdown()
+    assert fake.retains[0]["bank_id"] == "config-bank"
+
+
+def test_reflect_tags_scope_reflect(provider):
+    """#5170: reflect gets its own opt-in scope; recall_tags never leak into it."""
+    instance, fake = provider(
+        {"reflect_tags": "team, project-x", "reflect_tags_match": "all", "recall_tags": "other"},
+        client=FakeClient(reflect_text="synthesis"),
+    )
+    instance.handle_tool_call("hindsight_reflect", {"query": "q"})
+    assert fake.reflects[0]["tags"] == ["team", "project-x"]
+    assert fake.reflects[0]["tags_match"] == "all"
+
+
+def test_reflect_without_reflect_tags_uses_the_whole_bank(provider):
+    instance, fake = provider({"recall_tags": "team"}, client=FakeClient(reflect_text="synthesis"))
+    instance.handle_tool_call("hindsight_reflect", {"query": "q"})
+    assert "tags" not in fake.reflects[0]

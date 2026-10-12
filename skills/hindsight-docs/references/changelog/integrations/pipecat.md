@@ -10,6 +10,22 @@ For the source code, see [`hindsight-integrations/pipecat`](https://github.com/v
 
 ← [Back to main changelog](../index.md)
 
+## [0.1.2](https://github.com/vectorize-io/hindsight/tree/integrations/pipecat/v0.1.2)
+
+[Commits in this release →](https://github.com/vectorize-io/hindsight/commits/integrations/pipecat/v0.1.2)
+
+**Breaking Changes**
+
+- Migrated the Pipecat integration to the pipecat-ai 1.x release line, requiring compatibility with the newer Pipecat API.<span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/dcbouius" target="_blank" rel="noopener noreferrer" style={{color: "var(--ifm-color-primary)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px", verticalAlign: "middle"}}>@dcbouius</a><span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/vectorize-io/hindsight/commit/b95055ba2" target="_blank" rel="noopener noreferrer" style={{fontFamily: "var(--ifm-font-family-monospace, monospace)", fontSize: "0.85em", color: "var(--ifm-color-emphasis-600)"}}>b95055ba2</a>
+
+**Features**
+
+- Pipecat requests now identify the integration with a dedicated User-Agent header.<span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/nicoloboschi" target="_blank" rel="noopener noreferrer" style={{color: "var(--ifm-color-primary)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px", verticalAlign: "middle"}}>@nicoloboschi</a><span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/vectorize-io/hindsight/commit/5d4f5cfcd" target="_blank" rel="noopener noreferrer" style={{fontFamily: "var(--ifm-font-family-monospace, monospace)", fontSize: "0.85em", color: "var(--ifm-color-emphasis-600)"}}>5d4f5cfcd</a>
+
+**Improvements**
+
+- Updated the Pipecat integration to use pipecat-ai 1.12.0.<span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/cdbartholomew" target="_blank" rel="noopener noreferrer" style={{color: "var(--ifm-color-primary)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px", verticalAlign: "middle"}}>@cdbartholomew</a><span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/vectorize-io/hindsight/commit/ccfe85b48" target="_blank" rel="noopener noreferrer" style={{fontFamily: "var(--ifm-font-family-monospace, monospace)", fontSize: "0.85em", color: "var(--ifm-color-emphasis-600)"}}>ccfe85b48</a>
+
 ## [0.1.1](https://github.com/vectorize-io/hindsight/tree/integrations/pipecat/v0.1.1)
 
 **Features**

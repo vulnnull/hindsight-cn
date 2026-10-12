@@ -1,6 +1,6 @@
 [project]
 name = "hindsight-composio"
-version = "0.1.0"
+version = "0.1.1"
 description = "Composio integration for Hindsight - persistent memory custom tools for AI agents"
 requires-python = ">=3.10"
 license = { text = "MIT" }

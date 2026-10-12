@@ -52,7 +52,7 @@ _PROVIDER_DEFAULT_MODELS = {
 }
 # The embedded daemon speaks OpenAI wire format for these providers.
 _OPENAI_WIRE_PROVIDERS = {"openai_compatible", "openrouter"}
-_OBSERVATION_SCOPE_KEYWORDS = {"per_tag", "combined", "all_combinations"}
+_OBSERVATION_SCOPE_KEYWORDS = {"per_tag", "combined", "all_combinations", "shared"}
 
 
 def _parse_int_setting(value: Any, default: int) -> int:
@@ -63,6 +63,17 @@ def _parse_int_setting(value: Any, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         logger.warning("Invalid integer Hindsight setting %r; using default %s", value, default)
+        return default
+
+
+def _parse_float_setting(value: Any, default: float) -> float:
+    """Parse a float config/env value, falling back on invalid input."""
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        logger.warning("Invalid number for Hindsight setting %r; using default %s", value, default)
         return default
 
 

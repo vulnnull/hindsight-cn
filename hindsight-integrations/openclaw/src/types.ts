@@ -1,3 +1,4 @@
+import type { MemoryProviderRuntime } from "./memory-provider.js";
 // Moltbot plugin API types (minimal subset needed for this plugin)
 
 import type { MinScores } from "@vectorize-io/hindsight-client";
@@ -16,6 +17,8 @@ export interface MoltbotPluginAPI {
     event: string,
     handler: (event: any, ctx?: any) => void | Promise<void | PluginPromptHookResult>
   ): void;
+  // OpenClaw >= 2026.10: the memory-slot owner's native read runtime. Absent on older hosts.
+  registerMemoryCapability?(capability: { providerRuntime: MemoryProviderRuntime }): void;
   // OpenClaw framework logger — handles coloring/formatting consistently across plugins
   logger: {
     info(msg: string): void;
@@ -51,7 +54,20 @@ export interface PluginHookAgentContext {
   messageProvider?: string;
   channelId?: string;
   senderId?: string;
+  /** session_end only, OpenClaw >= 2026.10.1. Absent on older hosts. */
+  endedTranscript?: PluginHookEndedTranscript;
 }
+
+/** OpenClaw's bounded reader for the transcript of a session that just ended. */
+export type PluginHookEndedTranscript =
+  | { available: false; reason: string }
+  | {
+      available: true;
+      readTail(options: {
+        maxMessages: number;
+        maxBytes: number;
+      }): Promise<{ messages: readonly unknown[]; totalMessages: number; truncated: boolean }>;
+    };
 
 export interface PluginConfig {
   /**

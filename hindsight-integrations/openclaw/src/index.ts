@@ -2,6 +2,7 @@ import type {
   MoltbotPluginAPI,
   PluginConfig,
   PluginHookAgentContext,
+  PluginHookEndedTranscript,
   MemoryResult,
   RetainRequest,
 } from "./types.js";
@@ -12,6 +13,7 @@ import {
   type MinScores,
 } from "@vectorize-io/hindsight-client";
 import { RetainQueue } from "./retain-queue.js";
+import { createMemoryProviderRuntime } from "./memory-provider.js";
 import { compileSessionPatterns, matchesSessionPattern } from "./session-patterns.js";
 import { parseSessionFile } from "./session-file.js";
 import { createHash, randomUUID } from "crypto";
@@ -106,8 +108,33 @@ let currentPluginConfig: PluginConfig | null = null;
 let serviceGeneration = 0;
 let serviceAbortController: AbortController | null = null;
 // External-API hooks can lazy-initialize before the first service.start(). Keep
-// that recall-only lifetime cancellable without enabling pre-start retention.
-const preServiceRecallController = new AbortController();
+// that lifetime cancellable: the first start() or stop() aborts it.
+//
+// It covers retain as well as recall. It used to be recall-only, but OpenClaw
+// re-evaluates this module for each plugin registry it loads and only ever calls
+// service.start() on the first one, so the hooks that actually run often belong
+// to a copy that is never started. Recall worked there and retain returned at its
+// lifecycle guard without a log line, so memory silently stopped growing. (#4828)
+const preServiceController = new AbortController();
+
+/**
+ * Snapshot the lifecycle a hook runs under: the started service's, or the
+ * pre-start one when this module copy was never started. `isCurrent()` turns
+ * false once a later start() or stop() replaces it, so in-flight work can bail.
+ * After an explicit stop() there is no lifecycle and hooks do nothing.
+ */
+function captureHookLifecycle(): { signal: AbortSignal | undefined; isCurrent: () => boolean } {
+  const generation = serviceGeneration;
+  const controller = serviceAbortController ?? (generation === 0 ? preServiceController : null);
+  return {
+    signal: controller?.signal,
+    isCurrent: () =>
+      controller !== null &&
+      (serviceAbortController ?? preServiceController) === controller &&
+      generation === serviceGeneration &&
+      !controller.signal.aborted,
+  };
+}
 
 // Track which banks have had configured defaults applied (missions + bank config).
 const banksWithDefaultsApplied = new Set<string>();
@@ -511,6 +538,40 @@ export function sessionEndMessagesFromTranscript(
   }
 }
 
+// Generous bounds for one session's tail; OpenClaw applies its own caps on top.
+const ENDED_TRANSCRIPT_MAX_MESSAGES = 10_000;
+const ENDED_TRANSCRIPT_MAX_BYTES = 8 * 1024 * 1024;
+
+/**
+ * The messages of a session that just ended, for the `session_end` flush.
+ *
+ * OpenClaw 2026.9.4 moved transcripts into SQLite, so the JSONL file the event
+ * points at no longer exists and the flush found nothing (#4594). 2026.10.1 added
+ * `ctx.endedTranscript`, a bounded reader over that store; use it when the host
+ * offers one and keep the file read for older hosts.
+ */
+export async function sessionEndMessages(
+  event: unknown,
+  endedTranscript: PluginHookEndedTranscript | undefined
+): Promise<unknown[] | undefined> {
+  if (endedTranscript === undefined) return sessionEndMessagesFromTranscript(event);
+  if (!endedTranscript.available) {
+    debug(`[Hindsight Hook] session_end: transcript unavailable (${endedTranscript.reason})`);
+    return undefined;
+  }
+  try {
+    const { messages, truncated } = await endedTranscript.readTail({
+      maxMessages: ENDED_TRANSCRIPT_MAX_MESSAGES,
+      maxBytes: ENDED_TRANSCRIPT_MAX_BYTES,
+    });
+    if (truncated) debug("[Hindsight Hook] session_end: transcript truncated to its tail");
+    return messages.length > 0 ? [...messages] : undefined;
+  } catch (error) {
+    log.warn(`session_end: could not read the ended transcript: ${error}`);
+    return undefined;
+  }
+}
+
 export function formatCurrentTimeForRecall(date = new Date()): string {
   const year = date.getUTCFullYear();
   const month = String(date.getUTCMonth() + 1).padStart(2, "0");
@@ -568,6 +629,14 @@ async function lazyReinit(configOverride?: PluginConfig): Promise<void> {
 
     usingExternalApi = true;
     isInitialized = true;
+    // A copy that was never started has no retain queue, so a failed retain
+    // would be dropped instead of replayed. (#4537)
+    // ponytail: the started copy may hold the same file, so both can replay one
+    // item; the persisted operation id keeps that idempotent on API >= 0.8.6.
+    // Share one queue per process via globalThis if duplicates show up on older APIs.
+    if (!retainQueue && serviceGeneration === 0 && !preServiceController.signal.aborted) {
+      initRetainQueue(config, 0, preServiceController.signal);
+    }
     // Replace the rejected initPromise with a resolved one
     initPromise = Promise.resolve();
     debug("[Hindsight] ✓ Lazy re-initialization succeeded");
@@ -663,6 +732,36 @@ function getConfiguredBankId(pluginConfig: PluginConfig): string | undefined {
 
   const trimmed = pluginConfig.bankId.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+/**
+ * The bank an agent's memory lives in when it depends on the agent alone: an
+ * `agentBankMap` entry, a static bank, or agent-only dynamic banking. Undefined
+ * when the bank is keyed by user, channel or provider, which an agent id can't
+ * pick.
+ */
+export function agentOnlyBankId(agentId: string, pluginConfig: PluginConfig): string | undefined {
+  const ctx: PluginHookAgentContext = { agentId };
+  const mapped = mappedBankIdForAgent(ctx, pluginConfig);
+  if (mapped) return mapped;
+  if (usesStaticBank(pluginConfig)) return getStaticBankId(pluginConfig);
+  const fields = pluginConfig.dynamicBankGranularity?.length
+    ? pluginConfig.dynamicBankGranularity
+    : DEFAULT_DYNAMIC_BANK_GRANULARITY;
+  return fields.every((field) => field === "agent") ? deriveBankId(ctx, pluginConfig) : undefined;
+}
+
+/** The initialized client and its options, initializing lazily like the hooks do. */
+async function readyClient(): Promise<{
+  client: HindsightClient;
+  options: HindsightClientOptions;
+} | null> {
+  await (global as any).__hindsightClient?.waitForReady();
+  return client && clientOptions ? { client, options: clientOptions } : null;
+}
+
+function authHeaders(options: HindsightClientOptions): Record<string, string> {
+  return options.apiKey ? { Authorization: `Bearer ${options.apiKey}` } : {};
 }
 
 function usesStaticBank(pluginConfig: PluginConfig): boolean {
@@ -2132,6 +2231,16 @@ export function getPluginConfig(api: MoltbotPluginAPI): PluginConfig {
     skipStatelessSessions: config.skipStatelessSessions !== false,
     debug: config.debug ?? false,
     debugPerfTiming: config.debugPerfTiming === true,
+    // Both were missing from this whitelist, so the logger always ran at
+    // `info` with a 5-minute summary whatever the user configured.
+    logLevel:
+      config.logLevel && ["off", "error", "warning", "info", "debug"].includes(config.logLevel)
+        ? config.logLevel
+        : undefined,
+    logSummaryIntervalMs:
+      typeof config.logSummaryIntervalMs === "number" && config.logSummaryIntervalMs >= 0
+        ? config.logSummaryIntervalMs
+        : undefined,
     // Retain queue: kept off the strict whitelist before — user values were
     // silently dropped before queue init read them. (#1443)
     retainQueuePath:
@@ -2167,7 +2276,9 @@ export default function (api: MoltbotPluginAPI) {
     // Get plugin config first (needed for debug flag and service registration)
     const pluginConfig = getPluginConfig(api);
     // If logLevel is 'debug', also enable legacy debug flag
-    debugEnabled = pluginConfig.debug ?? pluginConfig.logLevel === "debug";
+    // `debug` is always a boolean here (getPluginConfig defaults it, and so does
+    // the schema), so `??` never reached logLevel and `logLevel: "debug"` was a no-op.
+    debugEnabled = pluginConfig.debug === true || pluginConfig.logLevel === "debug";
 
     // Configure structured logger — route through OpenClaw's api.logger for consistent formatting
     if (api.logger) setApiLogger(api.logger);
@@ -2190,7 +2301,7 @@ export default function (api: MoltbotPluginAPI) {
     api.registerService({
       id: "hindsight-memory",
       async start() {
-        preServiceRecallController.abort();
+        preServiceController.abort();
         serviceAbortController?.abort();
         inflightRecalls.clear();
         const serviceController = new AbortController();
@@ -2472,7 +2583,7 @@ export default function (api: MoltbotPluginAPI) {
       async stop() {
         try {
           serviceGeneration++;
-          preServiceRecallController.abort();
+          preServiceController.abort();
           serviceAbortController?.abort();
           serviceAbortController = null;
           inflightRecalls.clear();
@@ -2530,7 +2641,14 @@ export default function (api: MoltbotPluginAPI) {
     debug("[Hindsight] Registering agent hooks...");
     log.info("registering agent hooks");
 
-    api.on("before_dispatch", async (event: any, ctx?: PluginHookAgentContext) => {
+    // Inbound identity capture: cache the sender and dispatch surface per session
+    // before the agent runs, for banks keyed by user or channel.
+    //
+    // This used `before_dispatch`, which carries the same fields. OpenClaw refuses
+    // to start or resume a Goal while any plugin holds `before_dispatch` (it can't
+    // replay it after a restart), so the plugin blocked Goals. `message_received`
+    // fires earlier on the same inbound path and is not on that list. (#5177)
+    api.on("message_received", async (event: any, ctx?: PluginHookAgentContext) => {
       try {
         const sessionKey =
           ctx?.sessionKey ?? (typeof event?.sessionKey === "string" ? event.sessionKey : undefined);
@@ -2538,8 +2656,9 @@ export default function (api: MoltbotPluginAPI) {
           return;
         }
 
+        // A message hook's channelId is the surface ("telegram", "webchat").
         const dispatchChannel =
-          (typeof event?.channel === "string" ? event.channel : undefined) ||
+          (typeof ctx?.channelId === "string" ? ctx.channelId : undefined) ||
           ctx?.messageProvider ||
           parseSessionKey(sessionKey).provider;
         const { resolvedCtx, skipReason } = resolveAndCacheIdentity({
@@ -2556,7 +2675,7 @@ export default function (api: MoltbotPluginAPI) {
 
         if (skipReason) {
           debug(
-            `[Hindsight] before_dispatch marked session ${sessionKey} to skip this turn: ${formatIdentitySkipReason(skipReason)}`
+            `[Hindsight] message_received marked session ${sessionKey} to skip this turn: ${formatIdentitySkipReason(skipReason)}`
           );
           logSkipOnce("dispatch", sessionKey, skipReason);
           return;
@@ -2566,15 +2685,15 @@ export default function (api: MoltbotPluginAPI) {
         }
 
         debug(
-          `[Hindsight] before_dispatch cached identity for ${sessionKey}: ${resolvedCtx.messageProvider}/${resolvedCtx.channelId} sender=${resolvedCtx.senderId}`
+          `[Hindsight] message_received cached identity for ${sessionKey}: ${resolvedCtx.messageProvider}/${resolvedCtx.channelId} sender=${resolvedCtx.senderId}`
         );
       } catch (error) {
-        log.warn(`before_dispatch identity cache error: ${error}`);
+        log.warn(`message_received identity cache error: ${error}`);
       }
     });
 
     // No `before_agent_start` registration: the callback used to call
-    // `resolveAndCacheIdentity()` and emit a debug log, but `before_dispatch`
+    // `resolveAndCacheIdentity()` and emit a debug log, but `message_received`
     // already populates the identity cache earlier in the inbound path,
     // `before_prompt_build` re-resolves before recall (and can infer
     // `senderId` from prompt content when ctx is missing it), and `agent_end`
@@ -2584,14 +2703,8 @@ export default function (api: MoltbotPluginAPI) {
     // Auto-recall: Inject relevant memories before agent processes the message
     // Hook signature: (event, ctx) where event has {prompt, messages?} and ctx has agent context
     api.on("before_prompt_build", async (event: any, ctx?: PluginHookAgentContext) => {
-      const recallGeneration = serviceGeneration;
-      const recallController =
-        serviceAbortController ?? (recallGeneration === 0 ? preServiceRecallController : null);
-      const isCurrentRecall = () =>
-        recallController !== null &&
-        (serviceAbortController ?? preServiceRecallController) === recallController &&
-        recallGeneration === serviceGeneration &&
-        !recallController.signal.aborted;
+      const recallLifecycle = captureHookLifecycle();
+      const isCurrentRecall = recallLifecycle.isCurrent;
       if (!isCurrentRecall()) return;
       // Optional perf instrumentation (#1406). Captured here at hook entry so
       // the early-return paths below don't influence the measurement of slow
@@ -2757,7 +2870,7 @@ export default function (api: MoltbotPluginAPI) {
               minScores: pluginConfig.recallMinScores,
             },
             recallTimeoutMs,
-            recallController?.signal
+            recallLifecycle.signal
           );
           inflightRecalls.set(recallKey, recallPromise);
           void recallPromise
@@ -2849,7 +2962,7 @@ ${memoriesFormatted}
           // restarted mid-recall, which is not a timeout — quoting recallTimeoutMs
           // there reports a deadline that never elapsed, with a number unrelated
           // to the time actually spent. (#4450)
-          if (recallController?.signal.aborted) {
+          if (recallLifecycle.signal?.aborted) {
             debug("[Hindsight] Auto-recall cancelled: service stopped, skipping memory injection");
           } else {
             log.warn(
@@ -2876,13 +2989,7 @@ ${memoriesFormatted}
       const force = retainOptions.force === true;
       const hookName = retainOptions.hookName;
       const retainGeneration = serviceGeneration;
-      const retainController = serviceAbortController;
-      const retainSignal = retainController?.signal;
-      const retainLifecycleIsCurrent = () =>
-        retainController !== null &&
-        serviceAbortController === retainController &&
-        retainGeneration === serviceGeneration &&
-        !retainSignal?.aborted;
+      const { signal: retainSignal, isCurrent: retainLifecycleIsCurrent } = captureHookLifecycle();
       if (!retainLifecycleIsCurrent()) return;
       // Optional perf instrumentation (#1406). Only emitted when an actual
       // retain RPC fires; the many early-return skip paths are not measured.
@@ -2986,15 +3093,13 @@ ${memoriesFormatted}
         }
 
         // Resolved once: `session_end` carries no transcript, so the forced flush
-        // reads it from the file the event points at (#4341). Without this the guard
-        // below ended every session-close flush before it began.
+        // has to fetch it. Without this the guard below ended every session-close
+        // flush before it began. (#4341)
         let eventMessages = event.context?.sessionEntry?.messages ?? event.messages;
         if (force && (!Array.isArray(eventMessages) || eventMessages.length === 0)) {
-          eventMessages = sessionEndMessagesFromTranscript(event);
+          eventMessages = await sessionEndMessages(event, ctx?.endedTranscript);
           if (Array.isArray(eventMessages)) {
-            debug(
-              `[Hindsight Hook] session_end: read ${eventMessages.length} messages from ${event.sessionFile}`
-            );
+            debug(`[Hindsight Hook] session_end: read ${eventMessages.length} messages`);
           }
         }
 
@@ -3231,6 +3336,58 @@ ${memoriesFormatted}
     });
     debug("[Hindsight] Hooks registered");
     log.info("agent hooks registered");
+
+    // OpenClaw's own memory surfaces read through this when Hindsight holds the
+    // memory slot; without it they all report "memory plugin unavailable". (#4916)
+    api.registerMemoryCapability?.({
+      providerRuntime: createMemoryProviderRuntime({
+        providerId: "hindsight-openclaw",
+        agentBank: (agentId) => agentOnlyBankId(agentId, currentPluginConfig || pluginConfig),
+        recall: async (bankId, query, signal) => {
+          const live = await readyClient();
+          if (!live) throw new Error("Hindsight client is not initialized");
+          const config = currentPluginConfig || pluginConfig;
+          const response = await scopeClient(live.client, bankId).recall(
+            {
+              query,
+              maxTokens: config.recallMaxTokens,
+              budget: config.recallBudget,
+              types: config.recallTypes,
+            },
+            config.recallTimeoutMs,
+            signal
+          );
+          return (response.results ?? []).map((r) => ({
+            id: r.id,
+            text: r.text,
+            score: r.scores?.final,
+          }));
+        },
+        getMemory: async (bankId, memoryId, signal) => {
+          const live = await readyClient();
+          if (!live) throw new Error("Hindsight client is not initialized");
+          const res = await fetch(
+            `${live.options.baseUrl.replace(/\/$/, "")}/v1/default/banks/${encodeURIComponent(bankId)}/memories/${encodeURIComponent(memoryId)}`,
+            { headers: authHeaders(live.options), signal }
+          );
+          if (res.status === 404) return null;
+          if (!res.ok) throw new Error(`Hindsight memory lookup failed: HTTP ${res.status}`);
+          const body = (await res.json()) as { text?: unknown };
+          return typeof body.text === "string" ? body.text : null;
+        },
+        healthy: async () => {
+          const live = await readyClient().catch(() => null);
+          if (!live) return false;
+          // Bounded: OpenClaw's status call waits on this, and a hung API must read
+          // as unavailable rather than hang the Memory page.
+          const res = await fetch(`${live.options.baseUrl.replace(/\/$/, "")}/health`, {
+            headers: authHeaders(live.options),
+            signal: AbortSignal.timeout(5000),
+          }).catch(() => null);
+          return res?.ok === true;
+        },
+      }),
+    });
   } catch (error) {
     log.error("plugin loading error", error);
     if (error instanceof Error) {

@@ -10,6 +10,14 @@ For the source code, see [`hindsight-integrations/paperclip`](https://github.com
 
 ← [Back to main changelog](../index.md)
 
+## [0.4.2](https://github.com/vectorize-io/hindsight/tree/integrations/paperclip/v0.4.2)
+
+[Commits in this release →](https://github.com/vectorize-io/hindsight/commits/integrations/paperclip/v0.4.2)
+
+**Improvements**
+
+- Paperclip integration requests now include an integration-specific User-Agent for clearer identification and diagnostics.<span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/nicoloboschi" target="_blank" rel="noopener noreferrer" style={{color: "var(--ifm-color-primary)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px", verticalAlign: "middle"}}>@nicoloboschi</a><span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/vectorize-io/hindsight/commit/5d4f5cfcd" target="_blank" rel="noopener noreferrer" style={{fontFamily: "var(--ifm-font-family-monospace, monospace)", fontSize: "0.85em", color: "var(--ifm-color-emphasis-600)"}}>5d4f5cfcd</a>
+
 ## [0.4.1](https://github.com/vectorize-io/hindsight/tree/integrations/paperclip/v0.4.1)
 
 [Commits in this release →](https://github.com/vectorize-io/hindsight/commits/integrations/paperclip/v0.4.1)

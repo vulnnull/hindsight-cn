@@ -21,8 +21,12 @@ import {
   pageTriggerPatch,
   type RetainExtractionMode,
 } from "./missions";
+import { version as PKG_VERSION } from "../../package.json";
 import { pool, semverGte, sleep } from "./util";
 import type { RetainStamp } from "./retain-stamp";
+
+/** Sent on every request so the server can tell which integration is calling. */
+export const USER_AGENT = `hindsight-coding-agents/${PKG_VERSION}`;
 
 /** One node of GET /knowledge-base/tree. Only the fields this client reads. */
 export interface KnowledgeNode {
@@ -100,11 +104,11 @@ export interface ClientOpts {
   apiUrl: string;
   apiToken?: string;
   bank: string;
-  /** Repository this bank is about, named in every seeded page's query (`pageScopeRule`). Only
-   *  `seedPages()` reads it. Undefined when no single repository is (a shared static bank, a path
-   *  map, a bank several repos are renamed onto) — the query then names the BANK, which is the
-   *  only stable subject such a bank has. Must be a property of the bank and never of the calling
-   *  session's cwd: see `bankProjectName` (#4146). */
+  /** Repository this bank is about, named in every page query this client writes
+   *  (`pageScopeRule`). Undefined when no single repository is (a shared static bank, a path map, a
+   *  bank several repos are renamed onto) — the query then gets the shared-bank clause, which
+   *  names no project (#4490). Must be a property of the bank and never of the calling session's
+   *  cwd: see `bankProjectName` (#4146). */
   project?: string;
   log?: (msg: string) => void;
   /** Cap on concurrent retain-related requests (drain op polls, deepen pools). Default 10. */
@@ -204,9 +208,12 @@ async function isEndpointMissing(r: Response): Promise<boolean> {
         .toLowerCase() === "not found"
     );
   } catch {
-    // No JSON body at all (a proxy's HTML 404, a bare gateway response). Our API always answers
-    // bank-not-found in JSON, so this is not it — latch, as this code did before the fix.
-    return true;
+    // No JSON body at all (a proxy's HTML/plain-text 404, a bare gateway response). This used to
+    // latch, but a reverse proxy answers exactly this while the backend restarts, and the latch
+    // never expires — knowledge pages stayed off for the life of the process (#5071). Only our
+    // API's own JSON 404 is a verdict; anything else leaves the capability unknown, so the next
+    // call asks again.
+    return false;
   }
 }
 
@@ -235,6 +242,13 @@ export class ReflectError extends Error {
    *  every endpoint (auth, missing bank), so it is not. */
   get fallbackEligible(): boolean {
     return this.timedOut || (this.status !== undefined && this.status >= 500);
+  }
+
+  /** A 4xx the next attempt would get again (bad key, missing bank, rejected body) — retrying it
+   *  only spends another doomed call (#5207). 408/429 are "not now", so they stay retryable. */
+  get permanent(): boolean {
+    const s = this.status;
+    return s !== undefined && s >= 400 && s < 500 && s !== 408 && s !== 429;
   }
 }
 
@@ -266,6 +280,11 @@ export const DEFAULT_RECALL_OPTIONS: Record<string, unknown> = {
 
 /** How long drain() pauses between poll cycles when the API did not rate-limit (429). */
 const POLL_CYCLE_MS = 5000;
+
+/** Consecutive 5xx polls after which drain() gives an operation up as failed. A blip recovers in
+ *  one or two cycles; a server answering 5xx for this long (~1 min at the 5s cycle) is not going to
+ *  report that op's status, and polling it for the rest of the hour only hides it (#5080). */
+const POLL_MAX_SERVER_ERRORS = 12;
 
 /** Minimum backoff after a 429 that carried no (or a shorter) Retry-After. */
 const RETRY_AFTER_FLOOR_MS = 10 * 1000;
@@ -309,6 +328,35 @@ function shapePage(page: unknown): unknown {
     ...(p.timestamp ? { last_updated_at: p.timestamp } : {}),
     body,
   };
+}
+
+/** Undici's cross-version handle on the dispatcher Node's global `fetch` uses. */
+const GLOBAL_DISPATCHER = Symbol.for("undici.globalDispatcher.1");
+
+/**
+ * The global dispatcher with undici's own header/body timeouts switched off, for a request that
+ * already carries an AbortSignal deadline — or undefined where there is nothing to wrap.
+ *
+ * Node's fetch applies a 300s `headersTimeout` below our signal, so a reflect configured above
+ * 300s (`reflectToolTimeoutMs` defaults to 330s, past the server's own reflect wall) died with
+ * UND_ERR_HEADERS_TIMEOUT before the server could answer (#5504). Composing over the CURRENT
+ * global dispatcher, instead of building a new undici `Agent`, needs no `undici` dependency (the
+ * bundled one is not importable) and keeps any proxy dispatcher the host installed. Hosts whose
+ * fetch is not undici's (Bun, DSH's own) have no such dispatcher and ignore the option.
+ */
+function signalOnlyDispatcher(): unknown {
+  // Node loads undici — which installs the global dispatcher — lazily. Touching the `Headers`
+  // global loads it; touching `fetch` does not (it is a wrapper until first called).
+  void globalThis.Headers;
+  const d = (globalThis as Record<symbol, unknown>)[GLOBAL_DISPATCHER] as
+    | { compose?: (interceptor: unknown) => unknown }
+    | undefined;
+  if (typeof d?.compose !== "function") return undefined; // Node 18's undici predates compose()
+  type Dispatch = (opts: Record<string, unknown>, handler: unknown) => boolean;
+  return d.compose(
+    (dispatch: Dispatch) => (opts: Record<string, unknown>, handler: unknown) =>
+      dispatch({ ...opts, headersTimeout: 0, bodyTimeout: 0 }, handler)
+  );
 }
 
 export class HindsightClient {
@@ -359,6 +407,7 @@ export class HindsightClient {
     const h: Record<string, string> = {
       "Content-Type": "application/json",
       "Accept-Encoding": "identity",
+      "User-Agent": USER_AGENT,
     };
     if (this.token) h["Authorization"] = `Bearer ${this.token}`;
     return h;
@@ -392,7 +441,10 @@ export class HindsightClient {
    * bounds the whole call.
    */
   private async fetchWithAuth(url: string, init: RequestInit): Promise<Response> {
-    const send = () => fetch(url, { ...init, headers: this.headers() });
+    // Only a request with its own deadline drops undici's timeouts; the drain poll has none.
+    const dispatcher = init.signal ? signalOnlyDispatcher() : undefined;
+    const send = () =>
+      fetch(url, { ...init, headers: this.headers(), ...(dispatcher ? { dispatcher } : {}) });
     const r = await send();
     if (r.status !== 401 || !this.refreshToken()) return r;
     return send();
@@ -482,7 +534,7 @@ export class HindsightClient {
 
   /**
    * Whether this server honours `operation_id` on an async retain, and can therefore be appended to
-   * safely (see MIN_IDEMPOTENT_RETAIN_VERSION). Probed once per client via GET /version; anything
+   * safely (see MIN_IDEMPOTENT_RETAIN_VERSION). Probed once per client via the version endpoint; anything
    * unreachable, unparseable or older answers "no", which costs efficiency, never correctness.
    */
   async supportsIdempotentRetain(): Promise<boolean> {
@@ -493,15 +545,22 @@ export class HindsightClient {
     return this.idempotentRetain;
   }
 
+  /** `/v1/version` first: an ingress that routes only `/v1` to the API (the Helm chart's default)
+   *  hands a bare `/version` to the control plane, whose HTML 404 or login redirect read as "no",
+   *  so append silently never turned on (#5286). Servers that predate the alias still answer
+   *  `/version`, so that stays as the fallback. */
   private async probeIdempotentRetain(): Promise<boolean> {
-    try {
-      const r = await this.req("GET", `${this.apiUrl}/version`);
-      if (!r.ok) return false;
-      const j = (await r.json()) as { api_version?: string };
-      return semverGte(j.api_version, MIN_IDEMPOTENT_RETAIN_VERSION);
-    } catch {
-      return false;
+    for (const path of ["/v1/version", "/version"]) {
+      try {
+        const r = await this.req("GET", `${this.apiUrl}${path}`);
+        if (!r.ok) continue;
+        const j = (await r.json()) as { api_version?: string };
+        return semverGte(j.api_version, MIN_IDEMPOTENT_RETAIN_VERSION);
+      } catch {
+        /* unreachable or not our API's JSON — try the next path */
+      }
     }
+    return false;
   }
 
   /**
@@ -568,6 +627,15 @@ export class HindsightClient {
       if (hit) return hit.tags ?? [];
       if (items.length < limit || offset + limit >= (j.total ?? 0)) return undefined;
     }
+  }
+
+  /** Whether the bank holds any document at all — a one-row listing. A bank that does not exist
+   *  yet (404) holds none; any other failure throws, so a caller can tell "empty" from "unknown". */
+  async hasDocuments(): Promise<boolean> {
+    const r = await this.req("GET", this.bankUrl("/documents?limit=1"));
+    if (r.status === 404) return false;
+    const j = (await r.json()) as { items?: unknown[]; total?: number };
+    return (j.total ?? j.items?.length ?? 0) > 0;
   }
 
   /** Configure the bank: POST the coding bank manifest to /import (missions, retain strategies,
@@ -676,7 +744,13 @@ export class HindsightClient {
     this.log(`[wait] draining ${ids.length} ${label} operations …`);
     const start = Date.now();
     const pending = new Set(ids);
+    const serverErrors = new Map<string, number>();
     let failed = 0;
+    const giveUp = (id: string, status: number): void => {
+      pending.delete(id);
+      failed++;
+      this.log(`  … ${label} op ${id} -> HTTP ${status}, counted as failed`);
+    };
     while (pending.size && Date.now() - start < maxMs) {
       // Cycle backoff: default 5s; any 429 in the cycle raises it to the longest Retry-After seen
       // (floor 10s) so a rate-limited API gets room to recover before the next poll round.
@@ -691,7 +765,17 @@ export class HindsightClient {
             );
             return; // op stays pending — retried after the backoff
           }
-          if (!r.ok) return;
+          // Any other non-OK used to just `return`, leaving the op pending for the whole maxMs:
+          // a 403/404 (auth drift, vanished op or bank) was polled for an hour (#5080). A 4xx
+          // will answer the same next cycle, so it is terminal now; a 5xx gets a bounded run.
+          if (r.status >= 500) {
+            const n = (serverErrors.get(id) ?? 0) + 1;
+            serverErrors.set(id, n);
+            if (n >= POLL_MAX_SERVER_ERRORS) giveUp(id, r.status);
+            return;
+          }
+          if (!r.ok) return giveUp(id, r.status);
+          serverErrors.delete(id);
           const st = (((await r.json()) as { status?: string }).status || "").toLowerCase();
           if (TERMINAL.has(st)) {
             pending.delete(id);
@@ -909,10 +993,9 @@ export class HindsightClient {
     pagesConfig: PagesConfig = {},
     customPages: CustomPagesConfig = {}
   ): Promise<void> {
-    // The bank id is the fallback subject, not a degraded one: for a bank no single repository
-    // owns it is the only name that stays put across sessions, and under the default
-    // `coding-agent::{gitProject}` template `project` is always set, so it never applies there.
-    const pages = pagesFor(this.project ?? this.bank, pagesConfig, customPages);
+    // No project = a bank no single repository owns: the shared-bank clause. Pages seeded under the
+    // old bank-named clause drift from it and are PATCHed below, which rebuilds them (#4490).
+    const pages = pagesFor(this.project, pagesConfig, customPages);
     const existing = new Map<string, KnowledgeNode>();
     let roots: KnowledgeNode[];
     try {
@@ -1007,7 +1090,7 @@ export class HindsightClient {
     }
     const initiatives = await this.resyncInitiativeTriggers(roots, pageTrigger);
     this.log(
-      `[bank] knowledge pages seeded on ${this.bank} (scoped to ${this.project ?? this.bank}): ` +
+      `[bank] knowledge pages seeded on ${this.bank} (scoped to ${this.project ?? "the shared bank"}): ` +
         `${created} created, ${updated} re-synced, ` +
         `${pages.length - created - updated - vanished} unchanged` +
         (vanished ? `, ${vanished} deleted under us` : "") +
@@ -1023,9 +1106,12 @@ export class HindsightClient {
    * it: five taxonomy pages against one page per initiative, each an LLM synthesis per
    * consolidation under the auto-refresh that used to be the default (#3506).
    *
-   * Only the trigger is touched. Their `name` and `source_query` are written once, from the
-   * initiative's own title, and re-stating either would rebuild a page whose question never
-   * changed. The tree read above is reused rather than re-fetched.
+   * Their `name` and `source_query` are written once, from the initiative's own title, and
+   * re-stating either would rebuild a page whose question never changed. The one exception is
+   * the scope clause: a page captured while the clause named the BANK is scoped to a project no
+   * memory is about and comes out empty (#4490), so exactly that clause is swapped for the current
+   * one — the rest of the query, the user's wording included, is kept. The tree read above is
+   * reused rather than re-fetched.
    */
   private async resyncInitiativeTriggers(
     roots: KnowledgeNode[],
@@ -1034,16 +1120,23 @@ export class HindsightClient {
     const folder = roots.find(
       (n) => n.kind === "folder" && (n.name || "").toLowerCase() === "initiatives"
     );
+    const bankScope = pageScopeRule(this.bank);
     let updated = 0;
     for (const page of folder?.children ?? []) {
+      if (page.kind !== "page") continue;
+      const patch: { trigger?: PageTrigger; source_query?: string } = {};
+      const query = page.description?.replace(bankScope, pageScopeRule(this.project));
+      if (query !== page.description) patch.source_query = query;
       // No trigger reported = policy unknown, not divergent (a server older than #3572).
-      if (page.kind !== "page" || page.trigger == null) continue;
-      const desired = pageTriggerFor(pageTrigger, this.bank, page.name);
-      if (!pageTriggerDrifted(page.trigger, desired)) continue;
+      if (page.trigger != null) {
+        const desired = pageTriggerFor(pageTrigger, this.bank, page.name);
+        if (pageTriggerDrifted(page.trigger, desired)) patch.trigger = pageTriggerPatch(desired);
+      }
+      if (!patch.trigger && !patch.source_query) continue;
       const r = await this.req(
         "PATCH",
         this.bankUrl(`/knowledge-base/nodes/${encodeURIComponent(page.id)}`),
-        { trigger: pageTriggerPatch(desired) }
+        patch
       );
       // 404 only: `req` throws on every other non-ok status it was not told to tolerate, so the
       // 405/501 this used to test for never arrive (see `pagesUnsupported`). No latch here — a
@@ -1103,13 +1196,12 @@ export class HindsightClient {
       // "the project's memory" alone never said WHICH project (#3476). `max_tokens` is stated for
       // the same reason `seedPages` states it — leaving it implicit pins these pages to whatever
       // the server's page default happens to be, which is only coincidentally PAGE_MAX_TOKENS.
-      const subject = this.project ?? this.bank;
       const r = await this.req("POST", this.bankUrl("/knowledge-base/pages"), {
         name: args.title,
         source_query:
           `Summarize the "${args.title}" initiative: what is being built or changed and why, ` +
           `and its current state — drawn from the project's memory.` +
-          pageScopeRule(subject),
+          pageScopeRule(this.project),
         parent_id: folderId,
         tags: ["knowledge:feature-work"],
         max_tokens: PAGE_MAX_TOKENS,
@@ -1127,8 +1219,11 @@ export class HindsightClient {
     // rewritten) as an addition, and this string is what the page synthesis reads.
     const verb = args.relatesToPageId ? "Update to an existing initiative" : "New initiative";
     const content = `${verb}: ${args.title}. ${args.summary}`;
-    // Unique marker document id (NOT pageId) so repeated captures accrue instead of replacing.
-    const markerId = `initiative-marker-${this.slugify(args.title)}-${Date.now()}`;
+    // A STABLE id per initiative, so a recapture upserts instead of adding one more document every
+    // call (#5076). Keyed on the page, not the title — a recapture may reword it — and two slots:
+    // the creation marker keeps what the initiative set out to do, the update marker holds the
+    // latest plan change (a newer update supersedes the older one).
+    const markerId = `initiative-marker-${this.slugify(pageId)}${args.relatesToPageId ? "-update" : ""}`;
     const tags = [...new Set([...(args.stamp?.tags ?? []), "knowledge:feature-work"])];
     // The context rides on every fact extracted from this marker, verbatim (ExtractedFact.context),
     // so the Initiatives overview can link an initiative to its own page from what it retrieved.

@@ -1,6 +1,8 @@
 
 # Meta Muse
 
+[View Changelog →](../../changelog/integrations/meta-muse.md)
+
 Bring the memory from your other AI tools into [Meta Muse](https://muse.ai), Meta's personal AI agent. Muse connects to your [Hindsight](https://vectorize.io/hindsight) memory banks over MCP. What you told Claude, ChatGPT, Claude Code, Hermes or OpenClaw is available in Muse, and what you tell Muse is available to them.
 
 Muse gets all of your banks, not one. It keeps its own `muse` bank for what you and it do together, and reads your other banks when a question reaches into them.

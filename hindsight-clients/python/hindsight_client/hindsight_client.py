@@ -277,10 +277,11 @@ class Hindsight:
             base_url: The base URL of the Hindsight API server
             api_key: Optional API key for authentication (sent as Bearer token)
             timeout: Request timeout in seconds (default: 300.0)
-            user_agent: Override the default ``User-Agent`` header. Integrations
-                should set this to identify themselves (e.g.
-                ``"hindsight-crewai/1.2.0"``). Defaults to
-                ``hindsight-client-python/<version>``.
+            user_agent: Product token placed in front of the client's own in the
+                ``User-Agent`` header. Integrations should set this to identify
+                themselves (e.g. ``"hindsight-crewai/1.2.0"`` is sent as
+                ``"hindsight-crewai/1.2.0 hindsight-client-python/<version>"``).
+                Defaults to ``hindsight-client-python/<version>`` alone.
             max_attempts: Total attempts for *idempotent* calls (recall, reflect)
                 when the server reports it is at capacity (429/503). 1 disables
                 retrying. Waits honour ``Retry-After`` and are jittered; writes are
@@ -291,7 +292,9 @@ class Hindsight:
         base_url = base_url.rstrip("/")
         config = hindsight_client_api.Configuration(host=base_url, access_token=api_key)
         self._api_client = hindsight_client_api.ApiClient(config)
-        self._api_client.user_agent = user_agent or DEFAULT_USER_AGENT
+        # Prefix rather than replace, so the server still learns the client version behind an
+        # integration. Before, a caller's value replaced the default and the version was lost.
+        self._api_client.user_agent = f"{user_agent} {DEFAULT_USER_AGENT}" if user_agent else DEFAULT_USER_AGENT
         self._timeout = timeout
         self._max_attempts = max(1, max_attempts)
         # Per-client RNG so jitter is injectable in tests and independent of any
@@ -2563,17 +2566,25 @@ class Hindsight:
         """
         loop = asyncio.get_event_loop()
         deadline = loop.time() + timeout
+        timeout_message = f"Export operation {operation_id} did not complete within {timeout}s"
         while True:
-            status = await self._operations_api.get_operation_status(
-                bank_id, operation_id, _request_timeout=self._timeout
-            )
+            # The deadline bounds the in-flight status request and the sleep
+            # too, so a slow poll or a long poll_interval can't overrun it.
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise TimeoutError(timeout_message)
+            try:
+                status = await asyncio.wait_for(
+                    self._operations_api.get_operation_status(bank_id, operation_id, _request_timeout=self._timeout),
+                    remaining,
+                )
+            except asyncio.TimeoutError:
+                raise TimeoutError(timeout_message) from None
             if status.status == "completed":
                 break
             if status.status in ("failed", "cancelled"):
                 raise RuntimeError(f"Export operation {operation_id} {status.status}: {status.error_message}")
-            if loop.time() >= deadline:
-                raise TimeoutError(f"Export operation {operation_id} did not complete within {timeout}s")
-            await asyncio.sleep(poll_interval)
+            await asyncio.sleep(min(poll_interval, max(deadline - loop.time(), 0)))
 
         meta = status.result_metadata or {}
         download_url = meta.get("download_url")

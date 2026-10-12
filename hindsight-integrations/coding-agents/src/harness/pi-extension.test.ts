@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { describe, expect, it, vi } from "vitest";
 import type { ToolSpec } from "../core/knowledge-tools";
-import { createPiHooks, toPiTool } from "./pi-extension";
+import { createPiExtension, createPiHooks, toPiTool } from "./pi-extension";
 
 describe("pi extension adapter", () => {
   it.each(["before", "after"])("preserves sections added %s memory injection", async (order) => {
@@ -9,6 +9,7 @@ describe("pi extension adapter", () => {
       onPrompt: vi.fn(async () => {}),
       getInjection: vi.fn(() => "<hindsight_memories>remember this</hindsight_memories>"),
       onTranscript: vi.fn(async () => {}),
+      flush: vi.fn(async () => {}),
     };
     const hooks = createPiHooks(core, "pi");
     const sections: Record<string, string> = { base: "You are pi." };
@@ -121,6 +122,33 @@ describe("pi extension adapter", () => {
     );
   });
 
+  it("writes back the whole session branch, not just the latest run's messages (#4963)", async () => {
+    const onTranscript = vi.fn(async () => {});
+    const flush = vi.fn(async () => {});
+    const core = { onPrompt: vi.fn(), getInjection: vi.fn(), onTranscript, flush };
+    const hooks = createPiHooks(core as never, "pi");
+    const msg = (role: string, text: string) => ({
+      type: "message",
+      timestamp: "2026-10-01T00:00:00.000Z",
+      message: { role, content: [{ type: "text", text }] },
+    });
+
+    // The second run's event holds only its own exchange; the session holds both runs.
+    await hooks.agentEnd({ messages: [{ role: "user", content: "beta" }] }, "session-1", [
+      { type: "session" },
+      msg("user", "alpha"),
+      msg("assistant", "noted alpha"),
+      { type: "compaction" },
+      msg("user", "beta"),
+    ]);
+    const turns = (onTranscript.mock.calls[0] as unknown[])[1] as { content: string }[];
+    expect(turns.map((t) => t.content)).toEqual(["alpha", "noted alpha", "beta"]);
+
+    // Exit drains the write-back the last agent_end started (#5081).
+    await hooks.sessionShutdown();
+    expect(flush).toHaveBeenCalledOnce();
+  });
+
   it("does not write back an empty exchange", async () => {
     const onTranscript = vi.fn(async () => {});
     const core = {
@@ -155,5 +183,97 @@ describe("pi extension adapter", () => {
 
     const result = await def.execute("call-1", { query: "x" });
     expect(result.content).toEqual([{ type: "text", text: "page A\npage B" }]);
+  });
+});
+
+describe("pi extension factory", () => {
+  /** A fake RuntimeCore per repository; its one tool answers with the repository it is bound to. */
+  function fakeCore(repo: string) {
+    return {
+      seedIfCold: vi.fn(async () => {}),
+      onPrompt: vi.fn(async () => {}),
+      getInjection: vi.fn(() => undefined),
+      onTranscript: vi.fn(async () => {}),
+      flush: vi.fn(async () => {}),
+      toolSpecs: (): ToolSpec[] => [
+        {
+          name: "hindsight_reflect",
+          description: "reflect",
+          inputSchema: { query: z.string() },
+          annotations: {
+            readOnlyHint: true,
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: false,
+          },
+          handler: async () => ({ content: [{ type: "text", text: `bank of ${repo}` }] }),
+        },
+      ],
+    };
+  }
+
+  function fakePi() {
+    const handlers: Record<string, (event: unknown, ctx: unknown) => unknown> = {};
+    const tools: ReturnType<typeof toPiTool>[] = [];
+    const api = {
+      on: (event: string, handler: (event: unknown, ctx: unknown) => unknown) => {
+        handlers[event] = handler;
+      },
+      registerTool: (def: ReturnType<typeof toPiTool>) => tools.push(def),
+    };
+    return { handlers, tools, api };
+  }
+
+  const ctx = (cwd: string, session: string) => ({
+    cwd,
+    sessionManager: { getSessionId: () => session },
+  });
+
+  // #5039: pi's web UI serves every session from one process launched elsewhere, so the launch
+  // directory must not pick the bank, nor (when it is not opted in) disable every session.
+  it("resolves each session's repository from ctx.cwd, not the process cwd", async () => {
+    const cores = new Map<string, ReturnType<typeof fakeCore>>();
+    const makeRuntime = (_harness: string, dir: string) => {
+      if (dir === process.cwd()) return undefined; // the launch directory is not opted in
+      const core = fakeCore(dir);
+      cores.set(dir, core);
+      return core as never;
+    };
+    const pi = fakePi();
+    createPiExtension("pi", makeRuntime)(pi.api as never);
+    expect(pi.tools).toHaveLength(0);
+
+    pi.handlers.session_start({}, ctx("/repo-a", "s-a"));
+    expect(pi.tools.map((t) => t.name)).toEqual(["hindsight_reflect"]);
+
+    await pi.handlers.before_agent_start(
+      { prompt: "hello a", systemPrompt: "sys" },
+      ctx("/repo-a", "s-a")
+    );
+    await pi.handlers.before_agent_start(
+      { prompt: "hello b", systemPrompt: "sys" },
+      ctx("/repo-b", "s-b")
+    );
+    expect(cores.get("/repo-a")?.onPrompt).toHaveBeenCalledExactlyOnceWith("s-a", "hello a");
+    expect(cores.get("/repo-b")?.onPrompt).toHaveBeenCalledExactlyOnceWith("s-b", "hello b");
+
+    // Registered once, but each call runs against the calling session's bank.
+    const run = async (cwd: string) =>
+      (await pi.tools[0].execute("c", { query: "q" }, undefined, undefined, ctx(cwd, "s")))
+        .content[0].text;
+    expect(await run("/repo-b")).toBe("bank of /repo-b");
+    expect(await run(process.cwd())).toBe("Hindsight memory is disabled for this workspace.");
+    expect(pi.tools).toHaveLength(1);
+
+    // Exit drains every workspace's in-flight write-back, not just the launch one's (#5081).
+    await pi.handlers.session_shutdown({}, undefined);
+    expect(cores.get("/repo-a")?.flush).toHaveBeenCalledOnce();
+    expect(cores.get("/repo-b")?.flush).toHaveBeenCalledOnce();
+  });
+
+  it("registers the launch directory's tools at load, as the CLI always has", () => {
+    const pi = fakePi();
+    createPiExtension("pi", (_h, dir) => fakeCore(dir) as never)(pi.api as never);
+    expect(pi.tools.map((t) => t.name)).toEqual(["hindsight_reflect"]);
   });
 });
