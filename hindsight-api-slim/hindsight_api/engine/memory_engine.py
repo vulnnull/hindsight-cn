@@ -598,6 +598,7 @@ def validate_sql_schema(sql: str) -> None:
 from .cross_encoder import RANK_SCORE_PROVIDERS, CrossEncoderModel
 from .embeddings import Embeddings, create_embeddings_from_env
 from .interface import BankConfigState, BankTemplateImportWrite, MemoryEngineInterface
+from .search.decision_reranker import PROVIDER_NAME as DECISION_MODEL_RERANKER
 
 if TYPE_CHECKING:
     from hindsight_api.config_resolver import ValidatedBankConfigUpdate
@@ -5872,9 +5873,11 @@ class MemoryEngine(MemoryEngineInterface):
         # pgvector rejects ("NaN not allowed in vector") on MPS, or raises
         # "c10::Half != float" on CPU — non-deterministically across restarts. By the
         # time gather() returns, all load threads have joined, so resetting the
-        # default here is race-free, keeps the loads fully parallel, and converges on
-        # the float32 inference state a healthy boot already reaches. torch is only
-        # imported (in sys.modules) if a local provider actually loaded a model.
+        # default here is race-free and converges on the float32 inference state a
+        # healthy boot already reaches. Model builds now also hold
+        # LOCAL_MODEL_BUILD_LOCK (issue #4420), so this is the backstop for a loader
+        # added without it. torch is only imported (in sys.modules) if a local
+        # provider actually loaded a model.
         # See https://github.com/vectorize-io/hindsight/issues/2162.
         torch_mod = sys.modules.get("torch")
         if torch_mod is not None and torch_mod.get_default_dtype() != torch_mod.float32:
@@ -9970,7 +9973,9 @@ class MemoryEngine(MemoryEngineInterface):
 
                     # Ensure reranker is initialized (for lazy initialization mode)
                     await reranker_instance.ensure_initialized()
-                    reranked = await reranker_instance.rerank(query, merged_candidates)
+                    reranked = await reranker_instance.rerank(
+                        query, merged_candidates, now=_recall_scoring_now(question_date)
+                    )
                     scored_results = reranked.results
                     # Copied off the call that produced these scores. Do not read
                     # cross_encoder.provider_name here: on a failover chain that
@@ -10016,7 +10021,11 @@ class MemoryEngine(MemoryEngineInterface):
             # math, additive boosts and final sort would otherwise be invisible in
             # the phase metrics (issue #2361).
             scoring_start = time.time()
-            if scored_results and reranking == "interleave":
+            if scored_results and reranking == "cross_encoder" and served_provider == DECISION_MODEL_RERANKER:
+                # A decision model judged every candidate in the pool; its order
+                # is final. The recency / temporal / proof-count boosts would only second-guess it.
+                log_buffer.append("  [4.6] Decision model order kept (combined scoring skipped)")
+            elif scored_results and reranking == "interleave":
                 # Interleave order is authoritative for dedup recall: do NOT re-sort by the
                 # recency/temporal boosts — that re-sort is precisely what buried the twin
                 # under RRF. Seed weight from the interleave-position rrf_score so the order
