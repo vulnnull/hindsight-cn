@@ -10,15 +10,19 @@ import {
   createConfig,
   sdk,
 } from "@vectorize-io/hindsight-client";
+import { version } from "../../package.json";
 
 export const DATAPLANE_URL = process.env.HINDSIGHT_CP_DATAPLANE_API_URL || "http://localhost:8888";
 const DATAPLANE_API_KEY = process.env.HINDSIGHT_CP_DATAPLANE_API_KEY || "";
+
+/** Sent on every dataplane request so the API can tell control-plane traffic apart. */
+export const USER_AGENT = `hindsight-control-plane/${version}`;
 
 /**
  * Auth headers for direct fetch calls to the dataplane API.
  */
 export function getDataplaneHeaders(extra?: Record<string, string>): Record<string, string> {
-  const headers: Record<string, string> = { ...extra };
+  const headers: Record<string, string> = { "User-Agent": USER_AGENT, ...extra };
   if (DATAPLANE_API_KEY) {
     headers["Authorization"] = `Bearer ${DATAPLANE_API_KEY}`;
   }
@@ -40,6 +44,7 @@ export function dataplaneBankUrl(bankId: string, suffix = ""): string {
 export const hindsightClient = new HindsightClient({
   baseUrl: DATAPLANE_URL,
   apiKey: DATAPLANE_API_KEY || undefined,
+  userAgent: USER_AGENT,
 });
 
 /**
@@ -48,7 +53,7 @@ export const hindsightClient = new HindsightClient({
 export const lowLevelClient = createClient(
   createConfig({
     baseUrl: DATAPLANE_URL,
-    headers: DATAPLANE_API_KEY ? { Authorization: `Bearer ${DATAPLANE_API_KEY}` } : undefined,
+    headers: getDataplaneHeaders(),
   })
 );
 
