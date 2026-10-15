@@ -28,18 +28,27 @@ ALL_LABELS = [CORE, INTEGRATION, *OWN_LABEL.values()]
 
 # Label -> what it means to the model. The labels are the enum values, so its
 # answer is already the label to apply.
+# Claude Code and Codex are both coding-agent harnesses AND server LLM providers. The
+# first descriptions only named them under coding-agents, so gemini-2.5-flash-lite filed
+# 13 of 28 open coding-agents issues there by mistake (e.g. #5542, a claude-code provider
+# bug). Core now names those providers and coding-agents says they are not its own.
 ISSUE_OPTIONS = {
     CORE: "The core Hindsight service: API server, memory engine (retain, recall, reflect, "
-    "consolidation, mental models), database, LLM/embedding/reranker providers, SDK clients, "
-    "CLI, Docker images, deployment, control plane UI, docs",
+    "consolidation, mental models, knowledge pages, import/export), database, tenant/auth extensions, "
+    "LLM/embedding/reranker providers (including the claude-code, openai-codex and github-copilot "
+    "providers, where the server uses that tool as its LLM), the server's MCP tools, SDK clients, CLI, "
+    "the hindsight-embed local daemon/launcher, Docker images, deployment, control plane UI, docs",
     OWN_LABEL["hermes"]: "The Hermes Agent memory plugin/integration",
     OWN_LABEL["openclaw"]: "The OpenClaw (or NemoClaw) memory plugin/integration",
-    OWN_LABEL["coding-agents"]: "The coding-agents integration: one package of hooks and memory for coding agent "
-    "harnesses (Claude Code, Codex, Cursor, OpenCode, Copilot CLI, Cline, Pi, ...)",
+    OWN_LABEL["coding-agents"]: "The coding-agents plugin package (hindsight-integrations/coding-agents) that "
+    "runs inside a coding agent harness (Claude Code, Codex, Cursor, OpenCode, Copilot CLI, Cline, Pi, ...): "
+    "its installer, hooks, auto-recall/retain of sessions, bank selection per repo, knowledge tools, harness "
+    "support. Not this label when the issue is about the server using Claude Code or Codex as its LLM "
+    "provider: that is core",
     INTEGRATION: "Another framework integration (CrewAI, LangGraph, LiteLLM, Pydantic AI, n8n, Obsidian, "
     "MCP clients, ...)",
 }
-GEMINI_MODEL = "gemini-2.5-flash-lite"
+GEMINI_MODEL = "gemini-3.1-flash-lite"
 
 
 def gh(*args: str) -> str:

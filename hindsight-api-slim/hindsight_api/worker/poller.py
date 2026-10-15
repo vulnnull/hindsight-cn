@@ -2043,10 +2043,12 @@ class WorkerPoller:
                 for schema in schemas_to_query:
                     table = fq_table("async_operations", schema)
 
-                    # Bucket pending rows by the same predicates the claim query
-                    # filters on, so an operator can see why pending > 0 but
-                    # nothing is being claimed (orphaned batch_retain parents,
-                    # retry backoff, etc.).
+                    # Bucket pending rows by the claim-query predicates that are
+                    # cheap to count here, so an operator can see why pending > 0
+                    # but nothing is being claimed (orphaned batch_retain parents,
+                    # retry backoff, etc.). Deliberately a *subset* of the claim
+                    # predicate — the serialization exclusions are left out, see
+                    # _log_pending_breakdown.
                     # Use SUM(CASE WHEN ...) instead of COUNT(*) FILTER (WHERE ...)
                     # for Oracle compatibility — FILTER is PG-specific.
                     try:
@@ -2218,10 +2220,15 @@ class WorkerPoller:
           * retry_blocked  - next_retry_at is still in the future
           * assigned       - worker_id already set; another worker owns it
 
-        ``claimable`` is the residual that *should* be picked up on the next
-        poll. If ``claimable > 0`` while workers report free slots, the bug is
-        somewhere else (lock contention, tenant discovery, etc.) - this line
-        narrows the search.
+        There is deliberately no ``claimable`` residual here. The claim query
+        also applies ``bank_serialization_sql`` and ``key_serialization_sql``
+        (``engine/db/ops.py``), and a row queued behind a peer on the same bank
+        or the same serialization key is not claimable either. A residual that
+        ignores both overstates - it reported 11 claimable retains where the
+        predicate allowed 6 (#4527) - and made a queue that was merely lining
+        up read as a wedged one. Counting the two exclusions would mean
+        re-running the claim predicate purely to log it, so these buckets state
+        only what they can cheaply prove.
         """
         if not breakdown:
             return
@@ -2229,9 +2236,8 @@ class WorkerPoller:
         parts = []
         for op_type in sorted(breakdown):
             b = breakdown[op_type]
-            claimable = b["total"] - b["payload_null"] - b["retry_blocked"] - b["assigned"]
             parts.append(
-                f"{op_type}: total={b['total']} claimable={claimable} "
+                f"{op_type}: total={b['total']} "
                 f"payload_null={b['payload_null']} retry_blocked={b['retry_blocked']} "
                 f"assigned={b['assigned']}"
             )

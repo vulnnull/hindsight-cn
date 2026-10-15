@@ -3761,14 +3761,15 @@ async def test_pending_breakdown_explains_unclaimable_rows(pool, backend, clean_
     #   * retry_blocked - failed once, scheduled an hour out
     #   * assigned      - worker_id stamped (e.g. left over from a prior crash
     #                     that re-queued without clearing worker_id)
-    #   * claimable     - normal retain ready to go
-    #   * consolidation - normal consolidation, also claimable
+    #   * a plain retain and a plain consolidation, which land in `total`
+    #     only — the line reports no `claimable` residual (#4527), because the
+    #     claim query's serialization predicates are not modelled here.
     rows = [
         ("batch_retain", None, None, None),  # payload_null
         ("retain", json.dumps({"type": "test"}), "future", None),  # retry_blocked
         ("retain", json.dumps({"type": "test"}), None, "ghost-worker"),  # assigned
-        ("retain", json.dumps({"type": "test"}), None, None),  # claimable
-        ("consolidation", json.dumps({"type": "test"}), None, None),  # claimable
+        ("retain", json.dumps({"type": "test"}), None, None),
+        ("consolidation", json.dumps({"type": "test"}), None, None),
     ]
     for op_type, payload, retry_marker, worker_id in rows:
         op_id = uuid.uuid4()
@@ -3816,8 +3817,11 @@ async def test_pending_breakdown_explains_unclaimable_rows(pool, backend, clean_
     assert buckets["batch_retain"]["payload_null"] >= 1
     assert buckets["retain"]["retry_blocked"] >= 1
     assert buckets["retain"]["assigned"] >= 1
-    assert buckets["retain"]["claimable"] >= 1
-    assert buckets["consolidation"]["claimable"] >= 1
+    assert buckets["retain"]["total"] >= 3
+    assert buckets["consolidation"]["total"] >= 1
+    # No claimable residual: it ignored the claim query's serialization
+    # predicates and overstated what the next poll would pick up (#4527).
+    assert "claimable" not in buckets["retain"]
 
 
 class TestSummariseChildErrorMessages:

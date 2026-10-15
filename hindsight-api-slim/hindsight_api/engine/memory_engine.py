@@ -3117,6 +3117,28 @@ class MemoryEngine(MemoryEngineInterface):
             if _set_context is not None:
                 _set_context(self._ext_ctx)
 
+        # The LLM request extension decides the credentials of every LLM call in the
+        # process, so it is installed process-wide rather than handed to each LLM the
+        # engine builds below — a provider that missed the handle would bill the
+        # server's key without anyone noticing.
+        from ..extensions.llm_request import (  # noqa: PLC0415
+            LLMRequestExtension,
+            install_llm_request_extension,
+        )
+
+        self._llm_request_extension = load_extension("LLM_REQUEST", LLMRequestExtension, context=self._ext_ctx)
+        if self._llm_request_extension is not None:
+            if config.retain_batch_enabled:
+                # A batch job is submitted once, on the server's account, for every item
+                # of a retain — there is no per-call request to put a bank's key on.
+                raise RuntimeError(
+                    "Configuration error: HINDSIGHT_API_LLM_REQUEST_EXTENSION is not compatible with "
+                    "HINDSIGHT_API_RETAIN_BATCH_ENABLED=true. Batch retain submits its jobs on the server's "
+                    "own credentials, which the extension exists to replace. Set "
+                    "HINDSIGHT_API_RETAIN_BATCH_ENABLED=false."
+                )
+            install_llm_request_extension(self._llm_request_extension)
+
         loaded = load_extension("MEMORY_DEFENSE", MemoryDefenseExtension, context=self._ext_ctx)
         if loaded is not None:
             self._memory_defense: MemoryDefenseExtension = loaded
@@ -5695,6 +5717,10 @@ class MemoryEngine(MemoryEngineInterface):
         if self._initialized:
             return
 
+        # Before anything can make an LLM call through it.
+        if self._llm_request_extension is not None:
+            await self._llm_request_extension.on_startup()
+
         # Run model loading in thread pool (CPU-bound) in parallel with pg0 startup
         loop = asyncio.get_event_loop()
 
@@ -6245,6 +6271,17 @@ class MemoryEngine(MemoryEngineInterface):
     async def close(self):
         """Close the connection pool and shutdown background workers."""
         logger.info("close() started")
+
+        if self._llm_request_extension is not None:
+            from ..extensions.llm_request import (  # noqa: PLC0415
+                install_llm_request_extension,
+                installed_llm_request_extension,
+            )
+
+            # Only our own: another engine in this process may have installed its own since.
+            if installed_llm_request_extension() is self._llm_request_extension:
+                install_llm_request_extension(None)
+            await self._llm_request_extension.on_shutdown()
 
         # Stop the background maintenance loop (retention sweeps + reconcile)
         if self._maintenance_loop is not None:
@@ -8784,10 +8821,11 @@ class MemoryEngine(MemoryEngineInterface):
         max_tokens: int = 4096,
         enable_trace: bool = False,
         fact_type: list[str] | None = None,
-        # Opt-in (default False). Internal callers that recall raw facts on purpose —
-        # notably consolidation, which needs the raw facts it folds into observations —
-        # must leave this off so they aren't silently deduped away.
-        prefer_observations: bool = False,
+        # Default False for internal callers that recall raw facts on purpose — notably
+        # consolidation, which needs the raw facts it folds into observations, so they
+        # aren't silently deduped away. None means "use the bank-resolved
+        # recall_prefer_observations default" (public REST/MCP recall).
+        prefer_observations: bool | None = False,
         question_date: datetime | None = None,
         include_entities: bool = False,
         max_entity_tokens: int = 500,
@@ -8826,6 +8864,7 @@ class MemoryEngine(MemoryEngineInterface):
                        are requested, drop raw facts that a returned observation was consolidated from
                        (deduplication by provenance). Freed slots backfill, keeping the result count at
                        the budget. No-op unless both observation and raw types are requested.
+                       None resolves to the bank's recall_prefer_observations config.
             budget: Budget level for graph traversal (low=100, mid=300, high=600 units)
             max_tokens: Maximum tokens to return (counts only 'text' field, default 4096)
                        Results are returned until token budget is reached, stopping before
@@ -9015,6 +9054,8 @@ class MemoryEngine(MemoryEngineInterface):
         enable_temporal_retrieval = bool(budget_config_dict.get("enable_temporal_retrieval", True))
         enable_graph_retrieval = bool(budget_config_dict.get("enable_graph_retrieval", True))
         reranking = _resolve_reranking(budget_config_dict, reranking)
+        if prefer_observations is None:
+            prefer_observations = bool(budget_config_dict.get("recall_prefer_observations", False))
 
         # Log recall start with tags if present (skip if quiet mode for internal operations)
         if not _quiet:
@@ -10908,17 +10949,21 @@ class MemoryEngine(MemoryEngineInterface):
         """
         Update mutable fields on a document without re-processing its content.
 
-        Tag changes propagate to all associated memory units and trigger observation
-        invalidation + re-consolidation (same semantics as delete_document):
-        - Observations referencing the document's memory units are deleted.
-        - The document's own units and any co-source memories from other documents
-          have consolidated_at reset so they are re-consolidated under the new tags.
+        Tag changes propagate to all associated memory units. For each unit whose
+        observation scopes the change moves, observations are invalidated and
+        re-consolidated (same semantics as delete_document):
+        - Observations referencing those memory units are deleted.
+        - Those units and any co-source memories from other documents have
+          consolidated_at reset so they are re-consolidated under the new scopes.
 
-        That cascade is required: consolidation scopes a memory by its tags, so an
-        observation built under the old tag set is no longer valid, and deleting it
-        strands every OTHER source that observation carried unless they are requeued
-        too. It only runs when the tag set actually changes — a PATCH re-sending the
-        tags the document already has (an idempotent normalisation sweep) is a no-op.
+        That cascade is required where the tags ARE the scope (``combined``,
+        ``per_tag``, ``all_combinations``): an observation built under the old tag
+        set is no longer valid, and deleting it strands every OTHER source that
+        observation carried unless they are requeued too. Under ``shared`` or an
+        explicit scope list the tags take no part in where observations go, so a tag
+        change invalidates nothing (#5593). It only runs when the tag set actually
+        changes — a PATCH re-sending the tags the document already has (an
+        idempotent normalisation sweep) is a no-op.
 
         Args:
             document_id: Document ID to update
@@ -15325,7 +15370,9 @@ class MemoryEngine(MemoryEngineInterface):
         tag_groups = await self._resolve_fuzzy_tag_groups(bank_id, tag_groups)
 
         reflect_start = time.time()
-        reflect_id = f"{bank_id[:8]}-{int(time.time() * 1000) % 100000}"
+        # The random suffix, as recall's id has: the clock alone gave two reflects on
+        # one bank started in the same millisecond the same id.
+        reflect_id = f"{bank_id[:8]}-{int(time.time() * 1000) % 100000}-{uuid.uuid4().hex[:6]}"
         tags_info = f", tags={tags} ({tags_match})" if tags else ""
         logger.info(f"[REFLECT {reflect_id}] Starting agentic reflect for query: {query[:50]}...{tags_info}")
 
@@ -15600,9 +15647,18 @@ class MemoryEngine(MemoryEngineInterface):
                         store_document_text=config_dict.get("store_document_text", DEFAULT_STORE_DOCUMENT_TEXT),
                         answer_as_document=answer_as_document,
                         tool_token_limits=tool_token_limits,
+                        reflect_id=reflect_id,
                     ),
                     timeout=wall_timeout,
                 )
+            except (asyncio.CancelledError, OperationCancelledError):
+                # Logged here, under this reflect's id, because the HTTP layer's
+                # "[REFLECT CANCELLED] bank=..." line has no way to say which of a
+                # bank's concurrent reflects it was (#5128).
+                token = request_context.cancellation
+                reason = token.reason if token is not None and token.cancelled else "task cancelled"
+                logger.info("[REFLECT %s] Cancelled after %.1fs: %s", reflect_id, time.time() - reflect_start, reason)
+                raise
             except asyncio.TimeoutError:
                 total_time = time.time() - reflect_start
                 logger.error(
@@ -18604,26 +18660,17 @@ class MemoryEngine(MemoryEngineInterface):
         # The vector as well as its literal: a store-owned index takes the floats, and asking for
         # the string alone would mean embedding the same document twice on every page write.
         new_embedding_vec: list[float] | None = None
+        current_row: Any = None
         document_changed = name is not None or content is not None
         if document_changed:
             async with use_or_acquire(backend, conn) as read_conn:
                 current_row = await read_conn.fetchrow(
-                    f"SELECT name, content, reflect_response FROM {fq_table('mental_models')} "
-                    "WHERE bank_id = $1 AND id = $2",
+                    f"SELECT name, content FROM {fq_table('mental_models')} WHERE bank_id = $1 AND id = $2",
                     bank_id,
                     mental_model_id,
                 )
             if current_row is None:
                 return None
-
-            if content is not None:
-                # Snapshot for history, taken from the same read.
-                previous_content = current_row["content"]
-                raw_rr = current_row["reflect_response"]
-                if isinstance(raw_rr, str):
-                    previous_reflect_response = json.loads(raw_rr) if raw_rr else None
-                else:
-                    previous_reflect_response = raw_rr
 
             new_embedding_vec = await self._mental_model_embedding_vector(
                 name if name is not None else (current_row["name"] or ""),
@@ -18631,8 +18678,8 @@ class MemoryEngine(MemoryEngineInterface):
             )
             new_embedding_str = str(new_embedding_vec) if new_embedding_vec else None
 
-        # The exit stack carries the row lock a trigger patch takes below; it stays
-        # empty (and free) on every other update.
+        # The exit stack carries the row lock a trigger patch or document edit takes
+        # below; it stays empty (and free) on every other update.
         async with use_or_acquire(backend, conn) as conn, AsyncExitStack() as stack:
             # A supplied trigger PATCHES the stored one (see _merge_trigger): callers
             # send only the fields they set, so the rest have to be read back rather
@@ -18641,19 +18688,43 @@ class MemoryEngine(MemoryEngineInterface):
             # Read-modify-write, so the row is locked for the rest of the statement:
             # two concurrent patches (an agent setting a cron while another flips
             # fact_types) would otherwise both merge onto the same pre-image and the
-            # later write would drop the earlier one. Only this path takes the lock —
-            # a refresh passes no trigger and stays lock-free.
-            if trigger is not None:
+            # later write would drop the earlier one.
+            #
+            # A document edit takes the same lock for the same reason: the embedding above was
+            # computed from a pre-image read off the lock, and a concurrent edit may have moved
+            # the other half since (#5297). Re-checked under the lock, and re-embedded only in
+            # that rare race, so a slow embedder still never pins a connection in the common case.
+            if trigger is not None or document_changed:
                 await stack.enter_async_context(conn.transaction())
-                trigger_row = await conn.fetchrow(
-                    f"SELECT trigger, tags FROM {fq_table('mental_models')} WHERE bank_id = $1 AND id = $2 FOR UPDATE",
+                locked_row = await conn.fetchrow(
+                    f"SELECT trigger, tags, name, content, reflect_response FROM {fq_table('mental_models')} "
+                    "WHERE bank_id = $1 AND id = $2 FOR UPDATE",
                     bank_id,
                     mental_model_id,
                 )
-                if trigger_row is None:
+                if locked_row is None:
                     return None
-                trigger = self._merge_trigger(trigger, base=self._stored_trigger(trigger_row["trigger"]))
-                trigger = _scope_mental_model_trigger(trigger, tag_scope)
+                if trigger is not None:
+                    trigger = self._merge_trigger(trigger, base=self._stored_trigger(locked_row["trigger"]))
+                    trigger = _scope_mental_model_trigger(trigger, tag_scope)
+                if content is not None:
+                    # Snapshot for history from the locked row, so it is the content this write replaces.
+                    previous_content = locked_row["content"]
+                    raw_rr = locked_row["reflect_response"]
+                    if isinstance(raw_rr, str):
+                        previous_reflect_response = json.loads(raw_rr) if raw_rr else None
+                    else:
+                        previous_reflect_response = raw_rr
+                # Only the half the caller did not send came from the pre-image; re-embed if it moved.
+                if document_changed and (
+                    (name is None and locked_row["name"] != current_row["name"])
+                    or (content is None and locked_row["content"] != current_row["content"])
+                ):
+                    new_embedding_vec = await self._mental_model_embedding_vector(
+                        name if name is not None else (locked_row["name"] or ""),
+                        content if content is not None else (locked_row["content"] or ""),
+                    )
+                    new_embedding_str = str(new_embedding_vec) if new_embedding_vec else None
 
             # Build dynamic update
             updates = []

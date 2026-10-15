@@ -22,6 +22,7 @@ from hindsight_api.engine.llm_interface import (
     LLMInterface,
     LLMToolChoice,
     LLMToolChoiceMode,
+    ProviderContentPolicyError,
 )
 from hindsight_api.engine.llm_trace import LLMResponseUsage, stash_response_usage
 from hindsight_api.engine.llm_transport import build_sdk_timeout, describe_llm_error
@@ -34,6 +35,20 @@ from hindsight_api.worker.stage import set_stage
 from ..response_models import LLMCallResult
 
 logger = logging.getLogger(__name__)
+
+
+_REFUSAL_STOP_REASONS = ("refusal", "content_filter")
+
+
+def _raise_on_refusal(response: Any) -> None:
+    """Fail fast when Anthropic refused the request (HTTP 200, empty body).
+
+    Without this the empty body is parsed as invalid JSON and retried, paying
+    for the same refusal again and again (#5201).
+    """
+    stop_reason = getattr(response, "stop_reason", None)
+    if stop_reason in _REFUSAL_STOP_REASONS:
+        raise ProviderContentPolicyError(f"Anthropic refused the request (stop_reason={stop_reason}); not retrying")
 
 
 def _usage_from_anthropic_response(response: Any) -> LLMResponseUsage:
@@ -363,11 +378,13 @@ class AnthropicLLM(LLMInterface):
                     # on every byte, so an upstream trickling keep-alive whitespace never trips it
                     # and the call pins its worker slot forever (#4763).
                     response = await asyncio.wait_for(
-                        self._client.messages.create(**call_params), timeout=self.timeout or _DEFAULT_ANTHROPIC_TIMEOUT
+                        self._request_client().messages.create(**call_params),
+                        timeout=self.timeout or _DEFAULT_ANTHROPIC_TIMEOUT,
                     )
                 # Stash usage before parse/validate, which may raise locally
                 # even though the provider charged for these tokens (#2387).
                 stash_response_usage(_usage_from_anthropic_response(response))
+                _raise_on_refusal(response)
 
                 if use_forced_tool:
                     # Forced tool_use → the validated args are already a dict; no parsing,
@@ -502,6 +519,10 @@ class AnthropicLLM(LLMInterface):
                         continue
 
                 logger.error(f"Anthropic API error after {max_retries + 1} attempts: {describe_llm_error(e)}")
+                raise
+
+            except ProviderContentPolicyError:
+                # An expected, permanent outcome — not an "unexpected error" worth an error log.
                 raise
 
             except Exception as e:
@@ -650,9 +671,11 @@ class AnthropicLLM(LLMInterface):
                     # on every byte, so an upstream trickling keep-alive whitespace never trips it
                     # and the call pins its worker slot forever (#4763).
                     response = await asyncio.wait_for(
-                        self._client.messages.create(**call_params), timeout=self.timeout or _DEFAULT_ANTHROPIC_TIMEOUT
+                        self._request_client().messages.create(**call_params),
+                        timeout=self.timeout or _DEFAULT_ANTHROPIC_TIMEOUT,
                     )
                 stash_response_usage(_usage_from_anthropic_response(response))
+                _raise_on_refusal(response)
 
                 # Extract content and tool calls
                 content_parts = []
@@ -957,6 +980,16 @@ class AnthropicLLM(LLMInterface):
         """Clean up resources (close Anthropic client connections)."""
         if hasattr(self, "_client") and self._client:
             await self._client.close()
+
+    def supports_request_overrides(self) -> bool:
+        return True
+
+    def _request_client(self) -> Any:
+        """The SDK client for one call, with the credentials an LLM request extension chose."""
+        # Lazy: importing the extensions package here would be circular.
+        from hindsight_api.extensions.llm_request import request_client
+
+        return request_client(self._client)
 
     def supports_attempt_scoped_concurrency(self) -> bool:
         return True

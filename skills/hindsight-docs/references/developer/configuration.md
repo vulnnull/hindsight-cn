@@ -309,7 +309,7 @@ For non-English banks (especially CJK) and the language/extraction-language trad
 | `HINDSIGHT_API_LLM_SUPPORTS_MAX_ITEMS` | Whether the LLM backend accepts JSON Schema `maxItems` / `minItems` in structured-output schemas. Set to `false` for backends such as Bedrock Converse that reject these keywords; consolidation still enforces observation caps after parsing. | `true` |
 | `HINDSIGHT_API_LLM_SUPPORTS_STRING_PATTERN` | Whether the LLM backend accepts JSON Schema `pattern` in structured-output schemas. When `true`, retain constrains `occurred_start` / `occurred_end` to an ISO timestamp, which stops a grammar-constrained model from reasoning inside the timestamp string — a failure that corrupts the date and can burn the entire completion budget on an unterminated response. Left `false` because support is narrow and rejection is a hard 400 at request time: Bedrock validates schemas against an allowlist that excludes this keyword, and OpenAI errors on unsupported keywords under `strict`. Backends that neither enforce nor reject it gain nothing. | `false` |
 | `HINDSIGHT_API_LLM_STRUCTURED_OUTPUT_FORCED_TOOL` | Request structured output from the LiteLLM-backed providers (`litellm`, `litellmrouter`, `bedrock`) with a single forced tool call — the response schema becomes the tool's parameters — instead of `response_format`. Set to `true` for backends that reject `response_format` outright. This is region-dependent on Bedrock Claude: `ap-southeast-2` (`au.*` inference profiles) refuses the translated Converse `outputConfig` with `Extra inputs are not permitted`, while the same model in `us-east-1` (`us.*`) accepts it and needs nothing here. Verified against both. If the model answers without calling the tool, the reply is parsed as text as before. Other providers ignore it. | `false` |
-| `HINDSIGHT_API_LLM_OPENAI_COMPATIBLE_JSON_MODE` | Whether the OpenAI-compatible backend honours `response_format={"type": "json_object"}` on the soft (non-strict) structured-output path. Leave unset and the provider decides: LM Studio, Ollama and Volcano get the schema in the prompt only, llama.cpp follows `HINDSIGHT_API_LLAMACPP_NO_GRAMMAR`, and every other provider also sends `json_object`. Set `false` for `provider=openai` pointed at a local server that can't constrain output: some such servers rewrite the prompt instead, and a thinking model can loop on the rewrite until the LLM timeout. This doesn't make a model write JSON. It only drops the request the server mishandles, so the model still has to follow the schema in the prompt. Set `true` to force `json_object` on a backend that would otherwise skip it. | Provider decides |
+| `HINDSIGHT_API_LLM_OPENAI_COMPATIBLE_JSON_MODE` | Whether the OpenAI-compatible backend honours `response_format={"type": "json_object"}` on the soft (non-strict) structured-output path. Leave unset and the provider decides: LM Studio, Ollama, Volcano and z.ai get the schema in the prompt only, llama.cpp follows `HINDSIGHT_API_LLAMACPP_NO_GRAMMAR`, and every other provider also sends `json_object`. z.ai is skipped because its `json_object` mode deletes the literal token `json` from the generated text, so `latest.json` comes back as `latest.` — valid JSON, silently corrupted. Set `false` for `provider=openai` pointed at a local server that can't constrain output: some such servers rewrite the prompt instead, and a thinking model can loop on the rewrite until the LLM timeout. This doesn't make a model write JSON. It only drops the request the server mishandles, so the model still has to follow the schema in the prompt. Set `true` to force `json_object` on a backend that would otherwise skip it. | Provider decides |
 | `HINDSIGHT_API_LLM_CODEX_HOME` | Credentials directory for the `openai-codex` provider — the directory holding the `auth.json` it authenticates with. Overrides the process-wide `CODEX_HOME` for Hindsight's own LLM calls. Its reason to exist is that `CODEX_HOME` is process-wide: set this (and the per-member `HINDSIGHT_API_LLM_<n>_CODEX_HOME`) to run two independently authorized ChatGPT profiles in one process, so a [multi-LLM chain](#multi-llm-strategies-failover--round-robin) of two Codex members can fail over between accounts. | Unset (`CODEX_HOME`, else `~/.codex`) |
 | `HINDSIGHT_API_LLM_OLLAMA_NUM_CTX` | Optional native Ollama `num_ctx` override. Leave unset to use the model/server default; set a positive integer only when you need a larger context window. Setting it also routes free-form calls (including the startup connection probe) through the native `/api/chat` API, since the OpenAI-compatible endpoint cannot express a context size — see the note below. | Unset |
 | `HINDSIGHT_API_LLM_GEMINI_SAFETY_SETTINGS` | JSON-encoded list of `{category, threshold}` dicts for Gemini/VertexAI content safety filtering | `null` |
@@ -1467,6 +1467,46 @@ The `jina-mlx` provider uses [`jinaai/jina-reranker-v3-mlx`](https://huggingface
 > **📝 License**
 >
 `jina-reranker-v3-mlx` is licensed under CC BY-NC 4.0. Contact Jina AI for commercial usage.
+### Decision model
+
+A decision model answers typed questions (pick one of these, how likely is this) in well
+under a second. Operations that support one hand it the in-between judgments an LLM call
+would otherwise make, and keep the LLM for writing. Set it up once here: every operation
+that supports a decision model shares it, unless that operation overrides it or turns it off.
+
+This is separate from the `typesafe` [reranker](#reranker), which keeps its own
+`HINDSIGHT_API_RERANKER_TYPESAFE_*` settings.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HINDSIGHT_API_DECISION_MODEL_PROVIDER` | `none`, `typesafe`, `cloudflare` or `openai` (see below). | `none` |
+| `HINDSIGHT_API_DECISION_MODEL_API_KEY` | API key (Cloudflare: an API token with Workers AI access). Required when the provider is not `none`. | - |
+| `HINDSIGHT_API_DECISION_MODEL_MODEL` | Model name. | provider default |
+| `HINDSIGHT_API_DECISION_MODEL_BASE_URL` | API base URL. Required for `cloudflare`. | provider default |
+| `HINDSIGHT_API_DECISION_MODEL_TIMEOUT` | Request timeout in seconds. | `60` |
+| `HINDSIGHT_API_DECISION_MODEL_MAX_CONCURRENT` | Most requests in flight at once, for each operation using the decision model. | `24` |
+
+| Provider | API | Default model | Default base URL |
+|----------|-----|---------------|------------------|
+| `typesafe` | [TypeSafe](https://typesafe.ai) System One (`/v1/systemone`) | `jev-latest` | `https://api.typesafe.ai` |
+| `cloudflare` | [Clef](https://blog.cloudflare.com/clef-decision-models) on Workers AI (System One body, `/@cf/cloudflare/<model>`) | `clef` (or `clef-flash`) | none: set `https://api.cloudflare.com/client/v4/accounts/<account_id>/ai/run`, or an AI Gateway `https://gateway.ai.cloudflare.com/v1/<account_id>/<gateway>/workers-ai` |
+| `openai` | [OpenAI Decisions API](https://developers.openai.com/api/docs/guides/decisions) (`/v1/decisions`, public beta) | `gpt-6-luna` | `https://api.openai.com` |
+
+**Per-operation overrides.** `HINDSIGHT_API_{RECALL,REFLECT,CONSOLIDATION}_DECISION_MODEL_{PROVIDER,API_KEY,MODEL,BASE_URL}`
+replace the global value for that operation only. Key, model and URL fall back to the global
+value only while the operation uses the global provider; an operation that switches to another
+provider takes that provider's defaults and needs its own key. Set an operation's provider to
+`none` to turn the decision model off for it, or give one operation a decision model without a
+global one.
+
+```bash
+export HINDSIGHT_API_DECISION_MODEL_PROVIDER=typesafe
+export HINDSIGHT_API_DECISION_MODEL_API_KEY=your-typesafe-key
+export HINDSIGHT_API_REFLECT_DECISION_MODEL_MODEL=jev-preview        # reflect only
+export HINDSIGHT_API_CONSOLIDATION_DECISION_MODEL_PROVIDER=openai    # consolidation on OpenAI
+export HINDSIGHT_API_CONSOLIDATION_DECISION_MODEL_API_KEY=your-openai-key
+```
+
 ### Authentication
 
 By default, Hindsight runs without authentication. For production deployments, enable API key authentication using the built-in tenant extension:
@@ -1659,6 +1699,12 @@ lowest-latency configuration there is.
 Disabling text search leaves the write path alone: `search_vector` and its index are
 still maintained, so a bank can be switched back without a reindex. The
 [text-search backend](#text-search-extension) it would have used is simply unread.
+
+##### Default `prefer_observations`
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HINDSIGHT_API_RECALL_PREFER_OBSERVATIONS` | Value of recall's [`prefer_observations`](./api/recall.md#prefer_observations) when a REST or MCP request leaves it out: drop raw facts that a returned observation was consolidated from, so results carry no duplicates. A value in the request still wins. Hierarchical — overridable per bank. Useful when callers you don't control (MCP connectors, generic agents) never pass the flag. | `false` |
 
 ##### Pairing with the retain side: plain-retrieval ("RAG") banks
 

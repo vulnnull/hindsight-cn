@@ -32,6 +32,7 @@ from hindsight_api.engine.llm_trace import LLMResponseUsage, stash_response_usag
 from hindsight_api.engine.llm_wrapper import parse_llm_json
 from hindsight_api.engine.providers.llm_debug import dump_request_on_4xx
 from hindsight_api.engine.providers.openai_compatible_llm import _strip_code_fences, visible_token_usage
+from hindsight_api.engine.remote_retry import is_transient_remote_error
 from hindsight_api.engine.response_models import LLMToolCall, LLMToolCallResult, TokenUsage
 from hindsight_api.engine.structured_output import provider_json_schema, strict_json_schema
 from hindsight_api.metrics import get_metrics_collector
@@ -98,6 +99,32 @@ def _forced_tool_arguments(message: Any) -> str | None:
         arguments = tool_call.function.arguments
         return arguments if isinstance(arguments, str) else json.dumps(arguments)
     return None
+
+
+# LiteLLM backends that authenticate with the ``api_key`` of the call (see
+# LiteLLMLLM.supports_request_overrides).
+_KEYED_LITELLM_BACKENDS = frozenset(
+    {
+        "openai",
+        "text-completion-openai",
+        "azure",
+        "anthropic",
+        "gemini",
+        "openrouter",
+        "litellm_proxy",
+        "groq",
+        "mistral",
+        "deepseek",
+        "together_ai",
+        "fireworks_ai",
+        "xai",
+        "cohere",
+        "cohere_chat",
+        "perplexity",
+        "deepinfra",
+        "hosted_vllm",
+    }
+)
 
 
 class LiteLLMLLM(LLMInterface):
@@ -228,6 +255,18 @@ class LiteLLMLLM(LLMInterface):
         # a per-call copy prevents LiteLLM/downstream from mutating the stored dict.
         if self._default_headers:
             kwargs.setdefault("extra_headers", dict(self._default_headers))
+
+        # Credentials an LLM request extension chose for this call (see
+        # supports_request_overrides). Lazy: importing the extensions package here
+        # would be circular.
+        from hindsight_api.extensions.llm_request import current_llm_request_overrides
+
+        overrides = current_llm_request_overrides()
+        if overrides is not None:
+            if overrides.api_key is not None:
+                kwargs["api_key"] = overrides.api_key
+            if overrides.headers:
+                kwargs["extra_headers"] = {**kwargs.get("extra_headers", {}), **overrides.headers}
 
         # Bedrock service tier: flex (50% cheaper), priority, or reserved
         if self.model.startswith("bedrock/") and self.bedrock_service_tier is not None:
@@ -486,27 +525,21 @@ class LiteLLMLLM(LLMInterface):
                 raise
 
             except Exception as e:
-                error_str = str(e).lower()
-                # Fast fail on auth errors
-                if "401" in error_str or "403" in error_str or "unauthorized" in error_str:
-                    logger.error(f"LiteLLM auth error, not retrying: {e}")
-                    raise
-
                 # Diagnostic dump (opt-in) of the exact request behind any 4xx.
                 dump_request_on_4xx(scope=scope, provider=self.provider, model=self.model, err=e, request=call_kwargs)
 
                 last_exception = e
-                if attempt < max_retries:
-                    # Retry on rate limits, connection errors, server errors
-                    is_retryable = any(
-                        keyword in error_str
-                        for keyword in ("rate", "limit", "timeout", "connection", "500", "502", "503", "529")
-                    )
-                    if is_retryable:
-                        backoff = min(initial_backoff * (2**attempt), max_backoff)
-                        jitter = backoff * 0.2 * (2 * (time.time() % 1) - 1)
-                        await asyncio.sleep(backoff + jitter)
-                        continue
+                # Retry on the HTTP status LiteLLM maps onto every provider error
+                # (``status_code``): 408/409/425/429 and 5xx retry, other 4xx fail fast.
+                # This used to search the message for rate/limit/timeout/500/503/...,
+                # but the message often omits the status -- Bedrock's transient 503
+                # failed on its first attempt -- and a 400 mentioning a "limit" was
+                # retried (#5009).
+                if attempt < max_retries and is_transient_remote_error(e):
+                    backoff = min(initial_backoff * (2**attempt), max_backoff)
+                    jitter = backoff * 0.2 * (2 * (time.time() % 1) - 1)
+                    await asyncio.sleep(backoff + jitter)
+                    continue
 
                 logger.error(f"LiteLLM API error after {attempt + 1} attempts: {e}")
                 raise
@@ -653,22 +686,14 @@ class LiteLLMLLM(LLMInterface):
                 raise
 
             except Exception as e:
-                error_str = str(e).lower()
-                if "401" in error_str or "403" in error_str or "unauthorized" in error_str:
-                    raise
-
                 # Diagnostic dump (opt-in) of the exact request behind any 4xx.
                 dump_request_on_4xx(scope=scope, provider=self.provider, model=self.model, err=e, request=call_kwargs)
 
                 last_exception = e
-                if attempt < max_retries:
-                    is_retryable = any(
-                        keyword in error_str
-                        for keyword in ("rate", "limit", "timeout", "connection", "500", "502", "503", "529")
-                    )
-                    if is_retryable:
-                        await asyncio.sleep(min(initial_backoff * (2**attempt), max_backoff))
-                        continue
+                # Status-based, same as call() (#5009).
+                if attempt < max_retries and is_transient_remote_error(e):
+                    await asyncio.sleep(min(initial_backoff * (2**attempt), max_backoff))
+                    continue
 
                 logger.error(f"LiteLLM tool call error after {attempt + 1} attempts: {e}")
                 raise
@@ -680,6 +705,19 @@ class LiteLLMLLM(LLMInterface):
     async def cleanup(self) -> None:
         """Clean up resources."""
         pass
+
+    def supports_request_overrides(self) -> bool:
+        # Decided by the backend LiteLLM routes the model to, not by our provider name:
+        # Bedrock, Vertex AI, SageMaker, ... authenticate with cloud credentials and
+        # ignore ``api_key``, which would send the call on the server's account. So an
+        # allowlist of backends known to read it; an unknown backend refuses.
+        if self.provider == "bedrock":
+            return False
+        try:
+            backend = self._litellm.get_llm_provider(self.model, api_base=self.base_url or None)[1]
+        except Exception:
+            return False
+        return backend in _KEYED_LITELLM_BACKENDS
 
     def supports_attempt_scoped_concurrency(self) -> bool:
         return True

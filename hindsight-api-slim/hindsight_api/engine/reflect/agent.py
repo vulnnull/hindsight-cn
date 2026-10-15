@@ -539,10 +539,15 @@ async def run_reflect_agent(
     search_observations_fn: Callable[[str, int], Awaitable[dict[str, Any]]],
     recall_fn: Callable[[str, int, int], Awaitable[dict[str, Any]]],
     expand_fn: Callable[[list[str], str], Awaitable[dict[str, Any]]],
+    reflect_id: str | None = None,
     **kwargs: Any,
 ) -> ReflectAgentResult:
     """Public entrypoint: runs the agent loop and tears down any per-step context
     caches it created.
+
+    ``reflect_id`` is the caller's log id for this reflect. The engine passes the one
+    it already logged ``Starting`` under, so every line of one request carries one id;
+    before, the agent minted its own a few ms later and a request logged under two.
 
     The step-by-step caches (Gemini ``CachedContent``) are ephemeral — scoped to
     exactly one reflect and never reused after it — so teardown is scheduled on
@@ -551,15 +556,22 @@ async def run_reflect_agent(
     cache TTL is the backstop if the teardown never runs; the delete is
     best-effort and never allowed to fail a reflect.
     """
-    reflect_id = f"{bank_id[:8]}-{int(time.time() * 1000) % 100000}"
+    reflect_id = reflect_id or f"{bank_id[:8]}-{int(time.time() * 1000) % 100000}"
     provider_impl = getattr(llm_config, "_provider_impl", None)
     # Reflect step-by-step caching needs the provider to support it AND the
     # dedicated reflect flag (on by default; distinct from the global prompt-cache
     # switch so it can be turned off for reflect alone).
+    # Lazy: importing the extensions package here would be circular.
+    from ...extensions.llm_request import installed_llm_request_extension
+
+    # Off under an LLM request extension: the cache is created on the server's own LLM
+    # outside any call the extension decides, so it would upload a reflect the extension
+    # sends elsewhere (or refuses) to the server's account.
     incremental_caching = (
         provider_impl is not None
         and provider_impl.supports_incremental_prompt_cache()
         and get_config().reflect_prompt_cache_enabled
+        and installed_llm_request_extension() is None
     )
     cache_session_id = f"reflect:{reflect_id}"
     # In-flight cache-create tasks (scheduled to overlap tool execution). Awaited
@@ -969,7 +981,9 @@ async def _run_reflect_agent_inner(
         except OperationCancelledError:
             raise
         except Exception as e:
-            logger.warning(f"[REFLECT {reflect_id}] closing done call failed, using the standalone prompt: {e}")
+            # repr, not str: a provider timeout is a bare TimeoutError whose str() is
+            # empty, so the reason used to log as nothing at all.
+            logger.warning(f"[REFLECT {reflect_id}] closing done call failed, using the standalone prompt: {e!r}")
             return None
         total_input_tokens += result.input_tokens
         total_output_tokens += result.output_tokens

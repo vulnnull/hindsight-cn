@@ -643,7 +643,10 @@
     "testerResultEmpty": "运行后即可查看 retain 会提取的内容。",
     "testerRunning": "正在提取…",
     "testerColumnCollapse": "折叠 {name}",
-    "testerColumnExpand": "展开 {name}"
+    "testerColumnExpand": "展开 {name}",
+    "recallServerDefaultState": "服务器默认值（{state}）",
+    "recallPreferObservationsLabel": "优先使用观察",
+    "recallPreferObservationsDescription": "未设置 prefer_observations 的 recall 请求会丢弃已并入返回观察的原始事实，避免重复。请求中的值仍然优先。"
   },
   "bankOperations": {
     "title": "后台操作",
@@ -1298,7 +1301,9 @@
     "budgetLabel": "预算",
     "maxTokensLabel": "最大令牌数",
     "tagsLabel": "标签",
-    "tagsMatchLabel": "标签匹配"
+    "tagsMatchLabel": "标签匹配",
+    "preferObservations": "优先使用观察",
+    "helpPreferObservations": "丢弃返回的观察所依据的原始事实，避免重复显示。初始值为该库的默认设置。"
   },
   "webhooksView": {
     "title": "Webhooks",

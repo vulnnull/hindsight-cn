@@ -18,6 +18,7 @@ from openai import APIConnectionError
 
 from hindsight_api.config import clear_config_cache
 from hindsight_api.engine import llm_wrapper
+from hindsight_api.engine.llm_trace import LLMTraceContext, reset_trace_context, set_trace_context
 from hindsight_api.engine.llm_wrapper import (
     LLMProvider,
     _scope_to_operation,
@@ -92,6 +93,40 @@ class TestSemaphoresForScope:
             assert _semaphores_for_scope("mental_model_delta_ops") == [llm_wrapper._global_llm_semaphore]
             assert _semaphores_for_scope("memory_think") == [llm_wrapper._global_llm_semaphore]
             assert _semaphores_for_scope("verification") == [llm_wrapper._global_llm_semaphore]
+
+    @pytest.mark.parametrize(
+        "operation", ["refresh_mental_model", "dry_run_refresh_mental_model", "mental_model_delta_ops"]
+    )
+    @pytest.mark.parametrize("scope", ["reflect", "reflect_tool_call", "final_rewrite", "mental_model_retraction_ops"])
+    def test_refresh_operation_uses_refresh_bucket_whatever_the_scope(self, operation, scope):
+        """The refresh runs the reflect agent, so its calls carry reflect scopes; the
+        operation they run under must still put them under the refresh cap (#5027)."""
+        refresh_sem = asyncio.Semaphore(1)
+        reflect_sem = asyncio.Semaphore(1)
+        token = set_trace_context(LLMTraceContext(operation=operation))
+        try:
+            with patch.object(
+                llm_wrapper,
+                "_per_op_llm_semaphores",
+                {"mental_model_refresh": refresh_sem, "reflect": reflect_sem},
+            ):
+                assert _semaphores_for_scope(scope) == [refresh_sem, llm_wrapper._global_llm_semaphore]
+        finally:
+            reset_trace_context(token)
+
+    def test_interactive_reflect_operation_keeps_reflect_bucket(self):
+        refresh_sem = asyncio.Semaphore(1)
+        reflect_sem = asyncio.Semaphore(1)
+        token = set_trace_context(LLMTraceContext(operation="reflect"))
+        try:
+            with patch.object(
+                llm_wrapper,
+                "_per_op_llm_semaphores",
+                {"mental_model_refresh": refresh_sem, "reflect": reflect_sem},
+            ):
+                assert _semaphores_for_scope("reflect_tool_call") == [reflect_sem, llm_wrapper._global_llm_semaphore]
+        finally:
+            reset_trace_context(token)
 
 
 class TestBuildPerOpSemaphores:
@@ -220,6 +255,45 @@ class TestSemaphoreEnforcement:
             )
 
         assert peak == 2, f"retain cap should hold even for end-to-end calls, peak={peak}"
+
+    @pytest.mark.asyncio
+    async def test_refresh_reflect_scoped_calls_respect_refresh_cap(self):
+        """End-to-end: a provider configured for the refresh operation binds its trace
+        before permits are taken, so reflect-agent scopes count against the refresh
+        cap and leave the interactive reflect cap free (#5027)."""
+        provider = LLMProvider(provider="mock", api_key="", base_url="", model="test-model")
+
+        in_flight = 0
+        peak = 0
+
+        async def slow_mock_call(**kwargs):
+            nonlocal in_flight, peak
+            in_flight += 1
+            peak = max(peak, in_flight)
+            await asyncio.sleep(0.01)
+            in_flight -= 1
+            return "ok"
+
+        provider._provider_impl.call = slow_mock_call  # type: ignore[assignment]
+        refresh_llm = provider.with_config(
+            SimpleNamespace(llm_gemini_safety_settings=None), bank_id="b", operation="refresh_mental_model"
+        )
+
+        refresh_sem = llm_wrapper.CrossLoopSemaphore(1)
+        reflect_sem = llm_wrapper.CrossLoopSemaphore(1)
+        with patch.object(
+            llm_wrapper,
+            "_per_op_llm_semaphores",
+            {"mental_model_refresh": refresh_sem, "reflect": reflect_sem},
+        ):
+            await asyncio.gather(
+                *[
+                    refresh_llm.call(messages=[{"role": "user", "content": "x"}], scope=scope)
+                    for scope in ("reflect", "reflect_tool_call", "final_rewrite", "final_map_0")
+                ]
+            )
+
+        assert peak == 1, f"refresh cap should serialize the refresh's reflect calls, peak={peak}"
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("with_tools", [False, True])

@@ -105,8 +105,8 @@ def _build_per_op_semaphores() -> dict[str, CrossLoopSemaphore]:
 
 _per_op_llm_semaphores: dict[str, CrossLoopSemaphore] = _build_per_op_semaphores()
 
-# Call scopes the automatic mental-model refresh makes: the reflect pass itself, its
-# dry run, and the structured delta/retraction ops that follow it.
+# Operation labels (and call scopes) of the automatic mental-model refresh: the reflect
+# pass itself, its dry run, and the structured delta/retraction ops that follow it.
 _MENTAL_MODEL_REFRESH_SCOPES = (
     "refresh_mental_model",
     "dry_run_refresh_mental_model",
@@ -138,10 +138,19 @@ def _scope_to_operation(scope: str) -> str | None:
 def _semaphores_for_scope(scope: str) -> list[CrossLoopSemaphore]:
     """Return the semaphores a call with the given scope must acquire.
 
-    Always includes the global semaphore; includes the per-op semaphore when
-    one is configured for the scope's operation bucket.
+    Always includes the global semaphore; includes the per-op semaphore when one
+    is configured for the call's bucket — the refresh bucket when the call runs
+    under a refresh operation, otherwise the bucket of its scope.
     """
+    from .llm_trace import current_trace_context
+
+    # The refresh runs the reflect agent, whose calls are scoped reflect/
+    # reflect_tool_call/final_rewrite/...: classify by the operation the call runs
+    # under first, or those calls would land in the interactive reflect bucket (#5027).
+    trace_ctx = current_trace_context()
     op = _scope_to_operation(scope)
+    if trace_ctx is not None and trace_ctx.operation and trace_ctx.operation.startswith(_MENTAL_MODEL_REFRESH_SCOPES):
+        op = "mental_model_refresh"
     per_op = _per_op_llm_semaphores.get(op) if op is not None else None
     if per_op is None:
         return [_global_llm_semaphore]
@@ -1223,6 +1232,47 @@ class LLMProvider:
         strict_schema: bool | None = None,
         prompt_cache: PromptCachePrefix | None = None,
     ) -> LLMCallResult:
+        """Make an LLM API call with retry logic — see ``_call`` for the arguments.
+
+        An installed LLM request extension decides first how the call is sent: its
+        credentials, or a different LLM altogether, which then runs the call in this
+        one's place. Decided before anything else so a refused call creates nothing
+        (e.g. a provider-side prompt cache) on the way to being refused.
+        """
+        from ..extensions.llm_request import bind_llm_request
+
+        bound = await bind_llm_request(self)
+        try:
+            return await (bound.llm or self)._call(
+                messages=messages,
+                response_format=response_format,
+                max_completion_tokens=max_completion_tokens,
+                temperature=temperature,
+                scope=scope,
+                max_retries=max_retries,
+                initial_backoff=initial_backoff,
+                max_backoff=max_backoff,
+                skip_validation=skip_validation,
+                strict_schema=strict_schema,
+                prompt_cache=prompt_cache,
+            )
+        finally:
+            bound.reset()
+
+    async def _call(
+        self,
+        messages: list[dict[str, str]],
+        response_format: Any | None = None,
+        max_completion_tokens: int | None = None,
+        temperature: float | None = None,
+        scope: str = "memory",
+        max_retries: int | None = None,
+        initial_backoff: float | None = None,
+        max_backoff: float | None = None,
+        skip_validation: bool = False,
+        strict_schema: bool | None = None,
+        prompt_cache: PromptCachePrefix | None = None,
+    ) -> LLMCallResult:
         """
         Make an LLM API call with retry logic.
 
@@ -1311,8 +1361,6 @@ class LLMProvider:
             set_response_usage,
         )
 
-        cached_prefix = await self._cached_prefix_for(prompt_cache) if prompt_cache is not None else None
-
         call_start = time.monotonic()
         request_token = set_request_context(
             _request_params(
@@ -1326,6 +1374,7 @@ class LLMProvider:
         # hand so the error path below can attach it if parsing/validation fails.
         usage_token = set_response_usage(None)
         try:
+            cached_prefix = await self._cached_prefix_for(prompt_cache) if prompt_cache is not None else None
             # Providers that own retry loops acquire the shared permits for each
             # upstream attempt so backoff never occupies request capacity.
             attempt_gated = self._provider_impl.supports_attempt_scoped_concurrency()
@@ -1399,6 +1448,47 @@ class LLMProvider:
         return sanitize_value(result)
 
     async def call_with_tools(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        max_completion_tokens: int | None = None,
+        temperature: float | None = None,
+        scope: str = "tools",
+        max_retries: int | None = None,
+        initial_backoff: float | None = None,
+        max_backoff: float | None = None,
+        tool_choice: LLMToolChoice = LLM_TOOL_CHOICE_AUTO,
+        cached_prefix: str | None = None,
+        cached_prefix_message_count: int = 0,
+    ) -> "LLMToolCallResult":
+        """Make an LLM call with tool calling — see ``_call_with_tools`` for the arguments.
+
+        Like ``call``, an installed LLM request extension decides first how it is sent.
+        """
+        from ..extensions.llm_request import bind_llm_request
+
+        bound = await bind_llm_request(self)
+        receiver = bound.llm or self
+        try:
+            return await receiver._call_with_tools(
+                messages=messages,
+                tools=tools,
+                max_completion_tokens=max_completion_tokens,
+                temperature=temperature,
+                scope=scope,
+                max_retries=max_retries,
+                initial_backoff=initial_backoff,
+                max_backoff=max_backoff,
+                tool_choice=tool_choice,
+                # A cache handle belongs to the LLM that created it; another LLM
+                # cannot read it, so a delegated call sends its prefix uncached.
+                cached_prefix=cached_prefix if receiver is self else None,
+                cached_prefix_message_count=cached_prefix_message_count if receiver is self else 0,
+            )
+        finally:
+            bound.reset()
+
+    async def _call_with_tools(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
