@@ -807,7 +807,9 @@
     "scopeNoResults": "未找到范围",
     "filterActive": "有效",
     "filterInvalidated": "已失效",
-    "invalidatedHint": "失效的记忆会被归档——不会出现在 recall 和 reflect 中，但会保留以供审计。"
+    "invalidatedHint": "失效的记忆会被归档——不会出现在 recall 和 reflect 中，但会保留以供审计。",
+    "sortNewestFirst": "最新优先",
+    "sortOldestFirst": "最早优先"
   },
   "documentsView": {
     "loadingDocuments": "正在加载文档...",
@@ -922,7 +924,10 @@
     "dateRangeCustom": "自定义范围",
     "dateRangeFrom": "从",
     "dateRangeTo": "至",
-    "dateRangeReversed": "结束时间必须晚于开始时间"
+    "dateRangeReversed": "结束时间必须晚于开始时间",
+    "matchedInText": "内容匹配",
+    "contentSearchPlaceholder": "在内容中查找…",
+    "contentSearchMatches": "{count, plural, other {# 处匹配}}"
   },
   "entitiesView": {
     "viewRelations": "关系",
@@ -1116,7 +1121,9 @@
     "nextRefreshRunning": "正在刷新",
     "optionsBudgetLabel": "刷新预算",
     "optionsBudgetDescription": "一次刷新可使用的智能体步数，按服务器迭代上限的倍数计：low 减半，mid 不变，high 加倍。",
-    "optionsBudgetDefault": "默认 — mid"
+    "optionsBudgetDefault": "默认 — mid",
+    "actionDownloadPdf": "下载 PDF",
+    "actionDownloadMarkdown": "下载 Markdown"
   },
   "cronPreview": {
     "invalid": "无效的 cron 表达式",
@@ -1805,7 +1812,9 @@
     "labelMinRefreshInterval": "最短刷新间隔",
     "minRefreshIntervalDefault": "默认",
     "labelKeepTrace": "保留追踪",
-    "secondsSuffix": "秒"
+    "secondsSuffix": "秒",
+    "actionDownloadPdf": "下载 PDF",
+    "actionDownloadMarkdown": "下载 Markdown"
   },
   "constellation": {
     "instructions": "滚动缩放 · 拖拽平移 · 悬停探索 · 点击选择",
@@ -2168,7 +2177,10 @@
     "advancedResults": "结果",
     "advancedJson": "原始 JSON",
     "advancedMeta": "{total} 条结果 · {ms} 毫秒",
-    "advancedIdle": "运行请求以查看结果和原始响应。"
+    "advancedIdle": "运行请求以查看结果和原始响应。",
+    "downloadButton": "下载",
+    "downloadPdf": "PDF",
+    "downloadMarkdown": "Markdown"
   },
   "home": {
     "title": "Home",
