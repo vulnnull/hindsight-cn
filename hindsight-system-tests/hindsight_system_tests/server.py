@@ -132,6 +132,13 @@ def stub_environment(stub_url: str) -> dict[str, str]:
         "HINDSIGHT_API_RERANKER_SILICONFLOW_API_KEY": "stub-key",
         "HINDSIGHT_API_RERANKER_SILICONFLOW_BASE_URL": stub_url,
         "HINDSIGHT_API_RERANKER_SILICONFLOW_MODEL": "stub-reranker",
+        # Consolidation's decision model (triage), for consolidation only: set up globally it
+        # would also rank recall. Triage is on by default wherever one is set up; it is off
+        # here so no other story's consolidation changes, and test_22 turns it on per bank.
+        "HINDSIGHT_API_CONSOLIDATION_DECISION_MODEL_PROVIDER": "typesafe",
+        "HINDSIGHT_API_CONSOLIDATION_DECISION_MODEL_API_KEY": "stub-key",
+        "HINDSIGHT_API_CONSOLIDATION_DECISION_MODEL_BASE_URL": stub_url,
+        "HINDSIGHT_API_CONSOLIDATION_USE_DECISION_MODEL": "false",
         # In production a retry earns its keep even on a 400: a model that
         # returned malformed JSON often gets it right the second time. Against a
         # deterministic stub it cannot — the same request gets the same answer —
@@ -202,7 +209,10 @@ def _server_env(stub_url: str, extra_env: dict[str, str] | None) -> dict[str, st
     # The repo .env is for the developer's own server; a system test must depend
     # only on what it sets here, or it passes on one machine and fails on another.
     for key in list(env):
-        if key.startswith("HINDSIGHT_API_"):
+        # ANTHROPIC_* too: with no Hindsight key the Anthropic SDK reads its own
+        # variables, and a developer's ANTHROPIC_API_KEY would outrank the federation
+        # credentials a story sets.
+        if key.startswith(("HINDSIGHT_API_", "ANTHROPIC_")):
             del env[key]
 
     env.update(stub_environment(stub_url))

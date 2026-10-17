@@ -312,6 +312,86 @@ For automation, the Copilot SDK also accepts `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`,
 
 ---
 
+### ChatGPT Setup (Sign in with ChatGPT)
+
+The `chatgpt` provider runs Hindsight's LLM calls on your ChatGPT plan through
+OpenAI's documented [Sign in with ChatGPT flow for open-source apps](https://developers.openai.com/siwc/token-sharing-open-source).
+Hindsight registers itself as its own OAuth client on first sign-in, and every call goes to the public
+`https://api.openai.com/v1/responses` endpoint with your OAuth access token. It does not use an API key.
+
+How it differs from `openai-codex`: that provider reuses the Codex CLI's sign-in and calls ChatGPT's private
+`chatgpt.com/backend-api/codex` endpoint. `chatgpt` uses the supported route and keeps its own
+credentials, so it never shares or rotates the Codex CLI's tokens.
+
+**Prerequisites:**
+- A ChatGPT plan that allows plan usage in third-party apps
+- A browser on the machine where you run the login
+
+**Setup on a machine with a browser (for example a laptop):**
+
+1. **Sign in:**
+   ```bash
+   hindsight-admin chatgpt login
+   ```
+   This opens your browser and waits for the callback on `http://127.0.0.1:1455/auth/callback`
+   (`--port` changes the port; `--no-browser` prints the URL instead). Approve the request, including
+   use of your ChatGPT plan. The command validates the ID token and the granted scopes, then writes
+   `~/.hindsight/chatgpt/credentials.json` (mode `0600`) next to this host's `host_id`.
+   If you declined plan usage, run `login --enable-plan-usage` to be asked again.
+
+2. **Configure Hindsight:**
+   ```bash
+   export HINDSIGHT_API_LLM_PROVIDER=chatgpt
+   # export HINDSIGHT_API_LLM_MODEL=gpt-6-luna       # the default
+   # export HINDSIGHT_API_LLM_REASONING_EFFORT=medium  # sent as reasoning.effort
+   ```
+
+3. **Check the stored session** (prints account, client id, scopes and expiry, never token values):
+   ```bash
+   hindsight-admin chatgpt status
+   ```
+
+**Self-hosted server or VM (no browser):** the `127.0.0.1` callback reaches the machine running the
+browser, so sign in on your laptop and move the credential file to the server.
+
+1. On the laptop: run `login` as above.
+2. Copy the file over SSH and install it on the server with `login --from-file`, as the user that runs Hindsight (add
+   `--home <dir>` before `login` if the server sets `HINDSIGHT_API_LLM_CHATGPT_HOME`).
+   `--from-file` keeps the server's own `host_id` (creating one on first use) instead of the laptop's:
+   ```bash
+   scp ~/.hindsight/chatgpt/credentials.json server:/tmp/chatgpt.json
+   ssh server 'hindsight-admin chatgpt login --from-file /tmp/chatgpt.json && rm /tmp/chatgpt.json'
+   ```
+3. On the laptop, stop using that copy without revoking it:
+   ```bash
+   hindsight-admin chatgpt logout --local-only
+   ```
+   Refresh tokens rotate, so after the copy only the server may use and refresh this session. A plain
+   `logout` would revoke it and end the server's session too. `--local-only` clears the laptop's
+   tokens but keeps its client registration for a later `login`. `--from-file` refuses to replace a
+   different account's registration on the server unless you pass `--force`.
+
+The server then owns refreshes. Sign in again on the laptop later if you also want Hindsight there.
+
+**Important notes:**
+- Access tokens last one hour and are refreshed automatically (five minutes before expiry, and once on
+  an HTTP 401). Refresh tokens rotate; refreshes take a file lock and re-read the file first, so
+  several Hindsight processes can share one credential directory.
+- When the refresh token is no longer valid, calls fail with the `login` command to run.
+- On ChatGPT Plus, the five-hour usage limit is shared with every other app that uses your plan,
+  including Codex. When the limit is reached, Hindsight defers retain and consolidation work and
+  retries it 30 minutes later instead of failing it. Review usage and per-app limits at
+  [ChatGPT Settings → Usage](https://chatgpt.com/settings/usage).
+- The route is a preview: Hindsight sends `store: false` and `stream: true`, omits fields it rejects
+  (`temperature`, `max_output_tokens`, `user`, and others), and sends system prompts as developer
+  messages.
+- `logout` revokes the session and clears local tokens but keeps the client registration and host id
+  for the next `login`. `logout --local-only` clears the tokens without revoking.
+- `HINDSIGHT_API_LLM_CHATGPT_HOME` relocates the credential directory. Use one directory per
+  ChatGPT account. The directory must be writable, because each refresh writes the rotated token
+  back; in a container, mount a writable volume there. If a write fails, the process keeps the new
+  tokens in memory, but other processes and restarts will not see them.
+
 ### OpenAI Codex Setup (ChatGPT Plus/Pro)
 
 Use your ChatGPT Plus or Pro subscription for Hindsight without separate OpenAI Platform API costs.
@@ -911,6 +991,7 @@ Converts text into dense vector representations for semantic similarity search.
 | `google` | Google embeddings (Gemini API or Vertex AI) | Production, multilingual, high quality |
 | `tei` | HuggingFace Text Embeddings Inference | Production, self-hosted |
 | `zeroentropy` | ZeroEntropy zembed-1 | Production, high quality retrieval |
+| `nvidia` | NVIDIA NIM retrieval embeddings (`input_type`-aware) | Users on NVIDIA NIM / build.nvidia.com |
 | `litellm` | LiteLLM proxy (unified gateway) | Multi-provider setups |
 | `litellm-sdk` | LiteLLM SDK (direct API, no proxy) | Multi-provider, simpler setup |
 
@@ -1001,6 +1082,11 @@ export HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_API_KEY=your-api-key
 export HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_MODEL=zembed-1
 export HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_DIMENSIONS=1280
 
+# NVIDIA NIM
+export HINDSIGHT_API_EMBEDDINGS_PROVIDER=nvidia
+export HINDSIGHT_API_EMBEDDINGS_NVIDIA_API_KEY=nvapi-your-key
+export HINDSIGHT_API_EMBEDDINGS_NVIDIA_MODEL=nvidia/llama-nemotron-embed-vl-1b-v2  # default, can omit
+
 # LiteLLM proxy
 export HINDSIGHT_API_EMBEDDINGS_PROVIDER=litellm
 export HINDSIGHT_API_LITELLM_API_BASE=http://localhost:4000
@@ -1055,6 +1141,7 @@ Reranks initial search results to improve precision.
 | `openrouter` | OpenRouter rerank API (Cohere-compatible gateway) | Multi-provider setups |
 | `zeroentropy` | ZeroEntropy rerank API (zerank-2) | Production, state-of-the-art accuracy |
 | `siliconflow` | SiliconFlow rerank API (Cohere-compatible `/rerank` endpoint) | Users in China or anyone on SiliconFlow's platform |
+| `nvidia` | NVIDIA NIM reranking API (native `/retrieval/{model}/reranking` endpoint) | Users on NVIDIA NIM / build.nvidia.com |
 | `typesafe` | TypeSafe typed-decision API (Jev) — ranks the whole pool in one question | Production, highest ranking quality; can also return only the relevant candidates |
 | `alibaba` | Alibaba Cloud DashScope rerank API (qwen3-rerank) | Users on Alibaba Cloud / DashScope |
 | `google` | Google Discovery Engine ranking API (REST + Google auth) | Production, GCP integration |
@@ -1170,6 +1257,11 @@ export HINDSIGHT_API_RERANKER_ZEROENTROPY_MODEL=zerank-2  # default, can omit
 export HINDSIGHT_API_RERANKER_PROVIDER=siliconflow
 export HINDSIGHT_API_RERANKER_SILICONFLOW_API_KEY=your-api-key
 export HINDSIGHT_API_RERANKER_SILICONFLOW_MODEL=BAAI/bge-reranker-v2-m3  # default, can omit
+
+# NVIDIA NIM (native reranking API, not Cohere-compatible)
+export HINDSIGHT_API_RERANKER_PROVIDER=nvidia
+export HINDSIGHT_API_RERANKER_NVIDIA_API_KEY=nvapi-your-key
+export HINDSIGHT_API_RERANKER_NVIDIA_MODEL=nvidia/llama-nemotron-rerank-vl-1b-v2  # default, can omit
 
 # TypeSafe (typed-decision API, ranks the whole pool in one question)
 export HINDSIGHT_API_RERANKER_PROVIDER=typesafe

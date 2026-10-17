@@ -148,6 +148,41 @@ rank the sources. The ways an operator can state the precedence with no new conf
 `HINDSIGHT_EVAL_SOURCE_STRATEGY`. It uses `hindsight_system_evals/sources.py`,
 not the shared corpus.
 
+**`test_09` — a coding agent's first-prompt reflect, with and without the decision model.** The only suite on
+banks shaped like a coding agent's: six sde-bench tasks as the coding-agents plugin ingests
+them — each task repo's history, the chat or commit where the decision was made, 140 decoy
+developer conversations, and the pages the plugin wrote about the code. Decisions recorded in
+chats, in commits (with a later commit that broke them), and amended after the fact. It sends
+the plugin's own first-prompt request (`buildReflectQuery`: the developer's goal wrapped in ~2k
+characters of rendering rules) with the decision model on and off (`reflect_use_decision_model`) on each bank, interleaved,
+`HINDSIGHT_EVAL_CODING_REFLECT_REPEATS` times each (default 2). Every bank gets a reflect mission
+that ranks its sources by their `source:` tags (a stated decision outranks a later cleanup commit
+and the pages about the code), so the decision model is also held to following a mission it
+never reads itself. Graded as rates over every run:
+with it, reflect must report the task's recorded decision as often as agent turns, less one; answer
+"the bank holds no decision" no more often; and make fewer LLM calls (the cost) in less time (median).
+
+Behind it: reflect with the decision model passed every suite above and still injected "the bank holds no
+decision" on sde-bench, in 14s against agent mode's 7-10s. The wrapped prompt was the search
+query, fresh pages about the code hid the facts, and the decision model's "partly" was a
+rounding of a "fully". Then, once that was fixed: the distilled search query asked for "implementation
+logic" and surfaced the commit that broke each history task's decision. None of that shows on
+short questions over an on-topic corpus. The cost and time checks need a decision model
+(`HINDSIGHT_EVAL_SET_DECISION_MODEL_PROVIDER=typesafe`, `HINDSIGHT_EVAL_SET_DECISION_MODEL_API_KEY`);
+without one only the answers are graded.
+
+The banks are `fixtures/coding-agent-banks/<task>.zip`, with each task's bug report and
+recorded policy in `manifest.json` there. Rebuild them on purpose, against a server you keep
+up, with sde-bench's own setup (`SDE_HSCODING_PLUGIN_DIR` at a built plugin,
+`SDEBENCH_BOLTONS_HOST` at a boltons clone, `OMB_ANSWER_LLM`/`OMB_JUDGE_LLM` set to a provider
+you have a key for):
+
+```bash
+uv run run-amb --api-url http://localhost:8888 --dataset sdebench --split boltons \
+  --memory hindsight-coding -- --mode coding --query-id <task> --skip-answer
+# then export bank sde-coding-<task> with export_bank into fixtures/coding-agent-banks/
+```
+
 **`test_08` — ranked retrieval on BEIR.** The only suite graded against labels
 nobody here wrote, and the only one that makes **no model call**. It records a
 *baseline*: what this pipeline scores on a public IR benchmark, and on what.
@@ -300,12 +335,13 @@ cost *and* outcome — a cheaper setting only counts at the same quality:
 
 ```bash
 HINDSIGHT_EVAL_CONSOLIDATION_COST=/tmp/base.jsonl uv run pytest evals/test_09_consolidation.py --full
-# any server setting, for every bank of the run: HINDSIGHT_EVAL_SET_<NAME> -> HINDSIGHT_API_<NAME>
-HINDSIGHT_EVAL_SET_CONSOLIDATION_MAX_TOKENS=256 \
-  HINDSIGHT_EVAL_CONSOLIDATION_COST=/tmp/try.jsonl uv run pytest evals/test_09_consolidation.py --full
+# consolidation triage: a decision model (TypeSafe Jev) for consolidation, on for every bank
+HINDSIGHT_EVAL_SET_CONSOLIDATION_DECISION_MODEL_PROVIDER=typesafe HINDSIGHT_EVAL_SET_CONSOLIDATION_DECISION_MODEL_API_KEY=... \
+  HINDSIGHT_EVAL_CONSOLIDATION_COST=/tmp/triage.jsonl uv run pytest evals/test_09_consolidation.py --full
 ```
 
-Speaker attribution is decided at
+Triage requests are traced like LLM calls (scope `consolidation_triage`) and
+reported apart from them, as `triage N calls, M in`. Speaker attribution is decided at
 retain and is out of scope; failure handling and scope mechanics are
 deterministic and live in `hindsight-system-tests`.
 
@@ -356,11 +392,23 @@ issue/PR history — and what grades it. "eval" = a `test_09` scenario (real mod
 - Deleting or replacing a document removes and rebuilds its observations (#429, #3294) — system `test_25`; unit `test_delta_retain_orphan_observations.py`
 - Trigger, dedup and serialisation of consolidation jobs (#4368) — system `test_26`, `test_28`
 - Observations in recall, `prefer_observations`, source facts (#2311) — system `test_27`
-- A bank's own observations mission on a noisy bank: keeps what the mission asks, drops the small talk it leaves out — eval `noisy-service-catalogue-mission`
+- Consolidation triage (a decision model, e.g. TypeSafe Jev): restatements, new facets and chatter settled without the LLM — unit `test_consolidation_triage.py`; system `test_22_consolidation_triage`; eval suite with triage on; under a bank's own mission it records only facts the mission wants as worded — eval `noisy-service-catalogue-mission`
 
 **Out of scope here, deliberately** — speaker attribution is decided at retain (#4572, #1680)
 and belongs with the retain suites; operational behaviour (timeouts #3301/#4715, quota
 handling #4160, wall-clock ceilings) is not a quality property.
+
+### `test_10` — a changed value changes everywhere
+
+A pump page is built from a
+manual (wave one), then refreshed with a notice that changes the filter interval
+and the owner (wave two). The trap is a block the refresh left untouched that
+still states the old value as current, or still says no change was recorded —
+in practice the opening summary. The regression behind it (#5228): the delta
+rewrote the paragraph the fact was about and left the rest, so the page
+contradicted itself under a clean refresh. One English and one Chinese case (the
+reporter's); `HINDSIGHT_EVAL_CONSISTENCY_REPEATS` (default 1) repeats each on
+fresh pages, which is how to read a rate.
 
 ## The corpus
 

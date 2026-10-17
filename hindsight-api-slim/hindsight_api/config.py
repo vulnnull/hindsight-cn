@@ -4,6 +4,7 @@ Centralized configuration for Hindsight API.
 All environment variables and their defaults are defined here.
 """
 
+import importlib.util
 import json
 import logging
 import os
@@ -225,6 +226,10 @@ ENV_LLM_TEMPERATURE_VERIFICATION = "HINDSIGHT_API_LLM_TEMPERATURE_VERIFICATION"
 ENV_LLM_TEMPERATURE_RETAIN = "HINDSIGHT_API_LLM_TEMPERATURE_RETAIN"
 ENV_LLM_TEMPERATURE_REFLECT = "HINDSIGHT_API_LLM_TEMPERATURE_REFLECT"
 ENV_LLM_TEMPERATURE_CONSOLIDATION = "HINDSIGHT_API_LLM_TEMPERATURE_CONSOLIDATION"
+# The mental-model refresh's structured edit calls (delta and retraction ops).
+# Unset, it takes the resolved consolidation temperature, which those calls used
+# before it existed; see _resolve_inherited_temperature.
+ENV_LLM_TEMPERATURE_MENTAL_MODEL_REFRESH = "HINDSIGHT_API_LLM_TEMPERATURE_MENTAL_MODEL_REFRESH"
 
 # Multi-LLM strategy. Extra LLMs are configured by index alongside the unindexed
 # primary (e.g. HINDSIGHT_API_LLM_1_PROVIDER, HINDSIGHT_API_LLM_2_PROVIDER, ...),
@@ -249,7 +254,7 @@ ENV_LLM_LITELLMROUTER_CONFIG = "HINDSIGHT_API_LLM_LITELLMROUTER_CONFIG"
 DEFAULT_LLM_TEMPERATURE_VERIFICATION = 0.0  # connection check
 DEFAULT_LLM_TEMPERATURE_RETAIN = 0.1  # fact extraction
 DEFAULT_LLM_TEMPERATURE_REFLECT = 0.9  # reflect "thinking"
-DEFAULT_LLM_TEMPERATURE_CONSOLIDATION = 0.0  # mental-model delta / dedup
+DEFAULT_LLM_TEMPERATURE_CONSOLIDATION = 0.0  # dedup; mental-model delta/retraction unless overridden
 
 # Defaults for service tiers
 DEFAULT_LLM_GROQ_SERVICE_TIER = "auto"  # "on_demand", "flex", or "auto"
@@ -319,6 +324,19 @@ def _resolve_operation_temperature(operation_env: str, default: float) -> float 
         raw = os.getenv(ENV_LLM_TEMPERATURE)
     if raw is None:
         return default
+    return _parse_temperature(raw)
+
+
+def _resolve_inherited_temperature(operation_env: str, inherited: float | None) -> float | None:
+    """Resolve a temperature that inherits another operation's when unset: per-op env -> ``inherited``.
+
+    ``inherited`` is that operation's already-resolved value, so the global env and
+    the omit sentinels reach this one through it, and leaving ``operation_env`` unset
+    changes nothing.
+    """
+    raw = os.getenv(operation_env)
+    if raw is None:
+        return inherited
     return _parse_temperature(raw)
 
 
@@ -563,6 +581,13 @@ ENV_EMBEDDINGS_ZEROENTROPY_ENCODING_FORMAT = "HINDSIGHT_API_EMBEDDINGS_ZEROENTRO
 ENV_EMBEDDINGS_ZEROENTROPY_LATENCY = "HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_LATENCY"
 ENV_EMBEDDINGS_ZEROENTROPY_BATCH_SIZE = "HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_BATCH_SIZE"
 
+# NVIDIA NIM embeddings (OpenAI-shaped /embeddings plus a required input_type)
+ENV_EMBEDDINGS_NVIDIA_API_KEY = "HINDSIGHT_API_EMBEDDINGS_NVIDIA_API_KEY"
+ENV_EMBEDDINGS_NVIDIA_MODEL = "HINDSIGHT_API_EMBEDDINGS_NVIDIA_MODEL"
+ENV_EMBEDDINGS_NVIDIA_BASE_URL = "HINDSIGHT_API_EMBEDDINGS_NVIDIA_BASE_URL"
+ENV_EMBEDDINGS_NVIDIA_DIMENSIONS = "HINDSIGHT_API_EMBEDDINGS_NVIDIA_DIMENSIONS"
+ENV_EMBEDDINGS_NVIDIA_BATCH_SIZE = "HINDSIGHT_API_EMBEDDINGS_NVIDIA_BATCH_SIZE"
+
 # Deprecated: Legacy shared Cohere API key (for backward compatibility)
 ENV_COHERE_API_KEY = "HINDSIGHT_API_COHERE_API_KEY"
 
@@ -645,6 +670,14 @@ ENV_RERANKER_ZEROENTROPY_BASE_URL = "HINDSIGHT_API_RERANKER_ZEROENTROPY_BASE_URL
 ENV_RERANKER_SILICONFLOW_API_KEY = "HINDSIGHT_API_RERANKER_SILICONFLOW_API_KEY"
 ENV_RERANKER_SILICONFLOW_MODEL = "HINDSIGHT_API_RERANKER_SILICONFLOW_MODEL"
 ENV_RERANKER_SILICONFLOW_BASE_URL = "HINDSIGHT_API_RERANKER_SILICONFLOW_BASE_URL"
+
+# NVIDIA NIM configuration (reranker only; native /retrieval/<model>/reranking endpoint)
+ENV_RERANKER_NVIDIA_API_KEY = "HINDSIGHT_API_RERANKER_NVIDIA_API_KEY"
+ENV_RERANKER_NVIDIA_MODEL = "HINDSIGHT_API_RERANKER_NVIDIA_MODEL"
+ENV_RERANKER_NVIDIA_BASE_URL = "HINDSIGHT_API_RERANKER_NVIDIA_BASE_URL"
+ENV_RERANKER_NVIDIA_TIMEOUT = "HINDSIGHT_API_RERANKER_NVIDIA_TIMEOUT"
+ENV_RERANKER_NVIDIA_BATCH_SIZE = "HINDSIGHT_API_RERANKER_NVIDIA_BATCH_SIZE"
+ENV_RERANKER_NVIDIA_MAX_CONCURRENT = "HINDSIGHT_API_RERANKER_NVIDIA_MAX_CONCURRENT"
 
 # TypeSafe configuration (reranker only; typed-question API, not a /rerank endpoint)
 ENV_RERANKER_TYPESAFE_API_KEY = "HINDSIGHT_API_RERANKER_TYPESAFE_API_KEY"
@@ -764,6 +797,10 @@ ENV_DB_ACQUIRE_WARN_THRESHOLD_MS = "HINDSIGHT_API_DB_ACQUIRE_WARN_THRESHOLD_MS"
 # (HINDSIGHT_API_<OP>LLM_<n>_CODEX_HOME) so a chain can span two profiles.
 ENV_LLM_CODEX_HOME = "HINDSIGHT_API_LLM_CODEX_HOME"
 
+# chatgpt provider (Sign in with ChatGPT) credential directory: holds
+# credentials.json and this host's host_id. Server-level only.
+ENV_LLM_CHATGPT_HOME = "HINDSIGHT_API_LLM_CHATGPT_HOME"
+
 # xai-oauth provider. The token store is written by the `login` entrypoint and read on
 # every call; the rest exist so a deployment can point at a different OAuth app.
 ENV_XAI_OAUTH_TOKEN_PATH = "HINDSIGHT_API_XAI_OAUTH_TOKEN_PATH"
@@ -878,6 +915,7 @@ ENV_CONSOLIDATION_SOURCE_FACTS_MAX_TOKENS_PER_OBSERVATION = (
 )
 ENV_CONSOLIDATION_RECALL_BUDGET = "HINDSIGHT_API_CONSOLIDATION_RECALL_BUDGET"
 ENV_CONSOLIDATION_MAX_ATTEMPTS = "HINDSIGHT_API_CONSOLIDATION_MAX_ATTEMPTS"
+ENV_CONSOLIDATION_USE_DECISION_MODEL = "HINDSIGHT_API_CONSOLIDATION_USE_DECISION_MODEL"
 ENV_OBSERVATIONS_MISSION = "HINDSIGHT_API_OBSERVATIONS_MISSION"
 ENV_MAX_OBSERVATIONS_PER_SCOPE = "HINDSIGHT_API_MAX_OBSERVATIONS_PER_SCOPE"
 ENV_OBSERVATION_SCOPE_LIMITS = "HINDSIGHT_API_OBSERVATION_SCOPE_LIMITS"
@@ -1022,6 +1060,8 @@ ENV_CONSOLIDATION_WALL_TIMEOUT = "HINDSIGHT_API_CONSOLIDATION_WALL_TIMEOUT"
 
 # Reflect agent settings
 ENV_REFLECT_MAX_ITERATIONS = "HINDSIGHT_API_REFLECT_MAX_ITERATIONS"
+ENV_REFLECT_USE_DECISION_MODEL = "HINDSIGHT_API_REFLECT_USE_DECISION_MODEL"
+ENV_MENTAL_MODEL_REFRESH_USE_DECISION_MODEL = "HINDSIGHT_API_MENTAL_MODEL_REFRESH_USE_DECISION_MODEL"
 ENV_REFLECT_PROMPT_CACHE_ENABLED = "HINDSIGHT_API_REFLECT_PROMPT_CACHE_ENABLED"
 ENV_REFLECT_MAX_CONTEXT_TOKENS = "HINDSIGHT_API_REFLECT_MAX_CONTEXT_TOKENS"
 ENV_REFLECT_WALL_TIMEOUT = "HINDSIGHT_API_REFLECT_WALL_TIMEOUT"
@@ -1132,6 +1172,7 @@ PROVIDER_DEFAULT_MODELS = {
     "lmstudio": "local-model",
     "vertexai": "google/gemini-3.1-flash-lite",
     "openai-codex": "gpt-5.6-luna",
+    "chatgpt": "gpt-6-luna",
     "claude-code": "claude-sonnet-4-5-20250929",
     "cursor": "auto",
     "github-copilot": "gpt-5.6-terra",
@@ -1222,6 +1263,9 @@ DEFAULT_LLM_SEND_BANK_AS_USER = False  # Opt-in: tag provider calls with user=<b
 
 # Codex credentials directory (None = CODEX_HOME, else ~/.codex)
 DEFAULT_LLM_CODEX_HOME = None
+
+# chatgpt credentials directory (None = ~/.hindsight/chatgpt)
+DEFAULT_LLM_CHATGPT_HOME = None
 
 # Vertex AI defaults
 DEFAULT_LLM_VERTEXAI_PROJECT_ID = None  # Required for Vertex AI
@@ -1319,6 +1363,7 @@ DEFAULT_RERANKER_COHERE_TIMEOUT = 60.0
 DEFAULT_RERANKER_OPENROUTER_TIMEOUT = 60.0
 DEFAULT_RERANKER_ZEROENTROPY_TIMEOUT = 60.0
 DEFAULT_RERANKER_SILICONFLOW_TIMEOUT = 60.0
+DEFAULT_RERANKER_NVIDIA_TIMEOUT = 60.0
 DEFAULT_RERANKER_TYPESAFE_TIMEOUT = 60.0
 DEFAULT_RERANKER_ALIBABA_TIMEOUT = 60.0
 DEFAULT_RERANKER_LITELLM_TIMEOUT = 60.0
@@ -1446,6 +1491,20 @@ DEFAULT_RERANKER_ZEROENTROPY_MODEL = "zerank-2"
 
 DEFAULT_RERANKER_SILICONFLOW_MODEL = "BAAI/bge-reranker-v2-m3"
 DEFAULT_RERANKER_SILICONFLOW_BASE_URL = "https://api.siliconflow.cn/v1"
+
+# The model id is part of the reranking path, so it keeps its "nvidia/" namespace.
+DEFAULT_RERANKER_NVIDIA_MODEL = "nvidia/llama-nemotron-rerank-vl-1b-v2"
+DEFAULT_RERANKER_NVIDIA_BASE_URL = "https://ai.api.nvidia.com/v1"
+# The hosted ranking API rejects more than 512 passages per request.
+DEFAULT_RERANKER_NVIDIA_BATCH_SIZE = 512
+DEFAULT_RERANKER_NVIDIA_MAX_CONCURRENT = 8
+
+DEFAULT_EMBEDDINGS_NVIDIA_MODEL = "nvidia/llama-nemotron-embed-vl-1b-v2"
+DEFAULT_EMBEDDINGS_NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
+# The model's native size is 2048; 1024 (a Matryoshka step it accepts) keeps the
+# provider inside pgvector HNSW's 2000-dimension index limit out of the box.
+DEFAULT_EMBEDDINGS_NVIDIA_DIMENSIONS = 1024
+DEFAULT_EMBEDDINGS_NVIDIA_BATCH_SIZE = 100
 
 DEFAULT_RERANKER_TYPESAFE_MODEL = "jev-latest"
 DEFAULT_RERANKER_TYPESAFE_BASE_URL = "https://api.typesafe.ai"
@@ -1772,6 +1831,9 @@ DEFAULT_ENABLE_DOCUMENT_IMPORT_API = True
 # Observations defaults (consolidated knowledge from facts)
 DEFAULT_ENABLE_OBSERVATIONS = True  # Observations enabled by default
 DEFAULT_ENABLE_AUTO_CONSOLIDATION = True  # Auto-consolidation after retain enabled by default
+# When a decision model is set up for consolidation, it settles restatements, new facets and
+# chatter before the LLM call; only facts that change existing observations reach the LLM.
+DEFAULT_CONSOLIDATION_USE_DECISION_MODEL = True
 DEFAULT_ENABLE_OBSERVATION_HISTORY = True  # Observation history tracking enabled by default
 DEFAULT_ENABLE_MENTAL_MODEL_HISTORY = True  # Mental model history tracking enabled by default
 # Floor on how often an *automatic* mental-model refresh may run: a triggered refresh
@@ -1959,6 +2021,12 @@ DEFAULT_CONSOLIDATION_WALL_TIMEOUT = 7200  # seconds (2 hours)
 
 # Reflect agent settings
 DEFAULT_REFLECT_MAX_ITERATIONS = 10  # Max tool call iterations before forcing response
+# Whether reflect (and, separately, a knowledge-page refresh) is decision-orchestrated when a
+# reflect decision model is set up: the retrieval layers run in parallel rounds and the decision
+# model prunes the evidence and judges when it is enough, in place of the LLM's per-layer turns.
+# On by default, so setting up a decision model is what turns it on; a bank can opt out.
+DEFAULT_REFLECT_USE_DECISION_MODEL = True
+DEFAULT_MENTAL_MODEL_REFRESH_USE_DECISION_MODEL = True
 # Step-by-step context caching for the reflect tool loop (Gemini). On by default;
 # requires the global prompt cache (HINDSIGHT_API_LLM_PROMPT_CACHE_ENABLED) to also
 # be on. Set false to force reflect to run uncached even when prompt caching is on.
@@ -2685,7 +2753,7 @@ def _parse_llm_members(prefix: str) -> list[LLMMemberConfig]:
     ``_TIMEOUT`` and ``_MAX_RETRIES`` are optional per-member overrides of the
     operation's request policy; unset means inherit it.
     """
-    from .engine.provider_auth import requires_api_key
+    from .provider_auth import requires_api_key
 
     members: list[LLMMemberConfig] = []
     index = 1
@@ -2800,6 +2868,13 @@ class RerankerMemberConfig:
     siliconflow_model: str
     siliconflow_base_url: str
     siliconflow_timeout: float
+    # nvidia
+    nvidia_api_key: str | None
+    nvidia_model: str
+    nvidia_base_url: str
+    nvidia_timeout: float
+    nvidia_batch_size: int
+    nvidia_max_concurrent: int
     # typesafe
     typesafe_api_key: str | None
     typesafe_model: str
@@ -2955,6 +3030,14 @@ def _parse_reranker_members() -> list[RerankerMemberConfig]:
                 siliconflow_model=_member_str(base, "SILICONFLOW_MODEL", DEFAULT_RERANKER_SILICONFLOW_MODEL),
                 siliconflow_base_url=_member_str(base, "SILICONFLOW_BASE_URL", DEFAULT_RERANKER_SILICONFLOW_BASE_URL),
                 siliconflow_timeout=_member_float(base, "SILICONFLOW_TIMEOUT", DEFAULT_RERANKER_SILICONFLOW_TIMEOUT),
+                nvidia_api_key=_member_opt_str(base, "NVIDIA_API_KEY"),
+                nvidia_model=_member_str(base, "NVIDIA_MODEL", DEFAULT_RERANKER_NVIDIA_MODEL),
+                nvidia_base_url=_member_str(base, "NVIDIA_BASE_URL", DEFAULT_RERANKER_NVIDIA_BASE_URL),
+                nvidia_timeout=_member_float(base, "NVIDIA_TIMEOUT", DEFAULT_RERANKER_NVIDIA_TIMEOUT),
+                nvidia_batch_size=_member_int(base, "NVIDIA_BATCH_SIZE", DEFAULT_RERANKER_NVIDIA_BATCH_SIZE),
+                nvidia_max_concurrent=_member_int(
+                    base, "NVIDIA_MAX_CONCURRENT", DEFAULT_RERANKER_NVIDIA_MAX_CONCURRENT
+                ),
                 typesafe_api_key=_member_opt_str(base, "TYPESAFE_API_KEY"),
                 typesafe_model=_member_str(base, "TYPESAFE_MODEL", DEFAULT_RERANKER_TYPESAFE_MODEL),
                 typesafe_base_url=_member_str(base, "TYPESAFE_BASE_URL", DEFAULT_RERANKER_TYPESAFE_BASE_URL),
@@ -3157,6 +3240,7 @@ class HindsightConfig:
     llm_temperature_retain: float | None
     llm_temperature_reflect: float | None
     llm_temperature_consolidation: float | None
+    llm_temperature_mental_model_refresh: float | None
 
     # LiteLLM Router chain (provider-specific; consumed by the "litellmrouter" provider).
     # List of deployment dicts evaluated in order with fallback on transient errors.
@@ -3169,6 +3253,10 @@ class HindsightConfig:
     # accepting it over the config API would let a bank point the server at an
     # arbitrary file.
     llm_codex_home: str | None
+
+    # chatgpt credential directory (None = ~/.hindsight/chatgpt). Server-level
+    # only, for the same reason as llm_codex_home.
+    llm_chatgpt_home: str | None
 
     # Vertex AI configuration
     llm_vertexai_project_id: str | None
@@ -3379,6 +3467,12 @@ class HindsightConfig:
     reranker_siliconflow_model: str
     reranker_siliconflow_base_url: str
     reranker_siliconflow_timeout: float
+    reranker_nvidia_api_key: str | None
+    reranker_nvidia_model: str
+    reranker_nvidia_base_url: str
+    reranker_nvidia_timeout: float
+    reranker_nvidia_batch_size: int
+    reranker_nvidia_max_concurrent: int
     reranker_typesafe_api_key: str | None
     reranker_typesafe_model: str
     reranker_typesafe_base_url: str
@@ -3511,6 +3605,7 @@ class HindsightConfig:
     # Observations settings (consolidated knowledge from facts)
     enable_observations: bool
     enable_auto_consolidation: bool
+    consolidation_use_decision_model: bool
     enable_observation_history: bool
     observation_history_max_entries: int
     enable_mental_model_history: bool
@@ -3633,6 +3728,8 @@ class HindsightConfig:
 
     # Reflect agent settings
     reflect_max_iterations: int
+    reflect_use_decision_model: bool
+    mental_model_refresh_use_decision_model: bool
     reflect_max_context_tokens: int
     reflect_wall_timeout: int
     reflect_prompt_cache_enabled: bool
@@ -3712,6 +3809,11 @@ class HindsightConfig:
     embeddings_zeroentropy_encoding_format: str = DEFAULT_EMBEDDINGS_ZEROENTROPY_ENCODING_FORMAT
     embeddings_zeroentropy_batch_size: int = DEFAULT_EMBEDDINGS_ZEROENTROPY_BATCH_SIZE
     embeddings_zeroentropy_latency: str | None = DEFAULT_EMBEDDINGS_ZEROENTROPY_LATENCY
+    embeddings_nvidia_api_key: str | None = None
+    embeddings_nvidia_model: str = DEFAULT_EMBEDDINGS_NVIDIA_MODEL
+    embeddings_nvidia_base_url: str = DEFAULT_EMBEDDINGS_NVIDIA_BASE_URL
+    embeddings_nvidia_dimensions: int = DEFAULT_EMBEDDINGS_NVIDIA_DIMENSIONS
+    embeddings_nvidia_batch_size: int = DEFAULT_EMBEDDINGS_NVIDIA_BATCH_SIZE
     file_parser_markitdown_ocr_enabled: bool = DEFAULT_FILE_PARSER_MARKITDOWN_OCR_ENABLED
     file_parser_markitdown_ocr_api_key: str | None = None
     file_parser_markitdown_ocr_base_url: str | None = None
@@ -3834,8 +3936,10 @@ class HindsightConfig:
         "reranker_cohere_base_url",
         "reranker_openrouter_base_url",
         "embeddings_zeroentropy_base_url",
+        "embeddings_nvidia_base_url",
         "reranker_zeroentropy_base_url",
         "reranker_siliconflow_base_url",
+        "reranker_nvidia_base_url",
         "reranker_typesafe_base_url",
         # Service Account Keys
         "llm_vertexai_service_account_key",
@@ -3845,6 +3949,7 @@ class HindsightConfig:
         "embeddings_gemini_api_key",
         "embeddings_openai_api_key",
         "embeddings_zeroentropy_api_key",
+        "embeddings_nvidia_api_key",
         # File storage credentials
         "file_storage_s3_access_key_id",
         "file_storage_s3_secret_access_key",
@@ -3871,6 +3976,8 @@ class HindsightConfig:
         "reflect_decision_model_base_url",
         "consolidation_decision_model_api_key",
         "consolidation_decision_model_base_url",
+        # chatgpt: points at a directory holding an OAuth grant.
+        "llm_chatgpt_home",
     }
 
     # CONFIGURABLE_FIELDS: Safe behavioral settings that can be customized per-tenant/bank
@@ -3910,6 +4017,7 @@ class HindsightConfig:
         # Consolidation settings
         "enable_observations",
         "enable_auto_consolidation",
+        "consolidation_use_decision_model",
         "consolidation_llm_batch_size",
         "consolidation_llm_parallelism",
         "consolidation_max_memories_per_round",
@@ -3924,6 +4032,8 @@ class HindsightConfig:
         "knowledge_page_default_trigger",
         # Reflect settings
         "reflect_mission",
+        "reflect_use_decision_model",
+        "mental_model_refresh_use_decision_model",
         "reflect_source_facts_max_tokens",
         "reflect_default_options",
         # Recall settings (used by internal recall, e.g. mental model refresh)
@@ -4028,6 +4138,12 @@ class HindsightConfig:
             siliconflow_model=self.reranker_siliconflow_model,
             siliconflow_base_url=self.reranker_siliconflow_base_url,
             siliconflow_timeout=self.reranker_siliconflow_timeout,
+            nvidia_api_key=self.reranker_nvidia_api_key,
+            nvidia_model=self.reranker_nvidia_model,
+            nvidia_base_url=self.reranker_nvidia_base_url,
+            nvidia_timeout=self.reranker_nvidia_timeout,
+            nvidia_batch_size=self.reranker_nvidia_batch_size,
+            nvidia_max_concurrent=self.reranker_nvidia_max_concurrent,
             typesafe_api_key=self.reranker_typesafe_api_key,
             typesafe_model=self.reranker_typesafe_model,
             typesafe_base_url=self.reranker_typesafe_base_url,
@@ -4238,11 +4354,9 @@ class HindsightConfig:
         # Don't hard-fail here — the actual ImportError fires at model init time
         # with a clear message. This early warning catches it before startup proceeds.
         if self.embeddings_provider == "local" or self.reranker_provider == "local":
-            try:
-                import importlib
-
-                importlib.import_module("sentence_transformers")
-            except ImportError:
+            # find_spec, not import: importing sentence_transformers pulls in torch and costs
+            # ~15 s, which every process (even `--help`) would pay just to run this check.
+            if importlib.util.find_spec("sentence_transformers") is None:
                 missing = []
                 if self.embeddings_provider == "local":
                     missing.append("embeddings")
@@ -4259,12 +4373,7 @@ class HindsightConfig:
                 )
 
         if self.embeddings_provider == "onnx":
-            try:
-                import importlib
-
-                importlib.import_module("onnxruntime")
-                importlib.import_module("transformers")
-            except ImportError:
+            if importlib.util.find_spec("onnxruntime") is None or importlib.util.find_spec("transformers") is None:
                 logger.warning(
                     "ONNX embeddings provider configured, but 'onnxruntime' and/or "
                     "'transformers' is not installed. The API will fail at model init time. Either:\n"
@@ -4299,6 +4408,11 @@ class HindsightConfig:
 
         # Parse per-type worker slot reservations (floors) once.
         worker_slot_reservations = _parse_worker_slot_reservations()
+
+        # Resolved once: the mental-model refresh temperature inherits it when unset.
+        llm_temperature_consolidation = _resolve_operation_temperature(
+            ENV_LLM_TEMPERATURE_CONSOLIDATION, DEFAULT_LLM_TEMPERATURE_CONSOLIDATION
+        )
 
         config = cls(
             # Database
@@ -4397,12 +4511,14 @@ class HindsightConfig:
             llm_temperature_reflect=_resolve_operation_temperature(
                 ENV_LLM_TEMPERATURE_REFLECT, DEFAULT_LLM_TEMPERATURE_REFLECT
             ),
-            llm_temperature_consolidation=_resolve_operation_temperature(
-                ENV_LLM_TEMPERATURE_CONSOLIDATION, DEFAULT_LLM_TEMPERATURE_CONSOLIDATION
+            llm_temperature_consolidation=llm_temperature_consolidation,
+            llm_temperature_mental_model_refresh=_resolve_inherited_temperature(
+                ENV_LLM_TEMPERATURE_MENTAL_MODEL_REFRESH, llm_temperature_consolidation
             ),
             llm_litellmrouter_config=_parse_llm_router_config(ENV_LLM_LITELLMROUTER_CONFIG),
             # Codex (ChatGPT OAuth) credentials directory
             llm_codex_home=os.getenv(ENV_LLM_CODEX_HOME) or DEFAULT_LLM_CODEX_HOME,
+            llm_chatgpt_home=os.getenv(ENV_LLM_CHATGPT_HOME, "").strip() or DEFAULT_LLM_CHATGPT_HOME,
             # Vertex AI
             llm_vertexai_project_id=os.getenv(ENV_LLM_VERTEXAI_PROJECT_ID) or DEFAULT_LLM_VERTEXAI_PROJECT_ID,
             llm_vertexai_region=os.getenv(ENV_LLM_VERTEXAI_REGION, DEFAULT_LLM_VERTEXAI_REGION),
@@ -4685,6 +4801,20 @@ class HindsightConfig:
                 os.getenv(ENV_EMBEDDINGS_ZEROENTROPY_BATCH_SIZE),
                 DEFAULT_EMBEDDINGS_ZEROENTROPY_BATCH_SIZE,
             ),
+            # NVIDIA NIM embeddings
+            embeddings_nvidia_api_key=os.getenv(ENV_EMBEDDINGS_NVIDIA_API_KEY),
+            embeddings_nvidia_model=os.getenv(ENV_EMBEDDINGS_NVIDIA_MODEL, DEFAULT_EMBEDDINGS_NVIDIA_MODEL),
+            embeddings_nvidia_base_url=os.getenv(ENV_EMBEDDINGS_NVIDIA_BASE_URL, DEFAULT_EMBEDDINGS_NVIDIA_BASE_URL),
+            embeddings_nvidia_dimensions=_parse_positive_int(
+                ENV_EMBEDDINGS_NVIDIA_DIMENSIONS,
+                os.getenv(ENV_EMBEDDINGS_NVIDIA_DIMENSIONS),
+                DEFAULT_EMBEDDINGS_NVIDIA_DIMENSIONS,
+            ),
+            embeddings_nvidia_batch_size=_parse_positive_int(
+                ENV_EMBEDDINGS_NVIDIA_BATCH_SIZE,
+                os.getenv(ENV_EMBEDDINGS_NVIDIA_BATCH_SIZE),
+                DEFAULT_EMBEDDINGS_NVIDIA_BATCH_SIZE,
+            ),
             # LiteLLM embeddings (with backward-compatible fallback to shared config)
             embeddings_litellm_api_base=os.getenv(ENV_EMBEDDINGS_LITELLM_API_BASE)
             or os.getenv(ENV_LITELLM_API_BASE, DEFAULT_LITELLM_API_BASE),
@@ -4863,6 +4993,21 @@ class HindsightConfig:
             ),
             reranker_siliconflow_timeout=float(
                 os.getenv(ENV_RERANKER_SILICONFLOW_TIMEOUT, str(DEFAULT_RERANKER_SILICONFLOW_TIMEOUT))
+            ),
+            # NVIDIA NIM reranker (native /retrieval/<model>/reranking endpoint)
+            reranker_nvidia_api_key=os.getenv(ENV_RERANKER_NVIDIA_API_KEY),
+            reranker_nvidia_model=os.getenv(ENV_RERANKER_NVIDIA_MODEL, DEFAULT_RERANKER_NVIDIA_MODEL),
+            reranker_nvidia_base_url=os.getenv(ENV_RERANKER_NVIDIA_BASE_URL, DEFAULT_RERANKER_NVIDIA_BASE_URL),
+            reranker_nvidia_timeout=float(os.getenv(ENV_RERANKER_NVIDIA_TIMEOUT, str(DEFAULT_RERANKER_NVIDIA_TIMEOUT))),
+            reranker_nvidia_batch_size=_parse_positive_int(
+                ENV_RERANKER_NVIDIA_BATCH_SIZE,
+                os.getenv(ENV_RERANKER_NVIDIA_BATCH_SIZE),
+                DEFAULT_RERANKER_NVIDIA_BATCH_SIZE,
+            ),
+            reranker_nvidia_max_concurrent=_parse_positive_int(
+                ENV_RERANKER_NVIDIA_MAX_CONCURRENT,
+                os.getenv(ENV_RERANKER_NVIDIA_MAX_CONCURRENT),
+                DEFAULT_RERANKER_NVIDIA_MAX_CONCURRENT,
             ),
             # TypeSafe reranker
             reranker_typesafe_api_key=os.getenv(ENV_RERANKER_TYPESAFE_API_KEY),
@@ -5138,6 +5283,10 @@ class HindsightConfig:
                 ENV_ENABLE_AUTO_CONSOLIDATION, str(DEFAULT_ENABLE_AUTO_CONSOLIDATION)
             ).lower()
             == "true",
+            consolidation_use_decision_model=os.getenv(
+                ENV_CONSOLIDATION_USE_DECISION_MODEL, str(DEFAULT_CONSOLIDATION_USE_DECISION_MODEL)
+            ).lower()
+            == "true",
             enable_observation_history=os.getenv(
                 ENV_ENABLE_OBSERVATION_HISTORY, str(DEFAULT_ENABLE_OBSERVATION_HISTORY)
             ).lower()
@@ -5298,6 +5447,14 @@ class HindsightConfig:
             ),
             # Reflect agent settings
             reflect_max_iterations=int(os.getenv(ENV_REFLECT_MAX_ITERATIONS, str(DEFAULT_REFLECT_MAX_ITERATIONS))),
+            reflect_use_decision_model=os.getenv(
+                ENV_REFLECT_USE_DECISION_MODEL, str(DEFAULT_REFLECT_USE_DECISION_MODEL)
+            ).lower()
+            == "true",
+            mental_model_refresh_use_decision_model=os.getenv(
+                ENV_MENTAL_MODEL_REFRESH_USE_DECISION_MODEL, str(DEFAULT_MENTAL_MODEL_REFRESH_USE_DECISION_MODEL)
+            ).lower()
+            == "true",
             reflect_prompt_cache_enabled=os.getenv(
                 ENV_REFLECT_PROMPT_CACHE_ENABLED, str(DEFAULT_REFLECT_PROMPT_CACHE_ENABLED)
             ).lower()

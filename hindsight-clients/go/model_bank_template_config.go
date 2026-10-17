@@ -31,6 +31,8 @@ type BankTemplateConfig struct {
 	EnableTemporalRetrieval NullableBool `json:"enable_temporal_retrieval,omitempty"`
 	EnableGraphRetrieval NullableBool `json:"enable_graph_retrieval,omitempty"`
 	EnableReranking NullableBool `json:"enable_reranking,omitempty"`
+	ReflectUseDecisionModel NullableBool `json:"reflect_use_decision_model,omitempty"`
+	MentalModelRefreshUseDecisionModel NullableBool `json:"mental_model_refresh_use_decision_model,omitempty"`
 	DispositionSkepticism NullableInt32 `json:"disposition_skepticism,omitempty"`
 	DispositionLiteralism NullableInt32 `json:"disposition_literalism,omitempty"`
 	DispositionEmpathy NullableInt32 `json:"disposition_empathy,omitempty"`
@@ -64,6 +66,7 @@ type BankTemplateConfig struct {
 	AuditLogEnabled NullableBool `json:"audit_log_enabled,omitempty"`
 	StoreDocumentText NullableBool `json:"store_document_text,omitempty"`
 	EnableAutoConsolidation NullableBool `json:"enable_auto_consolidation,omitempty"`
+	ConsolidationUseDecisionModel NullableBool `json:"consolidation_use_decision_model,omitempty"`
 	ConsolidationMaxMemoriesPerRound NullableInt32 `json:"consolidation_max_memories_per_round,omitempty"`
 	ConsolidationLlmParallelism NullableInt32 `json:"consolidation_llm_parallelism,omitempty"`
 	RecallIncludeChunks NullableBool `json:"recall_include_chunks,omitempty"`
@@ -592,6 +595,90 @@ func (o *BankTemplateConfig) SetEnableRerankingNil() {
 // UnsetEnableReranking ensures that no value is present for EnableReranking, not even an explicit nil
 func (o *BankTemplateConfig) UnsetEnableReranking() {
 	o.EnableReranking.Unset()
+}
+
+// GetReflectUseDecisionModel returns the ReflectUseDecisionModel field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *BankTemplateConfig) GetReflectUseDecisionModel() bool {
+	if o == nil || IsNil(o.ReflectUseDecisionModel.Get()) {
+		var ret bool
+		return ret
+	}
+	return *o.ReflectUseDecisionModel.Get()
+}
+
+// GetReflectUseDecisionModelOk returns a tuple with the ReflectUseDecisionModel field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *BankTemplateConfig) GetReflectUseDecisionModelOk() (*bool, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return o.ReflectUseDecisionModel.Get(), o.ReflectUseDecisionModel.IsSet()
+}
+
+// HasReflectUseDecisionModel returns a boolean if a field has been set.
+func (o *BankTemplateConfig) HasReflectUseDecisionModel() bool {
+	if o != nil && o.ReflectUseDecisionModel.IsSet() {
+		return true
+	}
+
+	return false
+}
+
+// SetReflectUseDecisionModel gets a reference to the given NullableBool and assigns it to the ReflectUseDecisionModel field.
+func (o *BankTemplateConfig) SetReflectUseDecisionModel(v bool) {
+	o.ReflectUseDecisionModel.Set(&v)
+}
+// SetReflectUseDecisionModelNil sets the value for ReflectUseDecisionModel to be an explicit nil
+func (o *BankTemplateConfig) SetReflectUseDecisionModelNil() {
+	o.ReflectUseDecisionModel.Set(nil)
+}
+
+// UnsetReflectUseDecisionModel ensures that no value is present for ReflectUseDecisionModel, not even an explicit nil
+func (o *BankTemplateConfig) UnsetReflectUseDecisionModel() {
+	o.ReflectUseDecisionModel.Unset()
+}
+
+// GetMentalModelRefreshUseDecisionModel returns the MentalModelRefreshUseDecisionModel field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *BankTemplateConfig) GetMentalModelRefreshUseDecisionModel() bool {
+	if o == nil || IsNil(o.MentalModelRefreshUseDecisionModel.Get()) {
+		var ret bool
+		return ret
+	}
+	return *o.MentalModelRefreshUseDecisionModel.Get()
+}
+
+// GetMentalModelRefreshUseDecisionModelOk returns a tuple with the MentalModelRefreshUseDecisionModel field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *BankTemplateConfig) GetMentalModelRefreshUseDecisionModelOk() (*bool, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return o.MentalModelRefreshUseDecisionModel.Get(), o.MentalModelRefreshUseDecisionModel.IsSet()
+}
+
+// HasMentalModelRefreshUseDecisionModel returns a boolean if a field has been set.
+func (o *BankTemplateConfig) HasMentalModelRefreshUseDecisionModel() bool {
+	if o != nil && o.MentalModelRefreshUseDecisionModel.IsSet() {
+		return true
+	}
+
+	return false
+}
+
+// SetMentalModelRefreshUseDecisionModel gets a reference to the given NullableBool and assigns it to the MentalModelRefreshUseDecisionModel field.
+func (o *BankTemplateConfig) SetMentalModelRefreshUseDecisionModel(v bool) {
+	o.MentalModelRefreshUseDecisionModel.Set(&v)
+}
+// SetMentalModelRefreshUseDecisionModelNil sets the value for MentalModelRefreshUseDecisionModel to be an explicit nil
+func (o *BankTemplateConfig) SetMentalModelRefreshUseDecisionModelNil() {
+	o.MentalModelRefreshUseDecisionModel.Set(nil)
+}
+
+// UnsetMentalModelRefreshUseDecisionModel ensures that no value is present for MentalModelRefreshUseDecisionModel, not even an explicit nil
+func (o *BankTemplateConfig) UnsetMentalModelRefreshUseDecisionModel() {
+	o.MentalModelRefreshUseDecisionModel.Unset()
 }
 
 // GetDispositionSkepticism returns the DispositionSkepticism field value if set, zero value otherwise (both if not set or set to explicit null).
@@ -1908,6 +1995,48 @@ func (o *BankTemplateConfig) UnsetEnableAutoConsolidation() {
 	o.EnableAutoConsolidation.Unset()
 }
 
+// GetConsolidationUseDecisionModel returns the ConsolidationUseDecisionModel field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *BankTemplateConfig) GetConsolidationUseDecisionModel() bool {
+	if o == nil || IsNil(o.ConsolidationUseDecisionModel.Get()) {
+		var ret bool
+		return ret
+	}
+	return *o.ConsolidationUseDecisionModel.Get()
+}
+
+// GetConsolidationUseDecisionModelOk returns a tuple with the ConsolidationUseDecisionModel field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *BankTemplateConfig) GetConsolidationUseDecisionModelOk() (*bool, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return o.ConsolidationUseDecisionModel.Get(), o.ConsolidationUseDecisionModel.IsSet()
+}
+
+// HasConsolidationUseDecisionModel returns a boolean if a field has been set.
+func (o *BankTemplateConfig) HasConsolidationUseDecisionModel() bool {
+	if o != nil && o.ConsolidationUseDecisionModel.IsSet() {
+		return true
+	}
+
+	return false
+}
+
+// SetConsolidationUseDecisionModel gets a reference to the given NullableBool and assigns it to the ConsolidationUseDecisionModel field.
+func (o *BankTemplateConfig) SetConsolidationUseDecisionModel(v bool) {
+	o.ConsolidationUseDecisionModel.Set(&v)
+}
+// SetConsolidationUseDecisionModelNil sets the value for ConsolidationUseDecisionModel to be an explicit nil
+func (o *BankTemplateConfig) SetConsolidationUseDecisionModelNil() {
+	o.ConsolidationUseDecisionModel.Set(nil)
+}
+
+// UnsetConsolidationUseDecisionModel ensures that no value is present for ConsolidationUseDecisionModel, not even an explicit nil
+func (o *BankTemplateConfig) UnsetConsolidationUseDecisionModel() {
+	o.ConsolidationUseDecisionModel.Unset()
+}
+
 // GetConsolidationMaxMemoriesPerRound returns the ConsolidationMaxMemoriesPerRound field value if set, zero value otherwise (both if not set or set to explicit null).
 func (o *BankTemplateConfig) GetConsolidationMaxMemoriesPerRound() int32 {
 	if o == nil || IsNil(o.ConsolidationMaxMemoriesPerRound.Get()) {
@@ -2239,6 +2368,12 @@ func (o BankTemplateConfig) ToMap() (map[string]interface{}, error) {
 	if o.EnableReranking.IsSet() {
 		toSerialize["enable_reranking"] = o.EnableReranking.Get()
 	}
+	if o.ReflectUseDecisionModel.IsSet() {
+		toSerialize["reflect_use_decision_model"] = o.ReflectUseDecisionModel.Get()
+	}
+	if o.MentalModelRefreshUseDecisionModel.IsSet() {
+		toSerialize["mental_model_refresh_use_decision_model"] = o.MentalModelRefreshUseDecisionModel.Get()
+	}
 	if o.DispositionSkepticism.IsSet() {
 		toSerialize["disposition_skepticism"] = o.DispositionSkepticism.Get()
 	}
@@ -2337,6 +2472,9 @@ func (o BankTemplateConfig) ToMap() (map[string]interface{}, error) {
 	}
 	if o.EnableAutoConsolidation.IsSet() {
 		toSerialize["enable_auto_consolidation"] = o.EnableAutoConsolidation.Get()
+	}
+	if o.ConsolidationUseDecisionModel.IsSet() {
+		toSerialize["consolidation_use_decision_model"] = o.ConsolidationUseDecisionModel.Get()
 	}
 	if o.ConsolidationMaxMemoriesPerRound.IsSet() {
 		toSerialize["consolidation_max_memories_per_round"] = o.ConsolidationMaxMemoriesPerRound.Get()

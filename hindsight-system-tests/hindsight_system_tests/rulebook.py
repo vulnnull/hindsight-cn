@@ -486,12 +486,52 @@ class RerankStub:
         return lexical_relevance(query, document)
 
 
+class TriageStub:
+    """Consolidation triage verdicts, scripted per fact.
+
+    Triage asks TypeSafe, per new fact, how it relates to the observations shown
+    (``relation``), which one it restates (``match`` / ``covers_oN``) and which it makes
+    should be reworded (``touches_oN``); under a bank's own mission also whether the mission
+    would keep the fact as stated (``keep_as``); every judgment is a choice. A story names the verdict for a
+    fact by a phrase in its text; every other fact gets "changes" with nothing flagged
+    and no mission fit, which hands it to the LLM — what an unconfigured stub must do so
+    no story is settled by accident.
+    """
+
+    def __init__(self) -> None:
+        self.verdicts: dict[str, str] = {}
+        #: Phrases of facts the bank's mission wants, worded as it allows.
+        self.fits_mission: set[str] = set()
+
+    def relation(self, fact_text: str) -> str:
+        return next((v for phrase, v in self.verdicts.items() if phrase in fact_text), "changes")
+
+    def fits(self, fact_text: str) -> bool:
+        return any(phrase in fact_text for phrase in self.fits_mission)
+
+    def reset(self) -> None:
+        self.verdicts.clear()
+        self.fits_mission.clear()
+
+
 @dataclass(frozen=True)
 class ReceivedWebhook:
     """One delivery the stub accepted, kept so a test can assert on it."""
 
     headers: dict[str, str]
     body: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class TokenExchange:
+    """One Workload Identity Federation exchange at ``/v1/oauth/token``: the identity
+    the server presented, and the short-lived access token the stub issued for it."""
+
+    assertion: str
+    federation_rule_id: str
+    organization_id: str
+    service_account_id: str | None
+    access_token: str
 
 
 @dataclass
@@ -501,6 +541,7 @@ class Stubs:
     llm: LLMStub = field(default_factory=LLMStub)
     embeddings: EmbeddingStub = field(default_factory=EmbeddingStub)
     rerank: RerankStub = field(default_factory=RerankStub)
+    triage: TriageStub = field(default_factory=TriageStub)
     rejected_requests: list[str] = field(default_factory=list)
     """Requests the stub refused as malformed — see ``validation.py``."""
 
@@ -513,6 +554,11 @@ class Stubs:
     tried rather than that anything arrived.
     """
 
+    token_exchanges: list[TokenExchange] = field(default_factory=list)
+    """Every federation token exchange, in arrival order. Not cleared by ``reset``: a
+    server exchanges once at startup and then reuses the token until it nears expiry,
+    so the exchange that issued a story's token usually predates the story."""
+
     def reset(self) -> None:
         """Between tests. The embedding stub is pure; the rerank stub is pure apart
         from what a story set on it (cut level, verdicts) or it recorded, which has to
@@ -521,6 +567,7 @@ class Stubs:
         self.rerank.cut_level = RerankStub.cut_level
         self.rerank.verdicts = {}
         self.rerank.states = []
+        self.triage.reset()
         self.rejected_requests.clear()
         self.webhooks.clear()
 

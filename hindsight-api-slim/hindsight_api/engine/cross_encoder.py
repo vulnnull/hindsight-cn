@@ -17,6 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any, cast
 
 import aiohttp
+from pydantic import BaseModel
 
 from .._cross_loop import CrossLoopSemaphore
 from ..config import (
@@ -32,6 +33,10 @@ from ..config import (
     DEFAULT_RERANKER_LOCAL_BATCH_SIZE,
     DEFAULT_RERANKER_LOCAL_MODEL,
     DEFAULT_RERANKER_LOCAL_TIMEOUT,
+    DEFAULT_RERANKER_NVIDIA_BASE_URL,
+    DEFAULT_RERANKER_NVIDIA_BATCH_SIZE,
+    DEFAULT_RERANKER_NVIDIA_MAX_CONCURRENT,
+    DEFAULT_RERANKER_NVIDIA_MODEL,
     DEFAULT_RERANKER_SILICONFLOW_BASE_URL,
     DEFAULT_RERANKER_SILICONFLOW_MODEL,
     DEFAULT_RERANKER_TEI_BATCH_SIZE,
@@ -979,11 +984,132 @@ class SiliconFlowCrossEncoder(CrossEncoderModel):
         return await self._client.predict(pairs)
 
 
+class _NvidiaText(BaseModel):
+    text: str
+
+
+class _NvidiaRerankRequest(BaseModel):
+    model: str
+    query: _NvidiaText
+    passages: list[_NvidiaText]
+
+
+class _NvidiaRanking(BaseModel):
+    index: int
+    logit: float
+
+
+class _NvidiaRerankResponse(BaseModel):
+    rankings: list[_NvidiaRanking]
+
+
+class NvidiaCrossEncoder(CrossEncoderModel):
+    """
+    NVIDIA NIM cross-encoder using the native reranking API.
+
+    Not Cohere-compatible, so it cannot reuse _CohereCompatibleRerankClient:
+    the path carries the model (/retrieval/<model>/reranking), the query is
+    {"text": ...}, each passage is {"text": ...}, and the response is
+    rankings[].logit — a raw logit, not a 0..1 relevance_score. Raw logits are
+    fine: each is a per-pair score, so they compare across batches and calls, and
+    recall's sigmoid normalization maps them into 0..1.
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str = DEFAULT_RERANKER_NVIDIA_MODEL,
+        base_url: str = DEFAULT_RERANKER_NVIDIA_BASE_URL,
+        timeout: float = 60.0,
+        batch_size: int = DEFAULT_RERANKER_NVIDIA_BATCH_SIZE,
+        max_concurrent: int = DEFAULT_RERANKER_NVIDIA_MAX_CONCURRENT,
+    ):
+        self.model = model
+        self.base_url = base_url.rstrip("/")
+        self.rerank_url = f"{self.base_url}/retrieval/{model.strip('/')}/reranking"
+        self.timeout = timeout
+        self.batch_size = batch_size
+        self.max_concurrent = max_concurrent
+        # CrossLoopSemaphore, not asyncio.Semaphore: the encoder is built once and
+        # reached from every loop in the process — same reasoning as TypeSafeCrossEncoder.
+        self._semaphore = CrossLoopSemaphore(max_concurrent)
+        self._session = LoopLocalSession(
+            timeout=per_phase_timeout(timeout),
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        )
+
+    @property
+    def provider_name(self) -> str:
+        return "nvidia"
+
+    async def initialize(self) -> None:
+        # Nothing to connect: the session is created lazily per event loop on first use.
+        logger.info(
+            f"Reranker: initializing NVIDIA provider at {self.rerank_url} "
+            f"(batch_size={self.batch_size}, max_concurrent={self.max_concurrent})"
+        )
+
+    async def _rerank_batch(self, query: str, texts: list[str]) -> list[float]:
+        request = _NvidiaRerankRequest(
+            model=self.model, query=_NvidiaText(text=query), passages=[_NvidiaText(text=t) for t in texts]
+        )
+        async with self._semaphore:
+            async with self._session.get().post(
+                self.rerank_url,
+                headers=reranker_bank_attribution_headers(),
+                json=request.model_dump(),
+            ) as response:
+                await raise_for_status(response)
+                result = _NvidiaRerankResponse.model_validate(await response.json(content_type=None))
+        scores = [0.0] * len(texts)
+        for ranking in result.rankings:
+            scores[ranking.index] = ranking.logit
+        return scores
+
+    async def _predict(self, pairs: list[tuple[str, str]]) -> list[float]:
+        # One request per distinct query (like the Cohere-compatible client), split
+        # into batch_size slices because the API caps passages per request; slices
+        # run concurrently, bounded by max_concurrent across all calls.
+        query_groups: dict[str, list[int]] = {}
+        for idx, (query, _) in enumerate(pairs):
+            query_groups.setdefault(query, []).append(idx)
+
+        slices = [
+            (query, indices[i : i + self.batch_size])
+            for query, indices in query_groups.items()
+            for i in range(0, len(indices), self.batch_size)
+        ]
+        # create_task copies contextvars, so the per-bank attribution header reaches every slice.
+        tasks = [
+            asyncio.create_task(self._rerank_batch(query, [pairs[idx][1] for idx in indices]))
+            for query, indices in slices
+        ]
+        try:
+            # Awaited in order, so the earliest failing slice is the one raised; its
+            # siblings are cancelled rather than left running unobserved.
+            results = [await task for task in tasks]
+        except BaseException:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
+        all_scores = [0.0] * len(pairs)
+        for (_, indices), scores in zip(slices, results):
+            for idx, score in zip(indices, scores):
+                all_scores[idx] = score
+        return all_scores
+
+
 # Single source of truth for prompt templates and overheads
 _RANK_INSTRUCTIONS_PREFIX = "Which candidate answers the question: "
 _CUT_INSTRUCTIONS = (
     "How far down this ranked list does genuine relevance to the question extend? "
     "Count a candidate as relevant only if it helps answer the question."
+)
+
+_SUFFICIENCY_INSTRUCTIONS = (
+    "Does the evidence above answer the question? Judge only what the evidence states, "
+    "not what could be guessed from it."
 )
 
 _OPTION_KEY_OVERHEAD = 7  # JSON envelope overhead per choice option: '"c249": "' + comma/newline
@@ -1034,6 +1160,11 @@ class TypeSafeCrossEncoder(CrossEncoderModel):
     # keeps a handful, so a longer list costs tokens to no purpose.
     SHORTLIST = 12
 
+    # The fewest candidates a cut may keep, by rank. 0 for recall, where the cut is
+    # the whole point; reflect's decision model raises it, because the cut's levels jump from five
+    # to ten and it picked five for a question whose answer was a count over seven.
+    MIN_KEEP = 0
+
     # Context window safety limit for Jev /v1/systemone.
     # Single question context limit is 32k. A defensive safety margin (26k vs 32k)
     # absorbs cross-tokenizer divergence and JSON envelope formatting overheads.
@@ -1064,7 +1195,13 @@ class TypeSafeCrossEncoder(CrossEncoderModel):
         timeout: float = DEFAULT_RERANKER_TYPESAFE_TIMEOUT,
         max_concurrent: int = DEFAULT_RERANKER_TYPESAFE_MAX_CONCURRENT,
         prune_candidates: bool = DEFAULT_RERANKER_TYPESAFE_PRUNE_CANDIDATES,
+        shortlist: int | None = None,
+        min_keep: int | None = None,
     ):
+        if shortlist is not None:
+            self.SHORTLIST = shortlist
+        if min_keep is not None:
+            self.MIN_KEEP = min_keep
         # Tolerate an unset-but-present value ("VAR=" in a compose file, or a config
         # built with every field zeroed) by falling back to the default.
         self.model = model or DEFAULT_RERANKER_TYPESAFE_MODEL
@@ -1209,6 +1346,55 @@ class TypeSafeCrossEncoder(CrossEncoderModel):
         ranked_finalists = await self._rank_once(query, effective_docs, finalists)
         return ranked_finalists + rest
 
+    # Ordered verdicts for the reflect sufficiency question; only the last one ends
+    # retrieval. "Partly" is its own level so a half-answer keeps searching.
+    SUFFICIENCY_LEVELS = [
+        "The evidence does not answer the question",
+        "The evidence answers part of the question; something it asks is missing",
+        "The evidence fully answers the question",
+    ]
+
+    async def evidence_is_sufficient(self, query: str, evidence: str) -> bool:
+        """Whether ``evidence`` already answers ``query``: one Score question.
+
+        Used by a decision-orchestrated reflect to skip the LLM turns that would otherwise decide to keep
+        searching. A Score, not a yes/no Choice, for the reason the cut uses one: the
+        levels are ordered, and "partly" must not be rounded up to "yes".
+        """
+        overhead = (
+            count_tokens(_SUFFICIENCY_INSTRUCTIONS) + sum(count_tokens(level) for level in self.SUFFICIENCY_LEVELS) + 50
+        )
+        prefix = f"Question: {query}\n\nEvidence:\n"
+        budget = max(100, self.MAX_QUESTION_TOKENS - overhead - count_tokens(prefix))
+        if count_tokens(evidence) > budget:
+            # ponytail: keeps the head of the evidence; the agent's own results come
+            # first (pages, then observations, then facts), so the tail is raw facts.
+            evidence = truncate_to_tokens(evidence, budget).text
+        result = await self._ask(
+            {
+                "state": f"{prefix}{evidence}",
+                "model": self.model,
+                "questions": {
+                    "sufficient": {
+                        "type": "score",
+                        "instructions": _SUFFICIENCY_INSTRUCTIONS,
+                        "criteria": self.SUFFICIENCY_LEVELS,
+                    }
+                },
+            }
+        )
+        answer = result["answers"]["sufficient"]
+        # The most likely level, not the rounded expected score: an expected 1.43 is "partly" when
+        # rounded, though "fully" was the likeliest verdict at 0.54 (sde-bench boltons-budget), and
+        # every such rounding cost two LLM turns. The score is the fallback for a reply without
+        # per-level probabilities.
+        probabilities = answer.get("probabilities")
+        if probabilities:
+            level = int(max(probabilities, key=lambda key: float(probabilities[key])))
+        else:
+            level = round(float(answer["score"]))
+        return level >= len(self.SUFFICIENCY_LEVELS) - 1
+
     async def _cut(self, query: str, docs: list[str], order: list[int]) -> int:
         """How many of the ranked candidates are relevant, as the model sees it."""
         shortlist = order[: self.SHORTLIST]
@@ -1262,6 +1448,7 @@ class TypeSafeCrossEncoder(CrossEncoderModel):
 
         order = await self._rank(query, docs, indices)
         keep = await self._cut(query, docs, order) if self.prunes_candidates else len(order)
+        keep = max(keep, min(self.MIN_KEEP, len(order)))
         # Positions, not confidences — see the class docstring. Descending from 1.0 so
         # the caller's ordering is preserved, and 0.0 for everything past the cut,
         # which is how prunes_candidates marks a candidate to leave out.
@@ -2338,6 +2525,20 @@ def _create_cross_encoder_backend(member: RerankerMemberConfig) -> CrossEncoderM
             base_url=member.siliconflow_base_url,
             timeout=member.siliconflow_timeout,
         )
+    elif provider == "nvidia":
+        api_key = member.nvidia_api_key
+        if not api_key:
+            raise ValueError(
+                f"{member.env_name('NVIDIA_API_KEY')} is required when {member.env_name('PROVIDER')} is 'nvidia'"
+            )
+        return NvidiaCrossEncoder(
+            api_key=api_key,
+            model=member.nvidia_model,
+            base_url=member.nvidia_base_url,
+            timeout=member.nvidia_timeout,
+            batch_size=member.nvidia_batch_size,
+            max_concurrent=member.nvidia_max_concurrent,
+        )
     elif provider == "google":
         project_id = member.google_project_id
         if not project_id:
@@ -2383,7 +2584,7 @@ def _create_cross_encoder_backend(member: RerankerMemberConfig) -> CrossEncoderM
         return JinaMLXCrossEncoder()
     else:
         raise ValueError(
-            f"Unknown reranker provider: {provider}. Supported: 'local', 'tei', 'cohere', 'zeroentropy', 'siliconflow', 'typesafe', 'alibaba', 'google', 'flashrank', 'litellm', 'litellm-sdk', 'rrf', 'jina-mlx'"
+            f"Unknown reranker provider: {provider}. Supported: 'local', 'tei', 'cohere', 'zeroentropy', 'siliconflow', 'nvidia', 'typesafe', 'alibaba', 'google', 'flashrank', 'litellm', 'litellm-sdk', 'rrf', 'jina-mlx'"
         )
 
 

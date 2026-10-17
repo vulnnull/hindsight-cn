@@ -31,6 +31,7 @@ from hindsight_api.engine.remote_retry import jittered_backoff
 from hindsight_api.engine.response_models import LLMToolCall, LLMToolCallResult, TokenUsage
 from hindsight_api.engine.structured_output import provider_json_schema
 from hindsight_api.metrics import get_metrics_collector
+from hindsight_api.provider_auth import requires_api_key
 from hindsight_api.worker.stage import set_stage
 
 from ..response_models import LLMCallResult
@@ -53,14 +54,20 @@ def _raise_on_refusal(response: Any) -> None:
 
 
 def _usage_from_anthropic_response(response: Any) -> LLMResponseUsage:
-    """Extract input/output/cached token counts from an Anthropic usage block."""
+    """Extract input/output/cached token counts from an Anthropic usage block.
+
+    Anthropic counts cache reads and writes apart from ``input_tokens``; the
+    ``TokenUsage`` contract counts them in it, with reads also in ``cached_tokens``.
+    """
     usage = getattr(response, "usage", None)
     if not usage:
         return LLMResponseUsage()
+    cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+    cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
     return LLMResponseUsage(
-        input_tokens=usage.input_tokens or 0,
+        input_tokens=(usage.input_tokens or 0) + cache_read + cache_write,
         output_tokens=usage.output_tokens or 0,
-        cached_tokens=getattr(usage, "cache_read_input_tokens", 0) or 0,
+        cached_tokens=cache_read,
     )
 
 
@@ -221,7 +228,7 @@ class AnthropicLLM(LLMInterface):
         super().__init__(provider, api_key, base_url, model, reasoning_effort, timeout=timeout, **kwargs)
         self._warn_reasoning_effort_unsupported()
 
-        if not self.api_key:
+        if not self.api_key and requires_api_key(provider):
             raise ValueError("API key is required for Anthropic provider")
 
         # User-configured extra body params (merged into every Messages API call)
@@ -234,7 +241,11 @@ class AnthropicLLM(LLMInterface):
             # SDK retries disabled — wrapper-level retry loop in ``call`` handles
             # backoff (mirrors ``OpenAICompatibleLLM`` so the two providers behave
             # consistently).
-            client_kwargs: dict[str, Any] = {"api_key": self.api_key, "max_retries": 0}
+            client_kwargs: dict[str, Any] = {"max_retries": 0}
+            # No key: the SDK resolves credentials itself (Workload Identity Federation).
+            # An explicit api_key would outrank that, so only pass one when set.
+            if self.api_key:
+                client_kwargs["api_key"] = self.api_key
             if self.base_url:
                 client_kwargs["base_url"] = self.base_url
             # Per-phase so the connect leg is capped independently (issue #3881). Built
@@ -257,7 +268,7 @@ class AnthropicLLM(LLMInterface):
             RuntimeError: If the connection test fails.
         """
         try:
-            test_messages = [{"role": "user", "content": "test"}]
+            test_messages = [{"role": "user", "content": "Say 'ok'"}]
             await self.call(
                 messages=test_messages,
                 max_completion_tokens=10,
@@ -449,6 +460,7 @@ class AnthropicLLM(LLMInterface):
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
                     success=True,
+                    cached_input_tokens=cached_tokens,
                 )
 
                 # Record trace span
@@ -690,8 +702,10 @@ class AnthropicLLM(LLMInterface):
                 finish_reason = "tool_calls" if tool_calls else "stop"
 
                 # Extract token usage
-                input_tokens = response.usage.input_tokens or 0
-                output_tokens = response.usage.output_tokens or 0
+                response_usage = _usage_from_anthropic_response(response)
+                input_tokens = response_usage.input_tokens
+                output_tokens = response_usage.output_tokens
+                cached_tokens = response_usage.cached_tokens
 
                 # Record metrics
                 metrics = get_metrics_collector()
@@ -704,6 +718,7 @@ class AnthropicLLM(LLMInterface):
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
                     success=True,
+                    cached_input_tokens=cached_tokens,
                 )
 
                 # Record OpenTelemetry span
@@ -728,6 +743,7 @@ class AnthropicLLM(LLMInterface):
                     finish_reason=finish_reason,
                     error=None,
                     tool_calls=tool_calls_dict,
+                    cached_tokens=cached_tokens,
                 )
 
                 return LLMToolCallResult(
@@ -736,6 +752,7 @@ class AnthropicLLM(LLMInterface):
                     finish_reason=finish_reason,
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
+                    cached_tokens=cached_tokens,
                 )
 
             except (APIConnectionError, APIStatusError, TimeoutError) as e:
@@ -862,9 +879,10 @@ class AnthropicLLM(LLMInterface):
         if tool_input is not None:
             content = json.dumps(tool_input, ensure_ascii=False)
 
-        usage = getattr(message, "usage", None)
-        input_tokens = (usage.input_tokens or 0) if usage else 0
-        output_tokens = (usage.output_tokens or 0) if usage else 0
+        usage = _usage_from_anthropic_response(message)
+        input_tokens = usage.input_tokens
+        output_tokens = usage.output_tokens
+        cached_tokens = usage.cached_tokens
 
         return {
             "choices": [
@@ -877,6 +895,7 @@ class AnthropicLLM(LLMInterface):
                 "prompt_tokens": input_tokens,
                 "completion_tokens": output_tokens,
                 "total_tokens": input_tokens + output_tokens,
+                "prompt_tokens_details": {"cached_tokens": cached_tokens},
             },
         }
 

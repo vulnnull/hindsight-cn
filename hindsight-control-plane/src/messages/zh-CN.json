@@ -700,7 +700,8 @@
       "cancel": "取消",
       "retry": "重试",
       "delete": "删除",
-      "download": "下载"
+      "download": "下载",
+      "retryAll": "全部重试 ({count})"
     },
     "pagination": "显示第 {start}-{end} 条，共 {total} 条",
     "paginationPrevious": "上一页",
@@ -728,7 +729,8 @@
       "hoursAgo": "{hours}小时前"
     },
     "progressEstimateNote": "总数是整合开始时的估算值，运行期间若有新记忆加入可能会增加，属于正常现象。",
-    "viewDocument": "查看文档"
+    "viewDocument": "查看文档",
+    "retryAllDone": "已重试 {done}/{total}"
   },
   "dataView": {
     "loadingMemories": "正在加载记忆...",
@@ -1123,7 +1125,13 @@
     "optionsBudgetDescription": "一次刷新可使用的智能体步数，按服务器迭代上限的倍数计：low 减半，mid 不变，high 加倍。",
     "optionsBudgetDefault": "默认 — mid",
     "actionDownloadPdf": "下载 PDF",
-    "actionDownloadMarkdown": "下载 Markdown"
+    "actionDownloadMarkdown": "下载 Markdown",
+    "triggerCronPresetSunday": "每周日 03:00",
+    "triggerCronPresetMonthly": "每月 1 日 03:00",
+    "triggerFullRefreshLabel": "定时完整刷新",
+    "triggerFullRefreshDescription": "按计划重写整个文档，清除多次小改动累积的偏差。常规刷新仍为增量刷新。",
+    "triggerFullRefreshCronLabel": "完整刷新计划（cron，UTC）",
+    "triggerFullRefreshChip": "完整刷新：{schedule}"
   },
   "cronPreview": {
     "invalid": "无效的 cron 表达式",
@@ -1814,7 +1822,15 @@
     "labelKeepTrace": "保留追踪",
     "secondsSuffix": "秒",
     "actionDownloadPdf": "下载 PDF",
-    "actionDownloadMarkdown": "下载 Markdown"
+    "actionDownloadMarkdown": "下载 Markdown",
+    "actionFullRefresh": "立即完整刷新",
+    "fullRefreshDialogTitle": "执行完整刷新？",
+    "fullRefreshDialogDescription": "从头重写整个文档一次。比增量刷新消耗更多 token。之后模型仍保持增量刷新；如果刷新失败，会保留当前内容。",
+    "fullRefreshDialogConfirm": "执行完整刷新",
+    "cancel": "取消",
+    "labelLastFullRefresh": "上次完整刷新",
+    "labelFullRefreshCron": "定时完整刷新（cron）",
+    "valueNever": "从未"
   },
   "constellation": {
     "instructions": "滚动缩放 · 拖拽平移 · 悬停探索 · 点击选择",
