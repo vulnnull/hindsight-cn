@@ -10,6 +10,7 @@ import asyncio
 import contextvars
 import logging
 import os
+import threading
 import time
 import warnings
 from abc import ABC, abstractmethod
@@ -113,6 +114,26 @@ class RerankTimeoutError(Exception):
         super().__init__(
             f"Reranker {model_name!r} exhausted its {timeout:g}s budget after scoring {scored}/{len(scores)} candidates"
         )
+
+
+async def _run_batches_in_executor(
+    executor: ThreadPoolExecutor | None,
+    predict_sync: Callable[[list[tuple[str, str]], threading.Event], list[float]],
+    pairs: list[tuple[str, str]],
+) -> list[float]:
+    """Run an in-process reranker's batch loop on ``executor``, stopping it on cancel.
+
+    Cancelling the awaiting task cannot interrupt a worker thread, so without this an
+    abandoned rerank kept scoring its remaining batches and the next request queued
+    behind them (#5722). ``predict_sync`` gets an event that is set on cancellation and
+    must check it before each batch; the batch already running still finishes.
+    """
+    cancelled = threading.Event()
+    try:
+        return await asyncio.get_running_loop().run_in_executor(executor, predict_sync, pairs, cancelled)
+    except asyncio.CancelledError:
+        cancelled.set()
+        raise
 
 
 class CrossEncoderModel(ABC):
@@ -391,13 +412,14 @@ class LocalSTCrossEncoder(CrossEncoderModel):
         else:
             logger.info(f"Reranker: local provider initialized (device: {self._device_type}, using existing executor)")
 
-    def _predict_sync(self, pairs: list[tuple[str, str]]) -> list[float]:
+    def _predict_sync(self, pairs: list[tuple[str, str]], cancelled: threading.Event | None = None) -> list[float]:
         """Synchronous prediction wrapper for thread pool execution.
 
         Scores in explicit batches rather than one `predict()` call so the wall-clock
         budget can be enforced between them — a blocking call already inside torch
         cannot be cancelled from the event loop, and abandoning it with `wait_for`
-        would leave it burning the executor's only worker (#4696).
+        would leave it burning the executor's only worker (#4696). ``cancelled`` is
+        checked at the same point (see ``_run_batches_in_executor``).
 
         Supports two optimizations (controlled via .env):
         - bucket_batching: sort pairs by token length to reduce padding waste (36-54% speedup)
@@ -419,6 +441,8 @@ class LocalSTCrossEncoder(CrossEncoderModel):
             deadline = time.monotonic() + self.timeout if self.timeout > 0 else None
 
             for start in range(0, len(order), self.batch_size):
+                if cancelled is not None and cancelled.is_set():
+                    raise asyncio.CancelledError()
                 if deadline is not None and time.monotonic() >= deadline:
                     raise RerankTimeoutError(scores, self.timeout, self.model_name)
                 batch = order[start : start + self.batch_size]
@@ -448,12 +472,7 @@ class LocalSTCrossEncoder(CrossEncoderModel):
             raise RuntimeError("Reranker not initialized. Call initialize() first.")
 
         # Use dedicated executor - limited workers naturally limits concurrency
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            LocalSTCrossEncoder._executor,
-            self._predict_sync,
-            pairs,
-        )
+        return await _run_batches_in_executor(LocalSTCrossEncoder._executor, self._predict_sync, pairs)
 
 
 class RemoteTEICrossEncoder(CrossEncoderModel):
@@ -1720,7 +1739,7 @@ class FlashRankCrossEncoder(CrossEncoderModel):
         else:
             logger.info("Reranker: FlashRank provider initialized (using existing executor)")
 
-    def _predict_sync(self, pairs: list[tuple[str, str]]) -> list[float]:
+    def _predict_sync(self, pairs: list[tuple[str, str]], cancelled: threading.Event | None = None) -> list[float]:
         """Synchronous predict — each query group, in bounded batches.
 
         FlashRank scores every passage of a request in one ONNX forward pass, and
@@ -1755,6 +1774,8 @@ class FlashRankCrossEncoder(CrossEncoderModel):
                 global_indices = [idx for idx, _ in indexed_texts]
 
                 for start in range(0, len(indexed_texts), self.batch_size):
+                    if cancelled is not None and cancelled.is_set():
+                        raise asyncio.CancelledError()
                     batch = indexed_texts[start : start + self.batch_size]
 
                     # Build passages list for FlashRank. Ids are batch-local, so
@@ -1790,8 +1811,7 @@ class FlashRankCrossEncoder(CrossEncoderModel):
             raise RuntimeError("Reranker not initialized. Call initialize() first.")
 
         # Run in thread pool to avoid blocking event loop
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(FlashRankCrossEncoder._executor, self._predict_sync, pairs)
+        return await _run_batches_in_executor(FlashRankCrossEncoder._executor, self._predict_sync, pairs)
 
 
 class OnnxCrossEncoder(CrossEncoderModel):
@@ -1910,7 +1930,7 @@ class OnnxCrossEncoder(CrossEncoderModel):
             )
         logger.info("Reranker: ONNX provider initialized")
 
-    def _predict_sync(self, pairs: list[tuple[str, str]]) -> list[float]:
+    def _predict_sync(self, pairs: list[tuple[str, str]], cancelled: threading.Event | None = None) -> list[float]:
         """Score ``pairs`` in bounded forward passes, longest first.
 
         Each pass pads to its longest pair and allocates ``batch * heads * seq^2``
@@ -1925,6 +1945,8 @@ class OnnxCrossEncoder(CrossEncoderModel):
         scores: list[float | None] = [None] * len(pairs)
         deadline = time.monotonic() + self.timeout if self.timeout > 0 else None
         for start in range(0, len(order), self.batch_size):
+            if cancelled is not None and cancelled.is_set():
+                raise asyncio.CancelledError()
             if deadline is not None and time.monotonic() >= deadline:
                 raise RerankTimeoutError(scores, self.timeout, self.model_path or self.model_id)
             window = order[start : start + self.batch_size]
@@ -1969,8 +1991,7 @@ class OnnxCrossEncoder(CrossEncoderModel):
             raise RuntimeError("Reranker not initialized. Call initialize() first.")
         if not pairs:
             return []
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(OnnxCrossEncoder._executor, self._predict_sync, pairs)
+        return await _run_batches_in_executor(OnnxCrossEncoder._executor, self._predict_sync, pairs)
 
 
 def _truncate_docs_to_tokens(texts: list[str], max_tokens: int) -> list[str]:

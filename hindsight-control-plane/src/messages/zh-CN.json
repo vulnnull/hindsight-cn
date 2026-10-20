@@ -663,7 +663,11 @@
     "testerColumnExpand": "展开 {name}",
     "recallServerDefaultState": "服务器默认值（{state}）",
     "recallPreferObservationsLabel": "优先使用观察",
-    "recallPreferObservationsDescription": "未设置 prefer_observations 的 recall 请求会丢弃已并入返回观察的原始事实，避免重复。请求中的值仍然优先。"
+    "recallPreferObservationsDescription": "未设置 prefer_observations 的 recall 请求会丢弃已并入返回观察的原始事实，避免重复。请求中的值仍然优先。",
+    "defaultObservationScopesLabel": "默认沉淀认知范围",
+    "defaultObservationScopesDescription": "未自行设置 observation_scopes 的保存条目如何划分沉淀认知范围。combined 按每条记忆的完整标签集分组；topic:* 这样的自定义范围只按其自身的主题标签分组，使同一主题的记忆一起整合。仅适用于新的保存。",
+    "observationScopesCustom": "自定义范围",
+    "observationScopesCustomPlaceholder": "每行一个范围，标签用逗号分隔 — 例如 topic:*, user:*"
   },
   "bankOperations": {
     "title": "后台操作",

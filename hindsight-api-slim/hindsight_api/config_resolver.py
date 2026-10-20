@@ -22,6 +22,7 @@ from hindsight_api.config import (
     HindsightConfig,
     _get_raw_config,
     normalize_config_dict,
+    validate_observation_scopes,
     validate_retain_chunking_config,
     validate_retain_completion_token_budget,
     validate_retain_image_chunking_config,
@@ -601,7 +602,14 @@ class ConfigResolver:
                 if not isinstance(strategy_overrides, dict):
                     raise ValueError(f"Invalid retain strategy {strategy_name!r}: must be an object")
                 try:
-                    _validate_config_value_types(normalize_config_dict(strategy_overrides))
+                    normalized_overrides = normalize_config_dict(strategy_overrides)
+                    _validate_config_value_types(normalized_overrides)
+                    # The type check above only sees "str | list"; a strategy's default scopes are
+                    # stamped onto its items, so they need the same shape check as the top level.
+                    if normalized_overrides.get("default_observation_scopes") is not None:
+                        validate_observation_scopes(
+                            normalized_overrides["default_observation_scopes"], "default_observation_scopes"
+                        )
                 except ValueError as e:
                     raise ValueError(f"Invalid retain strategy {strategy_name!r}: {e}") from e
 
@@ -611,6 +619,9 @@ class ConfigResolver:
         # the strategy simply never applies, with nothing to show why.
         if normalized_updates.get("consolidation_strategies") is not None:
             _validate_consolidation_strategies(normalized_updates["consolidation_strategies"])
+
+        if normalized_updates.get("default_observation_scopes") is not None:
+            validate_observation_scopes(normalized_updates["default_observation_scopes"], "default_observation_scopes")
 
         # Validate recall budget fields
         _validate_recall_budget_updates(normalized_updates)

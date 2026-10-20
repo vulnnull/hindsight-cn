@@ -247,6 +247,10 @@ Controls whether consolidation runs automatically after retain, delete, and upda
 
 This is useful when you want full control over consolidation timing — for example, batching many retains before consolidating, or running [targeted consolidation](/developer/observations#targeted-consolidation) for specific scopes only.
 
+### default_observation_scopes {#default_observation_scopes}
+
+The [`observation_scopes`](./retain#observation_scopes) applied to retained items that send none. Defaults to `combined`, which groups each memory by its full tag set. Set it to `[["topic:*"]]` to group memories by their own `topic:` tags only — e.g. ones added by an [entity label](#entity-labels) with `tag: true` — so memories about the same subject from different agents or sessions consolidate together without changing any client. Stored on each memory at retain, so changing it doesn't re-scope memories already retained — until their document is reprocessed, which applies the current default.
+
 ### observations_mission
 
 Defines what this bank should synthesise into durable observations. Replaces the built-in consolidation rules entirely — leave blank to use the server default.
@@ -924,6 +928,210 @@ Both endpoints are gated by server-level flags (default `true`). A disabled endp
 |----------|-------|
 | `HINDSIGHT_API_ENABLE_DOCUMENT_EXPORT_API` | `POST …/document-transfer/export` and `GET …/files/download/{key}` |
 | `HINDSIGHT_API_ENABLE_DOCUMENT_IMPORT_API` | `POST …/document-transfer` |
+
+## Splitting a bank in place
+
+One bank has become two concerns — two teams, two tenants, two products — and you want
+the memories to follow the split. This runbook moves a **subset of documents** from one
+bank to another **on the same instance**, with no LLM re-extraction and no re-chunking:
+facts are re-embedded with the target bank's model and entities are re-resolved against
+it, but nothing is re-derived from text by a model.
+
+To move a whole bank to an instance with a different embedding model, vector extension or
+text-search backend, you want
+[Migrating a bank to a new instance](#migrating-a-bank-to-a-new-instance) instead.
+
+:::note The Admin CLI is not the tool for this
+`hindsight-admin export-bank` / `import-bank` work on a **whole bank**, and import is
+not a merge — it fails if the target bank already exists. That is why the blue-green
+runbook does not adapt to a split. Use the
+[`/transfer/export` and `/transfer/import`](#bank-transfer-export--import) endpoints below.
+:::
+
+### What a document subset carries
+
+A subset export is narrower than a whole-bank archive, and the difference decides three
+of the steps below.
+
+| | Travels with a document subset |
+|---|---|
+| Documents, raw chunks | Yes |
+| Extracted facts, entity names, causal links | Yes |
+| Consolidated observations | **No** — the target re-consolidates from the imported facts |
+| Mental models, knowledge pages | **No** — recreate them on the target |
+| Bank config, directives, webhooks | **No** — passing `include_bank_config` with `document_id` is a `400` |
+| `audit_log`, `llm_requests` | **No** — passing `include_history` with `document_id` is a `400` |
+
+Observations are the reason, not an oversight: an observation can be consolidated from
+facts spanning several documents, including documents outside your subset. Carrying it
+would mean silently dropping every cross-document observation, so the export refuses the
+combination instead. Each fact's consolidation lifecycle is dropped along with it, which
+is what lets the target consolidate the subset from scratch.
+
+### The runbook
+
+Set `HINDSIGHT_URL` and `API_KEY` first. `SOURCE` is the bank you are splitting and
+`TARGET` is the new one.
+
+**1. Decide the cut and pin it to a list of document ids.**
+
+In 1.0 a document set is addressed by id, tag or time, so the cut has to be expressible
+one of those ways:
+
+```bash
+curl -s -H "Authorization: Bearer $API_KEY" \
+  "$HINDSIGHT_URL/v1/default/banks/$SOURCE/documents?tags=project-x&tags_match=all_strict&limit=1000" \
+  | tee /tmp/listing.json | jq -r '.items[].id' > move.txt
+wc -l move.txt
+jq .total /tmp/listing.json
+```
+
+The response is paginated (`items`, `total`, `limit`, `offset`), so check `total` against
+the line count and page with `offset=` if the cut is larger than one page. `tags_match`
+takes `any_strict` (default), `any`, `all_strict` or `all`, and `start_date` / `end_date`
+with `time_field=created_at|updated_at` narrow the set by a half-open time window.
+
+Save the list to a file and work from it for the rest of the runbook. Every later step
+reads the same `move.txt`, which is what makes the split auditable and repeatable after
+an interruption.
+
+:::warning Do not retag documents to mark the subset
+It looks like the tidy way to label the cut, and it is the most expensive thing you can
+do here. Changing a document's tags invalidates every observation derived from its
+memories **and** resets `consolidated_at` on co-source memories from other documents, so
+the bank re-consolidates a set whose size is the number of memories co-sourced with this
+document's — on a densely co-sourced bank, many times the document's own memory count.
+You would pay that once to apply the tag and again in step 7 when the documents are
+deleted. A plain id list costs nothing.
+:::
+
+**2. Create the target bank with its own configuration.**
+
+```bash
+hindsight bank create "$TARGET" --mission "Memory for project X"
+```
+
+Create it rather than cloning the source: a
+[clone](#clone-a-bank) copies the whole bank including its webhooks, which would point
+the new bank at the old bank's consumers.
+
+**3. Export the subset from the source.**
+
+`document_id` is repeatable. Leave `include_bank_config` and `include_history` off — with
+`document_id` they are rejected.
+
+```bash
+ARGS=$(sed 's/^/document_id=/' move.txt | paste -sd'&' -)
+OPERATION_ID=$(curl -s -X POST -H "Authorization: Bearer $API_KEY" \
+  "$HINDSIGHT_URL/v1/default/banks/$SOURCE/transfer/export?$ARGS" | jq -r .operation_id)
+```
+
+The export is a background operation. Poll it, then download the archive from the
+`download_url` in its `result_metadata`:
+
+```bash
+curl -s -H "Authorization: Bearer $API_KEY" \
+  "$HINDSIGHT_URL/v1/default/banks/$SOURCE/operations/$OPERATION_ID" | jq .status
+
+DOWNLOAD_URL=$(curl -s -H "Authorization: Bearer $API_KEY" \
+  "$HINDSIGHT_URL/v1/default/banks/$SOURCE/operations/$OPERATION_ID" \
+  | jq -r .result_metadata.download_url)
+curl -sf -H "Authorization: Bearer $API_KEY" "$HINDSIGHT_URL$DOWNLOAD_URL" -o split.zip
+```
+
+Read-only on the source: nothing has changed yet.
+
+**4. Merge the archive into the target.**
+
+```bash
+curl --fail-with-body -H "Authorization: Bearer $API_KEY" -F "file=@split.zip" \
+  "$HINDSIGHT_URL/v1/default/banks/$TARGET/transfer/import?mode=merge&document_conflict=skip"
+```
+
+`mode=merge` folds the archive's documents into the bank in the URL. `document_conflict`
+decides what happens to ids that already exist — `skip` (default), `replace`, or `new-id`.
+In merge mode `target_bank_id` and the include flags are rejected with a `400`: a merge
+takes the archive's documents and nothing else.
+
+Poll the **target** bank's operations endpoint for status and the per-component counts in
+`result_metadata`.
+
+**5. Verify the target before you delete anything from the source.**
+
+This is the rollback point, and the only one. The source is still whole; if anything looks
+wrong, delete the target bank and start again.
+
+```bash
+curl -s -H "Authorization: Bearer $API_KEY" \
+  "$HINDSIGHT_URL/v1/default/banks/$TARGET/documents?limit=1000" | jq '{total, ids: [.items[].id]}'
+```
+
+Check `total` against `wc -l move.txt`, confirm the ids are the ones you asked for, then
+run two or three recall queries whose answers you already know.
+
+**6. Rebuild what the subset did not carry.**
+
+Observations first. If the target bank has `enable_auto_consolidation` on, the imported
+facts are queued already and you only need to wait. Otherwise trigger it:
+
+```bash
+curl --fail-with-body -X POST -H "Authorization: Bearer $API_KEY" \
+  "$HINDSIGHT_URL/v1/default/banks/$TARGET/consolidate"
+```
+
+Until this finishes the target has facts and no observation layer. Recall still answers —
+which is exactly why this step gets skipped — but it answers from raw facts only, so the
+bank looks shallower than the source for no apparent reason.
+
+Then recreate the bank-level synthesis by hand: mental models, their directives, and the
+knowledge-page tree do not travel with a subset.
+
+**7. Purge the moved documents from the source.**
+
+```bash
+while read -r DOC; do
+  curl --fail-with-body -X DELETE -H "Authorization: Bearer $API_KEY" \
+    "$HINDSIGHT_URL/v1/default/banks/$SOURCE/documents/$DOC"
+done < move.txt
+```
+
+Deleting a document removes its memory units and their links, deletes the observations
+that referenced those memories, and resets `consolidated_at` on co-source memories from
+other documents — so the source requeues the surviving sources itself rather than
+stranding them. This is not undoable: step 5 was the rollback point.
+
+**8. Let the source settle.**
+
+The requeued co-sources re-consolidate automatically when the source bank has
+auto-consolidation on, or on the next `POST /banks/$SOURCE/consolidate`. Afterwards,
+re-check the source's mental models: their `based_on` evidence cited facts that have now
+moved, so a refresh is worth running before anyone reads them again.
+
+### Verifying the split was clean
+
+| Check | How |
+|---|---|
+| Every intended document arrived | the target listing's `total` matches `wc -l move.txt` |
+| Nothing unintended arrived | every `.items[].id` on the target appears in `move.txt` |
+| The target has an observation layer | Observations exist for the imported facts, not just memories |
+| The source no longer holds the subset | Each id in `move.txt` returns `404` on the source |
+| The source's observations are coherent | No memories left with `consolidated_at` reset and no queue running |
+| Mental models were recreated | The target's models exist and cite the target's facts |
+
+### Common wrong turns
+
+- **Retagging to mark the subset** (step 1) — pays the co-source re-consolidation cost
+  twice for a label an id list gives you free.
+- **Passing `include_bank_config=true` with `document_id`** — a `400`, not a bank copy. A
+  subset is not a bank.
+- **Expecting observations in the archive** — `include_observations` is whole-bank only,
+  by design. The target consolidates.
+- **Deleting from the source before verifying the target** — step 5 is the rollback point
+  and step 7 is irreversible.
+- **Treating the import's completion as the end** — an imported bank with no consolidation
+  run is facts without observations, and it looks fine.
+- **Cloning the source as the target** — carries the source's webhooks, which then fire
+  for the new bank.
 
 ## Migrating a bank to a new instance
 

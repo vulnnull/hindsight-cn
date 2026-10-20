@@ -1273,7 +1273,11 @@ class MemoryItem(BaseModel):
             "'shared' runs a single pass over one global, untagged scope, so memories consolidate together "
             "regardless of their tags — useful for deduplicating across volatile per-call provenance tags "
             "(e.g. per-session ids) while keeping those tags on the source facts. "
-            "A list of tag lists runs one pass per inner list, giving full control over which combinations to use."
+            "A list of tag lists runs one pass per inner list, giving full control over which combinations to use. "
+            "An entry containing '*' is a glob matched against the memory's own tags — e.g. [['topic:*', 'user:*']] "
+            "scopes by the memory's topic and user tags (including tags added by entity labels at retain) and ignores "
+            "the rest; a scope whose globs match nothing is skipped. "
+            "When omitted, the bank's default_observation_scopes applies ('combined' unless configured)."
         ),
     )
     strategy: str | None = Field(
@@ -2822,7 +2826,7 @@ class UpdateDocumentRequest(BaseModel):
         default=None,
         title="UpdateDocumentObservationScopes",
         description="New observation scoping for the document's memories, with the same values retain "
-        "accepts (send 'combined' to return to the default). Use it to move memories retained under one "
+        "accepts (send 'combined' to scope by each memory's full tag set). Use it to move memories retained under one "
         "scoping to another — e.g. per-session documents to 'shared' — without re-extracting them. "
         "Memories whose resolved scopes change lose their observations and are re-consolidated; the rest "
         "keep theirs. Also becomes the scoping a later reprocess of the document uses.",
@@ -4028,6 +4032,15 @@ class BankTemplateConfig(BaseModel):
             "fnmatch tag-globs; a consolidation scope matches under exact cover "
             "(every tag matched by a glob and every glob matched by a tag). The first "
             "matching rule wins; unmatched scopes fall back to max_observations_per_scope."
+        ),
+    )
+    default_observation_scopes: (
+        Literal["per_tag", "combined", "all_combinations", "shared"] | list[list[str]] | None
+    ) = Field(
+        default=None,
+        description=(
+            "observation_scopes applied at retain to items that send none ('combined' when unset). "
+            "A list of tag lists may use globs, e.g. [['topic:*']] scopes each memory by its own topic tags."
         ),
     )
     consolidation_strategies: list[ConsolidationStrategySpec] | None = Field(
