@@ -73,3 +73,36 @@ async def test_bank_delete_retries_transient_deadlock(
     result = await memory.delete_bank(bank_id, request_context=request_context)
     assert calls == 2, "expected exactly one retry after the injected deadlock"
     assert result["bank_deleted"] is True
+
+
+@pytest.mark.asyncio
+async def test_metadata_only_re_retain_retries_transient_deadlock(
+    memory: MemoryEngine, request_context: RequestContext, monkeypatch
+):
+    """Re-retaining an unchanged document survives a deadlock in its relabel tx (#5752).
+
+    Its queries plan on memory_units, taking AccessShare on every bank's vector
+    index, so another bank's DROP INDEX CONCURRENTLY can pick it as the victim.
+    """
+    from hindsight_api.engine.retain import fact_storage
+
+    bank_id = f"test-deadlock-{uuid.uuid4().hex[:8]}"
+    item = {"content": "Alice moved to Berlin in 2021.", "document_id": "doc-1"}
+    try:
+        await memory.retain_batch_async(bank_id=bank_id, contents=[dict(item)], request_context=request_context)
+
+        real = fact_storage.update_memory_units_metadata_and_tags
+        calls = 0
+
+        async def flaky(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise DeadlockDetectedError("deadlock detected")
+            return await real(*args, **kwargs)
+
+        monkeypatch.setattr(fact_storage, "update_memory_units_metadata_and_tags", flaky)
+        await memory.retain_batch_async(bank_id=bank_id, contents=[dict(item)], request_context=request_context)
+        assert calls == 2, "expected exactly one retry after the injected deadlock"
+    finally:
+        await memory.delete_bank(bank_id, request_context=request_context)

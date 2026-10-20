@@ -334,6 +334,8 @@ class _OrdersButOwnsNothing(_OrderingStore):
 
 
 @pytest.mark.asyncio
+# The bank under test is SQL-owned by construction: its fact is forged with an UPDATE on memory_units.
+@pytest.mark.memory_backend_incompatible
 async def test_a_sql_owned_bank_keeps_the_write_time_its_facts_give_it(memory, request_context, monkeypatch):
     """`last_write_at` must count facts, not just documents, on the ordered path too.
 

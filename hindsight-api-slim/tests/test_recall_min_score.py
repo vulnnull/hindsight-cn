@@ -1,6 +1,7 @@
 """Tests for the recall `scores` object and the `min_scores` filters.
 
-Inserts memory_units with known content + real embeddings directly via SQL, then
+Writes three facts with known content + real embeddings straight into the bank's memories
+store (raw SQL for a Postgres bank, a store write for a store-owned one), then
 verifies that recall_async:
   - returns a `scores` object (final/reranker/semantic/keyword) on every result,
   - applies the post-query floors (`reranker`, `final`) to the scored results,
@@ -13,15 +14,18 @@ no LLM and no LLM-as-judge required (uses the mock provider).
 """
 
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 import pytest_asyncio
 
 from hindsight_api import MemoryEngine, RequestContext
 from hindsight_api.engine.cross_encoder import CrossEncoderModel, MultiCrossEncoder
+from hindsight_api.engine.memories import MemoryPatch, get_memories
 from hindsight_api.engine.response_models import MinScores
 from hindsight_api.engine.retain import embedding_utils
 from hindsight_api.extensions.operation_validator import OperationValidationError
+from tests.store_seed import store_write_facts
 
 # Shared hardcoded UUIDs (memory_units.id is a global PK) → serialize xdist workers
 # onto one group to avoid pk conflicts, same as test_recall_time_range.py.
@@ -57,26 +61,23 @@ async def seeded_memory(memory_no_llm_verify: MemoryEngine):
 
     await engine.ensure_bank_profile(bank_id, request_context=RC)
 
-    embeddings = await embedding_utils.generate_embeddings_batch(
-        engine.embeddings,
-        ["the cat sat on the mat", "dogs are loyal animals", "birds can fly in the sky"],
-    )
+    texts = ["the cat sat on the mat", "dogs are loyal animals", "birds can fly in the sky"]
+    embeddings = await embedding_utils.generate_embeddings_batch(engine.embeddings, texts)
 
     def _to_str(emb: list[float]) -> str:
         return "[" + ",".join(str(v) for v in emb) + "]"
 
-    pool = await engine._get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute("DELETE FROM memory_units WHERE id IN ($1, $2, $3)", *ALL_IDS)
-        await _insert_fact(
-            conn, fact_id=ID_A, text="the cat sat on the mat", bank_id=bank_id, embedding_str=_to_str(embeddings[0])
-        )
-        await _insert_fact(
-            conn, fact_id=ID_B, text="dogs are loyal animals", bank_id=bank_id, embedding_str=_to_str(embeddings[1])
-        )
-        await _insert_fact(
-            conn, fact_id=ID_C, text="birds can fly in the sky", bank_id=bank_id, embedding_str=_to_str(embeddings[2])
-        )
+    store = get_memories()
+    if store.store_owned_for(bank_id):
+        # The same three facts and vectors, written where this bank's memories live. Kept out of
+        # the keyword index, like the SQL seed below, which writes no search_vector.
+        await store_write_facts(engine, bank_id, list(ALL_IDS), texts, embeddings=embeddings, text_search=False)
+    else:
+        pool = await engine._get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM memory_units WHERE id IN ($1, $2, $3)", *ALL_IDS)
+            for fact_id, text, emb in zip(ALL_IDS, texts, embeddings):
+                await _insert_fact(conn, fact_id=fact_id, text=text, bank_id=bank_id, embedding_str=_to_str(emb))
 
     yield engine, bank_id
 
@@ -198,6 +199,9 @@ class TestRankScoreReranker:
         assert result.results
         assert all(r.scores.reranker is None for r in result.results)
 
+    # Fails over inside the in-process reranker chain. A store that answers the whole recall
+    # reranks with its own model, so there is no failover for it to see.
+    @pytest.mark.memory_backend_incompatible
     async def test_floor_is_skipped_after_failover_to_it(self, seeded_memory, monkeypatch):
         """A pointwise primary accepts the floor; if the chain falls back to a
         rank-score member, the floor is skipped instead of halving the pool."""
@@ -217,9 +221,14 @@ class TestDecisionReranker:
     async def test_boosts_apply_to_a_cross_encoder_but_not_a_decision_model(self, seeded_memory, monkeypatch):
         engine, bank_id = seeded_memory
         # A fresh date makes the recency boost non-neutral, so skipping it is observable.
-        pool = await engine._get_pool()
-        async with pool.acquire() as conn:
-            await conn.execute("UPDATE memory_units SET occurred_start = now() WHERE id = ANY($1::uuid[])", ALL_IDS)
+        store = get_memories()
+        if store.store_owned_for(bank_id):
+            now = datetime.now(UTC)
+            await store.update_memories(bank_id, [MemoryPatch(unit_id=i, occurred_start=now) for i in ALL_IDS])
+        else:
+            pool = await engine._get_pool()
+            async with pool.acquire() as conn:
+                await conn.execute("UPDATE memory_units SET occurred_start = now() WHERE id = ANY($1::uuid[])", ALL_IDS)
 
         monkeypatch.setattr(engine._cross_encoder_reranker, "cross_encoder", _StubReranker("cohere"))
         boosted = await _recall(engine, bank_id)

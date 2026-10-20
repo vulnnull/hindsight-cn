@@ -1034,6 +1034,9 @@ class TestMoveRenameDelete:
         assert hit.status_code == 200, hit.text
         assert any(r["id"] == ids.orders for r in hit.json()["results"])
 
+    # Reads the mental_models.embedding column, which a store-owned bank leaves empty: its page
+    # vectors live in the store's index.
+    @pytest.mark.memory_backend_incompatible
     async def test_rename_page_reembeds_backing_model(
         self, api_client, kb_bank, memory: MemoryEngine, request_context, monkeypatch
     ):

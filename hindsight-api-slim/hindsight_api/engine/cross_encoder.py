@@ -26,6 +26,7 @@ from .._thread_limits import bound_onnx_session, onnx_intra_op_threads
 from ..config import (
     DEFAULT_LITELLM_API_BASE,
     DEFAULT_RERANKER_ALIBABA_MODEL,
+    DEFAULT_RERANKER_COHERE_MAX_CONCURRENT,
     DEFAULT_RERANKER_COHERE_MODEL,
     DEFAULT_RERANKER_FLASHRANK_BATCH_SIZE,
     DEFAULT_RERANKER_FLASHRANK_CACHE_DIR,
@@ -61,7 +62,8 @@ from ..config import (
 )
 from .aiohttp_session import LoopLocal, LoopLocalSession, UpstreamHTTPError, per_phase_timeout, raise_for_status
 from .bank_attribution import reranker_bank_attribution_headers
-from .decision_model import overflowed_window
+from .decision_model import overflowed_window, record_decision_call
+from .llm_trace import RERANK_SCOPE, trace_model_call
 from .local_device import (
     LOCAL_MODEL_BUILD_LOCK,
     align_local_model_weights,
@@ -195,6 +197,11 @@ class CrossEncoderModel(ABC):
     # base class for the same reason as retry_policy, so every provider honors it.
     max_tokens_per_candidate: int | None = None
 
+    # Whether predict() traces itself as one ``rerank`` row. Off for a backend that makes
+    # no model call (rrf), wraps backends that trace themselves (the failover chain), or
+    # traces each decision-model request it makes instead.
+    traces_calls: bool = True
+
     async def predict(self, pairs: list[tuple[str, str]]) -> list[float]:
         """
         Score query-document pairs for relevance, retrying transient failures.
@@ -208,6 +215,18 @@ class CrossEncoderModel(ABC):
         if self.max_tokens_per_candidate is not None and pairs:
             docs = _truncate_docs_to_tokens([doc for _, doc in pairs], self.max_tokens_per_candidate)
             pairs = [(query, doc) for (query, _), doc in zip(pairs, docs)]
+        if not self.traces_calls:
+            return await self._predict_with_retry(pairs)
+        return await trace_model_call(
+            self,
+            RERANK_SCOPE,
+            len(pairs),
+            lambda: self._predict_with_retry(pairs),
+            request={"queries": list(dict.fromkeys(q for q, _ in pairs)), "documents": [d for _, d in pairs]},
+            output_of=lambda scores: {"scores": [float(score) for score in scores]},
+        )
+
+    async def _predict_with_retry(self, pairs: list[tuple[str, str]]) -> list[float]:
         if self.retry_policy is None:
             return await self._predict(pairs)
         # One budget per predict(): rerank is one logical call on the synchronous
@@ -823,6 +842,7 @@ class CohereCrossEncoder(CrossEncoderModel):
         model: str = DEFAULT_RERANKER_COHERE_MODEL,
         base_url: str | None = None,
         timeout: float = 60.0,
+        max_concurrent: int = DEFAULT_RERANKER_COHERE_MAX_CONCURRENT,
     ):
         """
         Initialize Cohere cross-encoder client.
@@ -832,11 +852,19 @@ class CohereCrossEncoder(CrossEncoderModel):
             model: Cohere rerank model name (default: rerank-english-v3.0)
             base_url: Custom base URL for Cohere-compatible API (e.g., Azure-hosted endpoint)
             timeout: Request timeout in seconds (default: 60.0)
+            max_concurrent: Rerank requests in flight at once across every recall in the
+                process; the rest wait here before sending.
         """
         self.api_key = api_key
         self.model = model
         self.base_url = base_url
         self.timeout = timeout
+        self.max_concurrent = max_concurrent
+        # Held around the request only, so the timeout covers server time, not the wait
+        # behind other recalls: without it a burst queues at the server, waits there past
+        # the timeout and retries, adding load exactly when it is saturated.
+        # CrossLoopSemaphore for the same reason as TypeSafeCrossEncoder's cap.
+        self._semaphore = CrossLoopSemaphore(max_concurrent or DEFAULT_RERANKER_COHERE_MAX_CONCURRENT)
         self._client = None
         # Used when base_url is set (Azure AI Foundry and other Cohere-compatible hosts).
         # Azure endpoints already include the full invoke path, so rerank_url == base_url
@@ -863,7 +891,10 @@ class CohereCrossEncoder(CrossEncoderModel):
             return
 
         base_url_msg = f" at {self.base_url}" if self.base_url else ""
-        logger.info(f"Reranker: initializing Cohere provider with model {self.model}{base_url_msg}")
+        logger.info(
+            f"Reranker: initializing Cohere provider with model {self.model}{base_url_msg} "
+            f"(max_concurrent={self.max_concurrent})"
+        )
 
         if self._http_client is not None:
             await self._http_client.initialize()
@@ -897,36 +928,36 @@ class CohereCrossEncoder(CrossEncoderModel):
         if not pairs:
             return []
 
-        if self._http_client is not None:
-            return await self._http_client.predict(pairs)
-
-        return await self._predict_sdk(pairs)
-
-    async def _predict_sdk(self, pairs: list[tuple[str, str]]) -> list[float]:
-        """Predict using the native Cohere SDK's async client."""
         query_groups: dict[str, list[tuple[int, str]]] = {}
         for idx, (query, text) in enumerate(pairs):
             query_groups.setdefault(query, []).append((idx, text))
 
+        # One request per query, never split: a server may return ranks rather than
+        # independent scores (e.g. 1 - rank/n), and those only compare within one request.
+        groups = list(query_groups.items())
+        results = await asyncio.gather(*(self._rerank_group(query, [t for _, t in items]) for query, items in groups))
+
         all_scores = [0.0] * len(pairs)
+        for (_, items), scores in zip(groups, results):
+            for (idx, _), score in zip(items, scores):
+                all_scores[idx] = score
+        return all_scores
 
-        for query, indexed_texts in query_groups.items():
-            texts = [text for _, text in indexed_texts]
-            indices = [idx for idx, _ in indexed_texts]
-
+    async def _rerank_group(self, query: str, texts: list[str]) -> list[float]:
+        """Score ``texts`` against one query in a single request, within the concurrency cap."""
+        async with self._semaphore:
+            if self._http_client is not None:
+                return await self._http_client.predict([(query, text) for text in texts])
             response = await self._client.get().rerank(
                 query=query,
                 documents=texts,
                 model=self.model,
                 return_documents=False,
             )
-
-            for result in response.results:
-                original_idx = result.index
-                score = result.relevance_score
-                all_scores[indices[original_idx]] = score
-
-        return all_scores
+        scores = [0.0] * len(texts)
+        for result in response.results:
+            scores[result.index] = result.relevance_score
+        return scores
 
 
 class ZeroEntropyCrossEncoder(CrossEncoderModel):
@@ -1189,6 +1220,9 @@ class TypeSafeCrossEncoder(CrossEncoderModel):
 
     SYSTEMONE_PATH = "/v1/systemone"
 
+    # Each System One request is traced as a decision call; a rerank row would count them twice.
+    traces_calls = False
+
     # A Choice accepts at most 255 options; stay clear of the edge. A pool larger
     # than this or exceeding single-question token limits is ranked in chunks whose
     # winners are then ranked against each other, because probabilities are normalised
@@ -1276,15 +1310,36 @@ class TypeSafeCrossEncoder(CrossEncoderModel):
             f"(prune_candidates={self.prunes_candidates})"
         )
 
-    async def _ask(self, body: dict) -> dict:
-        async with self._semaphore:
-            async with self._session.get().post(
-                f"{self.base_url}{self.SYSTEMONE_PATH}",
-                headers=reranker_bank_attribution_headers(),
-                json=body,
-            ) as response:
-                await raise_for_status(response)
-                return await response.json(content_type=None)
+    async def _ask(self, body: dict, scope: str) -> dict:
+        """One System One request, traced under ``scope`` like any LLM call."""
+        started = time.monotonic()
+        result: dict | None = None
+        error: BaseException | None = None
+        try:
+            async with self._semaphore:
+                async with self._session.get().post(
+                    f"{self.base_url}{self.SYSTEMONE_PATH}",
+                    headers=reranker_bank_attribution_headers(),
+                    json=body,
+                ) as response:
+                    await raise_for_status(response)
+                    result = await response.json(content_type=None)
+                    return result
+        except BaseException as e:
+            error = e
+            raise
+        finally:
+            usage = result.get("usage") if isinstance(result, dict) else None
+            record_decision_call(
+                provider=self.provider_name,
+                model=self.model,
+                scope=scope,
+                request=body,
+                response=result if isinstance(result, dict) else None,
+                input_tokens=(usage.get("input_tokens") or 0) if isinstance(usage, dict) else 0,
+                started=started,
+                error=error,
+            )
 
     async def _within_window(self, build: Callable[[int], Awaitable[_T]]) -> _T:
         """``build(budget)`` at the full question budget, halved each time Jev finds the
@@ -1312,7 +1367,7 @@ class TypeSafeCrossEncoder(CrossEncoderModel):
                 }
             },
         }
-        result = await self._ask(body)
+        result = await self._ask(body, "decision_rank")
         probabilities = result["answers"]["rank"]["probabilities"]
         # Sort the option positions, not the indices themselves: the option key encodes
         # the position, and two candidates can carry the same index-independent text.
@@ -1440,7 +1495,8 @@ class TypeSafeCrossEncoder(CrossEncoderModel):
                             "criteria": self.SUFFICIENCY_LEVELS,
                         }
                     },
-                }
+                },
+                "decision_evidence_sufficiency",
             )
 
         result = await self._within_window(ask)
@@ -1492,7 +1548,10 @@ class TypeSafeCrossEncoder(CrossEncoderModel):
             # A refresh asks this once per new memory, all at once, so a rate limit is the
             # expected failure rather than a rare one: retried, not handed back as "search".
             return await acall_with_retry(
-                lambda: self._ask(body), policy=policy, budget=policy.new_budget(), provider=self.provider_name
+                lambda: self._ask(body, "decision_page_impact"),
+                policy=policy,
+                budget=policy.new_budget(),
+                provider=self.provider_name,
             )
 
         result = await self._within_window(ask)
@@ -1535,7 +1594,7 @@ class TypeSafeCrossEncoder(CrossEncoderModel):
                 }
             },
         }
-        result = await self._ask(body)
+        result = await self._ask(body, "decision_cut")
         level = round(float(result["answers"]["depth"]["score"]))
         depth = self.CUT_DEPTHS[min(len(self.CUT_DEPTHS) - 1, max(0, level))]
         return len(shortlist) if depth is None else min(depth, len(shortlist))
@@ -1589,6 +1648,8 @@ class RRFPassthroughCrossEncoder(CrossEncoderModel):
     - Deployments where reranking latency is unacceptable
     - Debugging to isolate retrieval vs reranking issues
     """
+
+    traces_calls = False  # no model call to trace
 
     def __init__(self):
         """Initialize RRF passthrough cross-encoder."""
@@ -2572,6 +2633,8 @@ class MultiCrossEncoder(CrossEncoderModel):
     the chain — it is retried lazily on the next request that reaches it.
     """
 
+    traces_calls = False  # each member's predict() traces its own attempt
+
     def __init__(self, members: list[CrossEncoderModel]) -> None:
         if len(members) < 2:
             raise ValueError("MultiCrossEncoder requires at least two members")
@@ -2757,6 +2820,7 @@ def _create_cross_encoder_backend(member: RerankerMemberConfig) -> CrossEncoderM
             model=member.cohere_model,
             base_url=member.cohere_base_url,
             timeout=member.cohere_timeout,
+            max_concurrent=member.cohere_max_concurrent,
         )
     elif provider == "openrouter":
         api_key = member.openrouter_api_key

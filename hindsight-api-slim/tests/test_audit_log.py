@@ -6,6 +6,10 @@ Verifies that audit entries are created for operations when audit logging is ena
 """
 
 import asyncio
+import json
+import re
+import uuid
+from pathlib import Path
 
 import httpx
 import pytest
@@ -13,6 +17,8 @@ import pytest_asyncio
 
 from hindsight_api.api import create_app
 from hindsight_api.config import get_config
+from hindsight_api.engine.db_utils import acquire_with_retry
+from hindsight_api.engine.schema import fq_table
 from tests.conftest import enable_audit_default
 
 
@@ -127,11 +133,48 @@ async def test_audit_log_entry_fields(audit_api_client, bank_id):
     assert entry["bank_id"] == bank_id
     assert entry["started_at"] is not None
     assert entry["ended_at"] is not None
-    # Request should contain the recall parameters
-    assert entry["request"] is not None
-    assert "query" in entry["request"]
-    # Response should contain the recall results
-    assert entry["response"] is not None
+    # The list leaves the bodies out; the entry itself carries them
+    assert "request" not in entry and "response" not in entry
+    detail = await audit_api_client.get(f"/v1/default/banks/{bank_id}/audit-logs/{entry['id']}")
+    assert detail.status_code == 200
+    full = detail.json()
+    assert full["action"] == "recall"
+    assert "query" in full["request"]
+    assert full["response"] is not None
+
+
+@pytest.mark.asyncio
+async def test_audit_log_list_stays_small_with_large_bodies(audit_api_client, bank_id, memory):
+    """A page of huge entries stays small: only get-by-id loads a body."""
+    await audit_api_client.put(f"/v1/default/banks/{bank_id}", json={"name": "Audit Test Bank"})
+    big = "x" * 1_000_000
+    ids = [uuid.uuid4() for _ in range(5)]
+    backend = await memory._get_backend()
+    async with acquire_with_retry(backend) as conn:
+        for log_id in ids:
+            await conn.execute(
+                f"INSERT INTO {fq_table('audit_log')} (id, action, transport, bank_id, request, response) "
+                "VALUES ($1, 'retain', 'http', $2, $3, $3)",
+                log_id,
+                bank_id,
+                json.dumps({"content": big}),
+            )
+
+    listed = await audit_api_client.get(f"/v1/default/banks/{bank_id}/audit-logs", params={"action": "retain"})
+    assert listed.status_code == 200
+    assert listed.json()["total"] == 5
+    assert len(listed.content) < 10_000
+
+    detail = await audit_api_client.get(f"/v1/default/banks/{bank_id}/audit-logs/{ids[0]}")
+    assert detail.status_code == 200
+    assert detail.json()["request"]["content"] == big
+
+    # Unknown id, and a real id under another bank, are both 404
+    missing = await audit_api_client.get(f"/v1/default/banks/{bank_id}/audit-logs/{uuid.uuid4()}")
+    assert missing.status_code == 404
+    await audit_api_client.put(f"/v1/default/banks/{bank_id}_other", json={"name": "Other"})
+    other = await audit_api_client.get(f"/v1/default/banks/{bank_id}_other/audit-logs/{ids[0]}")
+    assert other.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -453,3 +496,14 @@ async def test_audit_log_ordered_by_most_recent(audit_api_client, bank_id):
     # Check descending order by started_at
     timestamps = [item["started_at"] for item in data["items"] if item["started_at"]]
     assert timestamps == sorted(timestamps, reverse=True), "Audit logs should be ordered most recent first"
+
+
+def test_control_plane_filter_offers_every_audited_action():
+    """The control plane's action filter is a hardcoded list; a new @audited route must join it."""
+    root = Path(__file__).resolve().parents[2]
+    http = (root / "hindsight-api-slim" / "hindsight_api" / "api" / "http.py").read_text()
+    audited = re.findall(r'^\s*@audited\(\s*"([a-z_]+)"', http, re.M)
+    assert len(audited) > 30
+    view = (root / "hindsight-control-plane" / "src" / "components" / "audit-logs-view.tsx").read_text()
+    offered = set(re.findall(r'value: "([a-z_]+)"', view))
+    assert [a for a in audited if a not in offered] == []

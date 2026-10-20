@@ -1474,7 +1474,39 @@
     "detailRequest": "请求",
     "detailResponse": "响应",
     "detailMetadata": "元数据",
-    "entryCount": "{count, plural, one {# 条记录} other {# 条记录}}"
+    "entryCount": "{count, plural, one {# 条记录} other {# 条记录}}",
+    "actionFileRetain": "上传文件",
+    "actionUpdateMemory": "更新记忆",
+    "actionUpdateDocument": "更新文档",
+    "actionDeleteDocument": "删除文档",
+    "actionReprocessDocument": "重新处理文档",
+    "actionImportDocuments": "导入文档",
+    "actionExportDocuments": "导出文档",
+    "actionRecoverConsolidation": "恢复整合",
+    "actionClearObservations": "清除观察",
+    "actionClearMemoryObservations": "清除记忆的观察",
+    "actionUpdateMentalModel": "编辑知识摘要",
+    "actionDryRunRefreshMentalModel": "试运行知识摘要刷新",
+    "actionClearMentalModel": "清空知识摘要",
+    "actionUpdateDirective": "更新指令",
+    "actionUpdateBankConfig": "更新记忆库配置",
+    "actionResetBankConfig": "重置记忆库配置",
+    "actionCloneBank": "克隆记忆库",
+    "actionExportBank": "导出记忆库",
+    "actionImportBank": "导入记忆库",
+    "actionImportBankTemplate": "导入记忆库模板",
+    "actionImportBankTransfer": "导入记忆库迁移",
+    "actionCreateBankAlias": "创建记忆库别名",
+    "actionSetBankAliasPrimary": "设置主记忆库别名",
+    "actionDeleteBankAlias": "删除记忆库别名",
+    "actionCreateWebhook": "创建 Webhook",
+    "actionUpdateWebhook": "更新 Webhook",
+    "actionDeleteWebhook": "删除 Webhook",
+    "actionCancelOperation": "取消操作",
+    "actionRetryOperation": "重试操作",
+    "actionDeleteOperation": "删除操作",
+    "actionGraphMaintenance": "图维护",
+    "actionVectorIndexMaintenance": "向量索引维护"
   },
   "llmRequestsView": {
     "callVolume": "调用量",
@@ -1542,7 +1574,16 @@
     "entryCount": "{count, plural, one {# 条记录} other {# 条记录}}",
     "memoriesCreated": "已创建记忆 ({count}):",
     "memoriesSource": "来源记忆 ({count}):",
-    "tokensThoughts": "推理"
+    "tokensThoughts": "推理",
+    "operationRecall": "召回",
+    "operationMentalModelWrite": "编辑知识摘要",
+    "callTypeAll": "所有模型调用",
+    "callTypeLlm": "LLM",
+    "callTypeEmbedding": "嵌入",
+    "callTypeRerank": "重排序",
+    "callTypeDecision": "决策模型",
+    "inputCountTexts": "文本",
+    "inputCountDocuments": "文档"
   },
   "observationHistory": {
     "unchanged": "未更改",
@@ -2113,7 +2154,8 @@
       },
       "auditLogs": {
         "list": "列出审计日志失败",
-        "stats": "获取审计日志统计失败"
+        "stats": "获取审计日志统计失败",
+        "get": "获取审计日志条目失败"
       },
       "llmRequests": {
         "list": "列出 LLM 请求失败",

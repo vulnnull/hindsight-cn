@@ -345,6 +345,10 @@ async def test_reingest_and_delete_of_linked_documents_both_complete(delete_race
                 await handle_document_tracking(conn, bank, "b", "replacement", is_first_batch=True, ops=backend.ops)
 
     for _ in range(3):
+        # Each round acquires fresh connection wrappers, and CPython may hand a new one the
+        # id() of a freed wrapper from the last round. A stale entry would let that side skip
+        # the barrier and leave the other waiting alone until its 10s timeout.
+        arrived.clear()
         await race.setup.execute("DELETE FROM memory_units WHERE bank_id=$1", bank)
         await race.setup.execute("DELETE FROM documents WHERE bank_id=$1", bank)
         units = {}

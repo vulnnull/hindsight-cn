@@ -203,6 +203,8 @@ def _bank(prefix: str) -> str:
 
 
 @pytest.mark.asyncio
+# Spies on the SQL retrieval call, which a store that answers the whole recall never makes.
+@pytest.mark.memory_backend_incompatible
 async def test_bank_override_reaches_the_retrieval_arms(memory, request_context, monkeypatch):
     """The bank's text-search/temporal/graph settings arrive at the retrieval call itself."""
     bank_id = _bank("recall_toggle_arms")
@@ -235,6 +237,8 @@ async def test_bank_override_reaches_the_retrieval_arms(memory, request_context,
 
 
 @pytest.mark.asyncio
+# Spies on the in-process reranker, which a store that answers the whole recall reranks without.
+@pytest.mark.memory_backend_incompatible
 async def test_bank_override_disables_the_cross_encoder(memory, request_context, monkeypatch):
     """enable_reranking=False stops recall reaching the cross-encoder at all.
 

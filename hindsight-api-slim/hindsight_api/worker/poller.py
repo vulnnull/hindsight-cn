@@ -224,6 +224,28 @@ PROGRESS_LOG_INTERVAL = 30
 TERMINAL_WRITE_DEADLINE_S = 300.0
 TERMINAL_WRITE_MAX_BACKOFF_S = 30.0
 
+# A terminal write that fails because the task's own operations table is gone
+# can never succeed: the schema was dropped (the tenant was deleted) while the
+# task ran, and the row went with it. Postgres reports a missing relation or
+# schema by SQLSTATE; Oracle by ORA code in the message.
+_MISSING_RELATION_SQLSTATES = frozenset({"42P01", "3F000"})  # undefined_table, invalid_schema_name
+_MISSING_RELATION_MARKERS = ("ORA-00942",)  # table or view does not exist
+
+
+def _is_missing_relation(exc: BaseException) -> bool:
+    """Does `exc`, or anything it wraps, say a table or schema does not exist?"""
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if getattr(cur, "sqlstate", None) in _MISSING_RELATION_SQLSTATES:
+            return True
+        if any(marker in str(cur) for marker in _MISSING_RELATION_MARKERS):
+            return True
+        cur = cur.__cause__ or cur.__context__
+    return False
+
+
 # Stuck-task stack-dump thresholds (seconds). Each task gets one stack dump
 # per threshold its current stage crosses without making progress.
 STUCK_STACK_INITIAL_THRESHOLD_S = 300
@@ -1402,6 +1424,15 @@ class WorkerPoller:
                 await write()
                 return True
             except Exception as e:
+                if await self._operations_table_dropped(task, e):
+                    # Nothing to mark and nothing to recover: retrying would only
+                    # run out the deadline and take the worker (and every other
+                    # task on it) down with it.
+                    logger.warning(
+                        f"Not marking task {task.operation_id} {status}: schema {task.schema} no longer has "
+                        f"an operations table (dropped while the task ran); dropping the task"
+                    )
+                    return False
                 if time.monotonic() + delay > deadline:
                     logger.critical(
                         f"Could not mark task {task.operation_id} {status} for {TERMINAL_WRITE_DEADLINE_S:.0f}s "
@@ -1417,6 +1448,25 @@ class WorkerPoller:
                 )
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, TERMINAL_WRITE_MAX_BACKOFF_S)
+
+    async def _operations_table_dropped(self, task: ClaimedTask, error: BaseException) -> bool:
+        """Is the task's own operations table gone, not just this write failing?
+
+        A missing-relation error alone is not enough: the write may touch other
+        tables, and one missing there is a bug to surface, not a reason to drop
+        the status. So confirm by reading the operations table itself. A read
+        that fails for any other reason (the DB being unwell) means "not
+        proven", and the caller keeps retrying.
+        """
+        if task.schema is None or not _is_missing_relation(error):
+            return False
+        table = fq_table("async_operations", task.schema)
+        try:
+            async with self._backend.acquire() as conn:
+                await conn.fetchval(f"SELECT 1 FROM {table} WHERE 1 = 0")
+        except Exception as probe_error:
+            return _is_missing_relation(probe_error)
+        return False
 
     def _exit_process(self) -> None:
         """Ask the process to shut down, through the same path as `kill`."""

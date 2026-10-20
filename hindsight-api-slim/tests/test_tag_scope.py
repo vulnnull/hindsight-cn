@@ -13,7 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from hindsight_api.engine.memory_engine import _resolve_refresh_tag_filtering, _scope_mental_model_trigger
+from hindsight_api.engine.memories import MemoryPatch, get_memories
+from hindsight_api.engine.memory_engine import _resolve_refresh_tag_filtering, _scope_mental_model_trigger, fq_table
 from hindsight_api.engine.reflect.tools import tool_expand, tool_read_mental_models
 from hindsight_api.engine.schema import fq_store_table_explicit
 from hindsight_api.engine.search.tags import TagGroupLeaf, tags_satisfy_groups, tags_writable
@@ -105,13 +106,26 @@ async def scoped_bank(memory):
     # In production the rule tag comes from an entity label with `tag: true`, which needs a real
     # LLM to extract; the mock cannot. Forging it on the stored fact is the only way to put a
     # memory and its document in different scopes here, which is exactly the case under test.
+    # Written wherever this bank's memories live. Postgres's `update_memories` is a no-op (its
+    # callers write the row themselves), so for a SQL bank the UPDATE is that write.
+    store = get_memories()
     backend = await memory._get_backend()
     async with backend.acquire() as conn:
-        await conn.execute(
-            f"UPDATE {fq_store_table_explicit('memory_units')} SET tags = ARRAY['user:kate', 'kind:rule'] "
-            "WHERE bank_id = $1 AND fact_type = 'world' AND text ILIKE '%Fridays%'",
-            bank_id,
-        )
+        if store.store_owned_for(bank_id):
+            page = await store.scan_memories(
+                conn=conn, fq_table=fq_table, bank_id=bank_id, fact_types=["world"], limit=1_000_000
+            )
+            rules = [m.unit_id for m in page.memories if "fridays" in m.text.lower()]
+            assert rules, "the mock extracted no fact about Fridays to forge into the shared scope"
+            await store.update_memories(
+                bank_id, [MemoryPatch(unit_id=u, tags=["user:kate", "kind:rule"]) for u in rules]
+            )
+        else:
+            await conn.execute(
+                f"UPDATE {fq_store_table_explicit('memory_units')} SET tags = ARRAY['user:kate', 'kind:rule'] "
+                "WHERE bank_id = $1 AND fact_type = 'world' AND text ILIKE '%Fridays%'",
+                bank_id,
+            )
     validator = _ScopeByApiKey({"dan": DAN_SCOPE})
     original = memory._operation_validator
     memory._operation_validator = validator
@@ -703,6 +717,7 @@ async def test_bank_wide_reads_and_writes_are_refused_to_a_scoped_caller(memory,
         "retry operation": lambda: memory.retry_operation(scoped_bank, some_id, request_context=dan),
         "delete operation": lambda: memory.delete_operation(scoped_bank, some_id, request_context=dan),
         "audit log": lambda: memory.list_audit_logs(scoped_bank, request_context=dan),
+        "audit log entry": lambda: memory.get_audit_log(scoped_bank, some_id, request_context=dan),
         "audit log stats": lambda: memory.audit_log_stats(scoped_bank, request_context=dan),
         "llm requests": lambda: memory.list_llm_requests(scoped_bank, request_context=dan),
         "llm request stats": lambda: memory.llm_request_stats(scoped_bank, request_context=dan),

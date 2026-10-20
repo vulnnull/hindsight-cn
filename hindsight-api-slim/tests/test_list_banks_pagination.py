@@ -16,6 +16,7 @@ import uuid
 import pytest
 
 from hindsight_api import MemoryEngine
+from hindsight_api.engine.memories import get_memories
 from hindsight_api.extensions import (
     BankListContext,
     BankListResult,
@@ -27,6 +28,7 @@ from hindsight_api.extensions import (
     ValidationResult,
 )
 from hindsight_api.models import RequestContext
+from tests.store_seed import store_write_facts
 
 
 @pytest.fixture
@@ -100,16 +102,20 @@ async def test_fact_counts_are_right_for_the_banks_on_the_page(memory, request_c
     """Counting facts moved out of the list query and into a per-page query (#4468): the
     banks actually returned must still carry their own count, on any page."""
     prefix, bank_ids = three_banks
-    # Facts are inserted directly rather than retained: the assertion is an exact count per
+    # Facts are written directly rather than retained: the assertion is an exact count per
     # bank, and how many facts a retain extracts is the LLM's business, not this test's.
     pool = await memory._get_pool()
     async with pool.acquire() as conn:
         for index, bank_id in enumerate(bank_ids):
-            for fact in range(index + 1):
+            texts = [f"fact {fact}" for fact in range(index + 1)]
+            if get_memories().store_owned_for(bank_id):
+                await store_write_facts(memory, bank_id, [str(uuid.uuid4()) for _ in texts], texts)
+                continue
+            for text in texts:
                 await conn.execute(
                     "INSERT INTO memory_units (bank_id, text, event_date) VALUES ($1, $2, NOW())",
                     bank_id,
-                    f"fact {fact}",
+                    text,
                 )
 
     expected = {bank_id: index + 1 for index, bank_id in enumerate(bank_ids)}

@@ -434,6 +434,9 @@ class _FakeSubBatches:
         )
 
 
+# A store-owned bank never splits a retain into sub-batches (its session commits once), so there
+# are no in-flight siblings for these to cancel.
+@pytest.mark.memory_backend_incompatible
 class TestRetainKillStopsInFlightSubBatches:
     """#5372: leaving the sub-batch loop early must stop the sub-batches still in flight.
 

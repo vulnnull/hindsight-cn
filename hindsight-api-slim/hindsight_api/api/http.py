@@ -34,12 +34,13 @@ from hindsight_api.api.unknown_params import UnknownParamsRoute, use_unknown_par
 from hindsight_api.cancellation import OperationCancelledError
 from hindsight_api.engine.audit import (
     AuditEntry,
+    AuditLogEntry,
     AuditLogger,
     AuditLogListResponse,
     AuditLogStatsResponse,
 )
 from hindsight_api.engine.document_history import DocumentHistoryResponse
-from hindsight_api.engine.llm_trace import LLMRequestListResponse, LLMRequestStatsResponse
+from hindsight_api.engine.llm_trace import LLMCallType, LLMRequestListResponse, LLMRequestStatsResponse
 from hindsight_api.extensions import AuthenticationError, BankWriteOperation, PrecheckOperation
 
 
@@ -300,6 +301,7 @@ def _parse_tag_groups_query(raw: str | None, tags: list[str] | None) -> list[Tag
     return groups
 
 
+from hindsight_api.engine.stored_dates import is_placeholder_date
 from hindsight_api.engine.structured_output import validate_response_schema
 from hindsight_api.engine.time_filter import DocumentTimeField, MemoryTimeField
 from hindsight_api.extensions import HttpExtension, OperationValidationError, load_extension
@@ -1297,18 +1299,22 @@ class MemoryItem(BaseModel):
     def validate_timestamp(cls, v):
         if v is None or v == "":
             return None
-        if isinstance(v, datetime):
-            return v
         if isinstance(v, str):
             if v.lower() == "unset":
                 return "unset"
             try:
                 # Try parsing as ISO format
-                return datetime.fromisoformat(v.replace("Z", "+00:00"))
+                v = datetime.fromisoformat(v.replace("Z", "+00:00"))
             except ValueError as e:
                 raise ValueError(
                     f"Invalid timestamp/event_date format: '{v}'. Expected ISO format like '2024-01-15T10:30:00' or '2024-01-15T10:30:00Z', or the special value 'unset' to store without a timestamp."
                 ) from e
+        if isinstance(v, datetime):
+            if is_placeholder_date(v):
+                raise ValueError(
+                    f"timestamp year {v.year} is a placeholder, not a date; send a real date or 'unset' to store without one."
+                )
+            return v
         raise ValueError(f"timestamp must be a string or datetime, got {type(v).__name__}")
 
 
@@ -1381,6 +1387,19 @@ class FileRetainMetadata(BaseModel):
         description="Named retain strategy for this file. Overrides the bank's default strategy. "
         "Strategies are defined in the bank config under 'retain_strategies'.",
     )
+
+    @field_validator("timestamp")
+    @classmethod
+    def _reject_placeholder_timestamp(cls, v: str | None) -> str | None:
+        # Fail at request time rather than mid-retain; the retain parser enforces it too (#5820).
+        if v:
+            try:
+                parsed = datetime.fromisoformat(v.replace("Z", "+00:00"))
+            except ValueError:
+                return v  # format errors keep surfacing where they always have
+            if is_placeholder_date(parsed):
+                raise ValueError(f"timestamp year {parsed.year} is a placeholder, not a date.")
+        return v
 
 
 class FileRetainRequest(BaseModel):
@@ -10889,6 +10908,33 @@ def _register_routes(app: FastAPI):
             raise _internal_error(e, f"GET /v1/default/banks/{bank_id}/audit-logs/stats")
 
     @app.get(
+        "/v1/default/banks/{bank_id}/audit-logs/{log_id}",
+        summary="Get audit log entry",
+        description="Get one audit log entry with its full request and response bodies.",
+        operation_id="get_audit_log",
+        tags=["Audit"],
+        response_model=AuditLogEntry,
+        responses={404: {"description": "Bank or audit log entry not found"}},
+    )
+    async def api_get_audit_log(
+        bank_id: str,
+        log_id: str,
+        request_context: RequestContext = Depends(get_request_context),
+    ):
+        """Get one audit log entry with its request/response bodies."""
+        try:
+            result = await app.state.memory.get_audit_log(bank_id, log_id, request_context=request_context)
+            if result is None:
+                raise HTTPException(status_code=404, detail=f"Audit log entry '{log_id}' not found")
+            return result
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
+        except (AuthenticationError, HTTPException):
+            raise
+        except Exception as e:
+            raise _internal_error(e, f"GET /v1/default/banks/{bank_id}/audit-logs/{log_id}")
+
+    @app.get(
         "/v1/default/banks/{bank_id}/llm-requests",
         summary="List LLM request traces",
         description="List traced LLM requests for a bank, ordered by most recent first. "
@@ -10903,6 +10949,11 @@ def _register_routes(app: FastAPI):
         status: str | None = Query(None, description="Filter by status (success, error)"),
         operation: str | None = Query(None, description="Filter by operation (retain, reflect, consolidation)"),
         scope: str | None = Query(None, description="Filter by call scope"),
+        call_type: LLMCallType | None = Query(
+            None,
+            description="Filter by kind of model call, told apart by scope: embedding (embedding_*), "
+            "rerank, decision (decision_*), or llm (every other scope)",
+        ),
         provider: str | None = Query(None, description="Filter by LLM provider"),
         trace_id: str | None = Query(None, description="Filter to one operation run (all LLM calls sharing a trace)"),
         document_id: str | None = Query(None, description="Filter to LLM calls that processed a given document"),
@@ -10926,6 +10977,7 @@ def _register_routes(app: FastAPI):
                 status=status,
                 operation=operation,
                 scope=scope,
+                call_type=call_type,
                 provider=provider,
                 trace_id=trace_id,
                 document_id=document_id,
@@ -10958,6 +11010,9 @@ def _register_routes(app: FastAPI):
     async def api_llm_request_stats(
         bank_id: str,
         operation: str | None = Query(None, description="Filter by operation"),
+        call_type: LLMCallType | None = Query(
+            None, description="Filter by kind of model call: llm, embedding, rerank or decision"
+        ),
         period: str = Query("7d", description="Time period: 1d, 7d, or 30d"),
         request_context: RequestContext = Depends(get_request_context),
     ):
@@ -10967,6 +11022,7 @@ def _register_routes(app: FastAPI):
                 bank_id,
                 request_context=request_context,
                 operation=operation,
+                call_type=call_type,
                 period=period,
             )
             if result is None:

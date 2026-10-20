@@ -1231,6 +1231,7 @@ ZeroEntropy's `zembed-1` supports Matryoshka dimensions: `2560`, `1280`, `640`, 
 | `HINDSIGHT_API_RERANKER_COHERE_MODEL` | Cohere rerank model | `rerank-english-v3.0` |
 | `HINDSIGHT_API_RERANKER_COHERE_BASE_URL` | Custom base URL for any Cohere-compatible `/rerank` endpoint (Azure AI Foundry, Jina, Voyage, self-hosted BGE, etc.). When set, the `cohere` provider bypasses the Cohere SDK and calls the endpoint directly via HTTP. | - |
 | `HINDSIGHT_API_RERANKER_COHERE_TIMEOUT` | Request timeout for the Cohere reranker (seconds). Applies to both the native Cohere SDK and the Cohere-compatible HTTP path enabled by `HINDSIGHT_API_RERANKER_COHERE_BASE_URL`. | `60.0` |
+| `HINDSIGHT_API_RERANKER_COHERE_MAX_CONCURRENT` | Rerank requests in flight at once per process, across all recalls. The rest wait in the process before sending, so the timeout above measures server time instead of queue time. When several processes share one endpoint, divide what the endpoint can serve between them. | `16` |
 | `HINDSIGHT_API_RERANKER_LITELLM_API_BASE` | LiteLLM proxy base URL for reranking (falls back to `HINDSIGHT_API_LITELLM_API_BASE`) | `http://localhost:4000` |
 | `HINDSIGHT_API_RERANKER_LITELLM_API_KEY` | LiteLLM proxy API key for reranking (optional, depends on proxy config; falls back to `HINDSIGHT_API_LITELLM_API_KEY`) | - |
 | `HINDSIGHT_API_RERANKER_LITELLM_MODEL` | LiteLLM **proxy** rerank model (use provider prefix, e.g., `cohere/rerank-english-v3.0`) | `cohere/rerank-english-v3.0` |
@@ -2698,7 +2699,7 @@ For a server handling many concurrent requests, lower values (down to `1`) favor
 Because webhook URLs are caller-supplied, the delivery worker refuses to send to private, loopback, or link-local addresses (e.g. `169.254.169.254`, `127.0.0.1`, `10.0.0.0/8`) by default, and it does not return upstream response bodies to callers. Use `HINDSIGHT_API_WEBHOOK_ALLOWED_HOSTS` to allow specific internal destinations (such as `127.0.0.1` for local testing), and `HINDSIGHT_API_WEBHOOK_EXPOSE_RESPONSE_BODY=true` only if you trust those destinations and need the response body for debugging.
 ### Audit Logging
 
-Audit logging captures mutating operations (retain, recall, reflect, bank config updates, [Memory Defense](memory-defense/index.md) redact/block actions, etc.) into an `audit_log` table, queryable via the `/audit-logs` endpoint.
+Audit logging captures mutating operations (retain, recall, reflect, bank config updates, [Memory Defense](memory-defense/index.md) redact/block actions, etc.) into an `audit_log` table, queryable via the `/audit-logs` endpoint. The list returns entries without their request and response bodies; `GET /audit-logs/{log_id}` returns one entry with both.
 
 **Audit logging is disabled by default.** With `HINDSIGHT_API_AUDIT_LOG_ENABLED=false`, the `audit_log` table stays empty and `/audit-logs` returns `{"total": 0, "items": []}` regardless of activity. Set the flag to `true` and restart the API to start capturing events.
 
@@ -2716,6 +2717,19 @@ The actions allowlist and retention window stay server-level: retention is a glo
 
 LLM request tracing records every LLM call Hindsight makes — for retain, reflect, and consolidation — into an `llm_requests` table, queryable per bank via the `/llm-requests` endpoint. Each row captures the input messages, the model output, token usage (input / output / cached / total, taken from the provider response), finish reason, provider/model, timing, and caller metadata. **Failed calls are recorded too** (`status = "error"` with the error message), so the table is useful for debugging what the LLM is doing and why a call failed. Capture is wired into the OpenTelemetry GenAI recording path (the same `record_llm_call` hook used for OTLP span export), so it stays consistent with the provider-reported request details.
 
+The same table also records the other model calls Hindsight pays for, told apart by scope:
+
+| Kind (`call_type`) | Scopes | What a row holds |
+|---|---|---|
+| Embeddings | `embedding_document` (retain, consolidation), `embedding_query` (recall, reflect) | provider, model, timing, `llm_info.input_count` (texts embedded), input tokens when the provider reports them (OpenAI-compatible, Cohere). Input is the texts embedded (`{"texts": [...]}`), truncated like any other payload. |
+| Rerank | `rerank` | provider, model, timing, `llm_info.input_count` (documents scored). Input is the query and the documents (`{"queries": [...], "documents": [...]}`), output is each document's score (`{"scores": [...]}`). |
+| Decision model | `decision_*` (e.g. `decision_recall_rerank`, `decision_consolidation_triage`, `decision_rank`, `decision_cut`, `decision_evidence_sufficiency`, `decision_page_impact`) | the request and the answers, input tokens, timing — one row per request |
+| LLM | every other scope | as above |
+
+Filter on a kind with `?call_type=embedding|rerank|decision|llm` on both `/llm-requests` and `/llm-requests/stats`. Every call joins the run of the operation it belongs to (`retain`, `recall`, `reflect`, `consolidation`, `refresh_mental_model`), so a reflect's searches show inside that reflect. A knowledge page created or edited directly, outside a refresh, is embedded under its own `mental_model_write` run.
+
+Rows are buffered in memory and written in batches (at most every 0.5s, or once 500 are waiting), so tracing a recall costs no extra database round trip on the request path. Rows still in the buffer when the process is killed are lost; a normal shutdown writes them first.
+
 **LLM request tracing is enabled by default**, with traced rows retained for 1 day. To disable it entirely set `HINDSIGHT_API_LLM_TRACE_ENABLED=false` and restart the API — the `llm_requests` table then stays empty and `/llm-requests` returns `{"total": 0, "items": []}` regardless of activity.
 
 > **Note:** Traced rows contain the full prompt and model output, which may include sensitive memory content and can be large. Use `HINDSIGHT_API_LLM_TRACE_MAX_CHARS` to bound how much of each payload is stored, tighten `HINDSIGHT_API_LLM_TRACE_RETENTION_DAYS`, or set `HINDSIGHT_API_LLM_TRACE_ENABLED=false` to turn tracing off in sensitive environments.
@@ -2723,7 +2737,8 @@ LLM request tracing records every LLM call Hindsight makes — for retain, refle
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `HINDSIGHT_API_LLM_TRACE_ENABLED` | Master switch for LLM request tracing. Must be `true` for any calls to be recorded. | `true` |
-| `HINDSIGHT_API_LLM_TRACE_SCOPES` | Comma-separated allowlist of call scopes to trace (e.g. `retain_extract_facts,reflect`; empty = all scopes) | `""` |
+| `HINDSIGHT_API_LLM_TRACE_SCOPES` | Comma-separated allowlist of call scopes to trace (e.g. `retain_extract_facts,reflect`; empty = all scopes). An entry ending in `*` matches a prefix (`decision_*`). | `""` |
+| `HINDSIGHT_API_LLM_TRACE_EXCLUDE_SCOPES` | Comma-separated call scopes never to trace, applied after the allowlist; `*` prefix patterns as above (e.g. `embedding_*,rerank` keeps only LLM and decision-model calls). | `""` |
 | `HINDSIGHT_API_LLM_TRACE_RETENTION_DAYS` | Number of days to retain trace rows. `-1` = keep forever. | `1` |
 | `HINDSIGHT_API_LLM_TRACE_MAX_CHARS` | Truncate stored input/output beyond this many characters (keeps the row, stores a truncated preview). | `50000` |
 

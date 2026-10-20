@@ -26,7 +26,7 @@ from ...extensions.memory_defense import (
 from ...metrics import get_metrics_collector
 from ...worker.stage import set_stage
 from ..chunk_ids import build_chunk_id
-from ..db_utils import acquire_with_retry
+from ..db_utils import acquire_with_retry, retry_with_backoff
 from ..document_history import (
     DocumentEvent,
     DocumentEventKind,
@@ -464,28 +464,27 @@ def parse_datetime_flexible(value: Any) -> datetime:
 
     Raises:
         TypeError: If value is neither datetime nor string
-        ValueError: If string is not a valid ISO datetime
+        ValueError: If string is not a valid ISO datetime, or the value is a year-1/9999
+            placeholder (stored, it becomes Postgres infinity — see ``stored_dates``)
     """
+    if isinstance(value, str):
+        # Parse ISO format string (handles both 'Z' and '+00:00' timezone formats)
+        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if isinstance(value, datetime):
+        if is_placeholder_date(value):
+            raise ValueError(f"Date year {value.year} is a placeholder, not a date.")
         # Ensure timezone-aware
         if value.tzinfo is None:
             return value.replace(tzinfo=UTC)
         return value
-    elif isinstance(value, str):
-        # Parse ISO format string (handles both 'Z' and '+00:00' timezone formats)
-        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        # Ensure timezone-aware
-        if dt.tzinfo is None:
-            return dt.replace(tzinfo=UTC)
-        return dt
-    else:
-        raise TypeError(f"Expected datetime or string, got {type(value).__name__}")
+    raise TypeError(f"Expected datetime or string, got {type(value).__name__}")
 
 
 import asyncpg
 
 from ... import config as config_module
 from ..response_models import TokenUsage
+from ..stored_dates import is_placeholder_date
 from . import (
     chunk_storage,
     embedding_processing,
@@ -1316,6 +1315,27 @@ async def _delta_store_owned_write(
             f"replaced_chunks={len(replace_chunk_ids)} seq={resp.get('seq')} "
             f"new_entities={resp.get('new_entities', 0)}"
         )
+
+    # The facts on UNCHANGED chunks were not re-written above, so they still carry the previous
+    # retain's tags, metadata and observation scoping. The SQL delta syncs them with this same call
+    # inside its transaction; without it a store-owned bank ended a partial re-retain with a
+    # document whose units disagreed on their labels by whether their chunk happened to change.
+    # After the retain, not before: the units it is about to replace would only be patched to be
+    # thrown away. Skipped when no chunk survived, since then every unit was just written with the
+    # current labels and the relabel's scan of the document would find nothing to patch.
+    if set(existing_by_index) - set(changed_indices) - set(removed_indices):
+        async with acquire_with_retry(pool) as conn:
+            async with conn.transaction():
+                await fact_storage.update_memory_units_metadata_and_tags(
+                    conn,
+                    bank_id,
+                    effective_doc_id,
+                    merged_tags,
+                    retain_params.get("metadata", {}),
+                    observation_scopes=retain_params.get("observation_scopes"),
+                    label_tag_keys=label_tag_keys(getattr(config, "entity_labels", None)),
+                    ops=pool.ops,
+                )
 
     log_buffer.append(f"DELTA RETAIN COMPLETE (store-owned): {len(processed_facts)} new units")
     logger.info("\n" + "\n".join(log_buffer) + "\n")
@@ -4415,46 +4435,55 @@ async def _delta_metadata_only(
         logger.info("\n" + "\n".join(log_buffer) + "\n")
         return RetainBatchResult([[] for _ in contents], TokenUsage(), 0)
 
-    async with acquire_with_retry(pool) as conn:
-        async with conn.transaction():
-            # Lock the document row to serialize with concurrent retains
-            current_content_hash = await _meta_store.lock_document_hash(
-                conn=conn, fq_table=fq_table, bank_id=bank_id, document_id=document_id
-            )
-            if expected_content_hash is not None and current_content_hash != expected_content_hash:
-                log_buffer.append(
-                    f"[delta] Document {document_id} changed before metadata update — falling back to full retain"
+    async def _update() -> bool:
+        async with acquire_with_retry(pool) as conn:
+            async with conn.transaction():
+                # Lock the document row to serialize with concurrent retains
+                current_content_hash = await _meta_store.lock_document_hash(
+                    conn=conn, fq_table=fq_table, bank_id=bank_id, document_id=document_id
                 )
-                return None
-            # When this sub-batch is a slice of an oversized item, write the
-            # full original body (issue #1838) instead of just the slice. The
-            # override arrives already screened (see redact_document_body).
-            if full_document_body is not None:
-                combined_content = full_document_body
-            else:
-                combined_content = "\n".join([c.get("content", "") for c in contents_dicts])
-            retain_params, merged_tags = _build_retain_params(contents_dicts, document_tags)
-            await fact_storage.upsert_document_metadata(
-                conn,
-                bank_id,
-                document_id,
-                combined_content,
-                retain_params,
-                merged_tags,
-                attachment_filenames=_attachment_filenames_for(contents),
-            )
-            await fact_storage.update_memory_units_metadata_and_tags(
-                conn,
-                bank_id,
-                document_id,
-                merged_tags,
-                retain_params.get("metadata", {}),
-                observation_scopes=retain_params.get("observation_scopes"),
-                label_tag_keys=label_tag_keys(getattr(config, "entity_labels", None)),
-                ops=pool.ops,
-            )
-            if outbox_callback is not None:
-                await outbox_callback(conn)
+                if expected_content_hash is not None and current_content_hash != expected_content_hash:
+                    log_buffer.append(
+                        f"[delta] Document {document_id} changed before metadata update — falling back to full retain"
+                    )
+                    return False
+                # When this sub-batch is a slice of an oversized item, write the
+                # full original body (issue #1838) instead of just the slice. The
+                # override arrives already screened (see redact_document_body).
+                if full_document_body is not None:
+                    combined_content = full_document_body
+                else:
+                    combined_content = "\n".join([c.get("content", "") for c in contents_dicts])
+                retain_params, merged_tags = _build_retain_params(contents_dicts, document_tags)
+                await fact_storage.upsert_document_metadata(
+                    conn,
+                    bank_id,
+                    document_id,
+                    combined_content,
+                    retain_params,
+                    merged_tags,
+                    attachment_filenames=_attachment_filenames_for(contents),
+                )
+                await fact_storage.update_memory_units_metadata_and_tags(
+                    conn,
+                    bank_id,
+                    document_id,
+                    merged_tags,
+                    retain_params.get("metadata", {}),
+                    observation_scopes=retain_params.get("observation_scopes"),
+                    label_tag_keys=label_tag_keys(getattr(config, "entity_labels", None)),
+                    ops=pool.ops,
+                )
+                if outbox_callback is not None:
+                    await outbox_callback(conn)
+        return True
+
+    # Retried whole on a deadlock: the transaction plans queries on the shared
+    # memory_units table, which takes AccessShare on every bank's vector index,
+    # so another bank's DROP INDEX CONCURRENTLY can pick this one as its victim
+    # (#5752). The transaction rolled back, so a redo is safe.
+    if not await retry_with_backoff(_update):
+        return None
 
     total_time = time.perf_counter() - start_time
     log_buffer.append(f"DELTA RETAIN (no changes): metadata updated in {total_time:.3f}s")

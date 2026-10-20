@@ -87,6 +87,12 @@ from .llm_trace import (
     LLMRequestStatsResponse,
     LLMRequestTokenSums,
     LLMTraceRecorder,
+    call_type_clause,
+    current_trace_context,
+    new_trace_context,
+    operation_run,
+    reset_trace_context,
+    set_trace_context,
     trace_context_of,
 )
 from .operation_metadata import (
@@ -652,7 +658,7 @@ if TYPE_CHECKING:
 
     from ..webhooks.url_guard import GuardedWebhookClient
     from . import bank_aliases as bank_aliases_mod
-    from .audit import AuditLogListResponse, AuditLogStatsResponse
+    from .audit import AuditLogEntry, AuditLogListResponse, AuditLogStatsResponse, AuditLogSummary
     from .memories import MemoriesExtension, MemoryScopeWatermark
     from .memories.base import AttachmentRef, EntityResolverHandle, StoredMemory
     from .prompt_preview import PromptPreview
@@ -766,6 +772,7 @@ from .search.tags import (
 from .search.types import ScoredResult
 from .source_facts import select_source_facts_within_budget
 from .source_scope import visible_document_ids
+from .stored_dates import is_placeholder_date
 from .task_backend import TaskBackend
 from .time_filter import DOCUMENT_TIME_FIELDS, validate_time_window
 
@@ -994,6 +1001,24 @@ async def validate_retain_batch_support(retain_llm_config: "LLMConfig | MultiLLM
         f"Configuration error: HINDSIGHT_API_RETAIN_BATCH_ENABLED=true but {cause}. "
         f"Either switch to a provider that supports batch operations "
         f"(e.g. 'openai', 'groq', 'gemini') or set HINDSIGHT_API_RETAIN_BATCH_ENABLED=false."
+    )
+
+
+def _audit_summary(conn: Any, row: Any) -> "AuditLogSummary":
+    """The body-less part of an audit_log row, shared by the list and the get."""
+    from .audit import AuditLogSummary
+
+    started = row["started_at"]
+    ended = row["ended_at"]
+    return AuditLogSummary(
+        id=str(row["id"]),
+        action=row["action"],
+        transport=row["transport"],
+        bank_id=row["bank_id"],
+        started_at=started.isoformat() if started else None,
+        ended_at=ended.isoformat() if ended else None,
+        duration_ms=int((ended - started).total_seconds() * 1000) if started and ended else None,
+        metadata=conn.parse_json(row["metadata"]) if row["metadata"] is not None else {},
     )
 
 
@@ -3338,6 +3363,7 @@ class MemoryEngine(MemoryEngineInterface):
             schema_getter=get_current_schema,
             enabled=config.llm_trace_enabled,
             allowed_scopes=config.llm_trace_scopes,
+            excluded_scopes=config.llm_trace_exclude_scopes,
             max_chars=config.llm_trace_max_chars,
         )
         from ..tracing import register_span_recorder
@@ -3936,6 +3962,7 @@ class MemoryEngine(MemoryEngineInterface):
             tenant_id=task_dict.get("_tenant_id"),
             api_key_id=task_dict.get("_api_key_id"),
             retry_count=task_dict.get("_retry_count", 0),
+            operation_id=task_dict.get("_operation_id"),
         )
 
         async with self._retrieve_archive(storage_key) as archive:
@@ -4121,6 +4148,7 @@ class MemoryEngine(MemoryEngineInterface):
             tenant_id=task_dict.get("_tenant_id"),
             api_key_id=task_dict.get("_api_key_id"),
             retry_count=task_dict.get("_retry_count", 0),
+            operation_id=task_dict.get("_operation_id"),
         )
 
         async with self._retrieve_archive(storage_key) as archive:
@@ -4210,6 +4238,7 @@ class MemoryEngine(MemoryEngineInterface):
             tenant_id=task_dict.get("_tenant_id"),
             api_key_id=task_dict.get("_api_key_id"),
             retry_count=task_dict.get("_retry_count", 0),
+            operation_id=task_dict.get("_operation_id"),
         )
 
         backend = await self._get_backend()
@@ -4366,6 +4395,7 @@ class MemoryEngine(MemoryEngineInterface):
             tenant_id=task_dict.get("_tenant_id"),
             api_key_id=task_dict.get("_api_key_id"),
             retry_count=task_dict.get("_retry_count", 0),
+            operation_id=task_dict.get("_operation_id"),
         )
         await self.retain_batch_async(
             bank_id=bank_id,
@@ -4500,6 +4530,7 @@ class MemoryEngine(MemoryEngineInterface):
                     tenant_id=task_dict.get("_tenant_id"),
                     api_key_id=task_dict.get("_api_key_id"),
                     retry_count=task_dict.get("_retry_count", 0),
+                    operation_id=task_dict.get("_operation_id"),
                 )
                 await self._operation_validator.on_file_convert_complete(
                     FileConvertResult(
@@ -4654,6 +4685,7 @@ class MemoryEngine(MemoryEngineInterface):
             tenant_id=task_dict.get("_tenant_id"),
             api_key_id=task_dict.get("_api_key_id"),
             retry_count=task_dict.get("_retry_count", 0),
+            operation_id=task_dict.get("_operation_id"),
         )
         result = await run_consolidation_job(
             memory_engine=self,
@@ -4690,6 +4722,7 @@ class MemoryEngine(MemoryEngineInterface):
             tenant_id=task_dict.get("_tenant_id"),
             api_key_id=task_dict.get("_api_key_id"),
             retry_count=task_dict.get("_retry_count", 0),
+            operation_id=task_dict.get("_operation_id"),
         )
         return await run_graph_maintenance_job(
             memory_engine=self,
@@ -4839,6 +4872,7 @@ class MemoryEngine(MemoryEngineInterface):
             tenant_id=task_dict.get("_tenant_id"),
             api_key_id=task_dict.get("_api_key_id"),
             retry_count=task_dict.get("_retry_count", 0),
+            operation_id=task_dict.get("_operation_id"),
         )
 
         # Rate-limit automatic refreshes before any recall or LLM work happens. Parking
@@ -6632,6 +6666,8 @@ class MemoryEngine(MemoryEngineInterface):
         # The work that just finished schedules its audit rows as background
         # tasks; let them land before the pool they write through is closed below.
         await self._audit_logger.drain()
+        # Trace rows are buffered and written in batches; write what is left.
+        await self._llm_recorder.flush_on_shutdown()
 
         # Release the memories store's own resources (client/pool). No-op for the
         # default Postgres store; symmetric with init_memories() at startup.
@@ -7025,6 +7061,9 @@ class MemoryEngine(MemoryEngineInterface):
                 if item_doc_id is not None:
                     groups_by_doc_id[item_doc_id] = group
 
+            from .memories import get_memories as _get_memories_for_groups
+
+            store_owned = _get_memories_for_groups().store_owned_for(bank_id)
             result = [[] for _ in contents]
             total_usage = TokenUsage()
             total_processed_content_tokens = 0
@@ -7051,25 +7090,61 @@ class MemoryEngine(MemoryEngineInterface):
                 else:
                     group_outbox_callback = outbox_callback if is_last_group else None
 
-                group_outcome = await self._retain_batch_async_internal(
-                    bank_id=bank_id,
-                    contents=group.contents,
-                    request_context=request_context,
-                    document_id=group.document_id,
-                    is_first_batch=True,
-                    fact_type_override=fact_type_override,
-                    document_tags=document_tags,
-                    operation_id=operation_id,
-                    strategy=strategy,
-                    outbox_callback=group_outbox_callback,
-                )
+                if store_owned:
+                    # A store-owned bank needs the retain SESSION, which only the execution path
+                    # opens: without one the pipeline writes the document record before extraction,
+                    # so a re-retain that then failed kept its old memories but replaced the
+                    # document's text with the failed version. The session commits the document
+                    # and its memories together, or neither. Safe to route here because a session
+                    # never token-splits, which is what keeps Postgres groups off this path.
+                    execution = await self._run_retain_execution(
+                        bank_id=bank_id,
+                        contents=group.contents,
+                        request_context=request_context,
+                        document_id=group.document_id,
+                        fact_type_override=fact_type_override,
+                        document_tags=document_tags,
+                        operation_id=operation_id,
+                        strategy=strategy,
+                        outbox_callback=group_outbox_callback,
+                        outbox_callback_factory=None,
+                        start_time=start_time,
+                    )
+                    group_ids, group_usage, group_processed = (
+                        execution.unit_ids,
+                        execution.usage,
+                        execution.processed_content_tokens,
+                    )
+                    # The execution has its own between-sub-batch checkpoint; a bank deleted
+                    # while this group ran must stop the loop like the checkpoint above does.
+                    cancelled = execution.cancelled
+                else:
+                    group_outcome = await self._retain_batch_async_internal(
+                        bank_id=bank_id,
+                        contents=group.contents,
+                        request_context=request_context,
+                        document_id=group.document_id,
+                        is_first_batch=True,
+                        fact_type_override=fact_type_override,
+                        document_tags=document_tags,
+                        operation_id=operation_id,
+                        strategy=strategy,
+                        outbox_callback=group_outbox_callback,
+                    )
+                    group_ids, group_usage, group_processed = (
+                        group_outcome.memory_ids,
+                        group_outcome.usage,
+                        group_outcome.processed_content_tokens,
+                    )
                 for local_idx, origin_idx in enumerate(group.origins):
-                    if local_idx < len(group_outcome.memory_ids):
-                        result[origin_idx] = group_outcome.memory_ids[local_idx]
-                total_usage = total_usage + group_outcome.usage
+                    if local_idx < len(group_ids):
+                        result[origin_idx] = group_ids[local_idx]
+                total_usage = total_usage + group_usage
                 total_processed_content_tokens = merge_processed_content_tokens(
-                    total_processed_content_tokens, group_outcome.processed_content_tokens
+                    total_processed_content_tokens, group_processed
                 )
+                if cancelled:
+                    break
 
         # A cancelled run (bank deleted mid-flight) skips the completion side
         # effects, mirroring the pre-grouping early return from the sub-batch loop.
@@ -7313,9 +7388,11 @@ class MemoryEngine(MemoryEngineInterface):
         within one pass, and the only document that spans sub-batches here is an
         oversized SINGLE item, whose slices all replay the same body — so the
         per-document chunk_index offset stays valid. Shared-document batches are
-        handled by ``retain_batch_async`` itself (one pass per document), never
-        here, because splitting one document across differently-bodied sub-batches
-        trips the streaming pipeline's content-hash ownership check.
+        handled by ``retain_batch_async`` itself (one pass per document), because
+        splitting one document across differently-bodied sub-batches trips the
+        streaming pipeline's content-hash ownership check. The exception is a
+        store-owned bank, whose groups come here one at a time for the session:
+        a session never splits, so the check cannot trip.
         """
         if outbox_callback is None and outbox_callback_factory is not None:
             outbox_callback = outbox_callback_factory(contents)
@@ -7891,51 +7968,59 @@ class MemoryEngine(MemoryEngineInterface):
         # Create parent span for retain operation
         with create_operation_span("retain", bank_id):
             retain_llm = self._retain_llm_config.with_config(resolved_config, bank_id=bank_id, operation="retain")
-            result = await self._retain_batch_with_append_retry(
-                pool=self._backend,
-                embeddings_model=self.embeddings,
-                llm_config=retain_llm,
-                vlm_config=self._vlm_config,
-                entity_resolver=self.entity_resolver,
-                format_date_fn=self._format_readable_date,
-                bank_id=bank_id,
-                contents_dicts=contents,
-                document_id=document_id,
-                is_first_batch=is_first_batch,
-                fact_type_override=fact_type_override,
-                document_tags=document_tags,
-                config=resolved_config,
-                operation_id=operation_id,
-                schema=_current_schema.get(),
-                outbox_callback=outbox_callback,
-                outbox_callback_factory=outbox_callback_factory,
-                db_semaphore=self._db_semaphore_for(bank_id),
-                full_document_body=full_document_body,
-                document_body_hash=document_body_hash,
-                chunk_index_offset=chunk_index_offset,
-                body_accum=body_accum,
-                retain_session=retain_session,
-                # Stream chunk-level "storing N/total" progress to the operation row as
-                # the document's chunks commit (more useful than the coarse sub-batch tick).
-                progress_callback=self._write_operation_progress,
-                webhook_manager=self._webhook_manager,
-                memory_defense_extension=self._memory_defense,
-                audit_logger=self._audit_logger,
-                # One loader per retain, so a document that shows the same image in
-                # several sections fetches its bytes once rather than once per chunk.
-                attachment_loader=RetainAttachmentLoader(
-                    self._file_storage,
-                    self._backend,
-                    bank_id,
-                    # The document edge that holds the filenames is written later
-                    # in this same retain, so take them from the request.
-                    filenames={
-                        short_id: name
-                        for item in contents
-                        for short_id, name in (item.get("attachment_filenames") or {}).items()
-                    },
-                ),
-            )
+            # Bound for the whole retain, not only around its LLM calls, so its embedding calls
+            # join the same trace (and read as part of this retain) instead of as unattributed calls.
+            retain_trace = trace_context_of(retain_llm)
+            retain_trace_token = set_trace_context(retain_trace) if retain_trace is not None else None
+            try:
+                result = await self._retain_batch_with_append_retry(
+                    pool=self._backend,
+                    embeddings_model=self.embeddings,
+                    llm_config=retain_llm,
+                    vlm_config=self._vlm_config,
+                    entity_resolver=self.entity_resolver,
+                    format_date_fn=self._format_readable_date,
+                    bank_id=bank_id,
+                    contents_dicts=contents,
+                    document_id=document_id,
+                    is_first_batch=is_first_batch,
+                    fact_type_override=fact_type_override,
+                    document_tags=document_tags,
+                    config=resolved_config,
+                    operation_id=operation_id,
+                    schema=_current_schema.get(),
+                    outbox_callback=outbox_callback,
+                    outbox_callback_factory=outbox_callback_factory,
+                    db_semaphore=self._db_semaphore_for(bank_id),
+                    full_document_body=full_document_body,
+                    document_body_hash=document_body_hash,
+                    chunk_index_offset=chunk_index_offset,
+                    body_accum=body_accum,
+                    retain_session=retain_session,
+                    # Stream chunk-level "storing N/total" progress to the operation row as
+                    # the document's chunks commit (more useful than the coarse sub-batch tick).
+                    progress_callback=self._write_operation_progress,
+                    webhook_manager=self._webhook_manager,
+                    memory_defense_extension=self._memory_defense,
+                    audit_logger=self._audit_logger,
+                    # One loader per retain, so a document that shows the same image in
+                    # several sections fetches its bytes once rather than once per chunk.
+                    attachment_loader=RetainAttachmentLoader(
+                        self._file_storage,
+                        self._backend,
+                        bank_id,
+                        # The document edge that holds the filenames is written later
+                        # in this same retain, so take them from the request.
+                        filenames={
+                            short_id: name
+                            for item in contents
+                            for short_id, name in (item.get("attachment_filenames") or {}).items()
+                        },
+                    ),
+                )
+            finally:
+                if retain_trace_token is not None:
+                    reset_trace_context(retain_trace_token)
             # Map the created facts onto this retain's trace so the trace view can
             # show which memories the ingestion produced.
             created_ids = [uid for group in result.memory_ids for uid in group]
@@ -9472,6 +9557,11 @@ class MemoryEngine(MemoryEngineInterface):
         recall_span.set_attribute("hindsight.fact_types", ",".join(fact_type))
         recall_span.set_attribute("hindsight.thinking_budget", thinking_budget)
         recall_span.set_attribute("hindsight.max_tokens", max_tokens)
+        # A recall makes no LLM call, so nothing else gives its embedding, rerank and decision calls
+        # a run to belong to. Inside a reflect (its search tools recall) they join the reflect's.
+        recall_trace_token = (
+            set_trace_context(new_trace_context(bank_id, "recall")) if current_trace_context() is None else None
+        )
 
         try:
             # Backpressure: limit concurrent recalls to prevent overwhelming the database
@@ -9659,6 +9749,8 @@ class MemoryEngine(MemoryEngineInterface):
 
             return result
         finally:
+            if recall_trace_token is not None:
+                reset_trace_context(recall_trace_token)
             recall_span_context.__exit__(None, None, None)
 
     async def _search_with_retries(
@@ -9784,15 +9876,36 @@ class MemoryEngine(MemoryEngineInterface):
 
             try:
                 get_metrics_collector().record_recall_phase("swr_prelude", time.perf_counter() - backend_acquire_start)
-                if query_embedding is None:
+                from .search.retrieval import resolve_temporal_constraint
+
+                async def _embed_query():
+                    if query_embedding is not None:
+                        return query_embedding
                     query_embeddings = await embedding_utils.generate_embeddings_batch(
                         self.embeddings,
                         [query],
                         input_type="query",
                     )
-                    query_embedding = query_embeddings[0]
+                    return query_embeddings[0]
+
+                # The temporal window is resolved HERE, before the store is asked, because a store
+                # that answers the whole recall is handed only the window: resolving it inside the
+                # pipeline below left such a store ignoring the bank's enable_temporal_retrieval
+                # and never seeing the dates in the query. Beside the embedding rather than after
+                # it: the date extraction is CPU off the loop and the embedding is a network call,
+                # so together they cost about what the slower one does alone.
+                query_embedding, temporal_constraint = await asyncio.gather(
+                    _embed_query(),
+                    resolve_temporal_constraint(
+                        query,
+                        temporal_window=temporal_window,
+                        enable_temporal_retrieval=enable_temporal_retrieval,
+                        question_date=question_date,
+                        query_analyzer=self.query_analyzer,
+                    ),
+                )
                 step_duration = time.perf_counter() - step_start
-                log_buffer.append(f"  [1] Generate query embedding: {step_duration:.3f}s")
+                log_buffer.append(f"  [1] Generate query embedding + temporal window: {step_duration:.3f}s")
             finally:
                 embedding_span.end()
 
@@ -9835,15 +9948,9 @@ class MemoryEngine(MemoryEngineInterface):
                     query_embedding=str(query_embedding),
                     query_text=query,
                     limit=thinking_budget,
-                    # The field is declared `tuple[datetime, datetime] | None`, and a store that
-                    # claims the recall reads it as one. `temporal_window` is a `TemporalWindow`
-                    # here, so it is unpacked at the boundary rather than handed over as the model
-                    # -- the same conversion the pipeline below does for `recall_unified`.
-                    # `FullRecallRequest` does not validate at construction, so passing the model
-                    # through surfaces only inside the store, as a TypeError on the first index.
-                    temporal_window=(
-                        (temporal_window.start, temporal_window.end) if temporal_window is not None else None
-                    ),
+                    # Already a `(start, end)` tuple, the type the field declares: the resolved
+                    # window, so the bank's toggle and the query's dates are both in it.
+                    temporal_window=temporal_constraint,
                     tags=tags,
                     tags_match=tags_match,
                     tag_groups=tag_groups,
@@ -9971,7 +10078,14 @@ class MemoryEngine(MemoryEngineInterface):
                         created_before=created_before,
                         min_semantic=min_scores.semantic if min_scores else None,
                         min_keyword=min_scores.keyword if min_scores else None,
-                        temporal_window=temporal_window,
+                        # The window resolved above, so a store that declined does not cost a
+                        # second date extraction.
+                        temporal_window=(
+                            TemporalWindow.model_construct(start=temporal_constraint[0], end=temporal_constraint[1])
+                            if temporal_constraint is not None
+                            else None
+                        ),
+                        temporal_resolved=True,
                         enable_text_search=enable_text_search,
                         enable_temporal_retrieval=enable_temporal_retrieval,
                         enable_graph_retrieval=enable_graph_retrieval,
@@ -12576,6 +12690,8 @@ class MemoryEngine(MemoryEngineInterface):
             if not value:
                 return None
             dt = datetime.fromisoformat(value)
+            if is_placeholder_date(dt):
+                raise ValueError(f"Date year {dt.year} is a placeholder, not a date; send '' to clear it.")
             return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
         doing_edit = any(
@@ -14018,6 +14134,11 @@ class MemoryEngine(MemoryEngineInterface):
         # on the item, so retain_params came back without it and the NEXT reprocess
         # fell back to the bank default again.
         content_dict.update(retain_params)
+        # A document retained before #5820 may carry a year-1/9999 placeholder date, which
+        # retain now refuses; replay it as undated rather than failing every reprocess.
+        stored_date = content_dict.get("event_date")
+        if isinstance(stored_date, str) and is_placeholder_date(datetime.fromisoformat(stored_date)):
+            content_dict["event_date"] = None
         # These are the reprocess's own and must win over anything stored.
         content_dict["content"] = original_text
         content_dict["document_id"] = document_id
@@ -14101,6 +14222,7 @@ class MemoryEngine(MemoryEngineInterface):
         status: str | None = None,
         operation: str | None = None,
         scope: str | None = None,
+        call_type: str | None = None,
         provider: str | None = None,
         trace_id: str | None = None,
         document_id: str | None = None,
@@ -14151,6 +14273,8 @@ class MemoryEngine(MemoryEngineInterface):
                 where_clauses.append(f"{column} = ${idx}")
                 params.append(value)
                 idx += 1
+        if call_type:
+            where_clauses.append(call_type_clause(call_type))
         if document_id is not None:
             # document_id is carried in per-call metadata (set by the retain
             # extraction path); a document accrues one trace per retain run.
@@ -14239,6 +14363,7 @@ class MemoryEngine(MemoryEngineInterface):
         *,
         request_context: "RequestContext",
         operation: str | None = None,
+        call_type: str | None = None,
         period: str = "7d",
     ) -> LLMRequestStatsResponse | None:
         """LLM request counts and token sums grouped by day, for charting.
@@ -14275,6 +14400,8 @@ class MemoryEngine(MemoryEngineInterface):
             where_clauses.append(f"operation = ${idx}")
             params.append(operation)
             idx += 1
+        if call_type:
+            where_clauses.append(call_type_clause(call_type))
         where_sql = " AND ".join(where_clauses)
         table = fq_table("llm_requests")
 
@@ -14355,7 +14482,7 @@ class MemoryEngine(MemoryEngineInterface):
         ``get_bank_profile`` before any query runs, so the SELECT below is scoped
         to the authenticated tenant's schema.
         """
-        from .audit import AuditLogEntry, AuditLogListResponse
+        from .audit import AuditLogListResponse
 
         if await self.get_bank_profile(bank_id, request_context=request_context) is None:
             return None
@@ -14389,10 +14516,11 @@ class MemoryEngine(MemoryEngineInterface):
 
             params.append(limit)
             params.append(offset)
+            # No request/response here: a single body can be megabytes, and a page of
+            # them can exhaust the API process. get_audit_log returns one entry's bodies.
             rows = await conn.fetch(
                 f"""
-                SELECT id, action, transport, bank_id, started_at, ended_at,
-                       request, response, metadata
+                SELECT id, action, transport, bank_id, started_at, ended_at, metadata
                 FROM {table}
                 WHERE {where_sql}
                 ORDER BY started_at DESC
@@ -14400,28 +14528,49 @@ class MemoryEngine(MemoryEngineInterface):
                 """,
                 *params,
             )
-
-            items = []
-            for row in rows:
-                started = row["started_at"]
-                ended = row["ended_at"]
-                duration_ms = int((ended - started).total_seconds() * 1000) if started and ended else None
-                items.append(
-                    AuditLogEntry(
-                        id=str(row["id"]),
-                        action=row["action"],
-                        transport=row["transport"],
-                        bank_id=row["bank_id"],
-                        started_at=started.isoformat() if started else None,
-                        ended_at=ended.isoformat() if ended else None,
-                        duration_ms=duration_ms,
-                        request=conn.parse_json(row["request"]) if row["request"] is not None else None,
-                        response=conn.parse_json(row["response"]) if row["response"] is not None else None,
-                        metadata=conn.parse_json(row["metadata"]) if row["metadata"] is not None else {},
-                    )
-                )
+            items = [_audit_summary(conn, row) for row in rows]
 
         return AuditLogListResponse(bank_id=bank_id, total=total, limit=limit, offset=offset, items=items)
+
+    async def get_audit_log(
+        self,
+        bank_id: str,
+        log_id: str,
+        *,
+        request_context: "RequestContext",
+    ) -> "AuditLogEntry | None":
+        """One audit log entry with its full request/response bodies.
+
+        Returns None when the bank or the entry does not exist.
+        """
+        from .audit import AuditLogEntry
+
+        try:
+            log_uuid = uuid.UUID(log_id)
+        except ValueError:
+            return None
+        if await self.get_bank_profile(bank_id, request_context=request_context) is None:
+            return None
+        await self._refuse_bank_wide_if_scoped(bank_id, request_context, "read the bank's audit log")
+
+        backend = await self._get_backend()
+        async with acquire_with_retry(backend) as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT id, action, transport, bank_id, started_at, ended_at, request, response, metadata
+                FROM {fq_table("audit_log")}
+                WHERE id = $1 AND bank_id = $2
+                """,
+                log_uuid,
+                bank_id,
+            )
+            if row is None:
+                return None
+            return AuditLogEntry(
+                **_audit_summary(conn, row).model_dump(),
+                request=conn.parse_json(row["request"]) if row["request"] is not None else None,
+                response=conn.parse_json(row["response"]) if row["response"] is not None else None,
+            )
 
     async def audit_log_stats(
         self,
@@ -15998,6 +16147,12 @@ class MemoryEngine(MemoryEngineInterface):
                 logger.info(f"[REFLECT {reflect_id}] Bank has {mental_model_count} mental models")
         _mark("directives_and_pages")
 
+        # Built before the span opens: nothing between the span's __enter__ and the try that
+        # closes it may raise, or the span is left open.
+        reflect_llm = self._llm_for_reflect_operation(_operation_label).with_config(
+            resolved_reflect_config, bank_id=bank_id, operation=_operation_label
+        )
+
         # Run the agent with parent span for reflect operation (skip if called from another operation)
         if not _skip_span:
             span_context = create_operation_span("reflect", bank_id)
@@ -16005,13 +16160,15 @@ class MemoryEngine(MemoryEngineInterface):
         else:
             span_context = None
 
+        # Bound for the whole run, so the recalls its tools make (embeddings, rerank, decision
+        # calls) group under this reflect rather than as runs of their own.
+        reflect_trace = trace_context_of(reflect_llm)
+        reflect_trace_token = set_trace_context(reflect_trace) if reflect_trace is not None else None
         try:
             try:
                 agent_result = await asyncio.wait_for(
                     run_reflect_agent(
-                        llm_config=self._llm_for_reflect_operation(_operation_label).with_config(
-                            resolved_reflect_config, bank_id=bank_id, operation=_operation_label
-                        ),
+                        llm_config=reflect_llm,
                         bank_id=bank_id,
                         query=query,
                         bank_profile=profile,
@@ -16278,6 +16435,8 @@ class MemoryEngine(MemoryEngineInterface):
             )
             return result
         finally:
+            if reflect_trace_token is not None:
+                reset_trace_context(reflect_trace_token)
             if span_context:
                 span_context.__exit__(None, None, None)
 
@@ -17284,14 +17443,13 @@ class MemoryEngine(MemoryEngineInterface):
                 result.append(entry)
             return result
 
-    async def _mental_model_embedding_vector(self, name: str, content: str) -> list[float] | None:
+    async def _mental_model_embedding_vector(self, bank_id: str, name: str, content: str) -> list[float] | None:
         """The page embedding as a vector. Over name + content, matching what BM25 indexes."""
-        embedding = await embedding_utils.generate_embeddings_batch(self.embeddings, [f"{name} {content}"])
+        # A refresh binds its own trace around this; a direct create/edit of a page has none, so
+        # give it one rather than leave the embedding with no operation.
+        with operation_run(bank_id, "mental_model_write"):
+            embedding = await embedding_utils.generate_embeddings_batch(self.embeddings, [f"{name} {content}"])
         return list(embedding[0]) if embedding and embedding[0] else None
-
-    async def _generate_mental_model_embedding(self, name: str, content: str) -> str | None:
-        vec = await self._mental_model_embedding_vector(name, content)
-        return str(vec) if vec else None
 
     # -- the knowledge-page index -------------------------------------------
     #
@@ -17440,7 +17598,7 @@ class MemoryEngine(MemoryEngineInterface):
             stale.append(row)
 
         for row in stale:
-            vec = await self._mental_model_embedding_vector(row["name"] or "", row["content"] or "")
+            vec = await self._mental_model_embedding_vector(bank_id, row["name"] or "", row["content"] or "")
             await store.index_knowledge_pages(
                 bank_id,
                 [
@@ -17584,7 +17742,7 @@ class MemoryEngine(MemoryEngineInterface):
         trigger = _scope_mental_model_trigger(trigger, tag_scope)
         backend = await self._get_backend()
 
-        embedding_vec = await self._mental_model_embedding_vector(name, content)
+        embedding_vec = await self._mental_model_embedding_vector(bank_id, name, content)
         embedding = str(embedding_vec) if embedding_vec else None
 
         if not mental_model_id:
@@ -18817,8 +18975,10 @@ class MemoryEngine(MemoryEngineInterface):
             f"mental model '{mental_model_id}'",
         )
 
-        # Create parent span for mental model refresh operation
-        with create_operation_span("mental_model_refresh", bank_id):
+        # Create parent span for mental model refresh operation. The trace is bound for the whole
+        # refresh, not just its reflect pass, so the page write that follows (and its embedding)
+        # groups under the same run; the reflect pass joins it (see operation_trace_context).
+        with create_operation_span("mental_model_refresh", bank_id), operation_run(bank_id, "refresh_mental_model"):
             try:
                 run = await self._execute_mental_model_refresh(
                     bank_id, mental_model, mode=mode, request_context=request_context
@@ -19238,6 +19398,7 @@ class MemoryEngine(MemoryEngineInterface):
                 return None
 
             new_embedding_vec = await self._mental_model_embedding_vector(
+                bank_id,
                 name if name is not None else (current_row["name"] or ""),
                 content if content is not None else (current_row["content"] or ""),
             )
@@ -19286,6 +19447,7 @@ class MemoryEngine(MemoryEngineInterface):
                     or (content is None and locked_row["content"] != current_row["content"])
                 ):
                     new_embedding_vec = await self._mental_model_embedding_vector(
+                        bank_id,
                         name if name is not None else (locked_row["name"] or ""),
                         content if content is not None else (locked_row["content"] or ""),
                     )
@@ -19656,7 +19818,10 @@ class MemoryEngine(MemoryEngineInterface):
             await self._write_tag_scope(bank_id, request_context),
             f"mental model '{mental_model_id}'",
         )
-        embedding_str = await self._generate_mental_model_embedding(current_row["name"] or "", "")
+        # One embedding, reused for the column and the store's page index below: both describe
+        # the same name-only page, and embedding it twice cost a second call per clear.
+        embedding_vec = await self._mental_model_embedding_vector(bank_id, current_row["name"] or "", "")
+        embedding_str = str(embedding_vec) if embedding_vec else None
 
         # Content is cleared to '', so re-tokenize search_vector from the name
         # alone — vchord only (see update_mental_model). Non-vchord backends leave
@@ -19691,9 +19856,7 @@ class MemoryEngine(MemoryEngineInterface):
             # findable by title, rather than leaving the index describing content that no longer
             # exists.
             if row is not None:
-                vec = None
-                if self._knowledge_index_store(bank_id) is not None:
-                    vec = await self._mental_model_embedding_vector(row["name"] or "", "")
+                vec = embedding_vec if self._knowledge_index_store(bank_id) is not None else None
                 await self._index_knowledge_page(conn, bank_id, mental_model_id, embedding=vec)
 
         return self._row_to_mental_model(row) if row else None
@@ -20004,7 +20167,7 @@ class MemoryEngine(MemoryEngineInterface):
             await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         await self._require_knowledge_nodes_in_tag_scope(bank_id, request_context, [parent_id])
         mental_model_id = mental_model_id or f"mm-{uuid.uuid4().hex}"
-        embedding_vec = await self._mental_model_embedding_vector(name, content)
+        embedding_vec = await self._mental_model_embedding_vector(bank_id, name, content)
         embedding = str(embedding_vec) if embedding_vec else None
         effective_max_tokens = max_tokens if max_tokens is not None else self.KNOWLEDGE_PAGE_DEFAULT_MAX_TOKENS
         # Built-in default <- bank/tenant/global knowledge_page_default_trigger <- request.

@@ -18,9 +18,10 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 
 from hindsight_api.alembic import _owned
-from hindsight_api.engine.memories.pg.transfer import restore_fact_lifecycle
-from hindsight_api.engine.memory_engine import MemoryEngine
+from hindsight_api.engine.memories import get_memories
+from hindsight_api.engine.memory_engine import MemoryEngine, fq_table
 from hindsight_api.engine.transfer.importer import FactLifecycle
+from tests.store_seed import store_write_facts
 
 
 def _load_repair_migration():
@@ -395,15 +396,21 @@ async def test_import_never_writes_a_fact_both_consolidated_and_failed(memory: M
     bank_id = await _make_bank(memory, request_context, "lifecycle")
     unit_id = uuid.uuid4()
     when = datetime(2020, 1, 2, tzinfo=timezone.utc)
+    # Through the bank's memories store, so the importer's lifecycle restore is exercised on
+    # whichever store holds the fact — Postgres's SQL rewrite or a store-owned default.
+    store = get_memories()
     async with memory._pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO memory_units (id, bank_id, text, fact_type) VALUES ($1, $2, 'a fact', 'world')",
-            unit_id,
-            bank_id,
-        )
-        await restore_fact_lifecycle(
+        if store.store_owned_for(bank_id):
+            await store_write_facts(memory, bank_id, [str(unit_id)], ["a fact"])
+        else:
+            await conn.execute(
+                "INSERT INTO memory_units (id, bank_id, text, fact_type) VALUES ($1, $2, 'a fact', 'world')",
+                unit_id,
+                bank_id,
+            )
+        await store.restore_fact_lifecycle(
             conn=conn,
-            fq_table=lambda table: f"public.{table}",
+            fq_table=fq_table,
             bank_id=bank_id,
             rows=[
                 FactLifecycle(unit_id=str(unit_id), created_at=None, consolidated_at=when, consolidation_failed_at=when)

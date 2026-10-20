@@ -10,6 +10,8 @@ The reflect agent uses a hierarchical retrieval strategy:
 
 import copy
 
+from .prompts import NO_IDS_IN_TEXT_RULE
+
 # Tool definitions in OpenAI format
 
 TOOL_SEARCH_MENTAL_MODELS = {
@@ -293,7 +295,7 @@ _DONE_DOCUMENT_PROPERTY = {
                             "paragraphs in one entry, and never put a heading in one — headings are the "
                             "'heading' field. Within an entry, write the content as you would in a "
                             "document: '- one\n- two' for a list, "
-                            "'| a | b |\n| --- | --- |\n| 1 | 2 |' for a table."
+                            "'| a | b |\n| --- | --- |\n| 1 | 2 |' for a table. " + NO_IDS_IN_TEXT_RULE
                         ),
                         "items": {"type": "string"},
                     },

@@ -34,6 +34,12 @@ class RequestContext:
     # validators that want exponential backoff on repeated failures (e.g.
     # "defer for 2^retry_count minutes") without querying the DB themselves.
     retry_count: int = 0
+    # Id of the async operation this task is executing. Populated by the worker
+    # alongside retry_count; None for sync/HTTP requests. Lets a validator act
+    # on the operation it is deciding about (e.g. cancel it rather than fail it)
+    # without having to infer the row from the bank and its status. When retains
+    # are folded into one execution this is the primary operation's id.
+    operation_id: str | None = None
     # Cooperative cancellation signal for long-running operations. The HTTP
     # layer sets this to a token that fires when the client disconnects; the
     # engine checks it at stage boundaries and aborts abandoned work so it stops

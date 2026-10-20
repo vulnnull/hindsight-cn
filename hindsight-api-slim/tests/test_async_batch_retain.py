@@ -1254,6 +1254,66 @@ async def test_request_context_retry_count_propagated_to_validator(memory_no_llm
 
 
 @pytest.mark.asyncio
+async def test_request_context_operation_id_propagated_to_validator(memory_no_llm_verify, request_context):
+    """_handle_batch_retain forwards the task's _operation_id as
+    RequestContext.operation_id, so a validator can act on the exact operation
+    it is deciding about. Missing (a direct, non-worker call) surfaces as None.
+    """
+    from hindsight_api.extensions import (
+        OperationValidatorExtension,
+        RecallContext,
+        ReflectContext,
+        RetainContext,
+        ValidationResult,
+    )
+
+    captured: dict[str, str | None] = {}
+
+    class CapturingValidator(OperationValidatorExtension):
+        def __init__(self):
+            super().__init__({})
+
+        async def validate_retain(self, ctx: RetainContext) -> ValidationResult:
+            captured["operation_id"] = ctx.request_context.operation_id
+            return ValidationResult.accept()
+
+        async def validate_recall(self, ctx: RecallContext) -> ValidationResult:
+            return ValidationResult.accept()
+
+        async def validate_reflect(self, ctx: ReflectContext) -> ValidationResult:
+            return ValidationResult.accept()
+
+    memory_no_llm_verify._operation_validator = CapturingValidator()
+
+    bank_id = f"test-opid-propagate-{uuid.uuid4().hex[:8]}"
+    pool = await memory_no_llm_verify._get_pool()
+    await _ensure_bank(pool, bank_id)
+
+    operation_id = str(uuid.uuid4())
+    await memory_no_llm_verify._handle_batch_retain(
+        {
+            "type": "batch_retain",
+            "bank_id": bank_id,
+            "contents": [{"content": "operation-id propagate test"}],
+            "_tenant_id": "default",
+            "_operation_id": operation_id,
+        }
+    )
+    assert captured["operation_id"] == operation_id
+
+    captured.clear()
+    await memory_no_llm_verify._handle_batch_retain(
+        {
+            "type": "batch_retain",
+            "bank_id": bank_id,
+            "contents": [{"content": "operation-id propagate default test"}],
+            "_tenant_id": "default",
+        }
+    )
+    assert captured["operation_id"] is None
+
+
+@pytest.mark.asyncio
 async def test_submit_async_operation_leaves_claimable_row_when_submit_task_fails(memory):
     """Regression for the crash-window orphan bug fixed in #1091.
 

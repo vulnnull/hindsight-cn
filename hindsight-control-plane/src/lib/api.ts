@@ -107,16 +107,19 @@ export interface WebhookDelivery {
   updated_at: string | null;
 }
 
-export interface AuditLogEntry {
+export interface AuditLogSummary {
   id: string;
   action: string;
   transport: string;
   bank_id: string | null;
   started_at: string | null;
   ended_at: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface AuditLogEntry extends AuditLogSummary {
   request: Record<string, unknown> | null;
   response: Record<string, unknown> | null;
-  metadata: Record<string, unknown>;
 }
 
 export interface AuditLogsResponse {
@@ -124,7 +127,7 @@ export interface AuditLogsResponse {
   total: number;
   limit: number;
   offset: number;
-  items: AuditLogEntry[];
+  items: AuditLogSummary[];
 }
 
 export interface AuditStatsBucket {
@@ -166,6 +169,9 @@ export interface LLMRequestEntry {
   llm_info: Record<string, unknown>;
   metadata: Record<string, unknown>;
 }
+
+/** Kind of model call, derived server-side from the scope (embedding_*, rerank, decision_*, else llm). */
+export type LLMCallType = "llm" | "embedding" | "rerank" | "decision";
 
 export interface LLMRequestsResponse {
   bank_id: string;
@@ -2510,6 +2516,12 @@ export class ControlPlaneClient {
     );
   }
 
+  async getAuditLog(bankId: string, logId: string): Promise<AuditLogEntry> {
+    return this.fetchApi<AuditLogEntry>(
+      bankApi(bankId, `/audit-logs/${encodeURIComponent(logId)}`)
+    );
+  }
+
   async getAuditLogStats(
     bankId: string,
     options?: { action?: string; period?: string }
@@ -2532,6 +2544,7 @@ export class ControlPlaneClient {
       status?: string;
       operation?: string;
       scope?: string;
+      call_type?: LLMCallType;
       provider?: string;
       trace_id?: string;
       document_id?: string;
@@ -2547,6 +2560,7 @@ export class ControlPlaneClient {
     if (options?.status) params.append("status", options.status);
     if (options?.operation) params.append("operation", options.operation);
     if (options?.scope) params.append("scope", options.scope);
+    if (options?.call_type) params.append("call_type", options.call_type);
     if (options?.provider) params.append("provider", options.provider);
     if (options?.trace_id) params.append("trace_id", options.trace_id);
     if (options?.document_id) params.append("document_id", options.document_id);
@@ -2564,10 +2578,11 @@ export class ControlPlaneClient {
 
   async getLLMRequestStats(
     bankId: string,
-    options?: { operation?: string; period?: string }
+    options?: { operation?: string; call_type?: LLMCallType; period?: string }
   ): Promise<LLMRequestStatsResponse> {
     const params = new URLSearchParams();
     if (options?.operation) params.append("operation", options.operation);
+    if (options?.call_type) params.append("call_type", options.call_type);
     if (options?.period) params.append("period", options.period);
     const query = params.toString();
     return this.fetchApi<LLMRequestStatsResponse>(
