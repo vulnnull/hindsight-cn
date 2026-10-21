@@ -165,11 +165,16 @@ async def _acquire_permits(stack: AsyncExitStack, scope: str) -> None:
     slow LLM call can be attributed to queueing rather than to the provider --
     the two are otherwise indistinguishable in the reported duration (#3881).
     """
+    from ..worker.background import in_background_task
     from .llm_trace import record_queue_wait
 
+    # Calls from a background worker task yield the next free permit to any waiting
+    # live request.
+    background = in_background_task()
     queue_start = time.monotonic()
     for sem in _semaphores_for_scope(scope):
-        await stack.enter_async_context(sem)
+        await sem.acquire(background=background)
+        stack.callback(sem.release)
     record_queue_wait(time.monotonic() - queue_start)
 
 

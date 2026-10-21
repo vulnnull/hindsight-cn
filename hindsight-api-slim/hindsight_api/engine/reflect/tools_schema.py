@@ -403,6 +403,32 @@ def _build_done_tool_with_directives(directive_rules: list[str]) -> dict:
     }
 
 
+#: ``_DONE_SUFFICIENCY_GATE`` for the tool that decides to stop when that is answer_ready.
+_READY_SUFFICIENCY_GATE = _DONE_SUFFICIENCY_GATE.replace("call done", "call answer_ready")
+
+#: The stop signal for reflects whose answer is written by the closing step: a turn that
+#: wrote the answer itself (as prose or as ``done``) was thrown away and written again
+#: there, so the model's last free turn cost as much as the answer (#5832).
+TOOL_ANSWER_READY = {
+    "type": "function",
+    "function": {
+        "name": "answer_ready",
+        # The sufficiency gate moves here with the stop decision: done is only called once asked.
+        "description": (
+            "Call this when what you retrieved is enough to answer. You will then be asked for the answer "
+            "through done. Do not write the answer before you are asked for it." + _READY_SUFFICIENCY_GATE
+        ),
+        # The one argument is done's own verdict, so the "nothing is known needs recall first"
+        # gate (#4567) still sees it: the answer itself is only written in the closing step.
+        "parameters": {
+            "type": "object",
+            "properties": {"answer_found": _DONE_ANSWER_FOUND_PROPERTY},
+            "required": ["answer_found"],
+        },
+    },
+}
+
+
 def get_reflect_tools(
     directive_rules: list[str] | None = None,
     include_mental_models: bool = True,
@@ -411,6 +437,7 @@ def get_reflect_tools(
     include_expand: bool = True,
     answer_as_document: bool = False,
     llm_output_language: str | None = None,
+    answer_ready: bool = False,
 ) -> list[dict]:
     """
     Get the list of tools for the reflect agent.
@@ -435,6 +462,8 @@ def get_reflect_tools(
             markdown that gets persisted.
         llm_output_language: Configured output language. Swaps ``done``'s default
             answer-in-the-question's-language rule for a directive to write in it.
+        answer_ready: Offer ``answer_ready``, the stop signal (one ``answer_found``
+            bool), for a reflect whose answer the closing step writes.
 
     Returns:
         List of tool definitions in OpenAI format
@@ -452,6 +481,8 @@ def get_reflect_tools(
 
     if include_expand:
         tools.append(TOOL_EXPAND)
+    if answer_ready:
+        tools.append(TOOL_ANSWER_READY)
 
     # Use directive-aware done tool if directives are present
     if directive_rules:
@@ -460,7 +491,16 @@ def get_reflect_tools(
         done_tool = TOOL_DONE_ANSWER
     if answer_as_document:
         done_tool = _done_tool_for_document(done_tool)
-    # After the document swap: that replaces the tool description this appends to.
+    if answer_ready:
+        done_tool = copy.deepcopy(done_tool)
+        # Keeps the sufficiency gate: dropping it with the rest of the old description let the
+        # closing answer infer a value the evidence did not state (system eval hq-absent-2024).
+        done_tool["function"]["description"] = (
+            f"Your final answer{', as a structured document' if answer_as_document else ''}. Call this only when "
+            "you are asked for the answer; until then, call "
+            "answer_ready once you have enough." + _DONE_SUFFICIENCY_GATE
+        )
+    # After the document and answer_ready swaps: those replace the description this appends to.
     if llm_output_language:
         done_tool = _done_tool_for_output_language(done_tool, llm_output_language)
     tools.append(done_tool)

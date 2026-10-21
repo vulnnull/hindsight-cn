@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from hindsight_api.engine.consolidation.consolidator import _aggregate_source_fields, _TemporalBounds
 from hindsight_api.engine.memories.pg.recall import retrieve_temporal_combined_sql
 from hindsight_api.engine.retain.fact_extraction import _parse_datetime
 from hindsight_api.engine.schema import fq_store_table_explicit as fq_table
@@ -21,12 +22,14 @@ EMBED_DIM = 384
 _QUERY = "[" + ",".join(["1.0"] + ["0.0"] * (EMBED_DIM - 1)) + "]"
 
 
-async def _insert_unit(conn, bank_id: str, start_sql: str, end_sql: str) -> uuid.UUID:
+async def _insert_unit(
+    conn, bank_id: str, start_sql: str, end_sql: str, event_sql: str = "2025-01-16T00:00:00Z"
+) -> uuid.UUID:
     row = await conn.fetchrow(
         f"""
         INSERT INTO {fq_table("memory_units")} (bank_id, text, fact_type, embedding, event_date,
                                                 occurred_start, occurred_end)
-        VALUES ($1, 'unit', 'world', $2::vector, '2025-01-16'::timestamptz,
+        VALUES ($1, 'unit', 'world', $2::vector, '{event_sql}'::timestamptz,
                 '{start_sql}'::timestamptz, '{end_sql}'::timestamptz)
         RETURNING id
         """,
@@ -82,8 +85,41 @@ def test_extraction_keeps_real_dates():
 
 
 @pytest.mark.asyncio
-async def test_migration_clears_stored_placeholder_dates(memory, monkeypatch):
-    """c7e2f9a4d1b8 nulls the placeholder dates already stored and leaves real ones alone."""
+async def test_consolidation_merges_a_stored_placeholder_date_as_unknown(memory):
+    """Rows stored before #5820 keep their infinity dates (no migration rewrites them), so
+    consolidation's date merging must read them as unknown rather than compare naive vs aware."""
+    bank_id = f"test_placeholder_merge_{uuid.uuid4().hex[:8]}"
+    pool = await memory._get_pool()
+    # Raw SQL on both sides: the API refuses a placeholder date, so only a direct INSERT can
+    # forge a pre-#5820 row, and only a direct read hands back the naive datetime asyncpg
+    # produces for infinity — the exact value consolidation receives.
+    async with pool.acquire() as conn:
+        await _insert_unit(conn, bank_id, "-infinity", "infinity")
+        await _insert_unit(conn, bank_id, "2025-01-16T00:00:00Z", "2025-01-17T00:00:00Z")
+        try:
+            rows = await conn.fetch(
+                f"SELECT occurred_start, occurred_end FROM {fq_table('memory_units')} "
+                "WHERE bank_id = $1 ORDER BY occurred_start",  # -infinity row first
+                bank_id,
+            )
+        finally:
+            await conn.execute(f"DELETE FROM {fq_table('memory_units')} WHERE bank_id = $1", bank_id)
+
+    source_mems = [dict(r) for r in rows]
+    agg = _aggregate_source_fields(source_mems, tags=[])
+    assert agg.occurred_start == datetime(2025, 1, 16, tzinfo=UTC)
+    assert agg.occurred_end == datetime(2025, 1, 17, tzinfo=UTC)
+
+    bounds = _TemporalBounds(occurred_start=rows[0]["occurred_start"], occurred_end=rows[0]["occurred_end"])
+    merged = bounds.merged_with(_TemporalBounds(occurred_start=rows[1]["occurred_start"]))
+    assert merged.occurred_start == datetime(2025, 1, 16, tzinfo=UTC)
+    assert merged.occurred_end is None
+
+
+@pytest.mark.asyncio
+async def test_migration_clears_placeholder_event_dates_only(memory, monkeypatch):
+    """c7e2f9a4d1b8 nulls a placeholder event_date (PG <= 16 cannot subtract it in retain's
+    temporal-link SQL) and leaves real dates and the other columns, which readers ignore, alone."""
     import importlib.util
     from pathlib import Path
 
@@ -101,30 +137,31 @@ async def test_migration_clears_stored_placeholder_dates(memory, monkeypatch):
     bank_id = f"test_placeholder_migration_{uuid.uuid4().hex[:8]}"
     pool = await memory._get_pool()
     async with pool.acquire() as conn:
-        open_end = await _insert_unit(conn, bank_id, "2025-01-16T00:00:00Z", "infinity")
-        open_start = await _insert_unit(conn, bank_id, "-infinity", "2025-01-16T00:00:00Z")
-        year_9999 = await _insert_unit(conn, bank_id, "2025-01-16T00:00:00Z", "9999-12-31T23:59:59Z")
+        infinite = await _insert_unit(conn, bank_id, "2025-01-16T00:00:00Z", "infinity", event_sql="infinity")
+        minus_infinite = await _insert_unit(conn, bank_id, "-infinity", "2025-01-16T00:00:00Z", event_sql="-infinity")
+        year_9999 = await _insert_unit(conn, bank_id, "2025-01-16T00:00:00Z", "2025-01-17T00:00:00Z", "9999-12-31")
         real = await _insert_unit(conn, bank_id, "2025-01-16T00:00:00Z", "2025-01-17T00:00:00Z")
         try:
             for sql in statements:
                 await conn.execute(sql)
-            # Read back with SQL: the public reads now normalize these dates, so they could not
-            # show whether the stored value itself was cleared.
+            # Read back with SQL: the public reads normalize these dates, so they could not show
+            # whether the stored value itself was cleared.
             rows = {
-                r["id"]: (r["occurred_start"], r["occurred_end"])
+                r["id"]: r
                 for r in await conn.fetch(
-                    f"SELECT id, occurred_start, occurred_end FROM {fq_table('memory_units')} WHERE bank_id = $1",
+                    f"SELECT id, event_date, occurred_end FROM {fq_table('memory_units')} WHERE bank_id = $1",
                     bank_id,
                 )
             }
         finally:
             await conn.execute(f"DELETE FROM {fq_table('memory_units')} WHERE bank_id = $1", bank_id)
 
-    day = datetime(2025, 1, 16, tzinfo=UTC)
-    assert rows[open_end] == (day, None)
-    assert rows[open_start] == (None, day)
-    assert rows[year_9999] == (day, None)
-    assert rows[real] == (day, datetime(2025, 1, 17, tzinfo=UTC))
+    assert rows[infinite]["event_date"] is None
+    assert rows[minus_infinite]["event_date"] is None
+    assert rows[year_9999]["event_date"] is None
+    assert rows[real]["event_date"] == datetime(2025, 1, 16, tzinfo=UTC)
+    # Not cleared: no index serves occurred_end, and every reader treats it as unknown.
+    assert rows[infinite]["occurred_end"] == datetime.max
 
 
 @pytest.mark.parametrize("value", ["9999-12-31T23:59:59.999999Z", "0001-01-01T00:00:00"])

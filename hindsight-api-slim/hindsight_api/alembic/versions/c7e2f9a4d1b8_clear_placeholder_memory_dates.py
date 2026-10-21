@@ -1,15 +1,22 @@
-"""Clear year-1 / year-9999 placeholder dates from memory_units
+"""Clear year-1 / year-9999 placeholder event_date values from memory_units
 
 Revision ID: c7e2f9a4d1b8
 Revises: f2a9c4e7b1d3
 Create Date: 2026-10-20
 
-A memory whose occurred range was open-ended could be stored with datetime.min/max, which
-Postgres keeps as -infinity/infinity. asyncpg reads those back without a timezone while every
-finite value is aware, so the row broke temporal recall — and the consolidation that runs it —
-with "can't subtract offset-naive and offset-aware datetimes" on every retry (#5820). New writes
-now treat year 1 / 9999 as an unknown bound (see ``hindsight_api.engine.stored_dates``); this
-clears the rows already written the same way.
+A memory could be stored with datetime.min/max as a date, which Postgres keeps as
+-infinity/infinity (#5820). Every Python reader now treats a year-1 / 9999 value as an unknown
+bound (see ``hindsight_api.engine.stored_dates``), so most stored rows are harmless as they are.
+event_date is the exception: retain's temporal-link query subtracts it in SQL, and PostgreSQL 16
+and older refuse "cannot subtract infinite timestamps", failing retain into that bank.
+
+This revision first cleared all four date columns with one UPDATE filtered on all of them. No
+index leads with occurred_start/occurred_end/mentioned_at (their indexes start with bank_id), so
+it read the whole table in every schema at startup to fix a handful of rows. It now touches only
+event_date, which idx_memory_units_event_date serves as two index range probes.
+
+PG only: Oracle has no infinite timestamps — a year-9999 value there is finite, so its SQL
+arithmetic works and the Python readers already ignore it.
 
 Not reversible: the placeholder carried no date to restore.
 """
@@ -25,8 +32,6 @@ down_revision: str | Sequence[str] | None = "f2a9c4e7b1d3"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-_DATE_COLUMNS = ("occurred_start", "occurred_end", "mentioned_at", "event_date")
-
 
 def _pg_schema_prefix() -> str:
     """Schema-qualifier for raw SQL on PG (multi-tenant search_path)."""
@@ -34,33 +39,19 @@ def _pg_schema_prefix() -> str:
     return f'"{schema}".' if schema else ""
 
 
-def _placeholder(col: str, low: str, high: str) -> str:
-    # -infinity sorts below and infinity above every finite value, so one range test covers
-    # both the infinite and the finite year-1 / year-9999 forms.
-    return f"({col} < {low} OR {col} >= {high})"
-
-
 def _pg_upgrade() -> None:
     schema = _pg_schema_prefix()
-    low, high = "'0002-01-01T00:00:00Z'::timestamptz", "'9999-01-01T00:00:00Z'::timestamptz"
-    sets = ", ".join(f"{c} = CASE WHEN {_placeholder(c, low, high)} THEN NULL ELSE {c} END" for c in _DATE_COLUMNS)
-    where = " OR ".join(_placeholder(c, low, high) for c in _DATE_COLUMNS)
-    op.execute(f"UPDATE {schema}memory_units SET {sets} WHERE {where}")
-
-
-def _oracle_upgrade() -> None:
-    low, high = "TIMESTAMP '0002-01-01 00:00:00 +00:00'", "TIMESTAMP '9999-01-01 00:00:00 +00:00'"
-    # event_date is NOT NULL on Oracle: fall back to when the row was written.
-    sets = ", ".join(
-        f"{c} = CASE WHEN {_placeholder(c, low, high)} THEN {'created_at' if c == 'event_date' else 'NULL'} ELSE {c} END"
-        for c in _DATE_COLUMNS
+    # -infinity sorts below and infinity above every finite value, so one range test covers both
+    # the infinite and the finite year-1 / year-9999 forms. event_date is nullable on PG.
+    op.execute(
+        f"UPDATE {schema}memory_units SET event_date = NULL "
+        "WHERE event_date < '0002-01-01T00:00:00Z'::timestamptz "
+        "OR event_date >= '9999-01-01T00:00:00Z'::timestamptz"
     )
-    where = " OR ".join(_placeholder(c, low, high) for c in _DATE_COLUMNS)
-    op.execute(f"UPDATE memory_units SET {sets} WHERE {where}")
 
 
 def upgrade() -> None:
-    run_for_dialect(pg=_pg_upgrade, oracle=_oracle_upgrade)
+    run_for_dialect(pg=_pg_upgrade)  # oracle slot intentionally absent: see the module docstring
 
 
 def downgrade() -> None:
