@@ -2511,6 +2511,18 @@ def _done_arguments(done_call: "LLMToolCall", finish_reason: str | None) -> dict
     return _decode_json_argument(args["_raw"], finish_reason, "arguments")
 
 
+def _cited_ids(value: object, available: set[str]) -> list[str]:
+    """The ids in a ``done`` id field that were actually retrieved.
+
+    The tool schema asks for a list of strings, but the model's arguments are not
+    validated against it: a field sent as ``true`` or a bare string is treated as
+    empty rather than failing the whole reflect (#5927).
+    """
+    if not isinstance(value, list):
+        return []
+    return [i for i in value if isinstance(i, str) and i in available]
+
+
 async def _process_done_tool(
     done_call: "LLMToolCall",
     available_memory_ids: set[str],
@@ -2617,9 +2629,9 @@ async def _process_done_tool(
         document = _map_document_text(document, presenter.drop_unseen_ids)
 
     # Validate IDs (only include IDs that were actually retrieved)
-    used_memory_ids = [mid for mid in (args.get("memory_ids") or []) if mid in available_memory_ids]
-    used_mental_model_ids = [mid for mid in (args.get("mental_model_ids") or []) if mid in available_mental_model_ids]
-    used_observation_ids = [oid for oid in (args.get("observation_ids") or []) if oid in available_observation_ids]
+    used_memory_ids = _cited_ids(args.get("memory_ids"), available_memory_ids)
+    used_mental_model_ids = _cited_ids(args.get("mental_model_ids"), available_mental_model_ids)
+    used_observation_ids = _cited_ids(args.get("observation_ids"), available_observation_ids)
 
     # Generate structured output if schema provided
     structured_output = None
@@ -2734,6 +2746,22 @@ async def _execute_tool_with_timing(
             raise
 
 
+def _expand_memory_ids(args: dict[str, Any]) -> list[str]:
+    """``expand``'s memory_ids as a list, whatever shape the model sent.
+
+    The tool schema asks for a list, but the model's arguments are not validated
+    against it. A bare string is one id; anything else that is not a list (e.g.
+    ``true``) is empty, so ``expand`` answers with a tool error instead of the
+    trace summary's ``len()`` failing the whole reflect (#5953).
+    """
+    memory_ids = args.get("memory_ids")
+    if isinstance(memory_ids, str):
+        return [memory_ids]
+    if not isinstance(memory_ids, list):
+        return []
+    return memory_ids
+
+
 async def _execute_tool(
     tool_name: str,
     args: dict[str, Any],
@@ -2829,7 +2857,7 @@ async def _execute_tool(
         return await recall_fn(query, max_tokens, max_chunk_tokens)
 
     elif tool_name == "expand":
-        memory_ids = args.get("memory_ids", [])
+        memory_ids = _expand_memory_ids(args)
         if not memory_ids:
             return {"error": "expand requires memory_ids"}
         depth = args.get("depth", "chunk")
@@ -2947,7 +2975,7 @@ def _summarize_input(
         )
         return f"(query={query_preview}, max_tokens={max_tokens}, max_chunk_tokens={max_chunk_tokens})"
     elif tool_name == "expand":
-        memory_ids = args.get("memory_ids", [])
+        memory_ids = _expand_memory_ids(args)
         depth = args.get("depth", "chunk")
         return f"(memory_ids=[{len(memory_ids)} ids], depth={depth})"
     elif tool_name == "done":

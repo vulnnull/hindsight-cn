@@ -1506,7 +1506,13 @@
     "actionRetryOperation": "重试操作",
     "actionDeleteOperation": "删除操作",
     "actionGraphMaintenance": "图维护",
-    "actionVectorIndexMaintenance": "向量索引维护"
+    "actionVectorIndexMaintenance": "向量索引维护",
+    "actionSyncRetain": "同步保留",
+    "actionInvalidateMemory": "使记忆失效",
+    "actionCreateKnowledgeFolder": "创建知识文件夹",
+    "actionCreateKnowledgePage": "创建知识页面",
+    "actionUpdateKnowledgeNode": "更新知识节点",
+    "actionDeleteKnowledgeNode": "删除知识节点"
   },
   "llmRequestsView": {
     "callVolume": "调用量",

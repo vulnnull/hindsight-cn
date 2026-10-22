@@ -14,6 +14,7 @@ import {
 } from "@vectorize-io/hindsight-client";
 import { RetainQueue } from "./retain-queue.js";
 import { createMemoryProviderRuntime } from "./memory-provider.js";
+import { createHindsightTools, HINDSIGHT_TOOL_NAMES } from "./tools.js";
 import { compileSessionPatterns, matchesSessionPattern } from "./session-patterns.js";
 import { parseSessionFile } from "./session-file.js";
 import { createHash, randomUUID } from "crypto";
@@ -1545,9 +1546,12 @@ export function getIdentitySkipReason(
   const mappedBanking =
     pluginConfig !== undefined && mappedBankIdForAgent(resolvedCtx, pluginConfig) !== undefined;
   const allowCliSessions = agentBanking || staticBanking || mappedBanking;
+  // Cron, heartbeat and subagent sessions are skipped unless the operator opts
+  // them in; then ignoreSessionPatterns / statelessSessionPatterns decide (#5915).
+  const allowOperationalSessions = pluginConfig?.skipOperationalSessions === false;
 
   if (typeof sessionKey === "string") {
-    if (/^agent:[^:]+:(cron|heartbeat|subagent):/.test(sessionKey)) {
+    if (!allowOperationalSessions && /^agent:[^:]+:(cron|heartbeat|subagent):/.test(sessionKey)) {
       return { resolvedCtx, reason: finalSkipReason(`operational session ${sessionKey}`) };
     }
     if (!allowCliSessions && /^agent:[^:]+:main$/.test(sessionKey)) {
@@ -1558,9 +1562,10 @@ export function getIdentitySkipReason(
     }
   }
 
-  const operationalProviders = allowCliSessions
-    ? ["cron", "heartbeat", "subagent"]
-    : ["cron", "heartbeat", "subagent", "main"];
+  const operationalProviders = [
+    ...(allowOperationalSessions ? [] : ["cron", "heartbeat", "subagent"]),
+    ...(allowCliSessions ? [] : ["main"]),
+  ];
   if (resolvedCtx?.messageProvider && operationalProviders.includes(resolvedCtx.messageProvider)) {
     return {
       resolvedCtx,
@@ -2177,7 +2182,12 @@ export function getPluginConfig(api: MoltbotPluginAPI): PluginConfig {
           ])
         )
       : ["heartbeat"],
-    autoRecall: config.autoRecall !== false, // Default: true (on) — backward compatible
+    // "tools" is Hermes's tools-only mode: the agent recalls through hindsight_recall instead.
+    autoRecall: config.autoRecall !== false && config.memoryMode !== "tools", // Default: true (on)
+    memoryMode:
+      config.memoryMode === "context" || config.memoryMode === "tools"
+        ? config.memoryMode
+        : "hybrid",
     dynamicBankGranularity: Array.isArray(config.dynamicBankGranularity)
       ? config.dynamicBankGranularity
       : DEFAULT_DYNAMIC_BANK_GRANULARITY,
@@ -2229,6 +2239,7 @@ export function getPluginConfig(api: MoltbotPluginAPI): PluginConfig {
       ? config.statelessSessionPatterns
       : [],
     skipStatelessSessions: config.skipStatelessSessions !== false,
+    skipOperationalSessions: config.skipOperationalSessions !== false,
     debug: config.debug ?? false,
     debugPerfTiming: config.debugPerfTiming === true,
     // Both were missing from this whitelist, so the logger always ran at
@@ -3388,6 +3399,41 @@ ${memoriesFormatted}
         },
       }),
     });
+
+    // Hermes's agent tools on this session's own bank. (#5635)
+    api.registerTool?.(
+      (toolCtx) =>
+        createHindsightTools(
+          {
+            bankFor: (ctx) => {
+              const config = currentPluginConfig || pluginConfig;
+              // The same identity resolution auto-recall runs, so the tools land on its bank.
+              const { resolvedCtx, skipReason } = resolveAndCacheIdentity({
+                sessionKey: ctx.sessionKey,
+                ctx: {
+                  agentId: ctx.agentId,
+                  sessionKey: ctx.sessionKey,
+                  workspaceDir: ctx.workspaceDir,
+                },
+                senderIdHint: ctx.requesterSenderId,
+                pluginConfig: config,
+              });
+              return skipReason
+                ? { error: skipReason.detail }
+                : { bankId: deriveBankId(resolvedCtx, config) };
+            },
+            clientFor: async (bankId) => {
+              const live = await readyClient();
+              if (!live) throw new Error("Hindsight client is not initialized");
+              await ensureBankDefaultsApplied(bankId, currentPluginConfig || pluginConfig);
+              return live.client;
+            },
+            config: () => currentPluginConfig || pluginConfig,
+          },
+          toolCtx
+        ),
+      { names: HINDSIGHT_TOOL_NAMES }
+    );
   } catch (error) {
     log.error("plugin loading error", error);
     if (error instanceof Error) {

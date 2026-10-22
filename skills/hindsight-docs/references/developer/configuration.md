@@ -2717,6 +2717,8 @@ Audit logging captures mutating operations (retain, recall, reflect, bank config
 
 The actions allowlist and retention window stay server-level: retention is a global sweep across all tenants with no bank in scope.
 
+**Destructive operations are always logged, whatever the audit setting.** Deleting or clearing a bank, its memories, documents, mental models, directives, aliases, webhooks or observations, and importing into a bank, writes one INFO line to the API's application log over both HTTP and MCP — `destructive_op action=delete_bank bank=… transport=mcp tenant=… schema=… api_key_id=… status=ok duration_ms=…`. It records who removed what, and when, even with the `audit_log` table off. Every MCP tool call also logs one `mcp tool=… bank=… status=… duration_ms=…` line.
+
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `HINDSIGHT_API_AUDIT_LOG_ENABLED` | Whether audit events are written. Hierarchical — can be overridden per bank via the config API. | `false` |
@@ -2742,7 +2744,7 @@ Rows are buffered in memory and written in batches (at most every 0.5s, or once 
 
 **LLM request tracing is enabled by default**, with traced rows retained for 1 day. To disable it entirely set `HINDSIGHT_API_LLM_TRACE_ENABLED=false` and restart the API — the `llm_requests` table then stays empty and `/llm-requests` returns `{"total": 0, "items": []}` regardless of activity.
 
-> **Note:** Traced rows contain the full prompt and model output, which may include sensitive memory content and can be large. Use `HINDSIGHT_API_LLM_TRACE_MAX_CHARS` to bound how much of each payload is stored, tighten `HINDSIGHT_API_LLM_TRACE_RETENTION_DAYS`, or set `HINDSIGHT_API_LLM_TRACE_ENABLED=false` to turn tracing off in sensitive environments.
+> **Note:** Traced rows contain the full prompt and model output, which may include sensitive memory content and can be large. Use `HINDSIGHT_API_LLM_TRACE_MAX_CHARS` to bound how much of each payload is stored, tighten `HINDSIGHT_API_LLM_TRACE_RETENTION_DAYS`, or set `HINDSIGHT_API_LLM_TRACE_ENABLED=false` to turn tracing off in sensitive environments. Deleting a bank deletes its trace rows with it.
 
 | Variable | Description | Default |
 |----------|-------------|---------|

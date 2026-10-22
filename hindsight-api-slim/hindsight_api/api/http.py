@@ -513,7 +513,11 @@ async def run_task_cancellable_on_disconnect(
         # cancellation, not a fault worth reporting over the 499.
         await asyncio.gather(task, return_exceptions=True)
         logger.info(f"[{operation.upper()} CANCELLED] bank={bank_id} reason={token.reason}")
-        raise HTTPException(status_code=_CLIENT_CLOSED_REQUEST_STATUS_CODE, detail=token.reason)
+        # Chained to the typed cancellation so metrics count it as abandoned, not
+        # failed (#5946), the same as run_cancellable_on_disconnect above.
+        raise HTTPException(
+            status_code=_CLIENT_CLOSED_REQUEST_STATUS_CODE, detail=token.reason
+        ) from OperationCancelledError(token.reason)
     finally:
         waiter.cancel()
         # This call can itself be cancelled from above (server shutdown, a deadline),
@@ -5175,9 +5179,15 @@ def _make_audited_http(audit_logger_getter: Callable[[], AuditLogger | None]):
             @wraps(func)
             async def wrapper(*args, **kwargs):
                 al = audit_logger_getter()
+                if al is None:
+                    return await func(*args, **kwargs)
+                with al.destructive_op(action, "http", kwargs.get("bank_id"), kwargs.get("request_context")):
+                    return await _audited(al, *args, **kwargs)
+
+            async def _audited(al: AuditLogger, *args: Any, **kwargs: Any) -> Any:
                 # Cheap bank-independent pre-filter first, then the per-bank
                 # decision (audit_log_enabled is overridable per bank).
-                if al is None or not al.action_allowed(action):
+                if not al.action_allowed(action):
                     return await func(*args, **kwargs)
 
                 bank_id = kwargs.get("bank_id")

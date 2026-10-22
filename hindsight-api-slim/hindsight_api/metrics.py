@@ -69,7 +69,10 @@ def _is_client_cancellation(exc: BaseException) -> bool:
 
     An abandoned recall/reflect raises OperationCancelledError (issue #2122);
     the HTTP layer re-raises it as ``HTTPException(499) from exc`` (see
-    api/http.py run_cancellable_on_disconnect). The exception itself, or any
+    api/http.py run_cancellable_on_disconnect). The hard-cancel path
+    (run_task_cancellable_on_disconnect) has no such error to re-raise, so it
+    chains a fresh one; before #5946 it raised a bare 499 and every hard
+    disconnect counted as a failure. The exception itself, or any
     link in its ``__cause__`` chain, being an OperationCancelledError marks it
     as a cancellation. Matching on the cause chain rather than a bare status
     code avoids misclassifying an unrelated 499 as a cancellation. Per the
