@@ -34,6 +34,24 @@ Write every observation in the language of its own source facts — never transl
 
 When an existing observation is written in a different language from the new facts updating it, do NOT edit its wording in place — that is what produces an English sentence with a Chinese detail bolted on. Discard the old phrasing and compose the merged observation from scratch in the new facts' language."""
 
+# Time comes before the rules because every UPDATE depends on it. Facts are handed over in
+# processing order, which is not the order things happened: imports and backfills deliver old
+# conversations late and in parallel. Small models read the "New facts" batch as the latest news
+# and let an older rule overwrite its newer amendment (#5938). Rule 10 alone did not stop it, nor did
+# this section plus a `reason` written first: flash-lite misread the times, or compared them right
+# and let "was updated" win. The code now makes the comparison (`newer_than_input_facts` in
+# consolidator._build_observations_for_llm, every time in one format) and this section says what
+# a marked observation means. Rule 10 still says "compare their `mentioned_at`" on purpose:
+# rewording it to match this section measured worse on flash-lite (noisy-bank evals 2/6, #5938
+# scenario failing), so the measured wording stays.
+_TIME_RULE = """## TIME
+
+Facts are NOT processed in the order they happened. Old conversations and documents are imported late, several at once, in any order — so an input fact is often OLDER than the observations it touches. When a fact reached you means nothing. What counts is when something was last true: the latest of its `mentioned_at` (when it was stated) and `occurred_start` / `occurred_end` (when the event happened).
+
+The current value of anything is the most recent one. Never judge that from processing order or from the fact's own wording ("was updated", "now", "new policy"): an older fact that describes a change describes the EARLIER state.
+
+An existing observation marked `"newer_than_input_facts": true` is more recent than every input fact. Its current value stays: an input fact may only add history to it ("the grace allowance is 25 units; before that, no small overage was waived"). Without the mark, compare the times as above."""
+
 _PROCESSING_RULES = """## PROCESSING RULES
 
 1. PREFER UPDATE OVER CREATE (when there is something to merge with): if new facts describe the same canonical event, statement, decision, claim, or recurring pattern already covered by an existing observation, UPDATE that observation and attach the new facts as evidence. Do NOT create a near-duplicate sibling. One canonical observation with many source facts is always better than many siblings with one source fact each. Merge aggressively on: same named event, same diagnostic finding, same architectural decision, same recurring claim. **When the EXISTING OBSERVATIONS list is empty, or no existing observation covers the same facet as a new fact, CREATE a new observation** — this rule is about preventing duplicates, not about refusing to record durable knowledge. CREATE is the correct default for any structurally distinct event, claim, or pattern that has no existing match.
@@ -175,7 +193,7 @@ Expected output:
 - One create or update may reference multiple facts when they jointly support the observation.
 - **AT MOST ONE UPDATE PER `observation_id`**: if several new facts all update the same existing observation, emit a single `updates` entry that lists all contributing `source_fact_ids` and a single consolidated `text`. Never emit two `updates` entries with the same `observation_id` in one response — they would silently overwrite each other.
 - `deletes`: only when an observation is directly superseded or contradicted by new facts. When you delete an observation because its content now lives in another one (a merge), set `merged_into` to that observation's `id`. Every entry MUST carry `observation_id` — the EXACT `id` UUID string of the observation to remove, copied from existing observations, exactly as an UPDATE does. A delete entry without it names no target and is rejected, and rejecting it discards the whole response — the creates and updates alongside it included. Naming the observation in `reason` prose is NOT enough. If you cannot supply the id, emit no delete.
-- `reason`: REQUIRED on every create/update/delete — one sentence explaining the choice. For a CREATE, state which existing observation(s) you considered and why none matched (a near-identical existing observation means you should UPDATE, not CREATE). This is audited to catch duplicate creates.
+- `reason`: REQUIRED on every create/update/delete — one sentence explaining the choice. For a CREATE, state which existing observation(s) you considered and why none matched (a near-identical existing observation means you should UPDATE, not CREATE). This is audited to catch duplicate creates. For an UPDATE, `reason` comes first: say whether the observation is `newer_than_input_facts` (or which of their times is later), and so what changes (see TIME).
 - Do NOT include `tags` — handled automatically.
 - Return `{{"creates": [], "updates": [], "deletes": []}}` if nothing durable is found."""
 
@@ -205,6 +223,7 @@ def build_consolidation_system_prompt(
         "observations, merging with existing observations when appropriate.\n\n"
         f"{_MISSION_PRIORITY_NOTE}\n\n"
         f"{language_section}"
+        f"{_TIME_RULE}\n\n"
         f"{_PROCESSING_RULES}\n\n"
         f"{_INPUT_FORMAT_NOTE}\n\n"
         f"{_DECISION_GUIDE}\n\n"

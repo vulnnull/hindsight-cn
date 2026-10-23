@@ -42,6 +42,7 @@ from hindsight_api.extensions.memory_defense import (
     apply_redaction,
     parse_policy,
 )
+from hindsight_api.extensions.model_call import ModelCall, ModelCallExtension
 from hindsight_api.extensions.operation_validator import (
     # Bank Management operations
     BankListContext,
@@ -111,6 +112,9 @@ __all__ = [
     "LLMRequestOverrides",
     "LLMRequestRefused",
     "LLMRequestTarget",
+    # Model Call Extension
+    "ModelCall",
+    "ModelCallExtension",
     # Operation Validator - Core
     "DeferOperation",
     "OperationValidationError",

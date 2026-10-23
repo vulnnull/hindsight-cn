@@ -3466,6 +3466,17 @@ class MemoryEngine(MemoryEngineInterface):
                 )
             install_llm_request_extension(self._llm_request_extension)
 
+        # Every model call, with its input and output, handed to an extension that keeps a
+        # per-call record somewhere of its own. Fed by the same GenAI recorders as llm_requests.
+        from ..extensions.model_call import ModelCallExtension, ModelCallRecorder  # noqa: PLC0415
+
+        self._model_call_extension = load_extension("MODEL_CALL", ModelCallExtension, context=self._ext_ctx)
+        self._model_call_recorder = (
+            ModelCallRecorder(self._model_call_extension) if self._model_call_extension is not None else None
+        )
+        if self._model_call_recorder is not None:
+            register_span_recorder(self._model_call_recorder)
+
         loaded = load_extension("MEMORY_DEFENSE", MemoryDefenseExtension, context=self._ext_ctx)
         if loaded is not None:
             self._memory_defense: MemoryDefenseExtension = loaded
@@ -6086,6 +6097,8 @@ class MemoryEngine(MemoryEngineInterface):
         # Before anything can make an LLM call through it.
         if self._llm_request_extension is not None:
             await self._llm_request_extension.on_startup()
+        if self._model_call_extension is not None:
+            await self._model_call_extension.on_startup()
 
         # Run model loading in thread pool (CPU-bound) in parallel with pg0 startup
         loop = asyncio.get_event_loop()
@@ -6666,6 +6679,12 @@ class MemoryEngine(MemoryEngineInterface):
         # The work that just finished schedules its audit rows as background
         # tasks; let them land before the pool they write through is closed below.
         await self._audit_logger.drain()
+        # The workers are done, so no more calls; let the extension write what it buffered
+        # while the process can still reach its destination.
+        if self._model_call_recorder is not None:
+            unregister_span_recorder(self._model_call_recorder)
+        if self._model_call_extension is not None:
+            await self._model_call_extension.on_shutdown()
         # Trace rows are buffered and written in batches; write what is left.
         await self._llm_recorder.flush_on_shutdown()
 
