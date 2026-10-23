@@ -8,6 +8,22 @@ import PageHero from '@site/src/components/PageHero';
 
 [← OpenClaw integration](../../sdks/integrations/openclaw.md)
 
+## [1.2.0](https://github.com/vectorize-io/hindsight/tree/integrations/openclaw/v1.2.0)
+
+[Commits in this release →](https://github.com/vectorize-io/hindsight/commits/integrations/openclaw/v1.2.0)
+
+**Features**
+
+- Adds Hindsight knowledge-base tools to OpenClaw agents for searching and accessing stored knowledge.<span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/nicoloboschi" target="_blank" rel="noopener noreferrer" style={{color: "var(--ifm-color-primary)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px", verticalAlign: "middle"}}>@nicoloboschi</a><span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/vectorize-io/hindsight/commit/c45498570" target="_blank" rel="noopener noreferrer" style={{fontFamily: "var(--ifm-font-family-monospace, monospace)", fontSize: "0.85em", color: "var(--ifm-color-emphasis-600)"}}>c45498570</a>
+
+## [1.1.1](https://github.com/vectorize-io/hindsight/tree/integrations/openclaw/v1.1.1)
+
+[Commits in this release →](https://github.com/vectorize-io/hindsight/commits/integrations/openclaw/v1.1.1)
+
+**Bug Fixes**
+
+- OpenClaw now saves run memory from the conversation start instead of only from the most recent user message.<span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/nicoloboschi" target="_blank" rel="noopener noreferrer" style={{color: "var(--ifm-color-primary)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px", verticalAlign: "middle"}}>@nicoloboschi</a><span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/vectorize-io/hindsight/commit/95318b253" target="_blank" rel="noopener noreferrer" style={{fontFamily: "var(--ifm-font-family-monospace, monospace)", fontSize: "0.85em", color: "var(--ifm-color-emphasis-600)"}}>95318b253</a>
+
 ## [1.1.0](https://github.com/vectorize-io/hindsight/tree/integrations/openclaw/v1.1.0)
 
 [Commits in this release →](https://github.com/vectorize-io/hindsight/commits/integrations/openclaw/v1.1.0)

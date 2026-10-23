@@ -56,6 +56,7 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./server": "./index.js",
     "./dsh": "./dist/dsh.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json",

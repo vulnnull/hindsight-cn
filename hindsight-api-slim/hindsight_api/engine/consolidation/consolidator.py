@@ -57,9 +57,9 @@ from ..llm_trace import (
 )
 from ..llm_wrapper import sanitize_llm_output
 from ..memories import StoredMemory, get_memories
-from ..memory_engine import Budget, fq_table
-from ..prompt_utils import truncate_context_for_prompt
+from ..response_models import Budget
 from ..retain import embedding_utils
+from ..schema import fq_table
 from ..stored_dates import finite_utc
 from .prompts import (
     build_consolidation_input,
@@ -70,7 +70,7 @@ from .triage import TriageResult, triage_facts, triage_model
 if TYPE_CHECKING:
     # The engine's connection abstraction, which is what every caller passes; the annotations
     # below named asyncpg's concrete type, which predates it.
-    from ...api.http import RequestContext
+    from ...models import RequestContext
     from ..db.base import DatabaseConnection
     from ..memories.base import StoredMemory
     from ..memory_engine import MemoryEngine
@@ -3562,9 +3562,10 @@ def _build_observations_for_llm(
             sf = source_facts.get(sid)
             if sf is None:
                 continue
+            # No ``context``: in a bank whose documents share one retain context it repeated the
+            # same sentence on every source memory, ~11% of the prompt, and the observation's own
+            # text already says what the fact means (#5996). The new facts carry none either.
             sf_data: dict[str, Any] = {"text": sf.text}
-            if sf.context:
-                sf_data["context"] = truncate_context_for_prompt(sf.context)
             for key in ("occurred_start", "occurred_end", "mentioned_at"):
                 if shown := _prompt_time(getattr(sf, key)):
                     sf_data[key] = shown

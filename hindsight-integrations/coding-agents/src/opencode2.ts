@@ -24,8 +24,20 @@
  * The body lives in harness/opencode2.ts; everything behind it is the shared RuntimeCore.
  */
 import { createOpencode2PluginEntry } from "./harness/opencode2";
+import { createPluginEntry } from "./harness/plugin-entry";
 
-const HindsightOpencode2Plugin = createOpencode2PluginEntry("opencode2");
+/**
+ * The v2 definition, plus v1's plugin function as `server`. A host that looks this package up by
+ * NAME — v2 given a non-absolute entry such as `~/.hindsight/coding-agents`, or v1 1.18+ — reads
+ * package.json `exports["./server"]` (→ the root index.js → this file) before `main`. Without it v2
+ * fell through to `exports["."]`, got v1's function and refused to load the plugin (#5823); v1 1.18+
+ * reads the same export and accepts an object default that has `server()`. v2's schema ignores the
+ * extra key, and older v1 never reads `./server`, so it still follows `main` to dist/index.js.
+ */
+const HindsightOpencode2Plugin = {
+  ...createOpencode2PluginEntry("opencode2"),
+  server: createPluginEntry("opencode"),
+};
 
 export default HindsightOpencode2Plugin;
 export { HindsightOpencode2Plugin };
