@@ -37,6 +37,7 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError
 
 from ...config import get_config
 from ...metrics import get_metrics_collector
+from ...operation_runs import timed_operation
 from ...worker.stage import set_stage
 from ..db import DatabaseBackend
 from ..db_utils import acquire_with_retry
@@ -1643,7 +1644,8 @@ async def run_consolidation_job(
     # trace — flushed onto every trace row on exit by attach_memory_ids.
     trace_ctx = trace_context_of(llm_config)
     trace_token = set_trace_context(trace_ctx) if trace_ctx is not None else None
-    with track_observation_changes() as observation_changes:
+    # One run per consolidation, whichever way it started: a queued task, or run inline.
+    with timed_operation("consolidation", bank_id), track_observation_changes() as observation_changes:
         try:
             return await _run_consolidation_job(
                 memory_engine,
@@ -2732,6 +2734,11 @@ async def _process_memory_batch(
             return await coro
 
     def _check_update(update: _UpdateAction) -> _PreparedUpdate | None:
+        if not update.text.strip():
+            # An empty observation says nothing, and the embedder rejects empty input,
+            # which would fail the whole batch.
+            logger.warning("[CONSOLIDATION] discarded observation UPDATE: empty text")
+            return None
         source_mems = [mem_by_id[fid] for fid in update.source_fact_ids if fid in mem_by_id]
         if not source_mems:
             _log_unresolved_action("update", update.source_fact_ids, update.text, perf)
@@ -2800,6 +2807,11 @@ async def _process_memory_batch(
     update_texts = {_norm_obs_text(u.text) for u in llm_result.updates if u.text}
 
     def _check_create(create: _CreateAction) -> _PreparedCreate | None:
+        if not create.text.strip():
+            # An empty observation says nothing, and the embedder rejects empty input,
+            # which would fail the whole batch.
+            logger.warning("[CONSOLIDATION] discarded observation CREATE: empty text")
+            return None
         source_mems = [mem_by_id[fid] for fid in create.source_fact_ids if fid in mem_by_id]
         if not source_mems:
             _log_unresolved_action("create", create.source_fact_ids, create.text, perf)

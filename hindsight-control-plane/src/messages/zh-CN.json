@@ -667,7 +667,11 @@
     "defaultObservationScopesLabel": "默认沉淀认知范围",
     "defaultObservationScopesDescription": "未自行设置 observation_scopes 的保存条目如何划分沉淀认知范围。combined 按每条记忆的完整标签集分组；topic:* 这样的自定义范围只按其自身的主题标签分组，使同一主题的记忆一起整合。仅适用于新的保存。",
     "observationScopesCustom": "自定义范围",
-    "observationScopesCustomPlaceholder": "每行一个范围，标签用逗号分隔 — 例如 topic:*, user:*"
+    "observationScopesCustomPlaceholder": "每行一个范围，标签用逗号分隔 — 例如 topic:*, user:*",
+    "reflectMentalModelsMaxTokensLabel": "知识页最大令牌数",
+    "reflectMentalModelsMaxTokensDescription": "反思中知识页检索完整返回的页面令牌预算。最匹配的页面始终完整返回；其余放不下的以模型可打开的简短摘录返回。",
+    "reflectMentalModelsMaxTokensChip": "{tokens} 知识页令牌",
+    "reflectMentalModelsMaxTokensChipDefault": "默认知识页令牌"
   },
   "bankOperations": {
     "title": "后台操作",
