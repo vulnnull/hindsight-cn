@@ -638,6 +638,8 @@ The strategy JSON supports three modes:
 
 **Cooldown.** In `failover` and `round-robin`, a member that fails (after its own retries) is moved to the back of the order for `cooldown_seconds` (default `60`), so later requests stop waiting on its errors and timeouts — useful when a member has run out of a daily or weekly quota. If it fails again once the cooldown is over, the cooldown doubles, up to one hour; its next success clears it. A cooling member is only deprioritized, never dropped: if every other member fails too, it is still tried. Set `"cooldown_seconds": 0` to try every member in order on every request. The cooldown is held in memory per process, so a restart clears it.
 
+**A member that is not signed in.** A provider that runs on a stored login (`chatgpt`, `openai-codex`, `nous`, `github-copilot`) and finds none when the server starts does not stop the server. It logs a warning with the login command to run, fails every call it gets, and the chain fails over past it. Sign in again and restart the server to bring it back.
+
 ```bash
 # Primary OpenAI, failover to Groq then Anthropic
 export HINDSIGHT_API_LLM_PROVIDER=openai
@@ -1306,6 +1308,11 @@ Reranking is a refinement stage, but by default a reranker that is unreachable t
 recall down with it. Configure extra rerankers **by index** and Hindsight tries them
 in order: if a member fails (timeout, connection error, HTTP error, or an unusable
 response), the next one serves the request.
+
+A member that fails is benched for 30 seconds: requests try it after the healthy
+members instead of first, so an outage slows down one recall per 30 seconds rather
+than every recall. When the 30 seconds are up, the next request tries it again. If
+every member is down, benched members are still tried as a last resort.
 
 The unindexed `HINDSIGHT_API_RERANKER_*` config is the **primary** (member 0). Extra
 members are numbered from 1, and every setting of member `n` carries the same index —
