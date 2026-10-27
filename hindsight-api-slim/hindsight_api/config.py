@@ -717,7 +717,8 @@ ENV_RERANKER_NVIDIA_TIMEOUT = "HINDSIGHT_API_RERANKER_NVIDIA_TIMEOUT"
 ENV_RERANKER_NVIDIA_BATCH_SIZE = "HINDSIGHT_API_RERANKER_NVIDIA_BATCH_SIZE"
 ENV_RERANKER_NVIDIA_MAX_CONCURRENT = "HINDSIGHT_API_RERANKER_NVIDIA_MAX_CONCURRENT"
 
-# TypeSafe configuration (reranker only; typed-question API, not a /rerank endpoint)
+# TypeSafe configuration (reranker only; typed-question API, not a /rerank endpoint).
+# Deprecated: set up the shared decision model (ENV_DECISION_MODEL_* below) instead.
 ENV_RERANKER_TYPESAFE_API_KEY = "HINDSIGHT_API_RERANKER_TYPESAFE_API_KEY"
 ENV_RERANKER_TYPESAFE_MODEL = "HINDSIGHT_API_RERANKER_TYPESAFE_MODEL"
 ENV_RERANKER_TYPESAFE_BASE_URL = "HINDSIGHT_API_RERANKER_TYPESAFE_BASE_URL"
@@ -735,7 +736,7 @@ ENV_RERANKER_GOOGLE_PROJECT_ID = "HINDSIGHT_API_RERANKER_GOOGLE_PROJECT_ID"
 ENV_RERANKER_GOOGLE_SERVICE_ACCOUNT_KEY = "HINDSIGHT_API_RERANKER_GOOGLE_SERVICE_ACCOUNT_KEY"
 
 # Decision model (TypeSafe System One): set up once, shared by every operation that supports
-# one. Separate from the typesafe reranker above, which keeps its own settings. Each operation may override provider/key/model/URL with
+# one. Separate from the deprecated typesafe reranker above, which keeps its own settings. Each operation may override provider/key/model/URL with
 # HINDSIGHT_API_{RECALL,REFLECT,CONSOLIDATION}_DECISION_MODEL_* (see _decision_model_env).
 ENV_DECISION_MODEL_PROVIDER = "HINDSIGHT_API_DECISION_MODEL_PROVIDER"
 ENV_DECISION_MODEL_API_KEY = "HINDSIGHT_API_DECISION_MODEL_API_KEY"
@@ -745,6 +746,7 @@ ENV_DECISION_MODEL_TIMEOUT = "HINDSIGHT_API_DECISION_MODEL_TIMEOUT"
 ENV_DECISION_MODEL_MAX_CONCURRENT = "HINDSIGHT_API_DECISION_MODEL_MAX_CONCURRENT"
 ENV_DECISION_MODEL_MAX_REQUEST_TOKENS = "HINDSIGHT_API_DECISION_MODEL_MAX_REQUEST_TOKENS"
 ENV_DECISION_MODEL_TOKENIZER = "HINDSIGHT_API_DECISION_MODEL_TOKENIZER"
+ENV_RECALL_DECISION_MODEL_PRUNE = "HINDSIGHT_API_RECALL_DECISION_MODEL_PRUNE"
 
 ENV_VECTOR_EXTENSION = "HINDSIGHT_API_VECTOR_EXTENSION"
 ENV_ANN_ITERATIVE_SCAN = "HINDSIGHT_API_ANN_ITERATIVE_SCAN"
@@ -1603,6 +1605,8 @@ DEFAULT_DECISION_MODEL_MAX_CONCURRENT = 24
 # hence the floor.
 DEFAULT_DECISION_MODEL_MAX_REQUEST_TOKENS = 26_000
 MIN_DECISION_MODEL_MAX_REQUEST_TOKENS = 1_000
+# Off by default: dropping candidates changes what recall returns, so it is opt-in.
+DEFAULT_RECALL_DECISION_MODEL_PRUNE = False
 
 
 def _decision_model_env(operation: str, setting: str) -> str:
@@ -4004,6 +4008,8 @@ class HindsightConfig:
     recall_decision_model_api_key: str | None = None
     recall_decision_model_model: str | None = None
     recall_decision_model_base_url: str | None = None
+    # Recall only, server-level: the decision reranker drops the candidates it judges no help.
+    recall_decision_model_prune: bool = DEFAULT_RECALL_DECISION_MODEL_PRUNE
     reflect_decision_model_provider: str | None = None
     reflect_decision_model_api_key: str | None = None
     reflect_decision_model_model: str | None = None
@@ -5177,6 +5183,9 @@ class HindsightConfig:
                 for operation in DECISION_MODEL_OPERATIONS
                 for setting in ("PROVIDER", "API_KEY", "MODEL", "BASE_URL")
             },
+            recall_decision_model_prune=_parse_boolean_env(
+                ENV_RECALL_DECISION_MODEL_PRUNE, DEFAULT_RECALL_DECISION_MODEL_PRUNE
+            ),
             # Server
             host=os.getenv(ENV_HOST) or None,
             port=int(os.getenv(ENV_PORT, DEFAULT_PORT)),
