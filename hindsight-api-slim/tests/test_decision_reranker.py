@@ -24,6 +24,7 @@ class _Client:
         self.keep = keep or {}
         self.asked: list[tuple[str, dict]] = []
         self.max_request_tokens = 26_000
+        self.tokenizer = None
 
     async def ask_all(self, state, questions, *, scope):
         self.asked.append((state, questions))
@@ -152,6 +153,15 @@ class TestSharedState:
         memories = [q.instructions["memory"] for q in client.asked[0][1].values()]
         assert count_tokens(memories[0]) <= _MAX_MEMORY_TOKENS
         assert memories[1] == "short"
+
+    async def test_the_caps_count_in_the_models_own_vocabulary(self):
+        """Capped by o200k_base, a mixed-script memory would still run past 4k by Jev's count."""
+        client = _Client()
+        client.tokenizer = "jev"
+        await _reranker(client).predict([("q", "東京 café naïve 🎉 " * 3_000), ("q", "short")])
+        memory = next(iter(client.asked[0][1].values())).instructions["memory"]
+        assert count_tokens(memory, "jev") <= _MAX_MEMORY_TOKENS
+        assert count_tokens(memory) < _MAX_MEMORY_TOKENS - 500
 
     async def test_a_low_request_ceiling_shrinks_the_caps(self):
         """A ceiling below the caps would otherwise fail every request."""

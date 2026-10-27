@@ -80,7 +80,8 @@ class DecisionModelReranker(CrossEncoderModel):
 
     def _capped(self, text: str, ceiling: int) -> str:
         ceiling = min(ceiling, self._client.max_request_tokens // 4)
-        return truncate_to_tokens(text, ceiling).text if count_tokens(text) > ceiling else text
+        tokenizer = self._client.tokenizer
+        return truncate_to_tokens(text, ceiling, tokenizer).text if count_tokens(text, tokenizer) > ceiling else text
 
     def _state(self, query: str) -> str:
         """The question's state: what is being asked, plus what every candidate shares."""

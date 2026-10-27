@@ -87,9 +87,10 @@ class DecisionResponse(BaseModel):
 def overflowed_window(exc: BaseException) -> bool:
     """Whether System One refused a request as longer than its context window.
 
-    The window is counted in the model's own tokens, which no client can count: on
-    mixed-script text Jev's tokenizer runs twice ours (#5715), so a request sized to fit
-    can still come back ``400 {"detail": {"error_type": "max_tokens_exceeded"}}``. Not
+    The window is counted in the model's own tokens, which a client can only estimate:
+    on mixed-script text Jev's tokenizer ran twice o200k_base (#5715), which is why requests
+    are now sized with ``tokenizer`` ('jev' for typesafe). An estimate still misses, so a
+    request sized to fit can still come back ``400 {"detail": {"error_type": "max_tokens_exceeded"}}``. Not
     retryable as sent; the caller has to send less.
     """
     return isinstance(exc, UpstreamHTTPError) and exc.status_code == 400 and "max_tokens_exceeded" in exc.body
@@ -221,9 +222,13 @@ class DecisionModel:
         max_concurrent: int,
         max_request_tokens: int,
         retry_policy: RetryPolicy | None = None,
+        tokenizer: str | None = None,
     ):
         self.provider = provider
         self.max_request_tokens = max_request_tokens
+        # The vocabulary max_request_tokens is counted in: the model's own when known,
+        # since it is the model that refuses a request past its window.
+        self.tokenizer = tokenizer
         self.retry_policy = retry_policy or RetryPolicy()
         self.model = model
         self.base_url = base_url.rstrip("/")
@@ -246,6 +251,7 @@ class DecisionModel:
             timeout=config.timeout,
             max_concurrent=config.max_concurrent,
             max_request_tokens=config.max_request_tokens,
+            tokenizer=config.tokenizer,
         )
 
     async def ask(
@@ -306,16 +312,16 @@ class DecisionModel:
         """``questions`` in groups whose request bodies each fit ``max_request_tokens``.
 
         Counted on the System One body — state, model and every question with its framing —
-        since that is what the endpoint counts against its window. The OpenAI shape carries
-        the same text under other keys. A single question over the ceiling still goes out
-        alone, and fails there.
+        since that is what the endpoint counts against its window, and in the model's own
+        vocabulary when the config names it. The OpenAI shape carries the same text under
+        other keys. A single question over the ceiling still goes out alone, and fails there.
         """
-        envelope = count_tokens(json.dumps({"model": self.model, "state": state, "questions": {}}))
+        envelope = count_tokens(json.dumps({"model": self.model, "state": state, "questions": {}}), self.tokenizer)
         parts: list[dict[str, DecisionQuestion]] = []
         current: dict[str, DecisionQuestion] = {}
         used = envelope
         for key, question in questions.items():
-            tokens = count_tokens(json.dumps({key: question.system_one()}))
+            tokens = count_tokens(json.dumps({key: question.system_one()}), self.tokenizer)
             if current and (len(current) >= self.MAX_QUESTIONS or used + tokens > self.max_request_tokens):
                 parts.append(current)
                 current, used = {}, envelope
