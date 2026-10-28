@@ -683,3 +683,34 @@ async def test_a_full_refresh_folded_into_a_queued_one_upgrades_it(memory: Memor
     await memory.submit_async_refresh_mental_model(bank_id=bank, mental_model_id=mm_id, request_context=request_context)
     assert (await _queued_payload(memory, plain["operation_id"]))["_mode"] == "full"
     assert await _count_refresh_ops(memory, bank) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_stop_ends_the_pass_between_models(memory: MemoryEngine, request_context, monkeypatch):
+    """A pass over many due models stops at the next model once the loop is stopped.
+
+    Shutdown waits on the pass, and one over thousands of due models takes far longer
+    than any termination grace period; the models not reached are still due next time.
+    """
+    bank = await _make_bank(memory, request_context)
+    async with memory._pool.acquire() as conn:
+        for _ in range(3):
+            await _insert_mm(conn, bank, refresh_cron="*/5 * * * *", last_refreshed_offset="1 day")
+    await _new_fact(memory, bank)
+
+    loop = MaintenanceLoop(memory)
+    submitted: list[str] = []
+
+    async def _record_then_stop(
+        *, bank_id, mental_model_id, request_context, skip_if_in_flight=False, automatic=False, mode=None
+    ):
+        submitted.append(mental_model_id)
+        loop._stop.set()  # shutdown arrives while the first model is being submitted
+        return {"operation_id": str(uuid.uuid4())}
+
+    monkeypatch.setattr(memory, "submit_async_refresh_mental_model", _record_then_stop)
+    await loop._run_scheduled_mm_refresh()
+
+    # Discovery spans every schema, so under a parallel run the first model reached may be
+    # another test's; what matters is that nothing after it was.
+    assert len(submitted) == 1

@@ -78,6 +78,12 @@ logger = logging.getLogger(__name__)
 
 # Short tick so jobs with different cadences share one loop without per-job tasks.
 _TICK_SECONDS = 60
+# How long stop() lets the job in progress reach a stopping point before cancelling it.
+_STOP_GRACE_SECONDS = 5.0
+# How long stop() then waits for the cancel to land. A job that suppresses or delays
+# cancellation (a call that does not yield, a cleanup that catches CancelledError) is
+# left behind after this rather than waited on.
+_STOP_CANCEL_GRACE_SECONDS = 5.0
 # ── retention sweep pacing ────────────────────────────────────────────────────
 # Retention used to issue one unbounded `DELETE FROM <table> WHERE started_at <
 # cutoff` per schema. On a table with a real backlog that is a single statement
@@ -156,14 +162,35 @@ class MaintenanceLoop:
             logger.debug("Cannot start maintenance loop: no running event loop")
 
     async def stop(self) -> None:
-        """Stop the loop and wait for the current tick to finish."""
+        """Stop the loop: let the current job reach its next stopping point, then cancel it.
+
+        A job can run for a long time (a scheduled-refresh pass over many models, a
+        reconcile over many banks), and shutdown waits on this. Every job is safe to
+        cut short: each unit of work is its own transaction, and whatever was not
+        reached is still due on the next tick of the next process.
+        """
         self._stop.set()
-        if self._task and not self._task.done():
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
+        task = self._task
         self._task = None
+        if task is None or task.done():
+            return
+        _, pending = await asyncio.wait({task}, timeout=_STOP_GRACE_SECONDS)
+        if pending:
+            logger.info(f"Maintenance: cancelling the job in progress after {_STOP_GRACE_SECONDS:.0f}s to stop")
+            task.cancel()
+            _, pending = await asyncio.wait({task}, timeout=_STOP_CANCEL_GRACE_SECONDS)
+            if pending:
+                logger.warning(
+                    f"Maintenance: the job in progress did not stop within {_STOP_CANCEL_GRACE_SECONDS:.0f}s "
+                    "of being cancelled; leaving it behind"
+                )
+                return
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("Maintenance tick failed while stopping")
 
     @staticmethod
     def _any_job_enabled() -> bool:
@@ -466,6 +493,8 @@ class MaintenanceLoop:
         submitted = 0
         skipped_unknown = 0
         for target in targets:
+            if self._stop.is_set():
+                break
             schema = target.schema_name
             bank_id = target.bank_id
             tenant = tenant_by_schema.get(schema)
@@ -609,6 +638,8 @@ class MaintenanceLoop:
         skipped_in_flight = 0
         skipped_paused = 0
         for item in due:
+            if self._stop.is_set():
+                break
             row = item.row
             schema = row["schema_name"]
             bank_id = row["bank_id"]
