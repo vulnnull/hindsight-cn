@@ -39,3 +39,39 @@ def test_pruning_without_sending_anything():
     assert words.pruned([0.9, 0.1, 0.8]) == [1.0, 0.0, 2 / 3]
     # Below the floor, the best still stays.
     assert words.pruned([0.05, 0.01]) == [1.0, 0.0]
+
+
+def test_dedup_without_sending_anything():
+    """What an outside caller runs after the ranking answers: the pairs, then the drop."""
+    words = decision_rerank_interface.DecisionRerank(count=lambda t: len(t.split()), truncate=lambda t, n: t)
+    docs = ["tea is genmaicha", "offsite in lisbon", "tea genmaicha again"]
+    scores = words.pruned([0.9, 0.1, 0.8])
+    (repeat,) = words.repeat_questions(docs, scores)
+    assert (repeat.above, repeat.slot) == (0, 2)
+    assert repeat.system_one() == {
+        "type": "noul",
+        "instructions": {
+            "task": decision_rerank_interface.DEDUP_INSTRUCTIONS,
+            "memory_a": docs[0],
+            "memory_b": docs[2],
+        },
+    }
+    assert words.deduped(scores, [repeat], {repeat.key: 0.9}) == [1.0, 0.0, 0.0]
+    assert words.deduped(scores, [repeat], {repeat.key: 0.1}) == scores
+
+
+def test_dedup_asks_alike_pairs_best_ranked_first_up_to_the_cap():
+    """With alike pairs given, only those; without, every pair. Best-ranked first either way,
+    and never more than MAX_REPEAT_PAIRS."""
+    words = decision_rerank_interface.DecisionRerank(count=lambda t: len(t.split()), truncate=lambda t, n: t)
+    docs = ["tea is genmaicha", "tea genmaicha again", "sencha in the afternoon", "genmaicha, still"]
+    scores = words.scores([0.9, 0.8, 0.7, 0.6])
+
+    alike = {frozenset((3, 0)), frozenset((0, 1))}
+    assert [(q.above, q.slot) for q in words.repeat_questions(docs, scores, alike=alike)] == [(0, 1), (0, 3)]
+    assert words.repeat_questions(docs, scores, alike=set()) == []
+    assert [(q.above, q.slot) for q in words.repeat_questions(docs, scores)][:3] == [(0, 1), (0, 2), (1, 2)]
+
+    many = [f"memory {n}" for n in range(20)]
+    many_scores = words.scores([1.0 - n / 100 for n in range(20)])
+    assert len(words.repeat_questions(many, many_scores)) == decision_rerank_interface.MAX_REPEAT_PAIRS

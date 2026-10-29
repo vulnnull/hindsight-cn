@@ -658,6 +658,7 @@ class Hindsight:
         tags_match: Literal["any", "all", "any_strict", "all_strict", "exact"] = "any",
         tag_groups: list[dict[str, Any]] | None = None,
         prefer_observations: bool | None = None,
+        rerank: dict[str, bool | None] | None = None,
         min_scores: dict[str, float] | None = None,
         temporal_window: dict[str, Any] | None = None,
     ) -> RecallResponse:
@@ -689,6 +690,11 @@ class Hindsight:
                 observation supersedes it (no duplicate content). No effect unless "observation" and at
                 least one raw type are both in ``types``. ``None`` (default) uses the bank's
                 ``recall_prefer_observations`` config.
+            rerank: What a decision model set up for recall does beyond ordering, e.g.
+                ``{"prune": True, "dedup": True}``. ``prune`` drops the results it judges no help
+                instead of only ranking them last; ``dedup`` drops a result repeating a better-ranked
+                one, at the cost of one more decision-model request. A key left out (or ``None``) uses
+                the bank's ``recall_decision_model_prune`` / ``recall_decision_model_dedup`` config.
             min_scores: Optional per-stage score floors, e.g. ``{"semantic": 0.2, "final": 0.5}``.
                 ``semantic`` and ``keyword`` are retrieval-level cutoffs; ``reranker`` and ``final``
                 are applied to the scored results after reranking. Any omitted stage imposes no floor.
@@ -721,6 +727,7 @@ class Hindsight:
                 tags_match=tags_match,
                 tag_groups=tag_groups,
                 prefer_observations=prefer_observations,
+                rerank=rerank,
                 min_scores=min_scores,
                 temporal_window=temporal_window,
             )
@@ -1343,6 +1350,7 @@ class Hindsight:
         tags_match: Literal["any", "all", "any_strict", "all_strict", "exact"] = "any",
         tag_groups: list[dict[str, Any]] | None = None,
         prefer_observations: bool | None = None,
+        rerank: dict[str, bool | None] | None = None,
         min_scores: dict[str, float] | None = None,
         temporal_window: dict[str, Any] | None = None,
     ) -> RecallResponse:
@@ -1379,6 +1387,11 @@ class Hindsight:
                 observation supersedes it (no duplicate content). No effect unless "observation" and at
                 least one raw type are both in ``types``. ``None`` (default) uses the bank's
                 ``recall_prefer_observations`` config.
+            rerank: What a decision model set up for recall does beyond ordering, e.g.
+                ``{"prune": True, "dedup": True}``. ``prune`` drops the results it judges no help
+                instead of only ranking them last; ``dedup`` drops a result repeating a better-ranked
+                one, at the cost of one more decision-model request. A key left out (or ``None``) uses
+                the bank's ``recall_decision_model_prune`` / ``recall_decision_model_dedup`` config.
             min_scores: Optional per-stage score floors, e.g. ``{"semantic": 0.2, "final": 0.5}``.
                 ``semantic`` and ``keyword`` are retrieval-level cutoffs; ``reranker`` and ``final``
                 are applied to the scored results after reranking. Any omitted stage imposes no floor.
@@ -1434,6 +1447,16 @@ class Hindsight:
                 )
             min_scores_obj = MinScores.from_dict(min_scores)
 
+        rerank_obj = None
+        if rerank is not None:
+            from hindsight_client_api.models.rerank_options import RerankOptions
+
+            unknown_rerank = set(rerank) - {"prune", "dedup"}
+            if unknown_rerank:
+                # Fail loud, as for min_scores: a misspelled key would leave the bank's default on.
+                raise ValueError(f"Unknown rerank keys: {sorted(unknown_rerank)}. Allowed keys: ['dedup', 'prune'].")
+            rerank_obj = RerankOptions.from_dict(rerank)
+
         temporal_window_obj = None
         if temporal_window is not None:
             from hindsight_client_api.models.temporal_window import TemporalWindow
@@ -1444,6 +1467,7 @@ class Hindsight:
             query=query,
             types=types,
             prefer_observations=prefer_observations,
+            rerank=rerank_obj,
             budget=budget,
             max_tokens=max_tokens,
             trace=trace,
@@ -2949,6 +2973,8 @@ class Hindsight:
         recall_max_tokens: int | None = None,
         recall_include_chunks: bool | None = None,
         recall_prefer_observations: bool | None = None,
+        recall_decision_model_prune: bool | None = None,
+        recall_decision_model_dedup: bool | None = None,
         recall_chunks_max_tokens: int | None = None,
         recall_budget_function: str | None = None,
         recall_budget_fixed_low: int | None = None,
@@ -3019,6 +3045,8 @@ class Hindsight:
                 recall_max_tokens=recall_max_tokens,
                 recall_include_chunks=recall_include_chunks,
                 recall_prefer_observations=recall_prefer_observations,
+                recall_decision_model_prune=recall_decision_model_prune,
+                recall_decision_model_dedup=recall_decision_model_dedup,
                 recall_chunks_max_tokens=recall_chunks_max_tokens,
                 recall_budget_function=recall_budget_function,
                 recall_budget_fixed_low=recall_budget_fixed_low,
@@ -3088,6 +3116,8 @@ class Hindsight:
         recall_max_tokens: int | None = None,
         recall_include_chunks: bool | None = None,
         recall_prefer_observations: bool | None = None,
+        recall_decision_model_prune: bool | None = None,
+        recall_decision_model_dedup: bool | None = None,
         recall_chunks_max_tokens: int | None = None,
         recall_budget_function: str | None = None,
         recall_budget_fixed_low: int | None = None,
@@ -3180,6 +3210,8 @@ class Hindsight:
             recall_max_tokens: Token budget for facts returned by recall.
             recall_include_chunks: Include source chunks in recall results.
             recall_prefer_observations: Default ``prefer_observations`` for recall requests that omit it.
+            recall_decision_model_prune: Default ``prune`` for recall requests that omit it.
+            recall_decision_model_dedup: Default ``dedup`` for recall requests that omit it.
             recall_chunks_max_tokens: Token budget for those chunks.
             recall_budget_function: How the per-query result budget is derived: 'fixed' or 'adaptive'.
             recall_budget_fixed_low: Fixed budget for low-breadth queries.
@@ -3245,6 +3277,8 @@ class Hindsight:
                 "recall_max_tokens": recall_max_tokens,
                 "recall_include_chunks": recall_include_chunks,
                 "recall_prefer_observations": recall_prefer_observations,
+                "recall_decision_model_prune": recall_decision_model_prune,
+                "recall_decision_model_dedup": recall_decision_model_dedup,
                 "recall_chunks_max_tokens": recall_chunks_max_tokens,
                 "recall_budget_function": recall_budget_function,
                 "recall_budget_fixed_low": recall_budget_fixed_low,

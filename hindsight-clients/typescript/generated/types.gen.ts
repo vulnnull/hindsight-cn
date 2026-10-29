@@ -901,6 +901,18 @@ export type BankTemplateConfig = {
    */
   recall_prefer_observations?: boolean | null;
   /**
+   * Recall Decision Model Prune
+   *
+   * Default for recall prune when the request omits it (decision-model reranker only)
+   */
+  recall_decision_model_prune?: boolean | null;
+  /**
+   * Recall Decision Model Dedup
+   *
+   * Default for recall dedup when the request omits it (decision-model reranker only)
+   */
+  recall_decision_model_dedup?: boolean | null;
+  /**
    * Recall Max Tokens
    *
    * Max tokens of results returned by recall
@@ -5735,6 +5747,10 @@ export type RecallRequest = {
    * When recalling raw facts ('world'/'experience') together with 'observation', drop any raw fact that an observation in the results was consolidated from, so the observation supersedes it and you don't get duplicate content. The freed slots are backfilled with the next results, keeping the result count at the requested budget. When omitted, uses the bank/global recall_prefer_observations config (false unless configured). No effect unless 'observation' and at least one raw type are both requested.
    */
   prefer_observations?: boolean | null;
+  /**
+   * What the decision-model reranker does beyond ordering: drop results that do not help (`prune`) or that repeat a better-ranked one (`dedup`). Each field left unset uses the bank/global config. No effect unless a decision model is set up for recall.
+   */
+  rerank?: RerankOptions | null;
   budget?: Budget;
   /**
    * Max Tokens
@@ -6410,6 +6426,27 @@ export type ReprocessDocumentResponse = {
    * Items Count
    */
   items_count: number;
+};
+
+/**
+ * RerankOptions
+ *
+ * What the decision-model reranker does beyond ordering. Each field left unset (null) uses the
+ * bank/global config; neither has any effect unless a decision model is set up for recall.
+ */
+export type RerankOptions = {
+  /**
+   * Prune
+   *
+   * Drop the results the decision model judges no help to the query, instead of only ranking them last. Costs no extra request. When omitted, uses the bank/global recall_decision_model_prune config (false unless configured).
+   */
+  prune?: boolean | null;
+  /**
+   * Dedup
+   *
+   * Drop a result that repeats a better-ranked one, so the same fact comes back once. Costs one more decision-model request after the ranking one. When omitted, uses the bank/global recall_decision_model_dedup config (false unless configured).
+   */
+  dedup?: boolean | null;
 };
 
 /**

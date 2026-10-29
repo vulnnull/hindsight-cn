@@ -28,10 +28,12 @@ from ..config import (
     DEFAULT_RERANKER_ALIBABA_MODEL,
     DEFAULT_RERANKER_COHERE_MAX_CONCURRENT,
     DEFAULT_RERANKER_COHERE_MODEL,
+    DEFAULT_RERANKER_COHERE_TIMEOUT,
     DEFAULT_RERANKER_FLASHRANK_BATCH_SIZE,
     DEFAULT_RERANKER_FLASHRANK_CACHE_DIR,
     DEFAULT_RERANKER_FLASHRANK_MODEL,
     DEFAULT_RERANKER_GOOGLE_MODEL,
+    DEFAULT_RERANKER_HINDSIGHT_MODEL,
     DEFAULT_RERANKER_LITELLM_MODEL,
     DEFAULT_RERANKER_LITELLM_SDK_MODEL,
     DEFAULT_RERANKER_LOCAL_BATCH_SIZE,
@@ -58,6 +60,7 @@ from ..config import (
     DEFAULT_RERANKER_TYPESAFE_TIMEOUT,
     DEFAULT_RERANKER_ZEROENTROPY_MODEL,
     DEFAULT_ZEROENTROPY_BASE_URL,
+    HINDSIGHT_INFERENCE_URL,
     RerankerMemberConfig,
 )
 from .aiohttp_session import LoopLocal, LoopLocalSession, UpstreamHTTPError, per_phase_timeout, raise_for_status
@@ -1180,14 +1183,26 @@ _SUFFICIENCY_INSTRUCTIONS = (
     "not what could be guessed from it."
 )
 
+# The page-impact gate answers with the single most likely option, and anything but
+# "no" keeps the memory. With only yes/no, a memory that bears on the topic by
+# implication lost to "no": "the payment SDK vendor ends support on 1 September"
+# against a page of risks to a 15 September launch got p(yes) 0.10-0.22, so a new
+# launch risk never reached the page. Several ways to say "it may matter" split the
+# doubt across options that all keep the memory, so "no" wins only when it is the
+# model's clear answer: on replayed eval pages, 54/54 memories that should change a
+# page kept (48/54 before), unrelated memories let through 13/80 (12/80 before).
 _PAGE_IMPACT_INSTRUCTIONS = (
-    "Could the new memory change this page? Answer yes if it adds to, updates, corrects or "
-    "contradicts anything the page says, or is about the page's topic in a way the page does "
-    "not cover yet. Answer no only if the page would read the same with or without it."
+    "Is the new memory about the page's topic, or about anything the topic depends on (a "
+    "dependency, vendor, date, person or system the topic relies on)? A memory that could "
+    "threaten, block, delay or change what the topic is about counts, even when it never names "
+    "the topic. Answer no only when it concerns a different subject altogether."
 )
 _PAGE_IMPACT_OPTIONS = {
-    "yes": "Yes, the page could change because of it",
-    "no": "No, it has nothing to do with this page",
+    "yes": "Yes, it concerns the page's topic or something it depends on",
+    "maybe": "Possibly, it might affect the topic or something it relies on",
+    "unsure": "Unclear whether it bears on the topic",
+    "depends": "It concerns something the topic relies on (a vendor, dependency, date, person or system)",
+    "no": "No, a different subject altogether: nothing this page covers or relies on",
 }
 
 _OPTION_KEY_OVERHEAD = 7  # JSON envelope overhead per choice option: '"c249": "' + comma/newline
@@ -2992,13 +3007,30 @@ def _create_cross_encoder_backend(member: RerankerMemberConfig) -> CrossEncoderM
             max_concurrent=member.typesafe_max_concurrent,
             prune_candidates=member.typesafe_prune_candidates,
         )
+    elif provider == "hindsight":
+        # Imported here: cloud_auth pulls in aiohttp's server, which only this provider needs.
+        from .providers.cloud_auth import saved_api_key
+
+        api_key = member.hindsight_api_key or saved_api_key()
+        if not api_key:
+            raise ValueError(
+                f"{member.env_name('HINDSIGHT_API_KEY')} is required when {member.env_name('PROVIDER')} is "
+                "'hindsight' (or run `hindsight-admin cloud login`)"
+            )
+        # Hindsight Inference speaks Cohere's /v1/rerank, so the Cohere-compatible client serves it.
+        return CohereCrossEncoder(
+            api_key=api_key,
+            model=DEFAULT_RERANKER_HINDSIGHT_MODEL,
+            base_url=f"{HINDSIGHT_INFERENCE_URL}/v1/rerank",
+            timeout=DEFAULT_RERANKER_COHERE_TIMEOUT,
+        )
     elif provider == "rrf":
         return RRFPassthroughCrossEncoder()
     elif provider == "jina-mlx":
         return JinaMLXCrossEncoder()
     else:
         raise ValueError(
-            f"Unknown reranker provider: {provider}. Supported: 'local', 'tei', 'cohere', 'zeroentropy', 'siliconflow', 'nvidia', 'typesafe', 'alibaba', 'google', 'flashrank', 'onnx', 'litellm', 'litellm-sdk', 'rrf', 'jina-mlx'"
+            f"Unknown reranker provider: {provider}. Supported: 'local', 'tei', 'cohere', 'zeroentropy', 'siliconflow', 'nvidia', 'typesafe', 'hindsight', 'alibaba', 'google', 'flashrank', 'onnx', 'litellm', 'litellm-sdk', 'rrf', 'jina-mlx'"
         )
 
 

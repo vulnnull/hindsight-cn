@@ -64,12 +64,9 @@ stays out of the category counts.
 | recall | temporal | 4 | "last month", "yesterday", a year-only event, a named week — against `query_timestamp` |
 | recall | currency | 2 | the newer of two conflicting memories (a job, a decision) ranks first |
 | recall | multi_hop | 3 | the answer one entity or cause away: an employer's city, the cause of a cause, my sister's dog |
-| recall | filters | 3 | `types=[experience]`, `types=[world]` on a user/assistant exchange; a tag scope |
 | recall | language | 2 | Italian and Chinese queries (with 上周) over memories in that language |
 | recall | precision | 2 | the right budget among near-identical ones; a negation kept |
-| recall | budget | 2 | a small `max_tokens` returns fewer facts but never none; `max_tokens=0` returns chunks only |
-| recall | observations | 2 | `types=[observation]`; `prefer_observations` drops the facts an observation was built from |
-| recall | duplicates | 2 | one sentence in four documents comes back four times; reworded repeats all come back, pruning or not |
+| recall | duplicates | 2 | one sentence in four documents comes back four times (once, with dedup); reworded repeats collapse under dedup |
 | recall | distinct | 2 | facts that only look alike (four customers, three details of one offsite) all come back |
 | consolidation | merge | 2 | restatements update one observation; the same facts under two tags merge in a shared scope |
 | consolidation | update | 4 | a new employer, retired tools, a correction, a member leaving a list: the old belief stops reading as current |
@@ -87,9 +84,9 @@ stays out of the category counts.
 | reflect | pages | 2 | the bank holds a page about the question, and the answer comes from it |
 | refresh_pages | precision | 3 | a page built across waves keeps the asked attribute apart from its near-misses |
 | refresh_pages | update | 4 | a later wave changes the answer: a newer owner, a departed on-call, a renamed service, a corrected figure |
-| refresh_pages | aggregation | 3 | a count grows across waves; a list gains and loses members; a new risk joins the list |
+| refresh_pages | aggregation | 4 | a count grows across waves; a list gains and loses members; a new risk joins the list; a table grows over four deltas |
 | refresh_pages | no_overreach | 2 | a year the bank does not cover; a rule true in one region only |
-| refresh_pages | stability | 2 | a wave with nothing for the page leaves it intact; no page collapses across waves |
+| refresh_pages | stability | 3 | a wave with nothing for the page leaves it intact; no page collapses across waves; a history re-recorded every wave is not re-added |
 | refresh_pages | consistency | 2 | a changed value changes everywhere the page restates it (English, Chinese) |
 
 The knowledge-page and reflect evals share one corpus and grade twice per question: **correct** (meets
@@ -154,44 +151,56 @@ regression cannot return". The test that fails on that is
 
 ### Recall — `evals/recall/test_recall.py`
 
-**Capabilities** (`test_recall`): 26 cases in `hindsight_system_evals/recall_capabilities.py`,
+**Capabilities** (`test_recall`): 19 cases in `hindsight_system_evals/recall_capabilities.py`,
 each naming its history. Recall itself calls no LLM by default — dates in a query are read by
 a rule-based parser (`engine/query_analyzer.py`) and ranking is the embedder plus a
-cross-encoder — so every case retains through the real extraction, and a model comparison
-measures the memories that model's retain wrote, as recall finds them. Graded
-deterministically (a word in the top results, one result above another, a word never
-returned, the result types, token budgets and chunks) and by the judge only for a negation.
+reranker. Each case searches its own few memories among ~300 others
+(`recall_haystack.py`, one person's life written as near-misses: a trip in another month, an
+error code one digit off, a doctor with a similar name), as a real bank would make it.
+Each case also stores decoys beside it: wrong answers built so one search arm alone would
+pick them — dated inside the asked window, sharing the query's words, about someone else. Only
+ranking is graded; filters, tags, token budgets and observations are deterministic and pinned
+by the stub-model system tests.
+
+Every run is the same input: a case's memories were extracted once by a real model and frozen
+as `fixtures/recall-cases/<case id>.zip` (`manifest.json` names the model), a run imports that
+archive, and the haystack is stored as written. So the run needs no LLM and grades with none:
+a word in the top results, and one result above another. A score that moves, moved because
+ranking did.
+
+```bash
+# replay (no LLM)
+HINDSIGHT_EVAL_LLM_PROVIDER=none HINDSIGHT_EVAL_LLM_MODEL=none uv run pytest evals/recall --full -k test_recall
+# re-record after changing a case's memories, or to measure another model's extraction
+HINDSIGHT_EVAL_RECALL_RECORD=1 HINDSIGHT_EVAL_RECALL_HAYSTACK=0 uv run pytest evals/recall --full -k "test_recall and <case id>"
+```
+
 The tag modes, `min_scores` floors and budget levels are pinned by the stub-model system
 tests and are not repeated here.
 
-First full runs (judge `gemini-2.5-flash`):
+Rankers on the same archives (`HINDSIGHT_EVAL_SET_RERANKER_PROVIDER`, or a decision model
+via `HINDSIGHT_EVAL_SET_DECISION_MODEL_*`):
 
-| category | gemma-4-26b-a4b | gemini-3.1-flash-lite | gpt-6.1-sol | gpt-6-luna |
-|---|---|---|---|---|
-| semantic | 3/3 | 3/3 | 3/3 | 2/3 |
-| keyword | 3/3 | 2/3 | 3/3 | 2/3 |
-| temporal | 1/4 | 1/4 | 2/4 | 2/4 |
-| currency | 0/2 | 1/2 | 1/2 | 1/2 |
-| every other category | all | all | all | all |
+| ranker | passed |
+|---|---|
+| local cross-encoder (`ms-marco-MiniLM-L-6-v2`) | 6/19 |
+| `rrf` (fusion order, no reranker) | 10/19 |
+| decision model `systemone-jev-latest` | 19/19 |
 
-What fails is mostly recall, not the model. **A date in the query barely moves the order**:
-"where did I travel last month?" finds the Lisbon trip (the temporal arm matches its
-`mentioned_at`), but the final order is the cross-encoder's, and temporal proximity and
-recency are each a ±10% multiplier on it (`reranking.py`), so "Berlin for a wedding" outranks
-it, and "a dentist appointment" four days ago outranks yesterday's concert. The same holds
-for "where does the user work now?": the older "works at Globex" outranks "just started at
-Initech" on every model. These cases stay red until ranking weighs dates more (#6132). The model
-failures are real too: `gpt-6-luna` stored English input as Russian and Spanish facts (the
-#4283 drift), and Gemini 3.1 flash-lite dropped "Rotterdam" from the fact it was asked about.
+The decision model sees each memory's date (its event date, else the day it was stored), so
+"what did I do yesterday?" can rank yesterday's concert above last week's pottery class. An
+older decision model, `hs-decision-1`, fails a third of the cases or more: its answers to the questions in one request
+sway each other, so a memory's score depends on which others share its request.
 
 **Duplicates** (`test_recall_duplicates`, `test_recall_pools`). With observations and
 consolidation off, one sentence retained as four documents becomes four facts, and recall
 hands back every copy: observations merge facts, recall does not. With
-`HINDSIGHT_EVAL_SET_RECALL_DECISION_MODEL_PRUNE=true` (the flag from #6131, and a decision model) it still
-does: pruning drops what is no help, not repeats. Three pools of stored-as-written facts check
-that recall returns every needed fact; with pruning on they also stress it: alike-but-distinct
-facts (four customers joining one beta, three details of one offsite) must all survive, and
-most unrelated facts must go.
+`HINDSIGHT_EVAL_SET_RECALL_DECISION_MODEL_PRUNE=true` (and a decision model) it still does: pruning
+drops what is no help, not repeats. With `HINDSIGHT_EVAL_SET_RECALL_DECISION_MODEL_DEDUP=true` the
+story expects one copy. Three pools of stored-as-written facts check that recall returns every
+needed fact; with pruning or dedup on they also stress them: alike-but-distinct facts (four
+customers joining one beta, three details of one offsite) must all survive, most unrelated facts
+must go under pruning, and reworded repeats must collapse to one under dedup.
 
 **Benchmark: ranked retrieval on BEIR** (`test_recall_benchmark_beir_scifact`). The only suite graded against labels
 nobody here wrote, and the only one that makes **no model call**. It records a
@@ -397,7 +406,8 @@ issue/PR history — and what grades it. "eval" = a `test_consolidation` scenari
 - Deletes must name an `observation_id`; a malformed one no longer voids the response (#4152, #4183) — unit `test_consolidation_delete_schema.py`, `test_consolidation_delete_prompt_llm.py`
 - A merge delete (`merged_into`) moves its evidence to the survivor, or re-queues it; a plain delete retires it — system `test_22_consolidation_safety_nets`
 - Facts a response ignores are re-asked (together, then alone) — system `test_22_consolidation_safety_nets`
-- Miscopied observation ids are repaired; an update aimed at a fact id becomes a create — unit `test_consolidation_id_repair.py`; system `test_22_consolidation_safety_nets`
+- The answer is one entry per new fact, judging the observations it touches; the code compares the times and turns the verdicts into writes — eval; unit `test_consolidation_fact_format.py`; system `test_25c_consolidation_answer_per_fact`
+- A change aimed at a new fact's own id becomes a new observation — unit `test_consolidation_fact_format.py`; system `test_22_consolidation_safety_nets`
 - Observation scopes (`combined`, `per_tag`, `all_combinations`, `shared`, explicit) and strategies (#2202, #4619) — system `test_24`, `test_29`
 - Per-scope observation caps (#729, #2163) — system `test_29`; unit `test_observation_scope_limit_resolution.py`
 - Observation history snapshots — unit `test_observation_history.py`
@@ -510,6 +520,22 @@ same wave introduces, a correction of an earlier figure, a list gaining one memb
 losing another, a new item the topic covers, and a wave with nothing for the page at all.
 The wave-1 page must state the old value first; the trap is the page still asserting it.
 Every wave also carries the hard corpus, so most of what arrives is unrelated.
+
+Two more grow a page over several deltas, to the size where a model's delta goes wrong: a
+release history where every wave re-records, in other words, each release the page already
+lists (a model that takes the batch for news re-adds them all, and a long enough reply is cut
+off at the output cap and fails the refresh), and an incident table whose new rows fall
+between old ones by date (a model that re-types the table to slot them in drops rows). Both
+also count the items listed: none may vanish, every new one must land, at most one may appear
+twice. These fail one delta in a few, so measure a rate, not a pass:
+`HINDSIGHT_EVAL_DELTA_REPEATS=N` runs each delta case N times, and
+`HINDSIGHT_EVAL_DELTA_DUMP=DIR` writes each case's LLM calls (prompt and reply) in the
+`refresh-cost.json` shape, to replay a failing reply against the model.
+
+```bash
+HINDSIGHT_EVAL_DELTA_REPEATS=5 HINDSIGHT_EVAL_DELTA_DUMP=/tmp/delta \
+  uv run pytest evals/refresh-pages --full -k "du-rerecorded-history or du-incident-table"
+```
 
 Behind it: with a decision model set up, a delta refresh asks it which new memories to
 read and keeps only the ones it judges could change the page, one memory at a time. A

@@ -32,6 +32,7 @@ from types import SimpleNamespace
 from typing import IO, TYPE_CHECKING, Any, Literal, NoReturn, ParamSpec, TypeVar, cast
 
 import asyncpg
+import numpy as np
 from pydantic import TypeAdapter, ValidationError
 
 from .._vector_index import (
@@ -50,6 +51,7 @@ from ..config import (
     DEFAULT_STORE_DOCUMENT_TEXT,
     ENV_MODEL_INIT_TIMEOUT,
     LLM_STRATEGY_METADATA,
+    SYSTEM_ONE_DECISION_MODEL_PROVIDERS,
     ConfigLike,
     HindsightConfig,
     LLMMemberConfig,
@@ -9279,6 +9281,10 @@ class MemoryEngine(MemoryEngineInterface):
         max_entity_tokens: int = 500,
         include_chunks: bool = False,
         max_chunk_tokens: int = 8192,
+        # None means "use the bank-resolved recall_decision_model_prune / _dedup", for every
+        # caller, internal ones included. Only a decision-model reranker acts on them.
+        prune: bool | None = None,
+        dedup: bool | None = None,
         include_source_facts: bool = False,
         max_source_facts_tokens: int = 4096,
         max_source_facts_tokens_per_observation: int = -1,
@@ -9334,6 +9340,11 @@ class MemoryEngine(MemoryEngineInterface):
                              Chunks are fetched in batches (estimated as (max_chunk_tokens // retain_chunk_size) * 2)
                              until the token budget is exhausted or all chunks are fetched.
                              This handles varying chunk sizes across documents.
+            prune: With a decision-model reranker, drop the candidates it judges no help.
+                   None resolves to the bank's recall_decision_model_prune config.
+            dedup: With a decision-model reranker, drop a candidate repeating a better-ranked
+                   one (one more decision-model request). None resolves to the bank's
+                   recall_decision_model_dedup config.
             tags: Optional list of tags for visibility filtering (OR matching - returns
                   memories that have at least one matching tag)
             created_after: Lower bound on the window, exclusive. Despite the name it bounds
@@ -9503,6 +9514,10 @@ class MemoryEngine(MemoryEngineInterface):
         reranking = _resolve_reranking(budget_config_dict, reranking)
         if prefer_observations is None:
             prefer_observations = bool(budget_config_dict.get("recall_prefer_observations", False))
+        if prune is None:
+            prune = bool(budget_config_dict.get("recall_decision_model_prune", False))
+        if dedup is None:
+            dedup = bool(budget_config_dict.get("recall_decision_model_dedup", False))
 
         # One id for every log line of this recall, including a reranker failover
         # warning, so concurrent recalls can be told apart (#6072). The uuid suffix
@@ -9564,6 +9579,8 @@ class MemoryEngine(MemoryEngineInterface):
                             request_context,
                             semaphore_wait=semaphore_wait,
                             prefer_observations=prefer_observations,
+                            prune=prune,
+                            dedup=dedup,
                             tags=tags,
                             tags_match=tags_match,
                             tag_groups=tag_groups,
@@ -9722,6 +9739,31 @@ class MemoryEngine(MemoryEngineInterface):
             recall_span_context.__exit__(None, None, None)
             recall_log_id.reset(recall_log_token)
 
+    async def _candidate_embeddings(self, bank_id: str, unit_ids: list[str]) -> dict[str, np.ndarray] | None:
+        """The stored embeddings of ``unit_ids``, for recall's dedup to pick alike pairs.
+
+        ``None`` — the store keeps none here, or the read failed — makes dedup ask every pair:
+        it still works, at more questions, so a failure here never fails the recall.
+        """
+        from .memories import get_memories
+
+        try:
+            backend = await self._get_backend()
+            async with acquire_with_retry(backend) as conn:
+                rows = await get_memories().unit_embeddings(
+                    conn=conn, fq_table=fq_table, bank_id=bank_id, unit_ids=unit_ids
+                )
+            # pgvector text, "[0.1,0.2,...]". Parsed inside the try: a malformed row must not fail the recall.
+            vectors = {
+                row["id"]: np.array(row["embedding"][1:-1].split(","), dtype=np.float32)
+                for row in rows
+                if row["embedding"] is not None
+            }
+        except Exception:
+            logger.warning("recall dedup: embeddings unavailable, asking every pair", exc_info=True)
+            return None
+        return vectors or None
+
     async def _search_with_retries(
         self,
         bank_id: str,
@@ -9738,6 +9780,8 @@ class MemoryEngine(MemoryEngineInterface):
         request_context: "RequestContext" = None,
         semaphore_wait: float = 0.0,
         prefer_observations: bool = False,
+        prune: bool = False,
+        dedup: bool = False,
         tags: list[str] | None = None,
         tags_match: TagsMatch = "any",
         tag_groups: list[TagGroup] | None = None,
@@ -10452,8 +10496,23 @@ class MemoryEngine(MemoryEngineInterface):
 
                     # Ensure reranker is initialized (for lazy initialization mode)
                     await reranker_instance.ensure_initialized()
+                    # Dedup asks only pairs whose stored embeddings are alike. The embeddings are
+                    # read while the ranking request runs, so they add no round trip: the reranker
+                    # awaits them only once the ranking answers are in.
+                    embeddings = None
+                    if dedup and getattr(reranker_instance.cross_encoder, "provider_name", None) == (
+                        DECISION_MODEL_RERANKER
+                    ):
+                        embeddings = asyncio.create_task(
+                            self._candidate_embeddings(bank_id, [mc.retrieval.id for mc in merged_candidates])
+                        )
                     reranked = await reranker_instance.rerank(
-                        query, merged_candidates, now=_recall_scoring_now(question_date)
+                        query,
+                        merged_candidates,
+                        now=_recall_scoring_now(question_date),
+                        prune=prune,
+                        dedup=dedup,
+                        embeddings=embeddings,
                     )
                     scored_results = reranked.results
                     # Copied off the call that produced these scores. Do not read
@@ -15599,18 +15658,18 @@ class MemoryEngine(MemoryEngineInterface):
         pool is shared across reflects. It is a TypeSafeCrossEncoder because pruning needs
         that class's rank-and-cut; the sufficiency question is one more call on it.
 
-        That client speaks only TypeSafe's System One endpoint, so another provider (cloudflare,
-        openai) leaves reflect on agent turns instead of failing every reflect's first round.
+        That client speaks only the System One endpoint (typesafe, hindsight), so another provider
+        (cloudflare, openai) leaves reflect on agent turns instead of failing every reflect's first round.
         """
         if self._reflect_decision_model_client is None:
             setup = get_config().decision_model_config("reflect")
             if setup is None:
                 return None
-            if setup.provider != "typesafe":
+            if setup.provider not in SYSTEM_ONE_DECISION_MODEL_PROVIDERS:
                 if not self._reflect_decision_model_unsupported_logged:
                     self._reflect_decision_model_unsupported_logged = True
                     logger.warning(
-                        "Reflect's decision model supports only the typesafe provider, not %r: "
+                        "Reflect's decision model supports only the typesafe and hindsight providers, not %r: "
                         "reflect keeps agent turns.",
                         setup.provider,
                     )

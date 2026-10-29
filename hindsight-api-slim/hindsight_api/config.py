@@ -190,7 +190,6 @@ ENV_LLM_STRICT_SCHEMA = "HINDSIGHT_API_LLM_STRICT_SCHEMA"
 ENV_LLM_STRICT_SCHEMA_RETAIN = "HINDSIGHT_API_LLM_STRICT_SCHEMA_RETAIN"
 ENV_LLM_STRICT_SCHEMA_REFLECT = "HINDSIGHT_API_LLM_STRICT_SCHEMA_REFLECT"
 ENV_LLM_STRICT_SCHEMA_CONSOLIDATION = "HINDSIGHT_API_LLM_STRICT_SCHEMA_CONSOLIDATION"
-ENV_LLM_SUPPORTS_MAX_ITEMS = "HINDSIGHT_API_LLM_SUPPORTS_MAX_ITEMS"
 ENV_LLM_SUPPORTS_STRING_PATTERN = "HINDSIGHT_API_LLM_SUPPORTS_STRING_PATTERN"
 # Route structured output through a forced function tool instead of the
 # OpenAI-style ``response_format`` on the LiteLLM-backed providers (``litellm``,
@@ -607,6 +606,7 @@ ENV_RERANKER_OPENROUTER_BASE_URL = "HINDSIGHT_API_RERANKER_OPENROUTER_BASE_URL"
 # Requesty configuration (OpenAI-compatible gateway; embeddings)
 ENV_REQUESTY_API_KEY = "HINDSIGHT_API_REQUESTY_API_KEY"
 ENV_EMBEDDINGS_REQUESTY_API_KEY = "HINDSIGHT_API_EMBEDDINGS_REQUESTY_API_KEY"
+ENV_EMBEDDINGS_HINDSIGHT_API_KEY = "HINDSIGHT_API_EMBEDDINGS_HINDSIGHT_API_KEY"
 ENV_EMBEDDINGS_REQUESTY_MODEL = "HINDSIGHT_API_EMBEDDINGS_REQUESTY_MODEL"
 
 # ZeroEntropy configuration (embeddings)
@@ -720,6 +720,7 @@ ENV_RERANKER_NVIDIA_MAX_CONCURRENT = "HINDSIGHT_API_RERANKER_NVIDIA_MAX_CONCURRE
 # TypeSafe configuration (reranker only; typed-question API, not a /rerank endpoint).
 # Deprecated: set up the shared decision model (ENV_DECISION_MODEL_* below) instead.
 ENV_RERANKER_TYPESAFE_API_KEY = "HINDSIGHT_API_RERANKER_TYPESAFE_API_KEY"
+ENV_RERANKER_HINDSIGHT_API_KEY = "HINDSIGHT_API_RERANKER_HINDSIGHT_API_KEY"
 ENV_RERANKER_TYPESAFE_MODEL = "HINDSIGHT_API_RERANKER_TYPESAFE_MODEL"
 ENV_RERANKER_TYPESAFE_BASE_URL = "HINDSIGHT_API_RERANKER_TYPESAFE_BASE_URL"
 ENV_RERANKER_TYPESAFE_TIMEOUT = "HINDSIGHT_API_RERANKER_TYPESAFE_TIMEOUT"
@@ -747,6 +748,7 @@ ENV_DECISION_MODEL_MAX_CONCURRENT = "HINDSIGHT_API_DECISION_MODEL_MAX_CONCURRENT
 ENV_DECISION_MODEL_MAX_REQUEST_TOKENS = "HINDSIGHT_API_DECISION_MODEL_MAX_REQUEST_TOKENS"
 ENV_DECISION_MODEL_TOKENIZER = "HINDSIGHT_API_DECISION_MODEL_TOKENIZER"
 ENV_RECALL_DECISION_MODEL_PRUNE = "HINDSIGHT_API_RECALL_DECISION_MODEL_PRUNE"
+ENV_RECALL_DECISION_MODEL_DEDUP = "HINDSIGHT_API_RECALL_DECISION_MODEL_DEDUP"
 
 ENV_VECTOR_EXTENSION = "HINDSIGHT_API_VECTOR_EXTENSION"
 ENV_ANN_ITERATIVE_SCAN = "HINDSIGHT_API_ANN_ITERATIVE_SCAN"
@@ -1248,7 +1250,6 @@ DEFAULT_LLAMACPP_EXTRA_ARGS = None  # Space-separated extra CLI args for llama.c
 # (prose preambles, markdown fences, invalid JSON) — wedging retain/consolidation
 # on parse retries.
 DEFAULT_LLM_STRICT_SCHEMA = False
-DEFAULT_LLM_SUPPORTS_MAX_ITEMS = True
 
 # True = the backend accepts the JSON Schema ``pattern`` keyword in a
 # structured-output schema. Retain uses it to constrain occurred_start /
@@ -1256,9 +1257,8 @@ DEFAULT_LLM_SUPPORTS_MAX_ITEMS = True
 # reasoning inside the timestamp string and burning its whole completion budget.
 # Default False because provider support is narrow and failure is a hard 400 at
 # request time, not a degraded response: Bedrock validates schemas against an
-# allowlist that does not include ``pattern`` and rejects the request outright
-# (the same reason DEFAULT_LLM_SUPPORTS_MAX_ITEMS exists), and OpenAI errors on
-# any unsupported keyword when ``strict`` is set. Backends that neither enforce
+# allowlist that does not include ``pattern`` and rejects the request outright,
+# and OpenAI errors on any unsupported keyword when ``strict`` is set. Backends that neither enforce
 # nor reject it (native Anthropic tool schemas) gain nothing from it either --
 # only grammar-constrained backends that accept it do, so it is opt-in.
 DEFAULT_LLM_SUPPORTS_STRING_PATTERN = False
@@ -1566,6 +1566,12 @@ DEFAULT_EMBEDDINGS_NVIDIA_BATCH_SIZE = 100
 
 DEFAULT_RERANKER_TYPESAFE_MODEL = "jev-latest"
 DEFAULT_RERANKER_TYPESAFE_BASE_URL = "https://api.typesafe.ai"
+# Hindsight Inference: embeddings (OpenAI-compatible /v1/embeddings), reranking (Cohere-style
+# /v1/rerank) and the decision model (System One). hs-decision-1-flash serves both reranking
+# and decisions. Keys come from the provider's own *_HINDSIGHT_API_KEY or `hindsight-admin cloud login`.
+HINDSIGHT_INFERENCE_URL = "https://inference.hindsight.vectorize.io"
+DEFAULT_EMBEDDINGS_HINDSIGHT_MODEL = "hs-embed-1"
+DEFAULT_RERANKER_HINDSIGHT_MODEL = "hs-decision-1-flash"
 DEFAULT_RERANKER_TYPESAFE_MAX_CONCURRENT = 24
 # Off by default: dropping changes what recall returns, so it is opt-in.
 DEFAULT_RERANKER_TYPESAFE_PRUNE_CANDIDATES = False
@@ -1586,16 +1592,28 @@ class _DecisionProviderDefaults:
     #: The vocabulary the model counts its window in; None when unknown, which counts
     #: with HINDSIGHT_API_TOKENIZER_ENCODING.
     tokenizer: str | None = None
+    #: Most tokens one request may carry, sized for the model's window; None takes
+    #: DEFAULT_DECISION_MODEL_MAX_REQUEST_TOKENS.
+    max_request_tokens: int | None = None
 
 
 # "none": no decision model; operations that could use one keep their LLM-only path.
-# typesafe and cloudflare speak the System One API; openai has its own Decisions API.
+# hindsight, typesafe and cloudflare speak the System One API; openai has its own Decisions API.
+# hindsight is Hindsight Inference: its key comes from HINDSIGHT_API_DECISION_MODEL_API_KEY or,
+# when unset, from `hindsight-admin cloud login`. hs-decision-1-flash has a 64k window; the margin is
+# for counting it with o200k_base, not its own vocabulary.
 DECISION_MODEL_PROVIDER_DEFAULTS = {
+    "hindsight": _DecisionProviderDefaults(
+        model="hs-decision-1-flash", base_url=HINDSIGHT_INFERENCE_URL, max_request_tokens=54_000
+    ),
     "typesafe": _DecisionProviderDefaults(model="jev-latest", base_url="https://api.typesafe.ai", tokenizer="jev"),
     "cloudflare": _DecisionProviderDefaults(model="clef", base_url=None),
     "openai": _DecisionProviderDefaults(model="gpt-6-luna", base_url="https://api.openai.com"),
 }
 DECISION_MODEL_PROVIDERS = ("none", *DECISION_MODEL_PROVIDER_DEFAULTS)
+# Providers whose endpoint is System One itself (<base_url>/v1/systemone), which reflect's
+# client (TypeSafeCrossEncoder) speaks.
+SYSTEM_ONE_DECISION_MODEL_PROVIDERS = frozenset({"hindsight", "typesafe"})
 DEFAULT_DECISION_MODEL_PROVIDER = "none"
 DEFAULT_DECISION_MODEL_TIMEOUT = 60.0
 DEFAULT_DECISION_MODEL_MAX_CONCURRENT = 24
@@ -1609,6 +1627,8 @@ DEFAULT_DECISION_MODEL_MAX_REQUEST_TOKENS = 26_000
 MIN_DECISION_MODEL_MAX_REQUEST_TOKENS = 1_000
 # Off by default: dropping candidates changes what recall returns, so it is opt-in.
 DEFAULT_RECALL_DECISION_MODEL_PRUNE = False
+# Off by default: it costs one more decision-model request per recall.
+DEFAULT_RECALL_DECISION_MODEL_DEDUP = False
 
 
 def _decision_model_env(operation: str, setting: str) -> str:
@@ -3002,6 +3022,8 @@ class RerankerMemberConfig:
     google_project_id: str | None
     google_service_account_key: str | None
     google_timeout: float
+    # hindsight (None: the key `hindsight-admin cloud login` saved)
+    hindsight_api_key: str | None
 
     def env_name(self, suffix: str) -> str:
         """The env var this member reads ``suffix`` from, for error messages.
@@ -3154,6 +3176,7 @@ def _parse_reranker_members() -> list[RerankerMemberConfig]:
                     base, "NVIDIA_MAX_CONCURRENT", DEFAULT_RERANKER_NVIDIA_MAX_CONCURRENT
                 ),
                 typesafe_api_key=_member_opt_str(base, "TYPESAFE_API_KEY"),
+                hindsight_api_key=_member_opt_str(base, "HINDSIGHT_API_KEY"),
                 typesafe_model=_member_str(base, "TYPESAFE_MODEL", DEFAULT_RERANKER_TYPESAFE_MODEL),
                 typesafe_base_url=_member_str(base, "TYPESAFE_BASE_URL", DEFAULT_RERANKER_TYPESAFE_BASE_URL),
                 typesafe_timeout=_member_float(base, "TYPESAFE_TIMEOUT", DEFAULT_RERANKER_TYPESAFE_TIMEOUT),
@@ -3324,10 +3347,6 @@ class HindsightConfig:
     llm_strict_schema_retain: bool
     llm_strict_schema_reflect: bool
     llm_strict_schema_consolidation: bool
-    llm_supports_max_items: bool = field(
-        default=DEFAULT_LLM_SUPPORTS_MAX_ITEMS,
-        kw_only=True,
-    )  # Whether structured-output schemas accept JSON Schema maxItems
     llm_supports_string_pattern: bool = field(
         default=DEFAULT_LLM_SUPPORTS_STRING_PATTERN,
         kw_only=True,
@@ -3934,6 +3953,9 @@ class HindsightConfig:
     embeddings_zeroentropy_encoding_format: str = DEFAULT_EMBEDDINGS_ZEROENTROPY_ENCODING_FORMAT
     embeddings_zeroentropy_batch_size: int = DEFAULT_EMBEDDINGS_ZEROENTROPY_BATCH_SIZE
     embeddings_zeroentropy_latency: str | None = DEFAULT_EMBEDDINGS_ZEROENTROPY_LATENCY
+    # hindsight: None falls back to the key `hindsight-admin cloud login` saved.
+    embeddings_hindsight_api_key: str | None = None
+    reranker_hindsight_api_key: str | None = None
     embeddings_nvidia_api_key: str | None = None
     embeddings_nvidia_model: str = DEFAULT_EMBEDDINGS_NVIDIA_MODEL
     embeddings_nvidia_base_url: str = DEFAULT_EMBEDDINGS_NVIDIA_BASE_URL
@@ -4010,14 +4032,17 @@ class HindsightConfig:
     decision_model_base_url: str | None = None
     decision_model_timeout: float = DEFAULT_DECISION_MODEL_TIMEOUT
     decision_model_max_concurrent: int = DEFAULT_DECISION_MODEL_MAX_CONCURRENT
-    decision_model_max_request_tokens: int = DEFAULT_DECISION_MODEL_MAX_REQUEST_TOKENS
+    # None: the provider's default (DecisionModelConfig.max_request_tokens holds the resolved value).
+    decision_model_max_request_tokens: int | None = None
     decision_model_tokenizer: str | None = None
     recall_decision_model_provider: str | None = None
     recall_decision_model_api_key: str | None = None
     recall_decision_model_model: str | None = None
     recall_decision_model_base_url: str | None = None
-    # Recall only, server-level: the decision reranker drops the candidates it judges no help.
+    # Recall defaults for a request that omits them, per bank: the decision reranker drops the
+    # candidates it judges no help (prune), and the ones repeating a better-ranked one (dedup).
     recall_decision_model_prune: bool = DEFAULT_RECALL_DECISION_MODEL_PRUNE
+    recall_decision_model_dedup: bool = DEFAULT_RECALL_DECISION_MODEL_DEDUP
     reflect_decision_model_provider: str | None = None
     reflect_decision_model_api_key: str | None = None
     reflect_decision_model_model: str | None = None
@@ -4078,6 +4103,8 @@ class HindsightConfig:
         "embeddings_openai_api_key",
         "embeddings_zeroentropy_api_key",
         "embeddings_nvidia_api_key",
+        "embeddings_hindsight_api_key",
+        "reranker_hindsight_api_key",
         # File storage credentials
         "file_storage_s3_access_key_id",
         "file_storage_s3_secret_access_key",
@@ -4169,6 +4196,8 @@ class HindsightConfig:
         # Recall settings (used by internal recall, e.g. mental model refresh)
         "recall_include_chunks",
         "recall_prefer_observations",
+        "recall_decision_model_prune",
+        "recall_decision_model_dedup",
         "recall_max_tokens",
         "recall_chunks_max_tokens",
         # Recall budget mapping (Budget enum -> thinking_budget integer)
@@ -4278,6 +4307,7 @@ class HindsightConfig:
             nvidia_batch_size=self.reranker_nvidia_batch_size,
             nvidia_max_concurrent=self.reranker_nvidia_max_concurrent,
             typesafe_api_key=self.reranker_typesafe_api_key,
+            hindsight_api_key=self.reranker_hindsight_api_key,
             typesafe_model=self.reranker_typesafe_model,
             typesafe_base_url=self.reranker_typesafe_base_url,
             typesafe_timeout=self.reranker_typesafe_timeout,
@@ -4613,10 +4643,6 @@ class HindsightConfig:
             llm_strict_schema_retain=_resolve_operation_strict_schema(ENV_LLM_STRICT_SCHEMA_RETAIN),
             llm_strict_schema_reflect=_resolve_operation_strict_schema(ENV_LLM_STRICT_SCHEMA_REFLECT),
             llm_strict_schema_consolidation=_resolve_operation_strict_schema(ENV_LLM_STRICT_SCHEMA_CONSOLIDATION),
-            llm_supports_max_items=_parse_boolean_env(
-                ENV_LLM_SUPPORTS_MAX_ITEMS,
-                DEFAULT_LLM_SUPPORTS_MAX_ITEMS,
-            ),
             llm_supports_string_pattern=_parse_boolean_env(
                 ENV_LLM_SUPPORTS_STRING_PATTERN,
                 DEFAULT_LLM_SUPPORTS_STRING_PATTERN,
@@ -5147,6 +5173,8 @@ class HindsightConfig:
             ),
             # TypeSafe reranker
             reranker_typesafe_api_key=os.getenv(ENV_RERANKER_TYPESAFE_API_KEY),
+            reranker_hindsight_api_key=os.getenv(ENV_RERANKER_HINDSIGHT_API_KEY) or None,
+            embeddings_hindsight_api_key=os.getenv(ENV_EMBEDDINGS_HINDSIGHT_API_KEY) or None,
             reranker_typesafe_model=os.getenv(ENV_RERANKER_TYPESAFE_MODEL, DEFAULT_RERANKER_TYPESAFE_MODEL),
             reranker_typesafe_base_url=os.getenv(ENV_RERANKER_TYPESAFE_BASE_URL, DEFAULT_RERANKER_TYPESAFE_BASE_URL),
             reranker_typesafe_timeout=float(
@@ -5181,8 +5209,10 @@ class HindsightConfig:
             decision_model_max_concurrent=int(
                 os.getenv(ENV_DECISION_MODEL_MAX_CONCURRENT) or DEFAULT_DECISION_MODEL_MAX_CONCURRENT
             ),
-            decision_model_max_request_tokens=int(
-                os.getenv(ENV_DECISION_MODEL_MAX_REQUEST_TOKENS) or DEFAULT_DECISION_MODEL_MAX_REQUEST_TOKENS
+            decision_model_max_request_tokens=(
+                int(max_request_tokens)
+                if (max_request_tokens := os.getenv(ENV_DECISION_MODEL_MAX_REQUEST_TOKENS))
+                else None
             ),
             decision_model_tokenizer=os.getenv(ENV_DECISION_MODEL_TOKENIZER) or None,
             **{
@@ -5193,6 +5223,9 @@ class HindsightConfig:
             },
             recall_decision_model_prune=_parse_boolean_env(
                 ENV_RECALL_DECISION_MODEL_PRUNE, DEFAULT_RECALL_DECISION_MODEL_PRUNE
+            ),
+            recall_decision_model_dedup=_parse_boolean_env(
+                ENV_RECALL_DECISION_MODEL_DEDUP, DEFAULT_RECALL_DECISION_MODEL_DEDUP
             ),
             # Server
             host=os.getenv(ENV_HOST) or None,
@@ -5871,6 +5904,16 @@ class HindsightConfig:
             )
         if provider == "none":
             return None
+        # Hindsight's decision model is set up for consolidation, reflect and pages. Recall keeps
+        # its reranker unless the recall override names it: on recall the reranker evaluated better.
+        if provider == "hindsight" and operation == "recall" and own_provider is None:
+            return None
+        defaults = DECISION_MODEL_PROVIDER_DEFAULTS[provider]
+        max_request_tokens = (
+            self.decision_model_max_request_tokens
+            or defaults.max_request_tokens
+            or DEFAULT_DECISION_MODEL_MAX_REQUEST_TOKENS
+        )
         # Checked here, not on the first request: a ceiling no request fits, or a cap no
         # request gets through, would otherwise surface as every decision failing.
         if self.decision_model_timeout <= 0:
@@ -5879,10 +5922,10 @@ class HindsightConfig:
             raise ValueError(
                 f"{ENV_DECISION_MODEL_MAX_CONCURRENT} must be at least 1, not {self.decision_model_max_concurrent}"
             )
-        if self.decision_model_max_request_tokens < MIN_DECISION_MODEL_MAX_REQUEST_TOKENS:
+        if max_request_tokens < MIN_DECISION_MODEL_MAX_REQUEST_TOKENS:
             raise ValueError(
                 f"{ENV_DECISION_MODEL_MAX_REQUEST_TOKENS} must be at least {MIN_DECISION_MODEL_MAX_REQUEST_TOKENS}, "
-                f"not {self.decision_model_max_request_tokens}"
+                f"not {max_request_tokens}"
             )
         inherits_global = provider == (self.decision_model_provider or "").lower()
 
@@ -5900,7 +5943,6 @@ class HindsightConfig:
                 )
             return value
 
-        defaults = DECISION_MODEL_PROVIDER_DEFAULTS[provider]
         # The endpoint's model, not the provider, decides the vocabulary: a System One
         # endpoint serving another model than Jev sets it.
         tokenizer = self.decision_model_tokenizer or defaults.tokenizer
@@ -5911,14 +5953,25 @@ class HindsightConfig:
                 check_encoding(tokenizer)
             except ValueError as err:
                 raise ValueError(f"{ENV_DECISION_MODEL_TOKENIZER}: {err}") from err
+        api_key = setting("api_key")
+        if not api_key and provider == "hindsight":
+            # Imported here: cloud_auth pulls in aiohttp's server, which only this provider needs.
+            from .engine.providers.cloud_auth import saved_api_key
+
+            api_key = saved_api_key()
+            if not api_key:
+                raise ValueError(
+                    "The hindsight decision model needs a key: run `hindsight-admin cloud login`, "
+                    f"or set HINDSIGHT_API_DECISION_MODEL_API_KEY (or {_decision_model_env(operation, 'API_KEY')})"
+                )
         return DecisionModelConfig(
             provider=provider,
-            api_key=required(setting("api_key"), "API_KEY"),
+            api_key=required(api_key, "API_KEY"),
             model=setting("model") or defaults.model,
             base_url=required(setting("base_url") or defaults.base_url, "BASE_URL"),
             timeout=self.decision_model_timeout,
             max_concurrent=self.decision_model_max_concurrent,
-            max_request_tokens=self.decision_model_max_request_tokens,
+            max_request_tokens=max_request_tokens,
             tokenizer=tokenizer,
         )
 

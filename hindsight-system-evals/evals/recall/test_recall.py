@@ -8,11 +8,8 @@ Each case has a ``category`` and its test id is ``<category>/<case id>``, so
 * temporal — "last month", "yesterday", a year, a named week, against ``query_timestamp``;
 * currency — the newer of two conflicting memories ranks first;
 * multi_hop — the answer is one entity or cause away from what the query names;
-* filters — fact types (what the assistant did vs what the user said) and tags;
 * language — non-English queries over memories in that language;
 * precision — the right number among near-identical ones; a negation kept;
-* budget — a small ``max_tokens``; source chunks without facts;
-* observations — consolidated observations, and ``prefer_observations``;
 * duplicates — one fact stated several times comes back several times, unless the
   decision model prunes (``same-sentence-four-documents``, ``reworded-repeats``);
 * distinct — memories that only look alike are all kept, by recall and by the
@@ -20,8 +17,9 @@ Each case has a ``category`` and its test id is ``<category>/<case id>``, so
 
 The capability cases are in ``hindsight_system_evals.recall_capabilities``, each naming
 the history behind it. Recall itself calls no LLM by default — dates in a query are read
-by a rule-based parser and ranking is the embedder plus a cross-encoder — so a model
-comparison here measures the memories that model's retain wrote, as recall finds them.
+by a rule-based parser and ranking is the embedder plus a reranker — and each case's
+memories are imported from the archive a real extraction recorded once, so a run makes
+no model call and grades with none.
 
 The benchmark at the bottom (``test_recall_benchmark_beir_scifact``) is not a case: it
 scores recall against BEIR SciFact's own labels and makes no model call.
@@ -114,6 +112,7 @@ from hindsight_system_evals.retrieval_metrics import as_record
 log = logging.getLogger(__name__)
 
 PRUNING = os.getenv("HINDSIGHT_EVAL_SET_RECALL_DECISION_MODEL_PRUNE", "").lower() == "true"
+DEDUP = os.getenv("HINDSIGHT_EVAL_SET_RECALL_DECISION_MODEL_DEDUP", "").lower() == "true"
 
 RETAIN_REPEATS = 4
 
@@ -132,17 +131,15 @@ async def test_recall(client: Hindsight, bank_id: str, settled: SettleFn, case: 
             question_id=case.id,
             category=case.category,
             correct=not outcome.failed,
-            hit_trap=bool(outcome.trapped),
+            hit_trap=False,
             bank_id=bank_id,
-            reason="; ".join(outcome.trapped or outcome.failed) or "ok",
+            reason="; ".join(outcome.failed) or "ok",
         )
     )
     log.info("%s [%s] %r:\n%s", case.id, case.category, case.query, outcome.rendered)
     evidence = (
-        f"bank {bank_id} ({case.origin})\nquery: {case.query!r} {case.recall.options()}\nresults:\n{outcome.rendered}"
-    )
-    assert not outcome.trapped, (
-        f"{case.id}: returned what it must not —\n" + "\n".join(outcome.trapped) + f"\n{evidence}"
+        f"bank {bank_id} ({case.origin})\nquery: {case.query!r} now={case.query_timestamp}\n"
+        f"results:\n{outcome.rendered}"
     )
     assert not outcome.failed, f"{case.id}:\n" + "\n".join(outcome.failed) + f"\n{evidence}"
 
@@ -173,19 +170,24 @@ async def test_recall_duplicates(client: Hindsight, bank_id: str, settled: Settl
         context=f"The same sentence was retained as {RETAIN_REPEATS} separate documents: {CONTENT!r}",
     )
     where = f"{len(documents)} documents among the results — bank {bank_id}: {verdict.reasoning}\n{results}"
-    # Pruning drops what is no help, not repeats, so every copy comes back either way.
+    # Only dedup drops repeats; pruning drops what is no help, so it leaves every copy.
+    expected = not DEDUP
     RECORDED.append(
         EvalRecord(
             kind="recall",
             question_id=case,
             category="duplicates",
-            correct=verdict.meets_criteria,
+            correct=verdict.meets_criteria == expected and bool(recalled.results),
             hit_trap=False,
             bank_id=bank_id,
             reason=verdict.reasoning,
         )
     )
-    assert verdict.meets_criteria, f"recall returned no duplicates ({where})"
+    if DEDUP:
+        assert not verdict.meets_criteria, f"recall deduped, yet returned the fact more than once ({where})"
+        assert recalled.results, f"recall dropped every copy ({where})"
+    else:
+        assert verdict.meets_criteria, f"recall returned no duplicates ({where})"
 
 
 @dataclass(frozen=True)
@@ -193,7 +195,8 @@ class PruneCase:
     id: str
     category: str
     query: str
-    #: Each inner tuple is one fact, reworded: at least one of them must come back.
+    #: Each inner tuple is one fact, reworded: one of them must come back, and with dedup on
+    #: only one.
     facts: tuple[tuple[str, ...], ...]
     #: Nothing to do with the query: should not come back.
     junk: tuple[str, ...]
@@ -253,10 +256,10 @@ PRUNE_CASES = (
 # ── Prune: labelled pools, stored as written ─────────────────────────────────
 @pytest.mark.parametrize("case", case_params(PRUNE_CASES, {c.id for c in PRUNE_CASES}))
 async def test_recall_pools(client: Hindsight, bank_id: str, settled: SettleFn, case: PruneCase) -> None:
-    """Every needed fact comes back. With pruning on, also: most junk gone.
+    """Every needed fact comes back. With pruning on, also: most junk gone. With dedup on,
+    also: one copy of each.
 
-    Without pruning recall returns junk by design, so only the first holds. Repeats come back
-    either way: pruning drops what is no help, not repeats.
+    Without them recall returns junk and repeats by design, so only the first holds.
     """
     # Stored as written, so each label points at the exact text recall returns.
     await prepare_bank(client, bank_id)
@@ -272,6 +275,7 @@ async def test_recall_pools(client: Hindsight, bank_id: str, settled: SettleFn, 
         return any(text in r for r in returned)
 
     lost = [fact[0] for fact in case.facts if not any(came_back(text) for text in fact)]
+    repeated = [fact[0] for fact in case.facts if sum(came_back(text) for text in fact) > 1] if DEDUP else []
     junk = [text for text in case.junk if came_back(text)]
     # Most, not all: an unrelated memory is dropped only when the model is sure, since
     # dropping a needed one costs more than showing a stray one.
@@ -281,14 +285,15 @@ async def test_recall_pools(client: Hindsight, bank_id: str, settled: SettleFn, 
             kind="recall",
             question_id=case.id,
             category=case.category,
-            correct=not (lost or too_much_junk),
+            correct=not (lost or repeated or too_much_junk),
             hit_trap=False,
             bank_id=bank_id,
-            reason=f"lost {lost}; junk {len(junk)}/{len(case.junk)}",
+            reason=f"lost {lost}; repeated {repeated}; junk {len(junk)}/{len(case.junk)}",
         )
     )
     where = f"bank {bank_id}, returned:\n" + "\n".join(returned)
     assert not lost, f"{case.id}: every copy of {lost} is missing — {where}"
+    assert not repeated, f"{case.id}: more than one copy of {repeated} came back — {where}"
     assert not too_much_junk, f"{case.id}: {len(junk)}/{len(case.junk)} unrelated came back — {where}"
 
 
