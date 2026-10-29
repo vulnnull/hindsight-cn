@@ -796,6 +796,7 @@ ENV_ADMISSION_RETAIN_MAX_WAIT_MS = "HINDSIGHT_API_ADMISSION_RETAIN_MAX_WAIT_MS"
 ENV_RECALL_CONNECTION_BUDGET = "HINDSIGHT_API_RECALL_CONNECTION_BUDGET"
 ENV_RECALL_MAX_QUERY_TOKENS = "HINDSIGHT_API_RECALL_MAX_QUERY_TOKENS"
 ENV_RECALL_DIAGNOSTIC_PHASES = "HINDSIGHT_API_RECALL_DIAGNOSTIC_PHASES"
+ENV_RECALL_TRACE_RERANKER_PROVIDER = "HINDSIGHT_API_RECALL_TRACE_RERANKER_PROVIDER"
 ENV_RECALL_PHASE_SAMPLE_EVERY = "HINDSIGHT_API_RECALL_PHASE_SAMPLE_EVERY"
 ENV_GZIP_MIN_SIZE = "HINDSIGHT_API_GZIP_MIN_SIZE"
 ENV_LOOP_LAG_REPORT_SECONDS = "HINDSIGHT_API_LOOP_LAG_REPORT_SECONDS"
@@ -1769,6 +1770,7 @@ DEFAULT_ADMISSION_RETAIN_MAX_WAIT_MS = 2000
 DEFAULT_RECALL_CONNECTION_BUDGET = 4  # Max concurrent DB connections per recall operation
 DEFAULT_RECALL_MAX_QUERY_TOKENS = 500  # Maximum tokens allowed in recall query
 DEFAULT_RECALL_DIAGNOSTIC_PHASES = True  # Record the subset (diagnostic=true) recall phase metrics
+DEFAULT_RECALL_TRACE_RERANKER_PROVIDER = False  # Name the reranker that scored a recall in its trace
 DEFAULT_RECALL_PHASE_SAMPLE_EVERY = 1  # Record 1 in N recall-phase observations; 1 records every one
 DEFAULT_GZIP_MIN_SIZE = 1024  # Min response bytes to gzip; negative disables compression
 DEFAULT_LOOP_LAG_REPORT_SECONDS = 0.0  # Event-loop lag probe report interval; 0 disables it
@@ -3656,6 +3658,7 @@ class HindsightConfig:
     recall_connection_budget: int
     recall_max_query_tokens: int
     recall_diagnostic_phases: bool
+    recall_trace_reranker_provider: bool
     recall_phase_sample_every: int
     gzip_min_size: int
     loop_lag_report_seconds: float
@@ -5272,6 +5275,10 @@ class HindsightConfig:
             recall_max_query_tokens=int(os.getenv(ENV_RECALL_MAX_QUERY_TOKENS, str(DEFAULT_RECALL_MAX_QUERY_TOKENS))),
             recall_diagnostic_phases=os.getenv(
                 ENV_RECALL_DIAGNOSTIC_PHASES, str(DEFAULT_RECALL_DIAGNOSTIC_PHASES)
+            ).lower()
+            in ("true", "1", "yes"),
+            recall_trace_reranker_provider=os.getenv(
+                ENV_RECALL_TRACE_RERANKER_PROVIDER, str(DEFAULT_RECALL_TRACE_RERANKER_PROVIDER)
             ).lower()
             in ("true", "1", "yes"),
             recall_phase_sample_every=max(

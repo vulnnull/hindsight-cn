@@ -22,6 +22,7 @@ from hindsight_api.engine.cross_encoder import (
     RRFPassthroughCrossEncoder,
     create_cross_encoder,
     create_cross_encoder_from_env,
+    recall_log_id,
 )
 
 PAIRS = [("q", "doc a"), ("q", "doc b")]
@@ -231,6 +232,22 @@ async def test_unreachable_primary_falls_over_to_the_next_member():
 
     assert scores == [0.5, 0.5]  # neutral — the fusion order survives
     assert chain.provider_name == "rrf"  # reported as passthrough for downstream scoring
+
+
+@pytest.mark.asyncio
+async def test_failover_warning_names_the_recall(caplog):
+    """The warning carries the recall id, so it joins that recall's log lines (#6072)."""
+    chain = MultiCrossEncoder(
+        [_FakeCrossEncoder("primary", predict_error=TimeoutError("boom")), RRFPassthroughCrossEncoder()]
+    )
+    await chain.initialize()
+    token = recall_log_id.set("bank1234-42-abc123")
+    try:
+        await chain.predict(PAIRS)
+    finally:
+        recall_log_id.reset(token)
+
+    assert "[RECALL bank1234-42-abc123] Reranker member 0 (primary) failed" in caplog.text
 
 
 @pytest.mark.asyncio

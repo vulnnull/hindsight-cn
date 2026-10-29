@@ -385,6 +385,39 @@ async def logged_out_primary_client(logged_out_primary_server) -> AsyncIterator[
     await client.aclose()
 
 
+@pytest.fixture(scope="session")
+def failover_server(stub_server, tmp_path_factory: pytest.TempPathFactory) -> Iterator[object]:
+    """A server whose primary reranker is unreachable, with ``rrf`` as the next member.
+
+    It also names the serving reranker in recall traces, which is off by default.
+    Both settings are server-level, so this costs a process of its own. Session-scoped
+    and started lazily, like ``typesafe_server``.
+    """
+    log_path: Path = tmp_path_factory.mktemp("failover-server") / "server.log"
+    server = start_hindsight_server(
+        stub_url=stub_server.url,
+        log_path=log_path,
+        extra_env={
+            # Port 9 (discard) refuses the connection at once, so the primary fails fast.
+            "HINDSIGHT_API_RERANKER_SILICONFLOW_BASE_URL": "http://127.0.0.1:9",
+            "HINDSIGHT_API_RERANKER_1_PROVIDER": "rrf",
+            "HINDSIGHT_API_RECALL_TRACE_RERANKER_PROVIDER": "true",
+            # HTTP only, for the same reason as `typesafe_server`: a worker here would claim
+            # the other server's queued work and run it with this server's broken reranker.
+            "HINDSIGHT_API_WORKER_ENABLED": "false",
+        },
+    )
+    yield server
+    server.stop()
+
+
+@pytest.fixture
+async def failover_client(failover_server) -> AsyncIterator[Hindsight]:
+    client = Hindsight(base_url=failover_server.url)
+    yield client
+    await client.aclose()
+
+
 @pytest.fixture
 async def typesafe_client(typesafe_server) -> AsyncIterator[Hindsight]:
     client = Hindsight(base_url=typesafe_server.url)
