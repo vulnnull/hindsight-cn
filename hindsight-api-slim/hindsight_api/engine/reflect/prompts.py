@@ -231,7 +231,8 @@ def build_system_prompt_for_tools(
         has_mental_models: Whether the bank has any mental models (skip if not)
         include_observations: Whether search_observations is in the tool list.
         budget: Search depth budget - "low", "mid", or "high". Controls exploration thoroughness.
-        answer_as_document: Whether done() takes a structured document instead of markdown.
+        answer_as_document: Whether done() takes the answer as a markdown document, split into
+            sections by its headings (see tools_schema's markdown document tool).
         llm_output_language: Configured output language; drops the default language rule
             (the directive itself goes on the user message, see build_agent_user_prompt).
     """
@@ -563,38 +564,19 @@ def build_system_prompt_for_tools(
 
     non_conversational_rule = "- CRITICAL: This is a NON-CONVERSATIONAL system. NEVER ask follow-up questions, offer further assistance, or suggest next steps. Your answer must be complete and self-contained. The user cannot reply."
     if answer_as_document:
-        # The document is stored as structure and the markdown is rendered from
-        # it, so asking for "a markdown answer" here would be asking for the one
-        # thing the caller does not want (see tools_schema's document tool).
+        # The document again, written as markdown: its headings are its sections. The
+        # section-array instructions below must not appear here -- told to "state the
+        # structure, do NOT write markdown" and then asked for markdown, the model gets
+        # two contracts for one answer.
         parts.extend(
             [
                 "",
-                "## Output Format: Structured Document",
-                "Call done() with a 'document' field. Do NOT write a markdown document — "
-                "state its structure and the markdown is generated from it.",
-                # Name the wrapper and show it. Every field of a *section* was spelled out
-                # here — heading, level, blocks — and the array holding them never was, so
-                # the prose described a section while the tool schema described a document
-                # containing sections. Models resolved that disagreement in favour of the
-                # prose and emitted the bare section, which parsed to zero sections, an
-                # empty render, and a failed refresh. A shape stated in one place and shown
-                # in another is a shape that gets filled correctly.
-                "- 'document' holds a 'sections' array — one entry per section, in order. "
-                'Shape: {"sections": [{"heading": "Overview", "level": 2, "blocks": '
-                '["First paragraph.", "- a list item\\n- another"]}]}',
-                "- Even a one-section document uses the 'sections' array; never emit a bare section",
-                "- Each section carries its heading text (no '#') and a level; the heading is NOT a block",
-                "- 'blocks' holds the section's content, ONE block per paragraph, list, table or code fence",
-                "- Never put two paragraphs in one block, and never put a heading inside a block",
-                "- Inside a block, write list items and table rows on their own lines as usual",
-                # Stating the structure is a more clerical task than writing prose, and a
-                # model doing clerical work gets terse: measured against the markdown
-                # answer it replaced, the first version of this produced noticeably
-                # shorter documents that judges liked less. Say plainly that the
-                # structure is the shape, not a budget.
-                "- The structure is how the answer is laid out, NOT a reason to say less: give each "
-                "block the same specifics, numbers, names and examples you would write in prose",
-                "- Prefer a section with several blocks over one block that summarises them away",
+                "## Output Format: Markdown Document",
+                "Call done() with a 'markdown' field holding the whole document: a '## ' heading per "
+                "section, then its paragraphs, lists, tables or code fences.",
+                "- Give every section the specifics, numbers, names, dates and examples the results "
+                "hold: the structure is how the answer is laid out, NOT a reason to say less",
+                "- Prefer several paragraphs and lists over one paragraph that summarises them away",
                 f"- {NO_IDS_IN_TEXT_RULE}",
                 non_conversational_rule,
             ]
@@ -972,12 +954,17 @@ def build_final_prompt(
 #: per block (a delta "rewriting the list" rewrites only its first item, so a
 #: removed member stays listed). Replayed benchmark pages had each about a third
 #: of the time; the done tool's field descriptions alone did not move that.
+#: Written for the markdown page, which ``split_markdown`` cuts into sections at
+#: its headings and into blocks at its blank lines: the rules were first written
+#: for the section-array page, whose "blocks" a markdown page does not have.
 _DOCUMENT_SHAPE_INSTRUCTIONS = (
     "\n## Document shape\n"
-    "- Only the first section may have an empty heading. Every other section has a real heading.\n"
-    "- Items of one kind (bugs, releases, customers, components) are blocks of ONE section under one "
-    "heading — never an untitled section per item.\n"
-    "- A list is ONE block holding all its items ('- a\\n- b\\n- c'), never one block per item."
+    "- Only an opening summary may come before the first heading. Everything after it sits under a "
+    "real '## ' heading.\n"
+    "- Items of one kind (bugs, releases, customers, components) go under ONE heading together — "
+    "never a heading per item, and never items left after the summary without a heading.\n"
+    "- Write a list with no blank lines between its items ('- a\\n- b\\n- c'): a blank line splits it "
+    "into separate lists."
 )
 
 
@@ -992,8 +979,8 @@ def build_done_request_prompt(
 
     Sent inside the tool-loop conversation, so it carries only what the answer
     needs beyond the evidence already there: stop retrieving, the question, the
-    instructions and the length target — and, when the answer is a page's
-    structured document, the shape rules that keep it editable.
+    instructions and the length target — and, when the answer is a page,
+    the shape rules that keep it editable.
     """
     parts = [
         "## Answer now",

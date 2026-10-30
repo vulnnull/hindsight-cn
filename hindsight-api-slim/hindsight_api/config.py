@@ -191,11 +191,11 @@ ENV_LLM_STRICT_SCHEMA_RETAIN = "HINDSIGHT_API_LLM_STRICT_SCHEMA_RETAIN"
 ENV_LLM_STRICT_SCHEMA_REFLECT = "HINDSIGHT_API_LLM_STRICT_SCHEMA_REFLECT"
 ENV_LLM_STRICT_SCHEMA_CONSOLIDATION = "HINDSIGHT_API_LLM_STRICT_SCHEMA_CONSOLIDATION"
 ENV_LLM_SUPPORTS_STRING_PATTERN = "HINDSIGHT_API_LLM_SUPPORTS_STRING_PATTERN"
-# Route structured output through a forced function tool instead of the
+# Give the structured-output schema in the prompt instead of the
 # OpenAI-style ``response_format`` on the LiteLLM-backed providers (``litellm``,
 # ``litellmrouter``, ``bedrock``). Off by default; see
-# DEFAULT_LLM_STRUCTURED_OUTPUT_FORCED_TOOL.
-ENV_LLM_STRUCTURED_OUTPUT_FORCED_TOOL = "HINDSIGHT_API_LLM_STRUCTURED_OUTPUT_FORCED_TOOL"
+# DEFAULT_LLM_STRUCTURED_OUTPUT_IN_PROMPT.
+ENV_LLM_STRUCTURED_OUTPUT_IN_PROMPT = "HINDSIGHT_API_LLM_STRUCTURED_OUTPUT_IN_PROMPT"
 # Whether the configured LLM accepts image parts in a user message. Tri-state:
 # unset lets each provider answer for itself (see LLMInterface.supports_vision),
 # while an explicit true/false overrides it in both directions. The escape hatch
@@ -1109,7 +1109,6 @@ ENV_REFLECT_USE_DECISION_MODEL = "HINDSIGHT_API_REFLECT_USE_DECISION_MODEL"
 ENV_MENTAL_MODEL_REFRESH_USE_DECISION_MODEL = "HINDSIGHT_API_MENTAL_MODEL_REFRESH_USE_DECISION_MODEL"
 ENV_MENTAL_MODEL_DELTA_USE_DECISION_MODEL = "HINDSIGHT_API_MENTAL_MODEL_DELTA_USE_DECISION_MODEL"
 ENV_MENTAL_MODEL_DELTA_GATE_MAX_MEMORIES = "HINDSIGHT_API_MENTAL_MODEL_DELTA_GATE_MAX_MEMORIES"
-ENV_REFLECT_PROMPT_CACHE_ENABLED = "HINDSIGHT_API_REFLECT_PROMPT_CACHE_ENABLED"
 ENV_REFLECT_MAX_CONTEXT_TOKENS = "HINDSIGHT_API_REFLECT_MAX_CONTEXT_TOKENS"
 ENV_REFLECT_WALL_TIMEOUT = "HINDSIGHT_API_REFLECT_WALL_TIMEOUT"
 ENV_REFLECT_MISSION = "HINDSIGHT_API_REFLECT_MISSION"
@@ -1263,16 +1262,17 @@ DEFAULT_LLM_STRICT_SCHEMA = False
 # only grammar-constrained backends that accept it do, so it is opt-in.
 DEFAULT_LLM_SUPPORTS_STRING_PATTERN = False
 
-# True = ask LiteLLM-backed providers for structured output via a single forced
-# function tool (the response schema becomes the tool's parameters) instead of
-# the OpenAI-style ``response_format``. Needed where the backend rejects the
-# response_format route outright — notably Bedrock Claude, whose Converse layer
-# refuses the translated ``outputConfig`` ("Extra inputs are not permitted") while
-# accepting the identical schema as a tool (issue #3300). Verified region-dependent:
+# True = give LiteLLM-backed providers the structured-output schema in the prompt and
+# parse the reply, instead of the OpenAI-style ``response_format``. Needed where the
+# backend rejects the response_format route outright — notably Bedrock Claude, whose
+# Converse layer refuses the translated ``outputConfig`` ("Extra inputs are not
+# permitted", issue #3300). It used to send the schema as a single forced function
+# tool, which Bedrock accepted; Hindsight sends no tools any more
+# (providers/tools_via_schema.py), and the prompt is what every CLI provider already uses. Verified region-dependent:
 # ap-southeast-2 / au.* rejects it, us-east-1 / us.* accepts it, so this is opt-in
 # rather than keyed off the provider. Default False keeps ``response_format``, which
 # every other LiteLLM backend handles natively.
-DEFAULT_LLM_STRUCTURED_OUTPUT_FORCED_TOOL = False
+DEFAULT_LLM_STRUCTURED_OUTPUT_IN_PROMPT = False
 
 DEFAULT_LLM_MAX_CONCURRENT = 32
 DEFAULT_LLM_MAX_RETRIES = 3  # Max retry attempts for LLM API calls
@@ -1567,11 +1567,11 @@ DEFAULT_EMBEDDINGS_NVIDIA_BATCH_SIZE = 100
 DEFAULT_RERANKER_TYPESAFE_MODEL = "jev-latest"
 DEFAULT_RERANKER_TYPESAFE_BASE_URL = "https://api.typesafe.ai"
 # Hindsight Inference: embeddings (OpenAI-compatible /v1/embeddings), reranking (Cohere-style
-# /v1/rerank) and the decision model (System One). hs-decision-1-flash serves both reranking
-# and decisions. Keys come from the provider's own *_HINDSIGHT_API_KEY or `hindsight-admin cloud login`.
+# /v1/rerank) and the decision model (System One). hs-rerank-1 reranks and hs-decide-1-flash decides.
+# Keys come from the provider's own *_HINDSIGHT_API_KEY or `hindsight-admin cloud login`.
 HINDSIGHT_INFERENCE_URL = "https://inference.hindsight.vectorize.io"
 DEFAULT_EMBEDDINGS_HINDSIGHT_MODEL = "hs-embed-1"
-DEFAULT_RERANKER_HINDSIGHT_MODEL = "hs-decision-1-flash"
+DEFAULT_RERANKER_HINDSIGHT_MODEL = "hs-rerank-1"
 DEFAULT_RERANKER_TYPESAFE_MAX_CONCURRENT = 24
 # Off by default: dropping changes what recall returns, so it is opt-in.
 DEFAULT_RERANKER_TYPESAFE_PRUNE_CANDIDATES = False
@@ -1600,11 +1600,11 @@ class _DecisionProviderDefaults:
 # "none": no decision model; operations that could use one keep their LLM-only path.
 # hindsight, typesafe and cloudflare speak the System One API; openai has its own Decisions API.
 # hindsight is Hindsight Inference: its key comes from HINDSIGHT_API_DECISION_MODEL_API_KEY or,
-# when unset, from `hindsight-admin cloud login`. hs-decision-1-flash has a 64k window; the margin is
+# when unset, from `hindsight-admin cloud login`. hs-decide-1-flash has a 64k window; the margin is
 # for counting it with o200k_base, not its own vocabulary.
 DECISION_MODEL_PROVIDER_DEFAULTS = {
     "hindsight": _DecisionProviderDefaults(
-        model="hs-decision-1-flash", base_url=HINDSIGHT_INFERENCE_URL, max_request_tokens=54_000
+        model="hs-decide-1-flash", base_url=HINDSIGHT_INFERENCE_URL, max_request_tokens=54_000
     ),
     "typesafe": _DecisionProviderDefaults(model="jev-latest", base_url="https://api.typesafe.ai", tokenizer="jev"),
     "cloudflare": _DecisionProviderDefaults(model="clef", base_url=None),
@@ -2120,18 +2120,6 @@ DEFAULT_MENTAL_MODEL_DELTA_USE_DECISION_MODEL = True
 # Above this many new memories a delta refresh searches instead of asking about each: every
 # question is one decision-model request carrying the whole page.
 DEFAULT_MENTAL_MODEL_DELTA_GATE_MAX_MEMORIES = 200
-# Step-by-step context caching for the reflect tool loop (Gemini). On by default;
-# requires the global prompt cache (HINDSIGHT_API_LLM_PROMPT_CACHE_ENABLED) to also
-# be on. Set false to force reflect to run uncached even when prompt caching is on.
-#
-# Worth knowing before tuning it: Gemini bills an explicit cache's CREATION at the
-# full input rate, plus storage per token-hour, and the rolling cache each step
-# builds is read by exactly one later call. Measured on the refresh-cost eval, that
-# came to ~4.6% MORE than sending the same tokens uncached (and cache creation alone
-# was 38% of the bill on gemini-3.8-flash), while Gemini's implicit caching gives the
-# same read discount with no create or storage fee. Left on pending a cache that is
-# read more than once — `false` is the cheaper setting on Gemini today.
-DEFAULT_REFLECT_PROMPT_CACHE_ENABLED = True
 DEFAULT_REFLECT_MAX_CONTEXT_TOKENS = 100_000  # Max accumulated context tokens before forcing final prompt
 DEFAULT_REFLECT_WALL_TIMEOUT = 300  # Wall-clock timeout in seconds for the entire reflect operation (5 minutes)
 DEFAULT_REFLECT_SOURCE_FACTS_MAX_TOKENS = -1  # Token budget for source facts in search_observations (-1 = disabled)
@@ -3351,10 +3339,10 @@ class HindsightConfig:
         default=DEFAULT_LLM_SUPPORTS_STRING_PATTERN,
         kw_only=True,
     )  # Whether structured-output schemas accept JSON Schema pattern
-    llm_structured_output_forced_tool: bool = field(
-        default=DEFAULT_LLM_STRUCTURED_OUTPUT_FORCED_TOOL,
+    llm_structured_output_in_prompt: bool = field(
+        default=DEFAULT_LLM_STRUCTURED_OUTPUT_IN_PROMPT,
         kw_only=True,
-    )  # LiteLLM-backed providers: structured output via a forced tool call, not response_format
+    )  # LiteLLM-backed providers: the structured-output schema in the prompt, not response_format
     # Tags outbound OpenAI-compatible LLM + embedding calls with `user=<bank_id>` for
     # per-bank cost attribution. Downstream cost gateways (OpenRouter usage accounting,
     # LiteLLM, Helicone) key attribution on the OpenAI `user` field. Opt-in; never
@@ -3875,7 +3863,6 @@ class HindsightConfig:
     mental_model_delta_gate_max_memories: int
     reflect_max_context_tokens: int
     reflect_wall_timeout: int
-    reflect_prompt_cache_enabled: bool
     reflect_max_completion_tokens: int | None
 
     # OpenTelemetry tracing configuration
@@ -4647,9 +4634,9 @@ class HindsightConfig:
                 ENV_LLM_SUPPORTS_STRING_PATTERN,
                 DEFAULT_LLM_SUPPORTS_STRING_PATTERN,
             ),
-            llm_structured_output_forced_tool=_parse_boolean_env(
-                ENV_LLM_STRUCTURED_OUTPUT_FORCED_TOOL,
-                DEFAULT_LLM_STRUCTURED_OUTPUT_FORCED_TOOL,
+            llm_structured_output_in_prompt=_parse_boolean_env(
+                ENV_LLM_STRUCTURED_OUTPUT_IN_PROMPT,
+                DEFAULT_LLM_STRUCTURED_OUTPUT_IN_PROMPT,
             ),
             llm_send_bank_as_user=os.getenv(ENV_LLM_SEND_BANK_AS_USER, str(DEFAULT_LLM_SEND_BANK_AS_USER)).lower()
             in ("true", "1"),
@@ -5643,10 +5630,6 @@ class HindsightConfig:
                 os.getenv(ENV_MENTAL_MODEL_DELTA_GATE_MAX_MEMORIES),
                 DEFAULT_MENTAL_MODEL_DELTA_GATE_MAX_MEMORIES,
             ),
-            reflect_prompt_cache_enabled=os.getenv(
-                ENV_REFLECT_PROMPT_CACHE_ENABLED, str(DEFAULT_REFLECT_PROMPT_CACHE_ENABLED)
-            ).lower()
-            in ("1", "true", "yes", "on"),
             reflect_max_context_tokens=int(
                 os.getenv(ENV_REFLECT_MAX_CONTEXT_TOKENS, str(DEFAULT_REFLECT_MAX_CONTEXT_TOKENS))
             ),

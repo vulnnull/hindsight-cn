@@ -66,10 +66,6 @@ class LLMToolCall(BaseModel):
     id: str = Field(description="Unique identifier for this tool call")
     name: str = Field(description="Name of the tool to call")
     arguments: dict[str, Any] = Field(description="Arguments to pass to the tool")
-    thought_signature: str | None = Field(
-        default=None,
-        description="Opaque token required by Gemini 3.1+ thinking models to preserve thought context across turns",
-    )
 
 
 class LLMToolCallResult(BaseModel):
@@ -303,6 +299,28 @@ class RecallScores(BaseModel):
     keyword: float | None = Field(
         default=None,
         description="Keyword/full-text (BM25) score (>= 0, unbounded). None if this result was not surfaced by keyword search.",
+    )
+
+
+class RerankOptions(BaseModel):
+    """What the decision-model reranker does beyond ordering. Each field left unset (null) uses the
+    bank/global config; neither has any effect unless a decision model is set up for recall."""
+
+    prune: bool | None = Field(
+        default=None,
+        description=(
+            "Drop the results the decision model judges no help to the query, instead of only ranking them "
+            "last. Costs no extra request. When omitted, uses the bank/global recall_decision_model_prune "
+            "config (false unless configured)."
+        ),
+    )
+    dedup: bool | None = Field(
+        default=None,
+        description=(
+            "Drop a result that repeats a better-ranked one, so the same fact comes back once. Costs one "
+            "more decision-model request after the ranking one. When omitted, uses the bank/global "
+            "recall_decision_model_dedup config (false unless configured)."
+        ),
     )
 
 
