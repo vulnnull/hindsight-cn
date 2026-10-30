@@ -125,9 +125,11 @@ from .llm_interface import ProviderAuthError, ProviderContentPolicyError, Provid
 from .llm_trace import (
     LLMRequestEntry,
     LLMRequestListResponse,
+    LLMRequestSeriesSums,
     LLMRequestStatsBucket,
     LLMRequestStatsResponse,
     LLMRequestTokenSums,
+    LLMStatsSplit,
     LLMTraceRecorder,
     call_type_clause,
     current_trace_context,
@@ -964,6 +966,51 @@ def _build_llm(
         return base
     extra = [_member_to_llm(m, config, defaults) for m in members]
     return MultiLLMProvider([base, *extra], strategy)
+
+
+async def verify_llm_connections(configs: "list[tuple[str, LLMConfig | MultiLLMProvider]]") -> None:
+    """Probe each startup LLM config, fail-open and bounded (#1166, #6136).
+
+    The probes run in parallel and each is capped at _LLM_PROBE_TIMEOUT_SECONDS:
+    a busy backend that queues the probe behind long jobs must not hold startup
+    for the whole model-init budget (and then fail it), since a failed probe only
+    warns anyway. A multi-LLM chain is probed member by member, so a slow failover
+    member never hides a healthy primary.
+
+    One probe per distinct provider/model/endpoint, deduped after chains are
+    expanded: an operation whose model is already queued (as a plain config or as a
+    chain member) adds nothing, while the same model on a second host (a common
+    failover setup) is still probed. Deduping chains by their primary, as before, skipped a chain's
+    failover members whenever another config shared that primary.
+    """
+
+    async def verify(config_name: str, llm_config: LLMConfig) -> None:
+        try:
+            await asyncio.wait_for(llm_config.verify_connection(), timeout=_LLM_PROBE_TIMEOUT_SECONDS)
+        except Exception as e:
+            reason = f"no answer within {_LLM_PROBE_TIMEOUT_SECONDS:g}s" if isinstance(e, TimeoutError) else str(e)
+            logger.warning(
+                "LLM connection verification failed for '%s' config: %s. "
+                "Server will start but LLM-dependent operations may fail "
+                "until the provider is available.",
+                config_name,
+                reason,
+            )
+
+    probes: list[tuple[str, LLMConfig]] = []
+    seen: set[tuple[str | None, str | None, str | None]] = set()
+    for name, cfg in configs:
+        members = (
+            [(f"{name} ({m.provider}/{m.model})", m) for m in cfg.members]
+            if isinstance(cfg, MultiLLMProvider)
+            else [(name, cfg)]
+        )
+        for probe_name, member in members:
+            key = (member.provider, member.model, member.base_url)
+            if key not in seen:
+                seen.add(key)
+                probes.append((probe_name, member))
+    await asyncio.gather(*(verify(name, cfg) for name, cfg in probes))
 
 
 async def validate_retain_batch_support(retain_llm_config: "LLMConfig | MultiLLMProvider", config: ConfigLike) -> None:
@@ -3104,6 +3151,16 @@ class MemoryEngine(MemoryEngineInterface):
         # more expensive for the text-only chunks that are the vast majority.
         if config.vlm_provider or config.vlm_model or config.vlm_api_key or config.vlm_base_url:
             vlm_provider = config.vlm_provider or retain_provider
+            # Each HINDSIGHT_API_VLM_* knob overrides its retain value. A vision
+            # model rarely wants the extraction model's settings: a small text
+            # model at `xhigh` made every image call run the vision model at
+            # `xhigh` too, past the retain timeout (#6202).
+            vlm_call_defaults = _LLMCallDefaults(
+                **{
+                    field: retain_value if (vlm_value := getattr(config, f"vlm_{field}")) is None else vlm_value
+                    for field, retain_value in retain_call_defaults.as_kwargs().items()
+                }
+            )
             _vlm_base_llm = LLMConfig(
                 provider=vlm_provider,
                 api_key=config.vlm_api_key or retain_api_key,
@@ -3116,10 +3173,14 @@ class MemoryEngine(MemoryEngineInterface):
                     or (_provider_default_base_url(vlm_provider) if config.vlm_provider else retain_base_url)
                 ),
                 model=config.vlm_model or retain_model,
-                reasoning_effort=config.retain_llm_reasoning_effort or config.llm_reasoning_effort,
-                extra_body=config.retain_llm_extra_body or config.llm_extra_body,
+                reasoning_effort=(
+                    config.vlm_reasoning_effort or config.retain_llm_reasoning_effort or config.llm_reasoning_effort
+                ),
+                extra_body=config.vlm_extra_body or config.retain_llm_extra_body or config.llm_extra_body,
                 default_headers=config.llm_default_headers,
-                cache_affinity=config.retain_llm_cache_affinity or config.llm_cache_affinity,
+                cache_affinity=config.vlm_cache_affinity
+                or config.retain_llm_cache_affinity
+                or config.llm_cache_affinity,
                 ollama_num_ctx=config.llm_ollama_num_ctx,
                 bedrock_service_tier=config.llm_bedrock_service_tier,
                 structured_output_in_prompt=config.llm_structured_output_in_prompt,
@@ -3132,7 +3193,7 @@ class MemoryEngine(MemoryEngineInterface):
                 vertexai_project_id=config.llm_vertexai_project_id,
                 vertexai_region=config.llm_vertexai_region,
                 vertexai_service_account_key=config.llm_vertexai_service_account_key,
-                **retain_call_defaults.as_kwargs(),
+                **vlm_call_defaults.as_kwargs(),
             )
             # Deliberately NOT run through `_build_llm`: that would make the
             # vision model member 0 of the *retain* chain and append the retain
@@ -6148,34 +6209,15 @@ class MemoryEngine(MemoryEngineInterface):
             provider becomes available (e.g. after a quota reset).
             """
             if not self._skip_llm_verification:
-                # One probe per distinct provider/model: an operation whose config
-                # matches one already queued adds nothing.
-                configs_to_verify: list[tuple[str, LLMConfig | MultiLLMProvider]] = []
-                seen: set[tuple[str | None, str | None]] = set()
-                for config_name, llm_config in (
-                    ("default", self._llm_config),
-                    ("retain", self._retain_llm_config),
-                    ("reflect", self._reflect_llm_config),
-                    ("consolidation", self._consolidation_llm_config),
-                    ("mental model refresh", self._mental_model_refresh_llm_config),
-                ):
-                    key = (llm_config.provider, llm_config.model)
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    configs_to_verify.append((config_name, llm_config))
-
-                for config_name, llm_config in configs_to_verify:
-                    try:
-                        await llm_config.verify_connection()
-                    except Exception as e:
-                        logger.warning(
-                            "LLM connection verification failed for '%s' config: %s. "
-                            "Server will start but LLM-dependent operations may fail "
-                            "until the provider is available.",
-                            config_name,
-                            e,
-                        )
+                await verify_llm_connections(
+                    [
+                        ("default", self._llm_config),
+                        ("retain", self._retain_llm_config),
+                        ("reflect", self._reflect_llm_config),
+                        ("consolidation", self._consolidation_llm_config),
+                        ("mental model refresh", self._mental_model_refresh_llm_config),
+                    ]
+                )
 
                 # Validate batch API compatibility: if retain_batch_enabled is
                 # set, the retain LLM configuration must actually be able to
@@ -6209,9 +6251,9 @@ class MemoryEngine(MemoryEngineInterface):
         except TimeoutError as e:
             raise RuntimeError(
                 f"Model/connection initialization did not complete within "
-                f"{init_timeout:g}s. A model load (embeddings/cross-encoder) or LLM "
-                f"verification is likely blocked — e.g. an offline model download or "
-                f"an unreachable provider. Increase {ENV_MODEL_INIT_TIMEOUT} if the "
+                f"{init_timeout:g}s. A model load (embeddings/cross-encoder) is "
+                f"likely blocked — e.g. an offline model download or an unreachable "
+                f"embeddings/reranker provider. Increase {ENV_MODEL_INIT_TIMEOUT} if the "
                 f"first-time model download legitimately needs more time."
             ) from e
 
@@ -11352,7 +11394,8 @@ class MemoryEngine(MemoryEngineInterface):
         request_context: "RequestContext",
     ) -> dict[str, int]:
         """
-        Delete a document and all its associated memory units and links.
+        Delete a document and all its associated memory units and links, plus its LLM request
+        history when ``HINDSIGHT_API_LLM_TRACE_DELETE_WITH_DOCUMENT`` is on.
 
         Args:
             document_id: Document ID to delete
@@ -11369,6 +11412,18 @@ class MemoryEngine(MemoryEngineInterface):
             )
             await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         await self._require_writable(bank_id, request_context, document_id=document_id)
+        # Opt-in (#6098): the prompts and answers that quote this document go with it instead of
+        # waiting for the retention sweep. PG-only table.
+        from .llm_trace import _llm_requests_persistable  # noqa: PLC0415
+
+        delete_traces = get_config().llm_trace_delete_with_document and _llm_requests_persistable()
+        if delete_traces:
+            # The recorder holds new rows for up to 0.5s before writing them: a retain answered just
+            # before this delete would otherwise land its row after the DELETE below and outlive the
+            # document. This only covers this process; a worker's in-flight calls can still land
+            # late, and the retention sweep removes those. The memory-id patches that follow a run
+            # need no fence: they UPDATE rows already written, so a late one finds nothing to patch.
+            await self._llm_recorder.flush()
         backend = await self._get_backend()
         invalidated_obs = 0
         async with acquire_with_retry(backend) as conn:
@@ -11424,6 +11479,25 @@ class MemoryEngine(MemoryEngineInterface):
                 )
                 deleted = _deleted_doc.deleted
                 file_storage_key = _deleted_doc.file_storage_key
+
+                # Its retain runs, and every run that created or consumed one of its memories,
+                # consolidation included.
+                if deleted and delete_traces:
+                    from .llm_trace import llm_requests_locked_in_id_order  # noqa: PLC0415
+
+                    _llm_table = fq_table("llm_requests")
+                    _traced = llm_requests_locked_in_id_order(
+                        _llm_table,
+                        "bank_id = $1 AND (metadata->>'document_id' = $2"
+                        " OR metadata->'memory_ids' ?| $3::text[]"
+                        " OR metadata->'source_memory_ids' ?| $3::text[])",
+                    )
+                    await conn.execute(
+                        f"{_traced} DELETE FROM {_llm_table} t USING target WHERE t.id = target.id",
+                        bank_id,
+                        document_id,
+                        [str(u) for u in unit_ids],
+                    )
 
                 # Invalidate observations referencing these (now-deleted) memories
                 if unit_ids:
@@ -12217,11 +12291,17 @@ class MemoryEngine(MemoryEngineInterface):
                             # The bank's request history holds its prompts and model output (memory
                             # text included) and has no FK to banks, so it goes with the bank rather
                             # than waiting for the retention sweep (#5839). PG-only table.
-                            from .llm_trace import _llm_requests_persistable  # noqa: PLC0415
+                            from .llm_trace import (  # noqa: PLC0415
+                                _llm_requests_persistable,
+                                llm_requests_locked_in_id_order,
+                            )
 
                             if _llm_requests_persistable():
+                                _llm_table = fq_table("llm_requests")
                                 await conn.execute(
-                                    f"DELETE FROM {fq_table('llm_requests')} WHERE bank_id = $1", bank_id
+                                    f"{llm_requests_locked_in_id_order(_llm_table, 'bank_id = $1')} "
+                                    f"DELETE FROM {_llm_table} t USING target WHERE t.id = target.id",
+                                    bank_id,
                                 )
                             # Delete the bank profile and retrieve internal_id for HNSW index cleanup
                             internal_id = await conn.fetchval(
@@ -14214,6 +14294,14 @@ class MemoryEngine(MemoryEngineInterface):
             metadata=conn.parse_json(row["metadata"]) if row["metadata"] is not None else {},
         )
 
+    @staticmethod
+    def _llm_trace_retention_days() -> int | None:
+        """Days the maintenance sweep keeps LLM requests, or None when it never deletes them."""
+        cfg = get_config()
+        if cfg.retention_sweep_interval_seconds > 0 and cfg.llm_trace_enabled and cfg.llm_trace_retention_days > 0:
+            return cfg.llm_trace_retention_days
+        return None
+
     async def list_llm_requests(
         self,
         bank_id: str,
@@ -14255,7 +14343,14 @@ class MemoryEngine(MemoryEngineInterface):
             # llm_requests is PostgreSQL-only (its migration omits the Oracle slot;
             # LLMTraceRecorder skips writes on Oracle). There is nothing to read, so
             # return an empty page rather than querying a non-existent table (ORA-00942).
-            return LLMRequestListResponse(bank_id=bank_id, total=0, limit=limit, offset=offset, items=[])
+            return LLMRequestListResponse(
+                bank_id=bank_id,
+                total=0,
+                limit=limit,
+                offset=offset,
+                items=[],
+                retention_days=self._llm_trace_retention_days(),
+            )
 
         where_clauses = ["bank_id = $1"]
         params: list[Any] = [bank_id]
@@ -14353,7 +14448,14 @@ class MemoryEngine(MemoryEngineInterface):
 
             items = [self._llm_request_entry(conn, row) for row in rows]
 
-        return LLMRequestListResponse(bank_id=bank_id, total=total, limit=limit, offset=offset, items=items)
+        return LLMRequestListResponse(
+            bank_id=bank_id,
+            total=total,
+            limit=limit,
+            offset=offset,
+            items=items,
+            retention_days=self._llm_trace_retention_days(),
+        )
 
     async def llm_request_stats(
         self,
@@ -14363,8 +14465,9 @@ class MemoryEngine(MemoryEngineInterface):
         operation: str | None = None,
         call_type: str | None = None,
         period: str = "7d",
+        split_by: LLMStatsSplit | None = None,
     ) -> LLMRequestStatsResponse | None:
-        """LLM request counts and token sums grouped by day, for charting.
+        """LLM request counts and token sums by hour (1d) or by day (7d, 30d), for charting.
 
         Returns None when the bank does not exist (mapped to 404 by the HTTP
         layer). Auth/tenant resolution happen in ``get_bank_profile``.
@@ -14377,7 +14480,11 @@ class MemoryEngine(MemoryEngineInterface):
         now = datetime.now(timezone.utc)
         trunc = "day"
         if period == "1d":
-            start = now - timedelta(days=1)
+            # Last 24 hours by hour: with the default 1-day retention this is the
+            # only period that shows more than one point. Start on the hour so it
+            # is 24 buckets, not 25 with the first and last labelled the same.
+            trunc = "hour"
+            start = now.replace(minute=0, second=0, microsecond=0) - timedelta(hours=23)
         elif period == "30d":
             start = now - timedelta(days=30)
         else:  # 7d default
@@ -14386,7 +14493,12 @@ class MemoryEngine(MemoryEngineInterface):
         if _is_oracle():
             # llm_requests is PostgreSQL-only — no rows on Oracle (see list_llm_requests).
             return LLMRequestStatsResponse(
-                bank_id=bank_id, period=period, trunc=trunc, start=start.isoformat(), buckets=[]
+                bank_id=bank_id,
+                period=period,
+                trunc=trunc,
+                start=start.isoformat(),
+                buckets=[],
+                retention_days=self._llm_trace_retention_days(),
             )
 
         where_clauses = ["bank_id = $1", "started_at >= $2"]
@@ -14401,12 +14513,16 @@ class MemoryEngine(MemoryEngineInterface):
         where_sql = " AND ".join(where_clauses)
         table = fq_table("llm_requests")
 
+        # split_by is a Literal, so interpolating the column name is safe.
+        series_sql = f"COALESCE({split_by}, 'unknown')" if split_by else "''"
+
         backend = await self._get_backend()
         async with acquire_with_retry(backend) as conn:
             rows = await conn.fetch(
                 f"""
                 SELECT date_trunc('{trunc}', started_at) AS bucket,
                        status,
+                       {series_sql} AS series,
                        COUNT(*) AS count,
                        COALESCE(SUM(input_tokens), 0) AS input_tokens,
                        COALESCE(SUM(output_tokens), 0) AS output_tokens,
@@ -14415,7 +14531,7 @@ class MemoryEngine(MemoryEngineInterface):
                        COALESCE(SUM(total_tokens), 0) AS total_tokens
                 FROM {table}
                 WHERE {where_sql}
-                GROUP BY bucket, status
+                GROUP BY bucket, status, series
                 ORDER BY bucket ASC
                 """,
                 *params,
@@ -14426,14 +14542,21 @@ class MemoryEngine(MemoryEngineInterface):
         # typed models below.
         statuses_by_bucket: dict[str, dict[str, int]] = {}
         tokens_by_bucket: dict[str, dict[str, int]] = {}
+        series_by_bucket: dict[str, dict[str, LLMRequestSeriesSums]] = {}
         order: list[str] = []
         for row in rows:
             key = row["bucket"].isoformat()
             if key not in statuses_by_bucket:
                 statuses_by_bucket[key] = {}
                 tokens_by_bucket[key] = {"input": 0, "output": 0, "cached": 0, "thoughts": 0, "total": 0}
+                series_by_bucket[key] = {}
                 order.append(key)
-            statuses_by_bucket[key][row["status"]] = row["count"]
+            statuses = statuses_by_bucket[key]
+            statuses[row["status"]] = statuses.get(row["status"], 0) + row["count"]
+            if split_by:
+                sums = series_by_bucket[key].setdefault(row["series"], LLMRequestSeriesSums(calls=0, tokens=0))
+                sums.calls += row["count"]
+                sums.tokens += row["total_tokens"] + row["thoughts_tokens"]
             tok = tokens_by_bucket[key]
             tok["input"] += row["input_tokens"]
             tok["output"] += row["output_tokens"]
@@ -14446,12 +14569,14 @@ class MemoryEngine(MemoryEngineInterface):
             period=period,
             trunc=trunc,
             start=start.isoformat(),
+            retention_days=self._llm_trace_retention_days(),
             buckets=[
                 LLMRequestStatsBucket(
                     time=k,
                     statuses=statuses_by_bucket[k],
                     total=sum(statuses_by_bucket[k].values()),
                     tokens=LLMRequestTokenSums(**tokens_by_bucket[k]),
+                    series=series_by_bucket[k] if split_by else None,
                 )
                 for k in order
             ],

@@ -13,6 +13,7 @@ import sys
 from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 from typing import Any, Literal, Union, cast
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import find_dotenv, load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
@@ -453,6 +454,13 @@ ENV_VLM_PROVIDER = "HINDSIGHT_API_VLM_PROVIDER"
 ENV_VLM_API_KEY = "HINDSIGHT_API_VLM_API_KEY"
 ENV_VLM_MODEL = "HINDSIGHT_API_VLM_MODEL"
 ENV_VLM_BASE_URL = "HINDSIGHT_API_VLM_BASE_URL"
+ENV_VLM_REASONING_EFFORT = "HINDSIGHT_API_VLM_REASONING_EFFORT"
+ENV_VLM_EXTRA_BODY = "HINDSIGHT_API_VLM_EXTRA_BODY"
+ENV_VLM_CACHE_AFFINITY = "HINDSIGHT_API_VLM_CACHE_AFFINITY"
+ENV_VLM_TIMEOUT = "HINDSIGHT_API_VLM_TIMEOUT"
+ENV_VLM_MAX_RETRIES = "HINDSIGHT_API_VLM_MAX_RETRIES"
+ENV_VLM_INITIAL_BACKOFF = "HINDSIGHT_API_VLM_INITIAL_BACKOFF"
+ENV_VLM_MAX_BACKOFF = "HINDSIGHT_API_VLM_MAX_BACKOFF"
 ENV_RETAIN_LLM_MAX_CONCURRENT = "HINDSIGHT_API_RETAIN_LLM_MAX_CONCURRENT"
 ENV_RETAIN_LLM_MAX_RETRIES = "HINDSIGHT_API_RETAIN_LLM_MAX_RETRIES"
 ENV_RETAIN_LLM_INITIAL_BACKOFF = "HINDSIGHT_API_RETAIN_LLM_INITIAL_BACKOFF"
@@ -532,6 +540,7 @@ ENV_EMBEDDINGS_PASSAGE_PREFIX = "HINDSIGHT_API_EMBEDDINGS_PASSAGE_PREFIX"
 ENV_EMBEDDINGS_LOCAL_MODEL = "HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL"
 ENV_EMBEDDINGS_LOCAL_FORCE_CPU = "HINDSIGHT_API_EMBEDDINGS_LOCAL_FORCE_CPU"
 ENV_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE = "HINDSIGHT_API_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE"
+ENV_EMBEDDINGS_LOCAL_MAX_CONCURRENT = "HINDSIGHT_API_EMBEDDINGS_LOCAL_MAX_CONCURRENT"
 ENV_EMBEDDINGS_ONNX_MODEL_ID = "HINDSIGHT_API_EMBEDDINGS_ONNX_MODEL_ID"
 ENV_EMBEDDINGS_ONNX_MODEL_PATH = "HINDSIGHT_API_EMBEDDINGS_ONNX_MODEL_PATH"
 ENV_EMBEDDINGS_ONNX_TOKENIZER_NAME_OR_PATH = "HINDSIGHT_API_EMBEDDINGS_ONNX_TOKENIZER_NAME_OR_PATH"
@@ -554,6 +563,7 @@ ENV_EMBEDDINGS_OPENAI_MODEL = "HINDSIGHT_API_EMBEDDINGS_OPENAI_MODEL"
 ENV_EMBEDDINGS_OPENAI_BASE_URL = "HINDSIGHT_API_EMBEDDINGS_OPENAI_BASE_URL"
 ENV_EMBEDDINGS_OPENAI_BATCH_SIZE = "HINDSIGHT_API_EMBEDDINGS_OPENAI_BATCH_SIZE"
 ENV_EMBEDDINGS_OPENAI_DIMENSIONS = "HINDSIGHT_API_EMBEDDINGS_OPENAI_DIMENSIONS"
+ENV_EMBEDDINGS_OPENAI_EXTRA_BODY = "HINDSIGHT_API_EMBEDDINGS_OPENAI_EXTRA_BODY"
 
 # How many embedding requests a remote provider keeps in flight for one encode()
 # call. Applies to every remote provider, not just one.
@@ -938,6 +948,7 @@ ENV_FILE_CONVERSION_MAX_BATCH_SIZE = "HINDSIGHT_API_FILE_CONVERSION_MAX_BATCH_SI
 ENV_ENABLE_FILE_UPLOAD_API = "HINDSIGHT_API_ENABLE_FILE_UPLOAD_API"
 ENV_FILE_DELETE_AFTER_RETAIN = "HINDSIGHT_API_FILE_DELETE_AFTER_RETAIN"
 ENV_STORE_DOCUMENT_TEXT = "HINDSIGHT_API_STORE_DOCUMENT_TEXT"
+ENV_DEFAULT_TIMEZONE = "HINDSIGHT_API_DEFAULT_TIMEZONE"
 
 # Document transfer (export/import documents between banks without re-running the LLM)
 ENV_ENABLE_DOCUMENT_EXPORT_API = "HINDSIGHT_API_ENABLE_DOCUMENT_EXPORT_API"
@@ -1179,6 +1190,7 @@ ENV_LLM_TRACE_SCOPES = "HINDSIGHT_API_LLM_TRACE_SCOPES"
 ENV_LLM_TRACE_EXCLUDE_SCOPES = "HINDSIGHT_API_LLM_TRACE_EXCLUDE_SCOPES"
 ENV_LLM_TRACE_RETENTION_DAYS = "HINDSIGHT_API_LLM_TRACE_RETENTION_DAYS"
 ENV_LLM_TRACE_MAX_CHARS = "HINDSIGHT_API_LLM_TRACE_MAX_CHARS"
+ENV_LLM_TRACE_DELETE_WITH_DOCUMENT = "HINDSIGHT_API_LLM_TRACE_DELETE_WITH_DOCUMENT"
 
 # Background maintenance settings
 ENV_CONSOLIDATION_RECONCILE_INTERVAL_SECONDS = "HINDSIGHT_API_CONSOLIDATION_RECONCILE_INTERVAL_SECONDS"
@@ -1325,6 +1337,7 @@ DEFAULT_EMBEDDINGS_PROVIDER = "local"
 DEFAULT_EMBEDDINGS_LOCAL_MODEL = "BAAI/bge-small-en-v1.5"
 DEFAULT_EMBEDDINGS_LOCAL_FORCE_CPU = False  # Force CPU mode for local embeddings
 DEFAULT_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE = False  # Security: disabled by default, required for some models
+DEFAULT_EMBEDDINGS_LOCAL_MAX_CONCURRENT = 4  # Threads that run the local model; each keeps its own native pools (#6110)
 DEFAULT_EMBEDDINGS_ONNX_MODEL_ID = "intfloat/multilingual-e5-small"
 DEFAULT_EMBEDDINGS_ONNX_FILE = "onnx/model.onnx"
 DEFAULT_EMBEDDINGS_ONNX_MAX_TOKENS = 512
@@ -1908,6 +1921,7 @@ DEFAULT_FILE_CONVERSION_MAX_BATCH_SIZE = 10  # Max files per batch upload
 DEFAULT_ENABLE_FILE_UPLOAD_API = True  # Enable file upload endpoint
 DEFAULT_FILE_DELETE_AFTER_RETAIN = True  # Delete file bytes after retain (saves storage)
 DEFAULT_STORE_DOCUMENT_TEXT = True  # Persist raw source text in documents.original_text / chunks.chunk_text
+DEFAULT_DEFAULT_TIMEZONE = "UTC"  # IANA zone a retain timestamp with no UTC offset is read in
 
 # Document transfer defaults (export/import enabled by default; gated independently)
 DEFAULT_ENABLE_DOCUMENT_EXPORT_API = True
@@ -2201,6 +2215,7 @@ DEFAULT_LLM_TRACE_SCOPES = ""  # Empty = trace all call scopes
 DEFAULT_LLM_TRACE_EXCLUDE_SCOPES = ""  # Empty = exclude nothing
 DEFAULT_LLM_TRACE_RETENTION_DAYS = 1  # Retain trace rows for 1 day by default
 DEFAULT_LLM_TRACE_MAX_CHARS = 50000  # Truncate stored input/output beyond this many chars
+DEFAULT_LLM_TRACE_DELETE_WITH_DOCUMENT = False  # Keep a deleted document's trace rows until the retention sweep
 
 # Background maintenance defaults
 # Periodic reconcile that re-schedules consolidation for banks with eligible-but-unscheduled
@@ -2524,6 +2539,19 @@ def _validate_extraction_mode(mode: str) -> str:
         )
         return DEFAULT_RETAIN_EXTRACTION_MODE
     return mode_lower
+
+
+def _validate_default_timezone(name: str) -> str:
+    """Return ``name`` if it is a known IANA zone, else fall back to UTC with a warning."""
+    try:
+        ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        logger.warning(
+            f"Invalid {ENV_DEFAULT_TIMEZONE} '{name}', must be an IANA zone name such as 'Europe/Rome'. "
+            f"Defaulting to '{DEFAULT_DEFAULT_TIMEZONE}'."
+        )
+        return DEFAULT_DEFAULT_TIMEZONE
+    return name
 
 
 def _validate_recall_budget_function(function: str) -> str:
@@ -3420,6 +3448,13 @@ class HindsightConfig:
     vlm_api_key: str | None
     vlm_model: str | None
     vlm_base_url: str | None
+    vlm_reasoning_effort: str | None
+    vlm_extra_body: dict | None
+    vlm_cache_affinity: str | None
+    vlm_timeout: float | None
+    vlm_max_retries: int | None
+    vlm_initial_backoff: float | None
+    vlm_max_backoff: float | None
     retain_llm_max_concurrent: int | None
     retain_llm_max_retries: int | None
     retain_llm_initial_backoff: float | None
@@ -3487,6 +3522,7 @@ class HindsightConfig:
     embeddings_local_model: str
     embeddings_local_force_cpu: bool
     embeddings_local_trust_remote_code: bool
+    embeddings_local_max_concurrent: int
     embeddings_onnx_model_id: str
     embeddings_onnx_model_path: str | None
     embeddings_onnx_tokenizer_name_or_path: str | None
@@ -3726,6 +3762,7 @@ class HindsightConfig:
     enable_file_upload_api: bool
     file_delete_after_retain: bool
     store_document_text: bool  # When False, store NULL original_text / empty chunk_text
+    default_timezone: str  # IANA zone for retain times that carry no UTC offset
     enable_document_export_api: bool
     enable_document_import_api: bool
 
@@ -3903,6 +3940,7 @@ class HindsightConfig:
     llm_trace_exclude_scopes: list[str]  # Call scopes never traced; wins over the allowlist
     llm_trace_retention_days: int  # -1 = keep forever, >0 = delete after N days
     llm_trace_max_chars: int  # Truncate stored input/output beyond this many chars
+    llm_trace_delete_with_document: bool  # Deleting a document also deletes the trace rows that quote it
 
     # Background maintenance configuration (static - server-level only)
     # Interval for the periodic sweep that re-schedules consolidation for banks with
@@ -3931,6 +3969,7 @@ class HindsightConfig:
     embeddings_max_concurrent_requests: int = DEFAULT_EMBEDDINGS_MAX_CONCURRENT_REQUESTS
     embeddings_gemini_batch_size: int = DEFAULT_EMBEDDINGS_GEMINI_BATCH_SIZE
     embeddings_openai_dimensions: int | None = None
+    embeddings_openai_extra_body: dict | None = None
     embeddings_query_prefix: str = DEFAULT_EMBEDDINGS_QUERY_PREFIX
     embeddings_passage_prefix: str = DEFAULT_EMBEDDINGS_PASSAGE_PREFIX
     embeddings_zeroentropy_api_key: str | None = None
@@ -4135,6 +4174,9 @@ class HindsightConfig:
         # Per-bank so a data-minimizing bank can keep only derived facts while
         # others retain the raw source for expansion/re-extraction.
         "store_document_text",
+        # The zone a retain timestamp with no UTC offset is read in. Per bank, since
+        # one server can hold banks for users in different zones.
+        "default_timezone",
         # Retention settings (behavioral)
         "retain_chunk_size",
         "retain_structured_chunk_size",
@@ -4695,6 +4737,13 @@ class HindsightConfig:
             vlm_api_key=os.getenv(ENV_VLM_API_KEY) or None,
             vlm_model=os.getenv(ENV_VLM_MODEL) or _env_default_model(ENV_VLM_PROVIDER),
             vlm_base_url=os.getenv(ENV_VLM_BASE_URL) or None,
+            vlm_reasoning_effort=os.getenv(ENV_VLM_REASONING_EFFORT) or None,
+            vlm_extra_body=json.loads(os.getenv(ENV_VLM_EXTRA_BODY, "null")),
+            vlm_cache_affinity=os.getenv(ENV_VLM_CACHE_AFFINITY) or None,
+            vlm_timeout=_env_float(ENV_VLM_TIMEOUT),
+            vlm_max_retries=_env_int(ENV_VLM_MAX_RETRIES),
+            vlm_initial_backoff=_env_float(ENV_VLM_INITIAL_BACKOFF),
+            vlm_max_backoff=_env_float(ENV_VLM_MAX_BACKOFF),
             fireworks_account_id=os.getenv(ENV_FIREWORKS_ACCOUNT_ID) or None,
             fireworks_batch_base_url=os.getenv(ENV_FIREWORKS_BATCH_BASE_URL) or DEFAULT_FIREWORKS_BATCH_BASE_URL,
             fireworks_batch_max_wait_seconds=int(
@@ -4783,6 +4832,9 @@ class HindsightConfig:
                 ENV_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE, str(DEFAULT_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE)
             ).lower()
             in ("true", "1"),
+            embeddings_local_max_concurrent=int(
+                os.getenv(ENV_EMBEDDINGS_LOCAL_MAX_CONCURRENT, str(DEFAULT_EMBEDDINGS_LOCAL_MAX_CONCURRENT))
+            ),
             embeddings_onnx_model_id=os.getenv(ENV_EMBEDDINGS_ONNX_MODEL_ID, DEFAULT_EMBEDDINGS_ONNX_MODEL_ID),
             embeddings_onnx_model_path=os.getenv(ENV_EMBEDDINGS_ONNX_MODEL_PATH) or None,
             embeddings_onnx_tokenizer_name_or_path=os.getenv(ENV_EMBEDDINGS_ONNX_TOKENIZER_NAME_OR_PATH) or None,
@@ -4858,6 +4910,7 @@ class HindsightConfig:
                 ENV_EMBEDDINGS_OPENAI_DIMENSIONS,
                 os.getenv(ENV_EMBEDDINGS_OPENAI_DIMENSIONS),
             ),
+            embeddings_openai_extra_body=json.loads(os.getenv(ENV_EMBEDDINGS_OPENAI_EXTRA_BODY, "null")),
             embeddings_query_prefix=os.getenv(ENV_EMBEDDINGS_QUERY_PREFIX, DEFAULT_EMBEDDINGS_QUERY_PREFIX),
             embeddings_passage_prefix=os.getenv(ENV_EMBEDDINGS_PASSAGE_PREFIX, DEFAULT_EMBEDDINGS_PASSAGE_PREFIX),
             embeddings_max_retries=_parse_non_negative_int(
@@ -5433,6 +5486,7 @@ class HindsightConfig:
             ).lower()
             == "true",
             store_document_text=os.getenv(ENV_STORE_DOCUMENT_TEXT, str(DEFAULT_STORE_DOCUMENT_TEXT)).lower() == "true",
+            default_timezone=_validate_default_timezone(os.getenv(ENV_DEFAULT_TIMEZONE, DEFAULT_DEFAULT_TIMEZONE)),
             enable_document_export_api=os.getenv(
                 ENV_ENABLE_DOCUMENT_EXPORT_API, str(DEFAULT_ENABLE_DOCUMENT_EXPORT_API)
             ).lower()
@@ -5738,6 +5792,10 @@ class HindsightConfig:
                 os.getenv(ENV_LLM_TRACE_RETENTION_DAYS, str(DEFAULT_LLM_TRACE_RETENTION_DAYS))
             ),
             llm_trace_max_chars=int(os.getenv(ENV_LLM_TRACE_MAX_CHARS, str(DEFAULT_LLM_TRACE_MAX_CHARS))),
+            llm_trace_delete_with_document=os.getenv(
+                ENV_LLM_TRACE_DELETE_WITH_DOCUMENT, str(DEFAULT_LLM_TRACE_DELETE_WITH_DOCUMENT)
+            ).lower()
+            == "true",
             # Background maintenance configuration (static, server-level only)
             consolidation_reconcile_interval_seconds=int(
                 os.getenv(

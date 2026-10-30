@@ -671,7 +671,9 @@
     "reflectMentalModelsMaxTokensLabel": "知识页最大令牌数",
     "reflectMentalModelsMaxTokensDescription": "反思中知识页检索完整返回的页面令牌预算。最匹配的页面始终完整返回；其余放不下的以模型可打开的简短摘录返回。",
     "reflectMentalModelsMaxTokensChip": "{tokens} 知识页令牌",
-    "reflectMentalModelsMaxTokensChipDefault": "默认知识页令牌"
+    "reflectMentalModelsMaxTokensChipDefault": "默认知识页令牌",
+    "defaultTimezoneLabel": "默认时区",
+    "defaultTimezoneDescription": "没有 UTC 偏移的 retain 时间戳或内容中的时间按此时区解读。IANA 名称，如 Europe/Rome。"
   },
   "bankOperations": {
     "title": "后台操作",
@@ -1593,7 +1595,18 @@
     "callTypeRerank": "重排序",
     "callTypeDecision": "决策模型",
     "inputCountTexts": "文本",
-    "inputCountDocuments": "文档"
+    "inputCountDocuments": "文档",
+    "retentionNote": "仅保留最近 {days} 天",
+    "summaryCalls": "次调用",
+    "summaryTokens": "个令牌",
+    "periodLabel": "时间段",
+    "showLabel": "显示",
+    "linesLabel": "曲线",
+    "splitNone": "全部",
+    "splitModel": "按模型",
+    "splitOperation": "按操作",
+    "splitTokenType": "按令牌类型",
+    "runningTotal": "累计"
   },
   "observationHistory": {
     "unchanged": "未更改",
