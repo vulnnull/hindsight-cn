@@ -581,10 +581,11 @@ class PostgreSQLOps(DataAccessOps):
         queue_table: str,
         entities_table: str,
         ue_table: str,
+        units_table: str,
         bank_id: str,
         unit_ids: list,
     ) -> int:
-        # Three statements in the caller's transaction, deliberately not one
+        # Four statements in the caller's transaction, deliberately not one
         # (#6175). This used to be a single statement: the queue INSERT as a
         # data-modifying CTE, feeding a FOR UPDATE scan of the entities and the
         # UPDATE of their mention_count. When a concurrent transaction has just
@@ -601,6 +602,27 @@ class PostgreSQLOps(DataAccessOps):
         # rows go, and the join they'd have to write is this one. The read is
         # aggregated so one scan serves both halves — the queue insert wants the
         # ids, the mention release wants the counts.
+        #
+        # The memories are locked before their postings are read (#6229). Their
+        # postings are only ever removed by a transaction retiring the memory,
+        # and every one of those comes through here, so holding the memory row
+        # means no one else can change its postings until this commits. Without
+        # it, two transactions retiring one memory (two deletes, a delete racing
+        # a bulk delete) both counted its postings and both debited them, and
+        # two edits replacing its entities had the second clear postings the
+        # first had just written without counting them. Now the second waits
+        # here, and its read below — a new statement — sees what the first left.
+        #
+        # Ascending id, FOR NO KEY UPDATE: the order and strength the
+        # stale-observation sweep locks these same rows with, which runs before
+        # this on every path. NO KEY UPDATE still lets the relinker's FK
+        # KEY SHARE through while it holds queue rows our caller may enqueue
+        # next (see delete_stale_observations). Memory rows come first, then
+        # queue rows, then entity rows.
+        await conn.execute(
+            f"SELECT id FROM {units_table} WHERE id = ANY($1::uuid[]) ORDER BY id FOR NO KEY UPDATE",
+            unit_ids,
+        )
         doomed = await conn.fetch(
             f"""
             SELECT entity_id, COUNT(*) AS n

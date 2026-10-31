@@ -2286,7 +2286,10 @@
     "advancedIdle": "运行请求以查看结果和原始响应。",
     "downloadButton": "下载",
     "downloadPdf": "PDF",
-    "downloadMarkdown": "Markdown"
+    "downloadMarkdown": "Markdown",
+    "evidenceImages": "证据中的图片",
+    "endpointPage": "页面",
+    "advancedMentalModelId": "知识摘要 ID"
   },
   "home": {
     "title": "Home",

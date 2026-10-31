@@ -3308,7 +3308,11 @@ class MentalModelResponse(BaseModel):
     )
     reflect_response: dict | None = Field(
         default=None,
-        description="Full reflect API response payload including based_on facts and observations",
+        description=(
+            "Full reflect API response payload including based_on facts and observations. On a "
+            "single-model read, each world/experience/observation entry in based_on also carries "
+            "`attachments`: the retained images and files that memory was extracted from."
+        ),
     )
     is_stale: bool | None = Field(
         default=None,
@@ -6183,6 +6187,23 @@ def _register_routes(app: FastAPI):
             )
             if mental_model is None:
                 raise HTTPException(status_code=404, detail=f"Mental model '{mental_model_id}' not found")
+
+            # The refresh stores its evidence by id only. Resolve the attachments
+            # behind those memories on read, the same per-fact edge reflect's
+            # based_on carries, so a page can show the images it was built from
+            # without storing a copy of them.
+            based_on = (mental_model.get("reflect_response") or {}).get("based_on")
+            if isinstance(based_on, dict):
+                await _attach_to_memories(
+                    app.state.memory,
+                    bank_id,
+                    [
+                        fact
+                        for fact_type in ("world", "experience", "observation")
+                        for fact in based_on.get(fact_type) or []
+                    ],
+                    request_context,
+                )
 
             return MentalModelResponse(**mental_model)
         except (AuthenticationError, HTTPException):
