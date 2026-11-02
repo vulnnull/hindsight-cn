@@ -651,6 +651,7 @@ from .cross_encoder import RANK_SCORE_PROVIDERS, CrossEncoderModel, TypeSafeCros
 from .embeddings import Embeddings, create_embeddings_from_env
 from .interface import BankConfigState, BankTemplateImportWrite, MemoryEngineInterface
 from .memories import sql_memories
+from .memories.base import watermark_may_postdate as _may_need_refresh
 from .page_markdown import EMPTY_PAGE_NOTICE
 from .schema import _is_oracle, fq_table
 from .search.decision_reranker import PROVIDER_NAME as DECISION_MODEL_RERANKER
@@ -728,6 +729,8 @@ from .reflect.tools import (
 )
 from .remote_retry import RetryPolicy, is_transient_remote_error, status_code_of
 from .response_models import (
+    DIRECTIVE_PRIORITY_MAX,
+    DIRECTIVE_PRIORITY_MIN,
     VALID_RECALL_FACT_TYPES,
     Budget,
     ConsolidationStrategiesPreview,
@@ -1800,6 +1803,13 @@ def _recall_scoring_now(question_date: datetime | None) -> datetime:
 # Logger for memory system
 logger = logging.getLogger(__name__)
 
+
+def _check_directive_priority(priority: int) -> None:
+    """Reject a priority the INT column cannot hold, before it reaches the database as a 500."""
+    if not DIRECTIVE_PRIORITY_MIN <= priority <= DIRECTIVE_PRIORITY_MAX:
+        raise ValueError(f"Invalid priority: {priority} is outside {DIRECTIVE_PRIORITY_MIN}..{DIRECTIVE_PRIORITY_MAX}")
+
+
 #: Sentinel for "the store has never seen this page", distinct from a page indexed with no
 #: timestamp — the two must not compare equal or a reconcile would skip a genuinely missing entry.
 _MISSING_FROM_INDEX = object()
@@ -2085,34 +2095,6 @@ def _knowledge_tree_sort_key(row: Any) -> tuple[bool, int, str]:
     """ORDER BY sort_order, name (PostgreSQL ASC: NULL sort_order last), in Python."""
     sort_order = row["sort_order"]
     return (sort_order is None, sort_order or 0, row["name"] or "")
-
-
-def _may_need_refresh(last_refreshed_at: datetime | None, watermark: datetime | None) -> bool:
-    """Cheap half of staleness: rule a model current from the bank watermark alone.
-
-    False is exact — nothing in the bank has been written since the model last
-    read the memories, so nothing in its scope has either, and no scoped query is
-    needed. True means only that *something* was written, possibly outside the
-    model's tags, so it is a signal to go and ask
-    (:func:`_mental_model_stale_scope` plus the store's scoped check), never an
-    answer to report. Surfaces used to report it as "may need refresh" because
-    asking per model was expensive; they now ask the scoped question instead
-    (#3291), and this stays what it always was — a free way to skip it. Every
-    staleness caller runs it first (#4169): the scoped check is bounded by the
-    writes since the model's own watermark, so a model this settles is exactly the
-    one that would have paid the most to be asked.
-    """
-    if last_refreshed_at is None:
-        return True  # Never refreshed — nothing to be current with.
-    if watermark is None:
-        return False  # Empty bank.
-    # Oracle's TIMESTAMP columns come back naive while the bank watermark is aware;
-    # compare both in UTC, as engine/reflect/tools.py already does for last_refreshed_at.
-    if last_refreshed_at.tzinfo is None:
-        last_refreshed_at = last_refreshed_at.replace(tzinfo=UTC)
-    if watermark.tzinfo is None:
-        watermark = watermark.replace(tzinfo=UTC)
-    return watermark > last_refreshed_at
 
 
 def _mental_model_stale_scope(
@@ -8649,6 +8631,7 @@ class MemoryEngine(MemoryEngineInterface):
         *,
         carried: "Mapping[str, tuple[str | None, Sequence[str]]] | None" = None,
         observation_ids: "Sequence[str]" = (),
+        read_uncarried: bool = False,
     ) -> "dict[str, list[StoredAttachment]]":
         """The attachments each memory was actually drawn from, keyed by unit id.
 
@@ -8672,6 +8655,12 @@ class MemoryEngine(MemoryEngineInterface):
         rewriting an observation's sources, and a copy would go stale with them.
         ``observation_ids`` names which of ``unit_ids`` are observations — the caller
         already has each row's type, and only an observation pays for the source read.
+
+        ``read_uncarried`` is for a caller that holds memory ids and no rows -- a knowledge
+        page's stored evidence. For a store-owned bank, the non-observation memories it carried
+        nothing for are then read back from the store for their ids. Off by default: a caller
+        rendering store rows has already carried everything there is, and a read would cost a
+        store round trip on every recall.
         """
         if not unit_ids:
             return {}
@@ -8684,6 +8673,8 @@ class MemoryEngine(MemoryEngineInterface):
         wanted_observations = [u for u in wanted_units if u in observation_set]
         store_owned = store.store_owned_for(bank_id)
         refs: dict[str, list[AttachmentRef]] = {}
+        # The memories whose ids are read from the store rather than taken from ``carried``.
+        unread = wanted_units
         if store_owned:
             # Never `memory_units` for a store-owned bank. It holds none of the bank's memories,
             # so the read can only come back empty, and it is not a cheap empty read: the table
@@ -8697,7 +8688,12 @@ class MemoryEngine(MemoryEngineInterface):
                 for unit_id, (document_id, ids) in (carried or {}).items()
                 if unit_id in wanted_units and ids
             }
-            if not refs and not wanted_observations:
+            unread = (
+                [u for u in wanted_units if u not in observation_set and u not in (carried or {})]
+                if read_uncarried
+                else []
+            )
+            if not refs and not wanted_observations and not unread:
                 return {}
 
         profile = await self.get_bank_profile(bank_id, request_context=request_context)
@@ -8705,15 +8701,15 @@ class MemoryEngine(MemoryEngineInterface):
             return {}
         backend = await self._get_backend()
         async with backend.acquire() as conn:
-            if not store_owned:
-                refs = {
-                    unit_id: [ref]
+            if unread:
+                refs.update(
+                    (unit_id, [ref])
                     for unit_id, ref in (
                         await store.memory_attachment_refs(
-                            conn=conn, fq_table=fq_table, bank_id=bank_id, unit_ids=wanted_units
+                            conn=conn, fq_table=fq_table, bank_id=bank_id, unit_ids=unread
                         )
                     ).items()
-                }
+                )
             if wanted_observations:
                 refs.update(await _observation_attachment_refs(conn, store, bank_id, wanted_observations))
             if not refs:
@@ -12609,6 +12605,10 @@ class MemoryEngine(MemoryEngineInterface):
         Returns:
             Dictionary with count of deleted observations
         """
+        try:
+            memory_id = str(uuid.UUID(memory_id))
+        except ValueError:
+            raise ValueError(f"Invalid memory_id: '{memory_id}' is not a valid UUID") from None
         await self._authenticate_tenant(request_context)
         if self._operation_validator:
             ctx = BankWriteContext(
@@ -21147,72 +21147,63 @@ class MemoryEngine(MemoryEngineInterface):
         if scope is None:
             return True  # Never stamped with a watermark — nothing to be current with.
 
-        # The scoped existence check belongs to the store: it is a query over the
-        # memories, and the mental model's scope (tags, tag_groups, fact_types) is
-        # exactly what decides whether one of them changed since the last refresh.
-        # It is also the expensive half, so the bank-wide watermark is asked first
-        # and settles it outright whenever nothing has been written since this
-        # model read the memories — the same shortcut the batch variant takes, and
-        # the reason the cron loop and the consolidation flush, which come through
-        # here one model at a time, do not each pay for a scan.
-        from .memories import get_memories
-
-        if _may_need_refresh(scope.since, await self._bank_write_watermark(conn, bank_id)):
-            if await get_memories().any_memory_updated_since(
-                conn=conn,
-                fq_table=fq_table,
-                bank_id=bank_id,
-                since=scope.since,
-                fact_types=scope.fact_types,
-                tags=scope.tags,
-                tags_match=scope.tags_match,
-                tag_groups=scope.tag_groups,
-            ):
-                return True
-
-        # A memory that was *removed* raises no watermark — the row is simply not
-        # there — so the check above can never see one. That is why a page could
-        # keep stating a fact for as long as the bank stayed quiet: every staleness
-        # signal the system had was phrased over rows that still exist. Ask the
-        # complementary question too: does this document still cite anything that is
-        # gone? Deliberately second, so the common "already stale" answer costs
-        # nothing extra.
+        # Both halves are questions over the memories, so the store answers them in
+        # one call and may ask its parts concurrently:
         #
-        # Only the single-model path asks. The batch variant backs the polling
-        # display surfaces, where main made the whole set one round-trip; a
+        # - Has a memory in the model's scope (tags, tag_groups, fact_types) been
+        #   written since it last read the memories? The bank-wide watermark settles
+        #   this outright whenever nothing has been written at all, which is why the
+        #   cron loop and the consolidation flush, which come through here one model
+        #   at a time, do not each pay for a scan.
+        # - Does the document still cite anything that is gone? A memory that was
+        #   *removed* raises no watermark — the row is simply not there — so the
+        #   first question can never see one, and a page could keep stating a fact
+        #   for as long as the bank stayed quiet.
+        #
+        # Only the single-model path asks the second. The batch variant backs the
+        # polling display surfaces, where main made the whole set one round-trip; a
         # per-model grounding fetch would undo exactly that. The two refresh
         # triggers — the after-consolidation flush and the cron loop — both come
         # through here, so the refresh still fires; a page can briefly read
         # "up to date" in the list while a refresh for it is already queued.
-        return await self._has_retracted_grounding(conn, bank_id, _mm_row_field(mm_row, "id"))
-
-    async def _has_retracted_grounding(self, conn, bank_id: str, mental_model_id: Any) -> bool:
-        """Whether the model's stored grounding cites memories that no longer exist.
-
-        ``reflect_response`` is read here rather than being required on the row the
-        caller passed, so the staleness callers keep their narrow SELECTs and only a
-        model that already looks fresh pays for the extra fetch. Scope filters are
-        irrelevant: a fact this document was actually built on is in scope by
-        construction, whatever the model's tags say now.
-        """
         from .memories import get_memories
 
-        if mental_model_id is None:
-            return False
-        row = await conn.fetchrow(
-            f"SELECT reflect_response FROM {fq_table('mental_models')} WHERE bank_id = $1 AND id = $2",
-            bank_id,
-            mental_model_id,
+        cited_ids = await self._cited_fact_ids(conn, bank_id, mm_row)
+        return await get_memories().mental_model_is_stale(
+            conn=conn, fq_table=fq_table, bank_id=bank_id, scope=scope, cited_ids=cited_ids
         )
-        if row is None:
-            return False
-        reflect_response = row["reflect_response"]
+
+    async def _cited_fact_ids(self, conn, bank_id: str, mm_row: Any) -> list[str]:
+        """The memory ids the model's stored grounding cites.
+
+        Read off ``mm_row`` when the caller selected ``reflect_response`` (the full
+        read does), else fetched, so the staleness callers that keep a narrow SELECT
+        still work. Scope filters are irrelevant: a fact this document was actually
+        built on is in scope by construction, whatever the model's tags say now.
+        """
+        try:
+            reflect_response = mm_row["reflect_response"]
+        except (KeyError, IndexError, TypeError):
+            mental_model_id = _mm_row_field(mm_row, "id")
+            if mental_model_id is None:
+                return []
+            reflect_response = await conn.fetchval(
+                f"SELECT reflect_response FROM {fq_table('mental_models')} WHERE bank_id = $1 AND id = $2",
+                bank_id,
+                mental_model_id,
+            )
         if isinstance(reflect_response, str):
             try:
                 reflect_response = json.loads(reflect_response)
             except json.JSONDecodeError:
-                return False
-        cited_ids = based_on_fact_ids((reflect_response or {}).get("based_on"))
+                return []
+        return based_on_fact_ids((reflect_response or {}).get("based_on"))
+
+    async def _has_retracted_grounding(self, conn, bank_id: str, mental_model_id: Any) -> bool:
+        """Whether the model's stored grounding cites memories that no longer exist."""
+        from .memories import get_memories
+
+        cited_ids = await self._cited_fact_ids(conn, bank_id, {"id": mental_model_id})
         if not cited_ids:
             return False
         live_ids = await get_memories().live_memory_ids(
@@ -21742,6 +21733,10 @@ class MemoryEngine(MemoryEngineInterface):
         Returns:
             Directive dict or None if not found
         """
+        try:
+            directive_id = str(uuid.UUID(directive_id))
+        except ValueError:
+            raise ValueError(f"Invalid directive_id: '{directive_id}' is not a valid UUID") from None
         await self._authenticate_tenant(request_context)
         if self._operation_validator:
             ctx = BankReadContext(
@@ -21790,6 +21785,7 @@ class MemoryEngine(MemoryEngineInterface):
         Returns:
             The created directive dict
         """
+        _check_directive_priority(priority)
         await self._authenticate_tenant(request_context)
         if self._operation_validator:
             if not self._consume_preauthorized_bank_write(
@@ -21852,6 +21848,12 @@ class MemoryEngine(MemoryEngineInterface):
         Returns:
             Updated directive dict or None if not found
         """
+        if priority is not None:
+            _check_directive_priority(priority)
+        try:
+            directive_id = str(uuid.UUID(directive_id))
+        except ValueError:
+            raise ValueError(f"Invalid directive_id: '{directive_id}' is not a valid UUID") from None
         await self._authenticate_tenant(request_context)
         if self._operation_validator:
             if not self._consume_preauthorized_bank_write(
@@ -21932,6 +21934,10 @@ class MemoryEngine(MemoryEngineInterface):
         Returns:
             True if deleted, False if not found
         """
+        try:
+            directive_id = str(uuid.UUID(directive_id))
+        except ValueError:
+            raise ValueError(f"Invalid directive_id: '{directive_id}' is not a valid UUID") from None
         await self._authenticate_tenant(request_context)
         if self._operation_validator:
             ctx = BankWriteContext(
