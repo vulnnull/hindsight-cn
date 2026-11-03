@@ -73,7 +73,7 @@ Creating a mental model runs a reflect operation in the background and saves the
 |-----------|------|----------|-------------|
 | `name` | string | Yes | Human-readable name for the mental model |
 | `source_query` | string | Yes | The query to run to generate content |
-| `id` | string | No | Custom ID for the mental model (alphanumeric lowercase with hyphens). Auto-generated if omitted. |
+| `id` | string | No | Custom ID for the mental model (same rules as a bank id: at most 192 bytes of UTF-8, no '/' and no control characters). Auto-generated if omitted. |
 | `tags` | list | No | Tags that scope the model during reflect **and** filter source memories during refresh. Defaults to `all_strict` matching, so only memories carrying every listed tag are read. See [Tags and Visibility](#tags-and-visibility). |
 | `max_tokens` | int | No | Maximum tokens for the mental model content |
 | `trigger` | object | No | Trigger settings (see [Automatic Refresh](#automatic-refresh)) |
@@ -258,6 +258,8 @@ Delta mode falls back to a full regeneration automatically in two cases:
 2. The `source_query` has changed since the last refresh (the topic has shifted; the existing structure may no longer apply).
 
 **A delta refresh never replaces the document with a partial one.** Because delta retrieval only reads memories newer than the last refresh, an answer written from that window covers just the recent slice of the topic — it is material for editing the document, not a replacement for it. So when the edits can't be made at all — the provider call fails, the response can't be read, or every single operation is rejected — the existing content stays exactly as it is and the refresh **fails** instead of completing. Nothing is lost, the refresh's time window is not advanced, and a retry sees the same memories again. The same holds for an empty answer: a populated document is never overwritten with an empty one. A delta refresh is never turned into a full rewrite behind your back: if a model's delta refreshes keep failing, switch its `mode` to `full`.
+
+**With a decision model, a delta refresh can skip reflect.** When a [decision model](/developer/decision-models) is set up for reflect, a delta refresh asks it which memories added since the last refresh could change the document, and sends only those to the LLM that writes the operations — none of them means no LLM call. See [Knowledge Pages](/developer/knowledge-pages#decision-model-refresh) for limits and fallbacks.
 
 | Use Case | Recommended Mode | Why |
 |----------|-----------------|-----|
