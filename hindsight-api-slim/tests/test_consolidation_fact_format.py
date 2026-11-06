@@ -146,6 +146,34 @@ def test_an_earlier_state_in_another_language_gets_no_words_of_ours() -> None:
     assert [u.text for u in actions.updates] == ["用户最喜欢的框架是Svelte。 (2026-10-10 09:00: 用户最喜欢Vue)"]
 
 
+def test_earlier_states_keep_only_the_newest_three_without_duplicates() -> None:
+    """#6264: a topic that keeps coming up must not pile up notes the model then loops over."""
+    pool = {
+        "o-build": "The nightly build takes 41 minutes."
+        " (2025-03-11 18:02: Nightly builds run for roughly 40 minutes.)"
+        " (2025-03-11 09:15: The nightly build finished in 39 minutes.)"
+        " (2025-03-10 17:40: The nightly build takes around 40 minutes to complete.)"
+    }
+    answer = _answer(
+        {"fact_id": "f1", "kind": "lasting", "existing": [_change("o-build", "changes")]},
+        {"fact_id": "f2", "kind": "lasting", "existing": [_change("o-build", "changes")]},
+    )
+    states = {
+        "f1": "2025-03-11 18:02: Nightly builds run for roughly 40 minutes.",  # already there
+        "f2": "2025-03-12 09:10: The nightly build took about 40 minutes.",
+    }
+    actions = answer.to_actions(pool, states, lambda f, o: True, lambda f, o: True)
+    assert [(u.text, u.source_fact_ids) for u in actions.updates] == [
+        (
+            "The nightly build takes 41 minutes."
+            " (2025-03-12 09:10: The nightly build took about 40 minutes.)"
+            " (2025-03-11 18:02: Nightly builds run for roughly 40 minutes.)"
+            " (2025-03-11 09:15: The nightly build finished in 39 minutes.)",
+            ["f1", "f2"],
+        )
+    ]
+
+
 def test_a_change_before_an_earlier_state_note_is_kept() -> None:
     """An undated fact sorts first and is never "stated after": its change comes before a note."""
     actions = _actions(
@@ -368,3 +396,37 @@ async def test_the_prompt_uses_short_ids_oldest_first_and_marks_later_observatio
     assert "is an earlier state that the text before it replaced" in sent["messages"][0]["content"]
     # A full scope is told in the answer's own terms: no `new` sentences.
     assert 'Write no `new` sentences (set `adds` to "no")' in user
+
+
+async def test_a_reply_in_the_wrong_shape_is_asked_again_with_its_errors() -> None:
+    """Two JSON values back to back parse as a list (#5572): the model is told so, once, and the
+    second answer is used. The first request stays the prefix of the second."""
+    good = {"facts": [{"fact_id": "F1", "kind": "lasting", "existing": [], "adds": "yes", "new": ["Uses Rust."]}]}
+    calls: list[dict[str, Any]] = []
+
+    class _LLM:
+        async def call(self, **kwargs: Any) -> Any:
+            calls.append(kwargs)
+            if len(calls) == 1:
+                assert kwargs["skip_validation"] is True
+                return LLMCallResult(content=[good, good])
+            return LLMCallResult(content=kwargs["response_format"].model_validate(good))
+
+    config = SimpleNamespace(
+        llm_output_language=None,
+        observations_mission=None,
+        consolidation_max_attempts=1,
+        consolidation_llm_max_retries=None,
+        llm_temperature_consolidation=0.0,
+        llm_strict_schema_consolidation=False,
+        consolidation_max_completion_tokens=None,
+    )
+    result = await _consolidate_batch_with_llm(_LLM(), [{"id": "f1", "text": "uses rust"}], [], {}, config)
+
+    assert not result.failed
+    assert [c.text for c in result.creates] == ["Uses Rust."]
+    first, second = calls
+    assert "skip_validation" not in second
+    assert second["messages"][:2] == first["messages"]
+    assert second["messages"][2]["role"] == "assistant"
+    assert "(top level)" in second["messages"][3]["content"]

@@ -262,6 +262,16 @@ export HINDSIGHT_API_LLM_API_KEY=your-api-key
 
 </ProviderSetup>
 
+OpenRouter can serve one model from several hosts. A model slug like `z-ai/glm-5.3-flash` names who made the model, not the host your request lands on. On every call that asks for JSON back (fact extraction, consolidation, reflect's tool calls), Hindsight sets `provider.require_parameters=true`, so OpenRouter only picks hosts that support every parameter sent.
+
+To pick the hosts yourself, set OpenRouter's [provider routing](https://openrouter.ai/docs/features/provider-routing) keys. Your `provider` keys are kept and win over Hindsight's:
+
+```bash
+export HINDSIGHT_API_LLM_EXTRA_BODY='{"provider":{"only":["deepinfra","novita"],"allow_fallbacks":false}}'
+```
+
+If a model fails with "No endpoints found that can handle the requested parameters", no host supports every parameter sent. Models that reject `temperature` are the usual cause. Set `HINDSIGHT_API_LLM_TEMPERATURE=none` to stop sending it.
+
 ### Requesty {#llm-requesty}
 
 Requesty's router, with provider-prefixed model names such as `openai/gpt-4o-mini`.
@@ -1084,7 +1094,7 @@ Turns text into vectors for semantic search. The default, `BAAI/bge-small-en-v1.
 
 > **⚠️ Choose before you store memories**
 >
-Hindsight reads the embedding dimension at startup and sizes the database for it. Once memories are stored, changing to a model with other dimensions loses them; switching models with the same dimensions needs every bank re-embedded.
+Hindsight reads the embedding dimension at startup and sizes the database for it. Once memories are stored, a server will not start on a model with other dimensions. To switch models, re-embed everything in place with [`hindsight-admin reembed`](./admin-cli.md#reembed); do it for a switch with the same dimensions too, or old and new vectors end up mixed.
 ### Hindsight Inference {#embeddings-hindsight}
 
 [Hindsight Inference](https://inference.hindsight.vectorize.io) serves `hs-embed-1`, an embedding model built for agent memory, at $0.005 per million input tokens: eight languages, 384-dimensional vectors.
@@ -1114,7 +1124,7 @@ export HINDSIGHT_API_EMBEDDINGS_PROVIDER=local
 export HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL=hindsight-ai/hs-embed-1
 ```
 
-`hs-embed-1` has 112M parameters (MIT), returns 384 dimensions, works in eight languages, reads inputs up to 8,192 tokens and needs no query or document prefix. It downloads from Hugging Face on first start. Vectors from two models don't mix, so memories already stored need re-embedding after you switch.
+`hs-embed-1` has 112M parameters (MIT), returns 384 dimensions, works in eight languages, reads inputs up to 8,192 tokens and needs no query or document prefix. It downloads from Hugging Face on first start. Vectors from two models don't mix, so memories already stored need re-embedding after you switch: see [`hindsight-admin reembed`](./admin-cli.md#reembed).
 
 Any other Sentence Transformers model works the same way:
 

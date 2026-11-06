@@ -1918,7 +1918,8 @@
     "cancel": "取消",
     "labelLastFullRefresh": "上次完整刷新",
     "labelFullRefreshCron": "定时完整刷新（cron）",
-    "valueNever": "从未"
+    "valueNever": "从未",
+    "failureReasonCandidateRejected": "被操作验证器拒绝"
   },
   "constellation": {
     "instructions": "滚动缩放 · 拖拽平移 · 悬停探索 · 点击选择",

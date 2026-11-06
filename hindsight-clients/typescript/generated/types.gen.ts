@@ -551,6 +551,12 @@ export type BankStatsResponse = {
    * Total number of observations
    */
   total_observations?: number;
+  /**
+   * Paused Mental Models
+   *
+   * Number of mental models whose last refresh failed, so the automatic triggers (`refresh_after_consolidation`, `refresh_cron`, `full_refresh_cron`) skip them until an explicit refresh succeeds. Their content stops updating, so alert on this being above 0. Each model's `last_refresh_failed_at` says which ones, and its history says why.
+   */
+  paused_mental_models?: number;
 };
 
 /**
@@ -781,7 +787,7 @@ export type BankTemplateConfig = {
   /**
    * Reflect Default Options
    *
-   * Default reflect options for this bank (e.g. {"reflect_search_observations_max_tokens": 3000, "reflect_search_observations_include_entities": false}). Applied to every reflect in the bank -- API, MCP and mental-model refresh -- whenever the request (or the model's trigger) leaves the option unset.
+   * Default reflect options for this bank (e.g. {"reflect_search_observations_max_tokens": 3000, "reflect_search_observations_include_entities": false}). Applied to every reflect request in the bank (API and MCP) that leaves the option unset. Mental-model refreshes do not read it: they take these options from their own trigger, defaulted per bank by knowledge_page_default_trigger.
    */
   reflect_default_options?: {
     [key: string]: unknown;
@@ -6411,6 +6417,7 @@ export type RefreshMentalModelOperationDetails = {
     | "refresh_failed_empty_candidate"
     | "refresh_failed_delta_not_applied"
     | "refresh_failed_structured_output"
+    | "refresh_failed_candidate_rejected"
     | "refresh_failed_error";
   /**
    * Failure Reason
@@ -6424,6 +6431,7 @@ export type RefreshMentalModelOperationDetails = {
     | "delta_ops_all_skipped"
     | "delta_not_applied"
     | "structured_output_failed"
+    | "candidate_rejected"
     | "retrieval_failed"
     | "no_answer"
     | "unexpected_error"

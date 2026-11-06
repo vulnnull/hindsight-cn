@@ -23,6 +23,7 @@ The API service handles all memory operations (retain, recall, reflect).
 | `HINDSIGHT_API_DATABASE_URL` | PostgreSQL connection string | `pg0` (embedded) |
 | `HINDSIGHT_API_READ_DATABASE_URL` | Optional read-replica PostgreSQL URL. When set, recall queries (semantic, BM25, graph, temporal) are routed through a separate connection pool against this URL, offloading the primary. Typically points to a read-only endpoint (e.g., CNPG's `<cluster>-ro` service or Aurora reader endpoint). | Unset (uses primary) |
 | `HINDSIGHT_API_MIGRATION_DATABASE_URL` | Direct PostgreSQL URL for running migrations, bypassing connection poolers (e.g. PgBouncer). When set, advisory locks and Alembic migrations use this URL instead of `DATABASE_URL`. | Falls back to `DATABASE_URL` |
+| `HINDSIGHT_API_DATABASE_CONNECT_HOOK` | PostgreSQL only. `module.path:function` naming an async function with `asyncpg.connect`'s signature. Hindsight calls it to open every new database connection (pool growth, reconnects, read-replica pool, vector-index maintenance), so rotated or short-lived credentials are picked up without a restart. See [Rotating database credentials](#rotating-database-credentials). | Unset (plain `asyncpg.connect`) |
 | `HINDSIGHT_API_DATABASE_SCHEMA` | PostgreSQL schema name for tables | `public` |
 | `HINDSIGHT_API_RUN_MIGRATIONS_ON_STARTUP` | Run database migrations on API startup | `true` |
 | `HINDSIGHT_API_MIGRATION_ISOLATION` | Run migrations in a subprocess instead of in the calling process: `true` (keeps Alembic's import graph and its psycopg2 sync engine out of a long-lived server process) or `false` | `false` |
@@ -48,6 +49,24 @@ export HINDSIGHT_API_DATABASE_SCHEMA=hindsight
 ```
 
 Migrations will automatically create the schema if it doesn't exist and create all tables in the configured schema.
+
+#### Rotating database credentials
+
+When the database password changes while Hindsight runs (AWS Secrets Manager rotation, RDS IAM tokens, Azure AD or Cloud SQL IAM auth, Vault), point `HINDSIGHT_API_DATABASE_CONNECT_HOOK` at a function that fetches the current credential and opens the connection. Open connections keep working; each new one goes through the hook.
+
+```python
+# mypackage/db.py  ->  HINDSIGHT_API_DATABASE_CONNECT_HOOK=mypackage.db:connect
+from urllib.parse import quote, urlparse
+
+async def connect(dsn: str, **kwargs) -> asyncpg.Connection:
+    user, password = fetch_current_credentials()  # your secret store
+    u = urlparse(dsn)
+    host = u.netloc.rpartition("@")[2]  # host[:port], credentials dropped
+    dsn = u._replace(netloc=f"{quote(user)}:{quote(password)}@{host}").geturl()
+    return await asyncpg.connect(dsn, **kwargs)  # always forward kwargs
+```
+
+Always forward `**kwargs`: the pool passes the connection class it needs. Migrations at startup and `hindsight-admin` commands do not use the hook — they read the URL once, so it must be valid when they start.
 
 #### Owning a maintenance routine
 
@@ -274,7 +293,7 @@ For non-English banks (especially CJK) and the language/extraction-language trad
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HINDSIGHT_API_LLM_PROVIDER` | Provider: `openai`, `openai-responses`, `openai-codex`, `chatgpt`, `claude-code`, `cursor`, `github-copilot`, `anthropic`, `gemini`, `groq`, `minimax`, `deepseek`, `zai`, `opencode-go`, `meta`, `nous`, `xai-oauth`, `fireworks`, `ollama`, `ollama-cloud`, `lmstudio`, `llamacpp`, `vertexai`, `bedrock`, `litellm`, `litellmrouter`, `volcano`, `openrouter`, `requesty`, `none` | `openai` |
+| `HINDSIGHT_API_LLM_PROVIDER` | Provider: `openai`, `openai-responses`, `openai-codex`, `chatgpt`, `claude-code`, `cursor`, `github-copilot`, `anthropic`, `gemini`, `groq`, `minimax`, `deepseek`, `zai`, `opencode-go`, `meta`, `nous`, `xai-oauth`, `fireworks`, `ollama`, `ollama-cloud`, `lmstudio`, `llamacpp`, `vertexai`, `bedrock`, `litellm`, `litellmrouter`, `volcano`, `openrouter`, `requesty`, `none`, or `package.module:ClassName` for a [custom provider](./extensions.md#custom-llm-provider) | `openai` |
 | `HINDSIGHT_API_LLM_API_KEY` | API key for providers that require one; unused by `github-copilot`. Optional for `anthropic` when [Workload Identity Federation](https://platform.claude.com/docs/en/manage-claude/workload-identity-federation) is configured (see the Anthropic example below) | - |
 | `HINDSIGHT_API_LLM_MODEL` | Model name | `gpt-5-mini` |
 | `HINDSIGHT_API_LLM_BASE_URL` | Custom LLM endpoint | Provider default |
@@ -1058,6 +1077,42 @@ Do not mix embeddings from different models in the same vector index. Switching 
 > **⚠️ Warning**
 >
 The default ONNX query/document prefixes (`query: ` and `passage: `) are for E5 models. Clear both prefix variables for non-E5 models such as MiniLM or BGE, otherwise Hindsight will prepend E5-style text to models that were not trained with that format.
+#### Separate Query and Passage Embeddings
+
+Every search embeds a query: recall, reflect, knowledge-page search, and the searches consolidation runs to find related observations. Everything that gets stored (facts, observations and mental models) is embedded as a passage. By default both go through the one embeddings config above. You can give either side its own config, the same way [per-operation LLMs](#per-operation-llm-configuration) work: each side starts from the main embeddings config, and any variable you set for that side replaces the main one.
+
+| Side | Used for | Variable pattern |
+|---|---|---|
+| Query | Every search, including consolidation's | `HINDSIGHT_API_QUERY_EMBEDDINGS_<X>` overrides `HINDSIGHT_API_EMBEDDINGS_<X>` |
+| Passage | Everything that is stored: facts, observations, mental models | `HINDSIGHT_API_PASSAGE_EMBEDDINGS_<X>` overrides `HINDSIGHT_API_EMBEDDINGS_<X>` |
+
+`<X>` is any embeddings variable on this page: `PROVIDER`, `TEI_URL`, `OPENAI_BASE_URL`, `ONNX_MODEL_ID`, `MAX_INPUT_TOKENS`, and so on. A name that matches no embeddings variable stops startup with an error, so a typo can't go unnoticed. A side can switch provider, so one side can run in-process while the other calls a remote service. Each side keeps its own request limit (`MAX_CONCURRENT_REQUESTS`), so a long retain or import never queues recall queries behind it. Note that background consolidation also searches, so it sends requests to the query side too. Setting a side variable to an empty value clears the main value for that side only (for example, `HINDSIGHT_API_QUERY_EMBEDDINGS_QUERY_PREFIX=`).
+
+**Same model, separate endpoint for queries.** For example, a small TEI instance for queries and a bulk one for passages:
+
+```bash
+HINDSIGHT_API_EMBEDDINGS_PROVIDER=openai
+HINDSIGHT_API_EMBEDDINGS_OPENAI_MODEL=BAAI/bge-m3
+HINDSIGHT_API_EMBEDDINGS_OPENAI_BASE_URL=http://tei-bulk:8080/v1
+HINDSIGHT_API_QUERY_EMBEDDINGS_OPENAI_BASE_URL=http://tei-small:8080/v1
+```
+
+**A smaller query model trained for the document model's space.** Qdrant's [Constella](https://qdrant.tech/blog/constella-research-preview/) embeds documents with Stella and queries with Constella Nano, which is 12 times smaller. Both run in-process through the `onnx` provider:
+
+```bash
+HINDSIGHT_API_EMBEDDINGS_PROVIDER=onnx
+HINDSIGHT_API_EMBEDDINGS_ONNX_MODEL_ID=Qdrant/stella-en-400M-v5-doc-onnx
+HINDSIGHT_API_EMBEDDINGS_ONNX_FILE=model.onnx
+HINDSIGHT_API_EMBEDDINGS_ONNX_MAX_TOKENS=512
+# Neither model takes an E5-style prefix.
+HINDSIGHT_API_EMBEDDINGS_ONNX_QUERY_PREFIX=
+HINDSIGHT_API_EMBEDDINGS_ONNX_PASSAGE_PREFIX=
+HINDSIGHT_API_QUERY_EMBEDDINGS_ONNX_MODEL_ID=Qdrant/constella-nano
+```
+
+> **⚠️ Warning**
+>
+Both sides must embed into the same vector space. Startup fails when their dimensions differ, but matching dimensions alone don't prove two models are compatible. Pair models only when they were built to be paired, like the same model on two endpoints or Stella with Constella. Changing either side's model on an existing bank needs the same re-embedding as changing the main model.
 #### Common Pitfall: Provider-Specific Embedding Env Var Names
 
 Embedding environment variables include a provider segment in the key name:
@@ -1636,6 +1691,7 @@ The bank settings are also listed with their operation under [Observations](#obs
 |----------|-------------|---------|
 | `HINDSIGHT_API_RECALL_DECISION_MODEL_PRUNE` | Also drop recall candidates judged no help, instead of only ordering them (see below). Per bank (`recall_decision_model_prune`). | `false` |
 | `HINDSIGHT_API_RECALL_DECISION_MODEL_DEDUP` | Also drop recall candidates repeating a better-ranked one (see below). Per bank (`recall_decision_model_dedup`). | `false` |
+| `HINDSIGHT_API_RECALL_DECISION_MODEL_FALLBACK` | When the decision model fails or refuses a recall's ranking after its retries, rank that recall with the configured `HINDSIGHT_API_RERANKER_*` reranker (failover chain included) instead of failing it. Off, the recall fails, so you see the outage instead of quietly worse results. Server-wide. | `false` |
 | `HINDSIGHT_API_MENTAL_MODEL_DELTA_GATE_MAX_MEMORIES` | The most new memories a delta knowledge-page refresh asks the decision model about; past it, the refresh runs reflect. See [Reflect](#reflect). | `200` |
 
 - **Rate limits.** `HINDSIGHT_API_DECISION_MODEL_MAX_CONCURRENT` caps requests in flight for
@@ -2674,6 +2730,7 @@ Configuration for background task processing. By default, the API processes task
 | `HINDSIGHT_API_BACKPRESSURE_DEFER_SECONDS` | How long a task the store shed for backpressure is held before it is retried. Long enough that the backlog has a real chance to drain — retrying into a still-full store just sheds again — and short enough that a cleared backlog is not left waiting. Deferrals do not count against `HINDSIGHT_API_WORKER_MAX_RETRIES`. | `120` |
 | `HINDSIGHT_API_WORKER_HTTP_PORT` | HTTP port for worker metrics/health (worker CLI only) | `8889` |
 | `HINDSIGHT_API_WORKER_MAX_SLOTS` | Maximum concurrent tasks per worker (total across all operation types) | `10` |
+| `HINDSIGHT_API_WORKER_SHUTDOWN_DRAIN_SECONDS` | On SIGTERM a worker (the API's embedded one included) stops claiming at once, then waits this long for in-flight tasks before cancelling them and handing them back to `pending` for another worker. Counted from the signal. Cancel and hand-back take about 7s more, so keep it about 10s under the platform's grace period (`terminationGracePeriodSeconds`, Docker's `stop_grace_period`); the default fits Kubernetes' default 30s. A task handed back is retried from the start. | `20` |
 | `HINDSIGHT_API_OPERATION_RETENTION_DAYS` | Static server-wide retention window for completed, failed, and cancelled operation rows, including their task payload and result metadata. `0` (the default) keeps them indefinitely; set a positive number of days to enable automatic pruning. | `0` |
 | `HINDSIGHT_API_OPERATION_CLEANUP_BATCH_SIZE` | Maximum expired terminal operation rows deleted per tenant schema during each cleanup cycle. Together with the cleanup interval this sets the drain rate for a backlog. Must be a positive integer. | `1000` |
 | `HINDSIGHT_API_OPERATION_CLEANUP_INTERVAL_SECONDS` | How often the cleanup cycle runs. Each cycle costs one cross-tenant discovery round-trip, so the interval is the main lever on that cost for deployments with many tenants (see [Background Maintenance](#background-maintenance)). `0` disables the job. | `900` |

@@ -556,6 +556,9 @@ class PostgresMemories(MemoriesExtension):
     async def consolidation_freshness(self, *, conn, fq_table, bank_id: str) -> dict[str, Any]:
         return await counts.consolidation_freshness(conn=conn, fq_table=fq_store_table, bank_id=bank_id)
 
+    async def has_pending_consolidation(self, *, conn, fq_table, bank_id: str) -> bool:
+        return await counts.has_pending_consolidation(conn=conn, fq_table=fq_store_table, bank_id=bank_id)
+
     async def document_memory_counts(self, *, conn, fq_table, bank_id: str, document_ids: list[str]) -> dict[str, int]:
         return await counts.document_memory_counts(
             conn=conn, fq_table=fq_store_table, bank_id=bank_id, document_ids=document_ids
@@ -958,6 +961,12 @@ class PostgresMemories(MemoriesExtension):
         return await documents.current_document_tags(
             conn=conn, fq_table=fq_store_table, bank_id=bank_id, document_id=document_id
         )
+
+    async def existing_documents_tags(
+        self, *, conn, fq_table, bank_id: str, document_ids: list[str]
+    ) -> dict[str, list[str] | None]:
+        # A `documents` row always has tags (NULL reads as []), so found-without-tags never occurs.
+        return dict(await self.documents_tags(conn=conn, fq_table=fq_table, bank_id=bank_id, document_ids=document_ids))
 
     async def documents_tags(self, *, conn, fq_table, bank_id: str, document_ids: list[str]) -> dict[str, list[str]]:
         return await documents.documents_tags(

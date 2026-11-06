@@ -55,6 +55,7 @@ from hindsight_api.extensions.operation_validator import (
     # Consolidation operation
     ConsolidateContext,
     ConsolidateResult,
+    ConsolidationActionsContext,
     CreateBankContext,
     # File Conversion
     FileConvertResult,
@@ -63,8 +64,11 @@ from hindsight_api.extensions.operation_validator import (
     ImportContext,
     # Memory curation
     MemoryCurationAction,
+    # Memory review
+    MemoryReview,
     MemoryUpdateContext,
     MemoryUpdateResult,
+    MentalModelCandidateContext,
     # Mental Model operations
     MentalModelGetContext,
     MentalModelGetResult,
@@ -81,8 +85,11 @@ from hindsight_api.extensions.operation_validator import (
     ReflectResultContext,
     RetainAttachmentInfo,
     RetainContext,
+    RetainFactsContext,
     RetainResult,
     RetainSource,
+    ReviewedConsolidationAction,
+    ReviewedFact,
     TagScopeContext,
     ValidationResult,
 )
@@ -146,6 +153,11 @@ __all__ = [
     # Operation Validator - Consolidation
     "ConsolidateContext",
     "ConsolidateResult",
+    "ConsolidationActionsContext",
+    "MemoryReview",
+    "RetainFactsContext",
+    "ReviewedConsolidationAction",
+    "ReviewedFact",
     # Operation Validator - File Conversion
     "FileConvertResult",
     # Operation Validator - Memory curation
@@ -155,6 +167,7 @@ __all__ = [
     # Operation Validator - Mental Model
     "MentalModelGetContext",
     "MentalModelGetResult",
+    "MentalModelCandidateContext",
     "MentalModelRefreshContext",
     "MentalModelRefreshResult",
     # Tenant/Auth

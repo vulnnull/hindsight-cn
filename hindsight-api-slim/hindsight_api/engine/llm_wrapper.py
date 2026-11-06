@@ -30,6 +30,7 @@ from ..config import (
     ENV_RETAIN_LLM_MAX_CONCURRENT,
     _get_raw_config,
 )
+from ..provider_auth import is_custom_llm_provider
 
 # Re-exported: this module is where callers have always imported it from.
 from ..provider_auth import requires_api_key as requires_api_key
@@ -169,14 +170,17 @@ async def _acquire_permits(stack: AsyncExitStack, scope: str) -> None:
     """
     from ..worker.background import in_background_task
     from .llm_trace import record_queue_wait
+    from .permit_wait import waiting_for_permit
 
     # Calls from a background worker task yield the next free permit to any waiting
     # live request.
     background = in_background_task()
     queue_start = time.monotonic()
-    for sem in _semaphores_for_scope(scope):
-        await sem.acquire(background=background)
-        stack.callback(sem.release)
+    # Queued time is not this operation's work; time limits that opted in exclude it (#6140).
+    with waiting_for_permit():
+        for sem in _semaphores_for_scope(scope):
+            await sem.acquire(background=background)
+            stack.callback(sem.release)
     record_queue_wait(time.monotonic() - queue_start)
 
 
@@ -452,6 +456,29 @@ def parse_llm_json(raw: str) -> Any:
         return sanitize_value(repaired)
 
 
+def reask_messages(messages: list[dict[str, Any]], reply: Any, correction: str) -> list[dict[str, Any]]:
+    """The request again, plus the refused reply and what was wrong with it: one re-ask.
+
+    Every structured call that re-asks after a bad reply (retain, consolidation, the
+    mental-model delta) goes through here. At a fixed low temperature an identical prompt
+    returns the identical bad reply (#3421), so the re-ask must change the input: it quotes
+    the reply and the errors. It appends and never rewrites, so the original request stays a
+    byte-identical prefix and the provider's prompt cache still covers it.
+
+    The reply goes back as text. A provider parses the body when the call set a
+    ``response_format`` (a dict under ``skip_validation``, a model otherwise), and a strict
+    request validator refuses anything but a string as ``content`` with a 422 (#4965).
+    Serialized, not stringified, so the model reads back the JSON it wrote.
+    """
+    if isinstance(reply, BaseModel):
+        text = reply.model_dump_json()
+    elif isinstance(reply, dict | list):
+        text = json.dumps(reply, ensure_ascii=False, default=str)
+    else:
+        text = "" if reply is None else str(reply)
+    return [*messages, {"role": "assistant", "content": text}, {"role": "user", "content": correction}]
+
+
 def _validate_ollama_num_ctx(value: Any) -> int | None:
     """Validate a native Ollama context-window override."""
     if value is None:
@@ -461,6 +488,43 @@ def _validate_ollama_num_ctx(value: Any) -> int | None:
     if value < 1:
         raise ValueError(f"ollama_num_ctx must be >= 1, got {value}")
     return value
+
+
+def _create_custom_llm_provider(
+    *,
+    provider: str,
+    api_key: str,
+    base_url: str,
+    model: str,
+    reasoning_effort: str | None,
+    timeout: float | None,
+    extra_body: dict[str, Any] | None,
+    default_headers: dict[str, str] | None,
+) -> LLMInterface:
+    """Build the operator's own provider named by ``provider`` (``package.module:ClassName``).
+
+    The class must subclass ``LLMInterface``. It is constructed with keyword arguments
+    only: the ``LLMInterface.__init__`` ones plus ``extra_body`` and ``default_headers``,
+    so a subclass of ``OpenAICompatibleLLM`` takes them as-is and a direct
+    ``LLMInterface`` subclass receives the last two in ``**kwargs``.
+    """
+    # Lazy: the extensions package imports the engine.
+    from ..extensions.loader import ExtensionLoadError, resolve_class_path
+
+    try:
+        provider_class = resolve_class_path(provider, LLMInterface)
+    except ExtensionLoadError as e:
+        raise ValueError(f"Cannot load custom LLM provider {provider!r}: {e}") from e
+    return provider_class(
+        provider=provider,
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        reasoning_effort=reasoning_effort,
+        timeout=timeout,
+        extra_body=extra_body,
+        default_headers=default_headers,
+    )
 
 
 def create_llm_provider(
@@ -548,6 +612,18 @@ def create_llm_provider(
 
     # Each provider (and its SDK) loads only when chosen; see providers/__init__.py.
     from . import providers
+
+    if is_custom_llm_provider(provider):
+        return _create_custom_llm_provider(
+            provider=provider,
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            timeout=timeout,
+            extra_body=extra_body,
+            default_headers=default_headers,
+        )
 
     provider_lower = provider.lower()
     if provider_lower == "gemini":
@@ -934,7 +1010,8 @@ class LLMProvider:
         pure function of its arguments — which is what lets each member of a multi-LLM chain be
         configured independently.
         """
-        self.provider = provider.lower()
+        # A custom provider is a class path, and class names are case-sensitive.
+        self.provider = provider if is_custom_llm_provider(provider) else provider.lower()
         self.api_key = api_key
         self.base_url = base_url
         self.model = model
@@ -1015,8 +1092,11 @@ class LLMProvider:
             "xai-oauth",
             "meta",
         ]
-        if self.provider not in valid_providers:
-            raise ValueError(f"Invalid LLM provider: {self.provider}. Must be one of: {', '.join(valid_providers)}")
+        if self.provider not in valid_providers and not is_custom_llm_provider(self.provider):
+            raise ValueError(
+                f"Invalid LLM provider: {self.provider}. Must be one of: {', '.join(valid_providers)}, "
+                "or package.module:ClassName for a custom provider."
+            )
 
         # Set default base URLs
         if not self.base_url:

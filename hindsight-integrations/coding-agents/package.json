@@ -1,6 +1,6 @@
 {
   "name": "@vectorize-io/hindsight-coding-agents",
-  "version": "0.8.5",
+  "version": "0.8.6",
   "repository": {
     "type": "git",
     "url": "https://github.com/vectorize-io/hindsight.git",
@@ -107,6 +107,7 @@
     "smol-toml": "^1.8.0",
     "tsup": "^8.3.0",
     "typescript": "^5.6.0",
+    "undici": "^6.29.1",
     "vitest": "^4.1.12",
     "zod": "^4.4.3"
   },

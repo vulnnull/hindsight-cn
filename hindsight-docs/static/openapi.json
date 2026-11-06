@@ -9357,6 +9357,12 @@
             "title": "Total Observations",
             "description": "Total number of observations",
             "default": 0
+          },
+          "paused_mental_models": {
+            "type": "integer",
+            "title": "Paused Mental Models",
+            "description": "Number of mental models whose last refresh failed, so the automatic triggers (`refresh_after_consolidation`, `refresh_cron`, `full_refresh_cron`) skip them until an explicit refresh succeeds. Their content stops updating, so alert on this being above 0. Each model's `last_refresh_failed_at` says which ones, and its history says why.",
+            "default": 0
           }
         },
         "type": "object",
@@ -9402,6 +9408,7 @@
             "observation": 20,
             "preference": 30
           },
+          "paused_mental_models": 0,
           "pending_consolidation": 0,
           "pending_operations": 2,
           "total_documents": 10,
@@ -9867,7 +9874,7 @@
               }
             ],
             "title": "Reflect Default Options",
-            "description": "Default reflect options for this bank (e.g. {\"reflect_search_observations_max_tokens\": 3000, \"reflect_search_observations_include_entities\": false}). Applied to every reflect in the bank -- API, MCP and mental-model refresh -- whenever the request (or the model's trigger) leaves the option unset."
+            "description": "Default reflect options for this bank (e.g. {\"reflect_search_observations_max_tokens\": 3000, \"reflect_search_observations_include_entities\": false}). Applied to every reflect request in the bank (API and MCP) that leaves the option unset. Mental-model refreshes do not read it: they take these options from their own trigger, defaulted per bank by knowledge_page_default_trigger."
           },
           "mental_model_min_refresh_interval_seconds": {
             "anyOf": [
@@ -19006,6 +19013,7 @@
               "refresh_failed_empty_candidate",
               "refresh_failed_delta_not_applied",
               "refresh_failed_structured_output",
+              "refresh_failed_candidate_rejected",
               "refresh_failed_error"
             ],
             "title": "Outcome",
@@ -19022,6 +19030,7 @@
                   "delta_ops_all_skipped",
                   "delta_not_applied",
                   "structured_output_failed",
+                  "candidate_rejected",
                   "retrieval_failed",
                   "no_answer",
                   "unexpected_error"

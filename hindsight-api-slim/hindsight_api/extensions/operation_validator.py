@@ -44,6 +44,9 @@ class ValidationResult:
     allowed: bool
     reason: str | None = None
     status_code: int = 403  # Default to Forbidden
+    # Only read by validate_mental_model_candidate: True asks the refresh for a new
+    # draft, with ``reason`` in its prompt, instead of failing for good.
+    retry: bool = False
     # Optional enrichment fields — returned by validator, used by engine if present.
     # None means "no modification" (engine uses original values).
     contents: list[dict] | None = None  # Enriched retain contents (e.g., injected tags/strategy)
@@ -79,9 +82,12 @@ class ValidationResult:
         )
 
     @classmethod
-    def reject(cls, reason: str, status_code: int = 403) -> "ValidationResult":
-        """Create a rejected validation result with a reason and HTTP status code."""
-        return cls(allowed=False, reason=reason, status_code=status_code)
+    def reject(cls, reason: str, status_code: int = 403, *, retry: bool = False) -> "ValidationResult":
+        """Create a rejected validation result with a reason and HTTP status code.
+
+        ``retry`` only matters for ``validate_mental_model_candidate``: see there.
+        """
+        return cls(allowed=False, reason=reason, status_code=status_code, retry=retry)
 
 
 # =============================================================================
@@ -377,6 +383,94 @@ class ConsolidateResult:
 
 
 # =============================================================================
+# Memory Review Contexts (filter_retain_facts / filter_consolidation_actions)
+# =============================================================================
+
+
+@dataclass
+class MemoryReview:
+    """An extension's verdict on one extracted memory or one consolidation action.
+
+    Deliberately small: an extension may drop the item or replace its tags, nothing else.
+    Rewriting text is not offered — the text is what the embedding, entities and links
+    are built from, and a rewrite would have to redo all of them. Add fields here when a
+    concrete need comes up, not before.
+    """
+
+    #: False drops the item: the memory is not stored, the observation is not written.
+    keep: bool = True
+    #: The item's new tag set, replacing the one shown. None leaves the tags as they are.
+    tags: list[str] | None = None
+
+
+@dataclass
+class ReviewedFact:
+    """One memory extracted by a retain, before it is stored."""
+
+    text: str
+    fact_type: str
+    #: The tags the memory will be stored with (the item's and document's tags).
+    tags: list[str]
+    entities: list[str]
+
+
+@dataclass
+class RetainFactsContext:
+    """The memories extracted from one batch of a retain's chunks.
+
+    A large document is extracted and stored in batches, so one retain can call the hook
+    several times, each with a slice of the document's memories. Memories of chunks that
+    did not change on a re-retain are kept as they are and never shown.
+    """
+
+    bank_id: str
+    document_id: str | None
+    request_context: "RequestContext"
+    facts: list[ReviewedFact]
+
+
+@dataclass
+class ReviewedConsolidationAction:
+    """One observation write a consolidation batch decided, before it is applied."""
+
+    #: "create" writes a new observation; "update" rewrites ``observation_id``.
+    kind: Literal["create", "update"]
+    text: str
+    #: Tags the action writes. A create gets exactly these; an update adds them to the
+    #: observation's current tags (it never removes any).
+    tags: list[str]
+    #: The memories this observation is built from.
+    source_memory_ids: list[str]
+    observation_id: str | None = None
+    #: Set when the action will instead be folded into this existing near-duplicate
+    #: observation. A fold keeps the twin's tags, so ``MemoryReview.tags`` has no effect on
+    #: the twin; dropping the action still prevents the fold.
+    merge_into: str | None = None
+
+
+@dataclass
+class ConsolidationActionsContext:
+    """The creates and updates decided for one consolidation batch.
+
+    Dropping an action does not send its source memories back to the queue: they are
+    marked consolidated with the rest of the batch.
+    """
+
+    bank_id: str
+    request_context: "RequestContext"
+    actions: list[ReviewedConsolidationAction]
+
+
+def resolve_reviews(reviews: "list[MemoryReview] | None", count: int, hook: str) -> list[MemoryReview]:
+    """One review per item: None means keep everything; a wrong-length answer is a bug."""
+    if reviews is None:
+        return [MemoryReview() for _ in range(count)]
+    if len(reviews) != count:
+        raise ValueError(f"{hook} returned {len(reviews)} reviews for {count} items")
+    return reviews
+
+
+# =============================================================================
 # Bank Management Contexts
 # =============================================================================
 
@@ -441,7 +535,6 @@ class BankWriteOperation(StrEnum):
     DELETE_OPERATION = "delete_operation"
     DELETE_WEBHOOK = "delete_webhook"
     IMPORT_DOCUMENTS = "import_documents"
-    MERGE_BANK_MISSION = "merge_bank_mission"
     MOVE_KNOWLEDGE_NODE = "move_knowledge_node"
     RENAME_KNOWLEDGE_NODE = "rename_knowledge_node"
     REPROCESS_DOCUMENT = "reprocess_document"
@@ -576,6 +669,31 @@ class MentalModelRefreshContext:
     bank_id: str
     mental_model_id: str | None  # None for create (not yet assigned)
     request_context: "RequestContext"
+
+
+@dataclass
+class MentalModelCandidateContext:
+    """The document a refresh is about to publish, before it replaces the stored one.
+
+    ``candidate_content`` is the final markdown exactly as it would be stored —
+    after delta operations were applied and the document was rendered.
+    """
+
+    bank_id: str
+    mental_model_id: str
+    request_context: "RequestContext"
+    name: str
+    source_query: str
+    max_tokens: int
+    refresh_mode: "RefreshMode"
+    current_content: str
+    candidate_content: str
+    candidate_structured: "StructuredDocument | None"
+    # 0 for the refresh's first draft; n for the n-th redraft asked for with
+    # ``reject(reason, retry=True)``.
+    attempt: int = 0
+    # The reasons earlier drafts of this same refresh were rejected, oldest first.
+    previous_rejections: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -941,6 +1059,32 @@ class OperationValidatorExtension(Extension, ABC):
         pass
 
     # =========================================================================
+    # Memory review hooks (optional - default keeps everything)
+    # =========================================================================
+
+    async def filter_retain_facts(self, ctx: RetainFactsContext) -> list[MemoryReview] | None:
+        """
+        Review the memories a retain extracted, before they are embedded and stored.
+
+        Return one ``MemoryReview`` per ``ctx.facts`` item, in order, to drop a memory or
+        replace its tags; return None to keep them all unchanged. Runs once per extraction
+        batch (see ``RetainFactsContext``). Dropping every memory of a chunk still stores
+        the chunk itself.
+        """
+        return None
+
+    async def filter_consolidation_actions(self, ctx: ConsolidationActionsContext) -> list[MemoryReview] | None:
+        """
+        Review the observation creates and updates of one consolidation batch, before they
+        are written.
+
+        Return one ``MemoryReview`` per ``ctx.actions`` item, in order, to drop an action or
+        replace its tags; return None to keep them all unchanged. Runs before the batch's
+        write transaction, so it may be slow without holding locks.
+        """
+        return None
+
+    # =========================================================================
     # File Conversion - Post-operation hook (optional - override to implement)
     # =========================================================================
 
@@ -1078,6 +1222,30 @@ class OperationValidatorExtension(Extension, ABC):
         """
         return ValidationResult.accept()
 
+    async def validate_mental_model_candidate(self, ctx: MentalModelCandidateContext) -> ValidationResult:
+        """
+        Check the document a refresh produced before it replaces the stored one.
+
+        Runs on every non-empty candidate (full and delta refreshes), not on the
+        dry run. Accepting stores the candidate unchanged. Rejecting keeps the
+        stored document, its structured document and its watermark; the refusal
+        is recorded on the operation and in the model's history
+        (``failure_reason == "candidate_rejected"``), and automatic refreshes
+        pause until an explicit one succeeds.
+
+        A rejection is final by default: the operation fails and the worker does
+        not retry it, since the same input would make the same kind of document.
+        Return ``ValidationResult.reject(reason, retry=True)`` to get another
+        draft instead: the refresh writes a new full document straight away,
+        with ``reason`` added to the prompt, and calls this hook again with
+        ``ctx.attempt`` one higher and the reasons so far in
+        ``ctx.previous_rejections``. After 3 redrafts a rejection is final
+        whatever ``retry`` says.
+
+        If this hook raises, the candidate is not stored either.
+        """
+        return ValidationResult.accept()
+
     # =========================================================================
     # Mental Model - Post-operation hooks (optional - override to implement)
     # =========================================================================
@@ -1191,7 +1359,7 @@ class OperationValidatorExtension(Extension, ABC):
 
         Override to implement custom validation logic for bank writes
         (delete_bank, update_bank, update_bank_disposition, set_bank_mission,
-        merge_bank_mission, clear_observations, clear_observations_for_memory,
+        clear_observations, clear_observations_for_memory,
         and the knowledge-base writes — create_knowledge_folder /
         create_knowledge_page / update_knowledge_page / rename_knowledge_node /
         move_knowledge_node / delete_knowledge_node).

@@ -11,6 +11,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import signal
 import socket
 import subprocess
 import threading
@@ -70,6 +71,11 @@ def start_stub_server(stubs: Stubs) -> StubServer:
         port=port,
         log_level="warning",
         access_log=False,
+        # uvicorn closes an idle connection after 5s, but the server's aiohttp pool keeps
+        # it for 15s and may write a request onto it just as the stub closes it
+        # ("Can not write request body", #6298). With retries off (see stub_environment)
+        # that race fails the operation, so the stub outlives the client's pool instead.
+        timeout_keep_alive=60,
     )
     server = uvicorn.Server(config)
     thread = threading.Thread(target=server.run, daemon=True, name="provider-stub")
@@ -95,12 +101,27 @@ class HindsightServer:
     _process: subprocess.Popen
 
     def stop(self) -> None:
+        self.terminate_like_a_platform(grace=30)
+
+    def terminate_like_a_platform(self, grace: float) -> bool:
+        """SIGTERM, then SIGKILL once ``grace`` seconds pass — what a rollout does.
+
+        True if the process exited on its own within the grace period. Kubernetes and
+        Docker give no more than this: whatever shutdown has not finished by then dies.
+        """
+        # SIGTERM to `uv run` alone: it forwards it to the server, and a second
+        # SIGTERM sent to the group would reach the server twice and force-exit it.
         self._process.terminate()
         try:
-            self._process.wait(timeout=30)
+            self._process.wait(timeout=grace)
+            return True
         except subprocess.TimeoutExpired:
-            self._process.kill()
+            # The whole group: SIGKILL is not forwarded, so killing `uv run` alone
+            # would leave the server itself running as an orphan.
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(self._process.pid, signal.SIGKILL)
             self._process.wait(timeout=10)
+            return False
 
     def logs(self) -> str:
         with contextlib.suppress(OSError):
@@ -204,6 +225,32 @@ def start_hindsight_worker(
     return _start(command, env=env, url=f"http://127.0.0.1:{port}", log_path=log_path)
 
 
+def run_hindsight_admin(
+    args: list[str], *, stub_url: str, log_path: Path, extra_env: dict[str, str] | None = None
+) -> str:
+    """Run one ``hindsight-admin`` command to completion, as an operator would; return its output.
+
+    Same environment and scratch directory as a server, so it reaches the same database and
+    providers. Raises with the output when the command fails.
+    """
+    run_dir = log_path.parent / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / ".env").write_text("# intentionally empty: see start_hindsight_server\n")
+    result = subprocess.run(
+        ["uv", "run", "--project", str(API_DIR), "hindsight-admin", *args],
+        cwd=run_dir,
+        env=_server_env(stub_url, extra_env),
+        capture_output=True,
+        text=True,
+        timeout=SERVER_STARTUP_TIMEOUT,
+    )
+    output = result.stdout + result.stderr
+    log_path.write_text(output)
+    if result.returncode != 0:
+        raise RuntimeError(f"hindsight-admin {' '.join(args)} exited {result.returncode}:\n{output}")
+    return output
+
+
 def _server_env(stub_url: str, extra_env: dict[str, str] | None) -> dict[str, str]:
     env = os.environ.copy()
     # The repo .env is for the developer's own server; a system test must depend
@@ -258,6 +305,8 @@ def _start(command: list[str], *, env: dict[str, str], url: str, log_path: Path)
         env=env,
         stdout=log_file,
         stderr=subprocess.STDOUT,
+        # Its own process group, so a kill reaches the server and not only `uv run`.
+        start_new_session=True,
     )
 
     server = HindsightServer(url=url, log_path=log_path, _process=process)
