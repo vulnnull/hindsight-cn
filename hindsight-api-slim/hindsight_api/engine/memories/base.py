@@ -1097,6 +1097,8 @@ class EntityResolverHandle(Protocol):
 
     def discard_pending_stats(self) -> None: ...
 
+    def forget_pending_mentions(self, entity_ids: list[str]) -> None: ...
+
     async def flush_pending_stats(self, conn: Any | None = None) -> None: ...
 
     async def reassert_entities_batch(self, bank_id: str, resolved_entities: list[Any], conn) -> None: ...
@@ -3088,8 +3090,15 @@ class MemoriesExtension(Extension, ABC):
         await self.delete_document_record(bank_id=bank_id, document_id=document_id)
         return DeletedDocument(deleted=_record is not None, file_storage_key=file_storage_key)
 
-    async def current_document_tags(self, *, conn, fq_table, bank_id: str, document_id: str) -> DocumentTags:
+    async def current_document_tags(
+        self, *, conn, fq_table, bank_id: str, document_id: str, for_update: bool = False
+    ) -> DocumentTags:
         """The tags a document carries now, read before a retag overwrites them.
+
+        ``for_update`` asks the store to hold the document until ``conn``'s transaction ends, so
+        a tag change decided from this read (a partial add/remove, or whether a full write must
+        retag the memories) is not undone by a concurrent one. The default record-based read
+        cannot lock and ignores it.
 
         Default: the store's record. A record that does not carry a "tags" key at all is
         unreadable for this purpose, not empty — collapsing it to [] would read a PATCH of []
@@ -3616,10 +3625,17 @@ class MemoriesExtension(Extension, ABC):
         record = await self.get_document_record(bank_id=bank_id, document_id=document_id, include_text=include_text)
         return document_chunk_state(record, bank_id=bank_id, document_id=document_id, include_text=include_text)
 
-    async def load_existing_chunks(self, *, conn, fq_table, bank_id: str, document_id: str) -> list[ExistingChunk]:
-        """The document's chunks (id, index, content hash), in chunk order."""
+    async def load_existing_chunks(
+        self, *, conn, fq_table, bank_id: str, document_id: str, chunk_indices: list[int] | None = None
+    ) -> list[ExistingChunk]:
+        """The document's chunks (id, index, content hash), in chunk order; ``chunk_indices`` limits
+        the result to those positions."""
         record = await self.get_document_record(bank_id=bank_id, document_id=document_id)
-        return document_chunk_state(record, bank_id=bank_id, document_id=document_id, include_text=False).chunks
+        chunks = document_chunk_state(record, bank_id=bank_id, document_id=document_id, include_text=False).chunks
+        if chunk_indices is None:
+            return chunks
+        wanted = set(chunk_indices)
+        return [c for c in chunks if c.chunk_index in wanted]
 
     async def current_document_hash(self, *, backend, fq_table, bank_id: str, document_id: str) -> str | None:
         """The document's content_hash now, for the delta's pre-extraction recheck. ``backend`` is
