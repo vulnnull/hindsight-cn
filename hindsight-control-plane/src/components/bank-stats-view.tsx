@@ -87,7 +87,7 @@ export interface BankStats {
  * It also took the two refresh timestamps back when it derived staleness itself. */
 type MentalModelSummary = Pick<
   MentalModel,
-  "is_stale" | "is_knowledge_page" | "last_refreshed_at" | "last_refresh_failed_at"
+  "is_stale" | "is_page" | "last_refreshed_at" | "last_refresh_failed_at"
 >;
 
 type Period = "1h" | "12h" | "1d" | "7d" | "30d" | "90d";
@@ -127,7 +127,7 @@ type FactKey = "world" | "experience" | "observation";
 
 // Palette. Memory-type hues deliberately avoid the link-type hues (teal/blue/amber)
 // so the two distributions read as different dimensions.
-const CHART_COLORS = {
+export const CHART_COLORS = {
   primary: "var(--primary)",
   // Memory composition — modern violet / pink / indigo palette.
   // Picked to stay distinct from the link-type hues (teal/blue/amber).
@@ -162,7 +162,7 @@ const FACT_META: Record<FactKey, { label: string; color: string }> = {
   observation: { label: "Observations", color: CHART_COLORS.observation },
 };
 
-function formatCompact(n: number): string {
+export function formatCompact(n: number): string {
   if (n < 1000) return n.toString();
   if (n < 1_000_000) {
     const k = n / 1000;
@@ -191,7 +191,7 @@ type ChartTooltipProps = Partial<TooltipContentProps<number, string>> & {
   valueLabel?: string;
 };
 
-function ChartTooltip({ active, payload, label, valueLabel }: ChartTooltipProps) {
+export function ChartTooltip({ active, payload, label, valueLabel }: ChartTooltipProps) {
   if (!active || !payload || payload.length === 0) return null;
   return (
     <div className="rounded-lg border border-border/60 bg-popover/95 backdrop-blur-sm px-3 py-2 shadow-md">
@@ -255,7 +255,7 @@ function parseBucketIso(iso: string): Date {
   return new Date(/[+Z-]$/.test(iso) || /[+-]\d\d:?\d\d$/.test(iso) ? iso : `${iso}Z`);
 }
 
-function formatBucketLabel(iso: string, trunc: string): string {
+export function formatBucketLabel(iso: string, trunc: string): string {
   const d = parseBucketIso(iso);
   if (trunc === "day") {
     return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
@@ -263,7 +263,7 @@ function formatBucketLabel(iso: string, trunc: string): string {
   return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
-function formatBucketTooltip(iso: string, trunc: string): string {
+export function formatBucketTooltip(iso: string, trunc: string): string {
   const d = parseBucketIso(iso);
   if (trunc === "day") {
     return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
@@ -315,7 +315,7 @@ interface DistributionItem {
   color: string;
 }
 
-function Distribution({
+export function Distribution({
   title,
   items,
   emptyLabel,
@@ -376,14 +376,20 @@ function Distribution({
   );
 }
 
-function InlineStat({
+export function InlineStat({
   icon: Icon,
   label,
   value,
+  display,
+  note,
 }: {
   icon: typeof Database;
   label: string;
   value: number;
+  /** Shown instead of the compact number (e.g. a byte size). */
+  display?: string;
+  /** A small line under the value (e.g. "2 in progress"). */
+  note?: React.ReactNode;
 }) {
   return (
     <div className="flex items-center gap-3 p-4">
@@ -392,10 +398,17 @@ function InlineStat({
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-xs text-muted-foreground font-medium">{label}</p>
-        <CompactNumber
-          value={value}
-          className="text-2xl font-semibold text-foreground leading-tight tabular-nums block"
-        />
+        {display != null ? (
+          <span className="text-2xl font-semibold text-foreground leading-tight tabular-nums block">
+            {display}
+          </span>
+        ) : (
+          <CompactNumber
+            value={value}
+            className="text-2xl font-semibold text-foreground leading-tight tabular-nums block"
+          />
+        )}
+        {note}
       </div>
     </div>
   );
@@ -760,7 +773,7 @@ function FailedConsolidationsDialog({
   );
 }
 
-/** Freshness of a set of mental models — used for standalone models and for knowledge pages. */
+/** Freshness of a set of mental models — used for standalone models and for pages. */
 function MentalModelsCard({
   models,
   title,
@@ -881,7 +894,7 @@ function MentalModelsCard({
   );
 }
 
-const AXIS_TICK_STYLE = {
+export const AXIS_TICK_STYLE = {
   fontSize: 11,
   fill: CHART_COLORS.mutedFg,
   fontWeight: 500,
@@ -1234,9 +1247,9 @@ export function BankStatsView() {
         <MemoryStoreCard stats={stats} observationsEnabled={observationsEnabled} />
       </section>
 
-      {/* KNOWLEDGE — consolidation, mental models, knowledge pages */}
+      {/* SYNTHESIS — consolidation, mental models, pages */}
       <section>
-        <SectionHeading>{t("knowledgeSection")}</SectionHeading>
+        <SectionHeading>{t("synthesisSection")}</SectionHeading>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <ConsolidationCard
             done={consolidatedDone}
@@ -1247,11 +1260,11 @@ export function BankStatsView() {
             href={bankRoute(currentBank, "?view=data&subTab=observations")}
           />
           <MentalModelsCard
-            models={mentalModels.filter((m) => !m.is_knowledge_page)}
+            models={mentalModels.filter((m) => !m.is_page)}
             title={t("mentalModels")}
             emptyLabel={t("noMentalModels")}
             Icon={Brain}
-            href={bankRoute(currentBank, "?view=knowledge&knowledgeTab=models")}
+            href={bankRoute(currentBank, "?view=pages&pagesTab=models")}
             hints={{
               inSync: t("hintModelsInSync"),
               stale: t("hintModelsStale"),
@@ -1260,11 +1273,11 @@ export function BankStatsView() {
             }}
           />
           <MentalModelsCard
-            models={mentalModels.filter((m) => m.is_knowledge_page)}
-            title={t("knowledgePages")}
-            emptyLabel={t("noKnowledgePages")}
+            models={mentalModels.filter((m) => m.is_page)}
+            title={t("pages")}
+            emptyLabel={t("noPages")}
             Icon={BookOpen}
-            href={bankRoute(currentBank, "?view=knowledge&knowledgeTab=pages")}
+            href={bankRoute(currentBank, "?view=pages&pagesTab=pages")}
             hints={{
               inSync: t("hintPagesInSync"),
               stale: t("hintPagesStale"),

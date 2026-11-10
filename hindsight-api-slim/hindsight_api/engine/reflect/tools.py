@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, cast
 
 from ..prompt_utils import truncate_context_for_prompt
-from ..response_models import MemoryFact
+from ..response_models import KnowledgeDocumentHit, MemoryFact
 from ..schema import fq_table
 from ..search.tags import TagGroup, TagsMatch, tag_filter_active, tags_satisfy_groups
 from ..source_scope import ids_passing, visible_document_ids
@@ -165,7 +165,7 @@ async def tool_search_mental_models(
     Returns:
         Dict with matching mental models including content and freshness info
     """
-    from ..memory_engine import _knowledge_snippet, _mental_model_stale_scope_from_row
+    from ..memory_engine import _mental_model_stale_scope_from_row, _page_snippet
     from ..search.tags import build_tag_groups_where_clause, build_tags_where_clause
 
     # Build filters dynamically
@@ -207,7 +207,7 @@ async def tool_search_mental_models(
 
     store = get_memories()
     if store.store_owned_for(bank_id):
-        matches = await store.search_knowledge_pages_semantic(
+        matches = await store.search_pages_semantic(
             bank_id,
             embedding=list(query_embedding),
             limit=max_results,
@@ -289,7 +289,7 @@ async def tool_search_mental_models(
             {
                 "id": str(row["id"]),
                 "name": row["name"],
-                # Past the budget, a snippet like the knowledge-page search this mirrors:
+                # Past the budget, a snippet like the page search this mirrors:
                 # five unbounded whole pages measured 8.7-19k tokens and were re-sent on
                 # every later turn of the loop, the largest single item in a reflect's
                 # floor (#4533). The model reads the ones it wants with
@@ -297,11 +297,11 @@ async def tool_search_mental_models(
                 **(
                     {"content": content}
                     if whole
-                    # ``_knowledge_snippet`` so a page with no body reads as
+                    # ``_page_snippet`` so a page with no body reads as
                     # empty-on-purpose rather than as a blank match — the same
-                    # wording the knowledge-page search gives for the same state.
+                    # wording the page search gives for the same state.
                     else {
-                        "snippet": _knowledge_snippet(content),
+                        "snippet": _page_snippet(content),
                         "content_chars": len(content),
                     }
                 ),
@@ -497,6 +497,7 @@ async def tool_recall(
     include_chunks: bool = True,
     created_after: datetime | None = None,
     created_before: datetime | None = None,
+    include_documents: bool = False,
 ) -> dict[str, Any]:
     """
     Search memories using TEMPR retrieval.
@@ -542,12 +543,15 @@ async def tool_recall(
         _quiet=True,  # Suppress logging for internal operations
         include_chunks=include_chunks,
         max_chunk_tokens=max_chunk_tokens,
+        include_documents=include_documents,
     )
 
     # A chunk is raw source text: "I signed up yesterday" means nothing without the date it was
     # said on. Its facts carry that date, so the chunk borrows it from the first one.
     chunk_dates = {m.chunk_id: m.mentioned_at for m in reversed(result.results) if m.chunk_id and m.mentioned_at}
+    documents = _knowledge_documents(result.documents)
     return {
+        **documents,
         "query": query,
         "memories": [_drop_unread_fields(_prune_nulls(m.model_dump())) for m in result.results],
         # ``chunks`` is deliberately not trimmed: ChunkInfo carries only
@@ -559,6 +563,35 @@ async def tool_recall(
             for k, v in (result.chunks or {}).items()
         },
     }
+
+
+_DOCUMENTS_NOTE = (
+    "These documents come from the knowledge banks linked to this memory bank: authoritative product "
+    "documentation. When a document and a memory disagree, the document is right; answer from the document "
+    "and say the memory is outdated."
+)
+
+
+def _knowledge_documents(hits: list[KnowledgeDocumentHit] | None) -> dict[str, Any]:
+    """The linked knowledge banks' passages, for the agent: what it can read of them, plus who wins."""
+    if not hits:
+        return {}
+    docs = [
+        _prune_nulls(
+            {
+                "source": h.filename or h.document_id,
+                "document_id": h.document_id,
+                "page": h.page,
+                "start_ms": h.start_ms,
+                "end_ms": h.end_ms,
+                "media_type": h.media_type,
+                # A page image or a clip has no text the agent can read; it still learns the doc matched.
+                "text": h.text or f"[{h.media_type} passage: no text]",
+            }
+        )
+        for h in hits
+    ]
+    return {"documents_note": _DOCUMENTS_NOTE, "documents": docs}
 
 
 def _iso(value: datetime | None) -> str | None:

@@ -586,6 +586,29 @@ class MentalModelResult(BaseModel):
     relevance: float = Field(default=0.0, description="Relevance score to the query")
 
 
+class KnowledgeDocumentHit(BaseModel):
+    """A passage from a knowledge bank the memory bank links: an authoritative document.
+
+    When it conflicts with a memory, the document wins.
+    """
+
+    bank_id: str = Field(description="The knowledge bank the passage is from")
+    document_id: str
+    passage_index: int
+    filename: str | None = None
+    media_type: str = Field(description="document (PDF, Office), image, audio, video or text")
+    text: str | None = Field(
+        default=None, description="Text of the passage (a PDF page's text layer, or a text passage)"
+    )
+    page: int | None = None
+    start_ms: int | None = None
+    end_ms: int | None = None
+    score: float = Field(description="Cosine similarity between the query and the passage")
+    passage_url: str | None = Field(default=None, description="Streams this passage's page image or clip")
+    document_url: str = Field(description="Streams the original file")
+    tags: list[str] = Field(default_factory=list)
+
+
 class RecallResult(BaseModel):
     """
     Result from a recall operation.
@@ -636,6 +659,11 @@ class RecallResult(BaseModel):
             "results[].source_fact_ids have no entry in source_facts — the budget ran out, the "
             "references are not dangling. Only set when source facts were requested."
         ),
+    )
+    documents: list[KnowledgeDocumentHit] | None = Field(
+        None,
+        description="Passages from the knowledge banks this bank links (config `knowledge_banks`). They are "
+        "authoritative: when a document and a memory disagree, the document wins.",
     )
 
 
@@ -928,7 +956,7 @@ class ReflectDefaultOptions(BaseModel):
     value -> bank ``reflect_default_options`` -> the shipped default.
 
     A mental-model refresh does NOT read this. It is its own operation with its
-    own per-bank default (``knowledge_page_default_trigger``), so the same-named
+    own per-bank default (``page_default_trigger``), so the same-named
     fields are declared on ``MentalModelTrigger`` instead — see there.
     """
 
@@ -999,7 +1027,7 @@ class MentalModelTrigger(BaseModel):
     whole document, so it wants its own retrieval and iteration settings. This
     trigger is therefore the only source for them — a bank's
     ``reflect_default_options`` deliberately does not reach a refresh. The
-    per-bank default for these fields is ``knowledge_page_default_trigger``,
+    per-bank default for these fields is ``page_default_trigger``,
     which is merged over this same shape when a page is created.
     """
 

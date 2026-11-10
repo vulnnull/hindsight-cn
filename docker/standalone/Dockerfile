@@ -189,6 +189,7 @@ WORKDIR /app
 RUN apt-get update && apt-get upgrade -y \
     && apt-get install -y \
     procps \
+    ffmpeg \
     libssl3 \
     libgssapi-krb5-2 \
     libossp-uuid16 \
@@ -347,6 +348,7 @@ WORKDIR /app
 RUN apt-get update && apt-get upgrade -y \
     && apt-get install -y \
     procps \
+    ffmpeg \
     libssl3 \
     libgssapi-krb5-2 \
     libossp-uuid16 \

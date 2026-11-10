@@ -112,6 +112,12 @@ def static(default_value):
     return field(default=default_value, metadata={"hierarchical": False})
 
 
+# Config keys that were renamed: old name -> new name. Old names keep working
+# everywhere a key is read (env-style overrides, tenant overrides, stored bank
+# config, config PATCH bodies), so no stored row needs migrating. Remove in 2.x.
+_RENAMED_CONFIG_KEYS = {"knowledge_page_default_trigger": "page_default_trigger"}
+
+
 # Configuration key normalization utilities
 def normalize_config_key(key: str) -> str:
     """
@@ -130,7 +136,8 @@ def normalize_config_key(key: str) -> str:
     """
     if key.startswith("HINDSIGHT_API_"):
         key = key[len("HINDSIGHT_API_") :]
-    return key.lower()
+    key = key.lower()
+    return _RENAMED_CONFIG_KEYS.get(key, key)
 
 
 def normalize_config_dict(config: dict[str, Any]) -> dict[str, Any]:
@@ -534,7 +541,7 @@ ENV_MENTAL_MODEL_REFRESH_LLM_CACHE_AFFINITY = "HINDSIGHT_API_MENTAL_MODEL_REFRES
 ENV_EMBEDDINGS_PROVIDER = "HINDSIGHT_API_EMBEDDINGS_PROVIDER"
 
 # Per-side embeddings (optional). Recall queries embed through the QUERY side, everything
-# that is stored (retain, consolidation, imports, knowledge pages) through the PASSAGE side
+# that is stored (retain, consolidation, imports, pages) through the PASSAGE side
 # (facts, observations and mental models).
 # A side is "the main embeddings config, with any HINDSIGHT_API_<SIDE>_EMBEDDINGS_<X> laid
 # over HINDSIGHT_API_EMBEDDINGS_<X>" — the same inherit-then-specialize shape as the
@@ -542,6 +549,9 @@ ENV_EMBEDDINGS_PROVIDER = "HINDSIGHT_API_EMBEDDINGS_PROVIDER"
 # variable, so either side can switch provider (local on one side, remote on the other).
 EMBEDDINGS_SIDE_QUERY = "QUERY"
 EMBEDDINGS_SIDE_PASSAGE = "PASSAGE"
+# The knowledge banks' text embedder ("text" provider), when it is not the memory banks' own:
+# HINDSIGHT_API_KNOWLEDGE_TEXT_EMBEDDINGS_<X> for any HINDSIGHT_API_EMBEDDINGS_<X>.
+EMBEDDINGS_SIDE_KNOWLEDGE_TEXT = "KNOWLEDGE_TEXT"
 _ENV_EMBEDDINGS_PREFIX = "HINDSIGHT_API_EMBEDDINGS_"
 # Provider-agnostic asymmetric prefixes: applied client-side by every provider that
 # is plain text-in/vector-out (tei, litellm, litellm-sdk, openai-compatible). Providers
@@ -958,6 +968,36 @@ ENV_FILE_PARSER_IRIS_ORG_ID = "HINDSIGHT_API_FILE_PARSER_IRIS_ORG_ID"
 ENV_FILE_PARSER_LLAMA_PARSE_API_KEY = "HINDSIGHT_API_FILE_PARSER_LLAMA_PARSE_API_KEY"
 ENV_FILE_CONVERSION_MAX_BATCH_SIZE_MB = "HINDSIGHT_API_FILE_CONVERSION_MAX_BATCH_SIZE_MB"
 ENV_FILE_CONVERSION_MAX_BATCH_SIZE = "HINDSIGHT_API_FILE_CONVERSION_MAX_BATCH_SIZE"
+# Knowledge banks: multimodal document search (hindsight_api/knowledge/), no LLM anywhere
+ENV_KNOWLEDGE_EMBEDDINGS_PROVIDER = "HINDSIGHT_API_KNOWLEDGE_EMBEDDINGS_PROVIDER"
+ENV_KNOWLEDGE_EMBEDDINGS_MODEL = "HINDSIGHT_API_KNOWLEDGE_EMBEDDINGS_MODEL"
+ENV_KNOWLEDGE_EMBEDDINGS_API_KEY = "HINDSIGHT_API_KNOWLEDGE_EMBEDDINGS_API_KEY"
+ENV_KNOWLEDGE_EMBEDDINGS_DIMENSIONS = "HINDSIGHT_API_KNOWLEDGE_EMBEDDINGS_DIMENSIONS"
+ENV_KNOWLEDGE_EMBEDDINGS_BASE_URL = "HINDSIGHT_API_KNOWLEDGE_EMBEDDINGS_BASE_URL"
+ENV_KNOWLEDGE_EMBEDDINGS_MODALITIES = "HINDSIGHT_API_KNOWLEDGE_EMBEDDINGS_MODALITIES"
+ENV_KNOWLEDGE_EMBEDDINGS_DEVICE = "HINDSIGHT_API_KNOWLEDGE_EMBEDDINGS_DEVICE"
+ENV_KNOWLEDGE_EMBEDDINGS_BATCH_SIZE = "HINDSIGHT_API_KNOWLEDGE_EMBEDDINGS_BATCH_SIZE"
+# Media types (document, image, audio, video, text) this server refuses to ingest, comma-separated,
+# whatever its embedder could embed: e.g. "video,audio" to skip the cost of decoding clips.
+ENV_KNOWLEDGE_DISABLED_MEDIA_TYPES = "HINDSIGHT_API_KNOWLEDGE_DISABLED_MEDIA_TYPES"
+ENV_KNOWLEDGE_IMAGE_TOKENS = "HINDSIGHT_API_KNOWLEDGE_IMAGE_TOKENS"
+ENV_KNOWLEDGE_MAX_FILE_MB = "HINDSIGHT_API_KNOWLEDGE_MAX_FILE_MB"
+ENV_KNOWLEDGE_MAX_MEDIA_SECONDS = "HINDSIGHT_API_KNOWLEDGE_MAX_MEDIA_SECONDS"
+ENV_KNOWLEDGE_MAX_PDF_PAGES = "HINDSIGHT_API_KNOWLEDGE_MAX_PDF_PAGES"
+ENV_KNOWLEDGE_AUDIO_WINDOW_SECONDS = "HINDSIGHT_API_KNOWLEDGE_AUDIO_WINDOW_SECONDS"
+ENV_KNOWLEDGE_VIDEO_WINDOW_SECONDS = "HINDSIGHT_API_KNOWLEDGE_VIDEO_WINDOW_SECONDS"
+ENV_KNOWLEDGE_MEDIA_OVERLAP_SECONDS = "HINDSIGHT_API_KNOWLEDGE_MEDIA_OVERLAP_SECONDS"
+ENV_KNOWLEDGE_PDF_PAGE_PIXELS = "HINDSIGHT_API_KNOWLEDGE_PDF_PAGE_PIXELS"
+ENV_KNOWLEDGE_PDF_TEXT_WEIGHT = "HINDSIGHT_API_KNOWLEDGE_PDF_TEXT_WEIGHT"
+ENV_KNOWLEDGE_PDF_BANDS = "HINDSIGHT_API_KNOWLEDGE_PDF_BANDS"
+ENV_KNOWLEDGE_KEYWORD_WEIGHT = "HINDSIGHT_API_KNOWLEDGE_KEYWORD_WEIGHT"
+ENV_KNOWLEDGE_TEXT_PASSAGE_TOKENS = "HINDSIGHT_API_KNOWLEDGE_TEXT_PASSAGE_TOKENS"
+ENV_KNOWLEDGE_STORE_EXTENSION = "HINDSIGHT_API_KNOWLEDGE_STORE_EXTENSION"
+# Knowledge-bank ingestion strategies (knowledge/ingest_strategy.py): named mappings of file types to
+# the extension that pre-processes them (JSON, {name: {file_type: {"extension": "module:Class",
+# "settings": {...}}}}), and the one an ingest uses unless its item names another. Server-wide only.
+ENV_INGEST_STRATEGIES = "HINDSIGHT_API_INGEST_STRATEGIES"
+ENV_INGEST_DEFAULT_STRATEGY = "HINDSIGHT_API_INGEST_DEFAULT_STRATEGY"
 ENV_ENABLE_FILE_UPLOAD_API = "HINDSIGHT_API_ENABLE_FILE_UPLOAD_API"
 ENV_FILE_DELETE_AFTER_RETAIN = "HINDSIGHT_API_FILE_DELETE_AFTER_RETAIN"
 ENV_STORE_DOCUMENT_TEXT = "HINDSIGHT_API_STORE_DOCUMENT_TEXT"
@@ -966,6 +1006,7 @@ ENV_DEFAULT_TIMEZONE = "HINDSIGHT_API_DEFAULT_TIMEZONE"
 # Document transfer (export/import documents between banks without re-running the LLM)
 ENV_ENABLE_DOCUMENT_EXPORT_API = "HINDSIGHT_API_ENABLE_DOCUMENT_EXPORT_API"
 ENV_ENABLE_DOCUMENT_IMPORT_API = "HINDSIGHT_API_ENABLE_DOCUMENT_IMPORT_API"
+ENV_ENABLE_KNOWLEDGE_BANKS = "HINDSIGHT_API_ENABLE_KNOWLEDGE_BANKS"
 
 # Observations settings (consolidated knowledge from facts)
 ENV_ENABLE_OBSERVATIONS = "HINDSIGHT_API_ENABLE_OBSERVATIONS"
@@ -994,7 +1035,9 @@ ENV_OBSERVATION_HISTORY_MAX_ENTRIES = "HINDSIGHT_API_OBSERVATION_HISTORY_MAX_ENT
 ENV_ENABLE_MENTAL_MODEL_HISTORY = "HINDSIGHT_API_ENABLE_MENTAL_MODEL_HISTORY"
 ENV_MENTAL_MODEL_HISTORY_MAX_ENTRIES = "HINDSIGHT_API_MENTAL_MODEL_HISTORY_MAX_ENTRIES"
 ENV_MENTAL_MODEL_MIN_REFRESH_INTERVAL_SECONDS = "HINDSIGHT_API_MENTAL_MODEL_MIN_REFRESH_INTERVAL_SECONDS"
-ENV_KNOWLEDGE_PAGE_DEFAULT_TRIGGER = "HINDSIGHT_API_KNOWLEDGE_PAGE_DEFAULT_TRIGGER"
+ENV_PAGE_DEFAULT_TRIGGER = "HINDSIGHT_API_PAGE_DEFAULT_TRIGGER"
+# Deprecated name of ENV_PAGE_DEFAULT_TRIGGER, still read as a fallback. Remove in 2.x.
+ENV_PAGE_DEFAULT_TRIGGER_DEPRECATED = "HINDSIGHT_API_KNOWLEDGE_PAGE_DEFAULT_TRIGGER"
 ENV_REFLECT_DEFAULT_OPTIONS = "HINDSIGHT_API_REFLECT_DEFAULT_OPTIONS"
 
 # Webhook configuration (global, static - server-level only)
@@ -1211,6 +1254,7 @@ ENV_CONSOLIDATION_RECONCILE_INTERVAL_SECONDS = "HINDSIGHT_API_CONSOLIDATION_RECO
 ENV_MENTAL_MODEL_REFRESH_TICK_SECONDS = "HINDSIGHT_API_MENTAL_MODEL_REFRESH_TICK_SECONDS"
 ENV_RETENTION_SWEEP_INTERVAL_SECONDS = "HINDSIGHT_API_RETENTION_SWEEP_INTERVAL_SECONDS"
 ENV_OPERATION_CLEANUP_INTERVAL_SECONDS = "HINDSIGHT_API_OPERATION_CLEANUP_INTERVAL_SECONDS"
+ENV_ATTACHMENT_SWEEP_INTERVAL_SECONDS = "HINDSIGHT_API_ATTACHMENT_SWEEP_INTERVAL_SECONDS"
 ENV_MAINTENANCE_START_JITTER_SECONDS = "HINDSIGHT_API_MAINTENANCE_START_JITTER_SECONDS"
 ENV_VECTOR_INDEX_MIN_ROWS = "HINDSIGHT_API_VECTOR_INDEX_MIN_ROWS"
 ENV_VECTOR_INDEX_MAINTENANCE_MIN_INTERVAL_SECONDS = "HINDSIGHT_API_VECTOR_INDEX_MAINTENANCE_MIN_INTERVAL_SECONDS"
@@ -1496,6 +1540,30 @@ RECALL_BOOST_LEVELS = ("low", "medium", "high")
 DEFAULT_RECALL_BOOST_LEVEL = "medium"
 
 
+_KNOWLEDGE_MEDIA_TYPES = ("document", "image", "audio", "video", "text")
+
+
+def _parse_knowledge_media_types(raw: str | None) -> frozenset[str]:
+    names = frozenset(n.strip().lower() for n in (raw or "").split(",") if n.strip())
+    unknown = names - set(_KNOWLEDGE_MEDIA_TYPES)
+    if unknown:
+        raise ValueError(
+            f"{ENV_KNOWLEDGE_DISABLED_MEDIA_TYPES}: unknown media types {', '.join(sorted(unknown))} "
+            f"(expected some of {', '.join(_KNOWLEDGE_MEDIA_TYPES)})"
+        )
+    return names
+
+
+def _parse_ingest_strategies(raw: str | None) -> dict | None:
+    """HINDSIGHT_API_INGEST_STRATEGIES: a JSON object of strategy name -> its file-type mapping (an object)."""
+    if not raw:
+        return None
+    parsed = json.loads(raw)
+    if not isinstance(parsed, dict) or not all(isinstance(v, dict) for v in parsed.values()):
+        raise ValueError(f"{ENV_INGEST_STRATEGIES} must be a JSON object of strategy name -> file-type mapping")
+    return parsed
+
+
 def _parse_strategy_boosts(raw: str | None) -> dict[str, str]:
     """Parse a "strategy:level,strategy:level" string into a boost map.
 
@@ -1622,16 +1690,26 @@ class _DecisionProviderDefaults:
     #: Most tokens one request may carry, sized for the model's window; None takes
     #: DEFAULT_DECISION_MODEL_MAX_REQUEST_TOKENS.
     max_request_tokens: int | None = None
+    #: ``base_url`` fits each request to the window of the model serving it, so on that URL the
+    #: client does not split by tokens. Any other URL (the model served on your own vLLM) does not.
+    default_url_fits_requests: bool = False
 
 
 # "none": no decision model; operations that could use one keep their LLM-only path.
 # hindsight, typesafe and cloudflare speak the System One API; openai has its own Decisions API.
 # hindsight is Hindsight Inference: its key comes from HINDSIGHT_API_DECISION_MODEL_API_KEY or,
-# when unset, from `hindsight-admin cloud login`. hs-decide-1-flash has a 64k window; the margin is
-# for counting it with o200k_base, not its own vocabulary.
+# when unset, from `hindsight-admin cloud login`. Hindsight Inference fits each request to the
+# window of the model that serves it and merges the answers, so the whole pool goes in one request.
+# It used to split at 54k tokens there too, counted on the whole JSON body: about twice the text the
+# model reads, so pools that fit were sent as 2+ calls (#6489). The 54k still applies on a custom URL,
+# where nothing fits the request: hs-decide-1-flash has a 64k window, and the margin is for counting
+# it with o200k_base, not its own vocabulary.
 DECISION_MODEL_PROVIDER_DEFAULTS = {
     "hindsight": _DecisionProviderDefaults(
-        model="hs-decide-1-flash", base_url=HINDSIGHT_INFERENCE_URL, max_request_tokens=54_000
+        model="hs-decide-1-flash",
+        base_url=HINDSIGHT_INFERENCE_URL,
+        max_request_tokens=54_000,
+        default_url_fits_requests=True,
     ),
     "typesafe": _DecisionProviderDefaults(model="jev-latest", base_url="https://api.typesafe.ai", tokenizer="jev"),
     "cloudflare": _DecisionProviderDefaults(model="clef", base_url=None),
@@ -1935,6 +2013,31 @@ DEFAULT_FILE_PARSER_MARKITDOWN_OCR_PROMPT = """You are a precise OCR transcripti
 Transcribe only the visible text in the image. Do not describe the image, summarize it, translate it, infer missing content, or add commentary. Preserve the original language, wording, numbers, punctuation, capitalization, and reading order. Reconstruct headings, lists, key-value fields, stamps, and tables as clean Markdown when the layout is clear. If text is unreadable or uncertain, write [unclear] for that span. Return only the extracted Markdown."""
 DEFAULT_FILE_CONVERSION_MAX_BATCH_SIZE_MB = 100  # Max total batch size in MB (all files combined)
 DEFAULT_FILE_CONVERSION_MAX_BATCH_SIZE = 10  # Max files per batch upload
+# Knowledge banks: one embedder per server, its modalities deciding which media types can be ingested
+# (knowledge/embedders.py). Multimodal: "local" (EmbeddingGemma 2 in-process), "gemini" / "vertex"
+# (Gemini Embedding 2), "voyage" (text, image, video), "cohere" (text, image), "openai" (any compatible
+# server). Text only: "text", any memory-bank embeddings provider (see EMBEDDINGS_SIDE_KNOWLEDGE_TEXT).
+DEFAULT_KNOWLEDGE_EMBEDDINGS_PROVIDER = "local"
+DEFAULT_KNOWLEDGE_EMBEDDINGS_LOCAL_MODEL = "google/embeddinggemma-2"
+DEFAULT_KNOWLEDGE_EMBEDDINGS_GEMINI_MODEL = "gemini-embedding-2"
+DEFAULT_KNOWLEDGE_EMBEDDINGS_VOYAGE_MODEL = "voyage-multimodal-3.5"
+DEFAULT_KNOWLEDGE_EMBEDDINGS_COHERE_MODEL = "embed-v4.0"
+DEFAULT_KNOWLEDGE_EMBEDDINGS_BATCH_SIZE = 8
+DEFAULT_KNOWLEDGE_IMAGE_TOKENS = 280  # EmbeddingGemma 2 vision token budget per image (70..1120)
+DEFAULT_KNOWLEDGE_MAX_FILE_MB = 500
+DEFAULT_KNOWLEDGE_MAX_MEDIA_SECONDS = 7200  # 2h of audio/video per file
+DEFAULT_KNOWLEDGE_MAX_PDF_PAGES = 2000
+DEFAULT_KNOWLEDGE_AUDIO_WINDOW_SECONDS = 60
+DEFAULT_KNOWLEDGE_VIDEO_WINDOW_SECONDS = 30
+DEFAULT_KNOWLEDGE_MEDIA_OVERLAP_SECONDS = 5
+DEFAULT_KNOWLEDGE_PDF_PAGE_PIXELS = 1536  # Longest side of a rendered PDF page
+# A PDF page's score = (1 - w) * image score + w * text-layer score (PDF_GEMMA.md: 0.6 best on ViDoRe V3)
+DEFAULT_KNOWLEDGE_PDF_TEXT_WEIGHT = 0.6
+# Three sharper horizontal band crops per PDF page as extra vectors: +0.4 nDCG@10 for half the ingest speed.
+DEFAULT_KNOWLEDGE_PDF_BANDS = False
+# Keyword match weight, fused only for documents in the query's language (PDF_GEMMA.md: 0.2 best).
+DEFAULT_KNOWLEDGE_KEYWORD_WEIGHT = 0.2
+DEFAULT_KNOWLEDGE_TEXT_PASSAGE_TOKENS = 128  # structure-aware; best on LegalBench-RAG (CHUNKING.md)
 DEFAULT_ENABLE_FILE_UPLOAD_API = True  # Enable file upload endpoint
 DEFAULT_FILE_DELETE_AFTER_RETAIN = True  # Delete file bytes after retain (saves storage)
 DEFAULT_STORE_DOCUMENT_TEXT = True  # Persist raw source text in documents.original_text / chunks.chunk_text
@@ -1943,6 +2046,9 @@ DEFAULT_DEFAULT_TIMEZONE = "UTC"  # IANA zone a retain timestamp with no UTC off
 # Document transfer defaults (export/import enabled by default; gated independently)
 DEFAULT_ENABLE_DOCUMENT_EXPORT_API = True
 DEFAULT_ENABLE_DOCUMENT_IMPORT_API = True
+# Knowledge banks ship hidden while they are being built: off, their HTTP routes answer 404, their
+# reflect ignores linked knowledge banks and the UI hides them.
+DEFAULT_ENABLE_KNOWLEDGE_BANKS = False
 
 # Observations defaults (consolidated knowledge from facts)
 DEFAULT_ENABLE_OBSERVATIONS = True  # Observations enabled by default
@@ -1959,10 +2065,10 @@ DEFAULT_ENABLE_MENTAL_MODEL_HISTORY = True  # Mental model history tracking enab
 # (API/MCP/control plane) ignore it entirely. Per-model
 # `trigger.min_refresh_interval_seconds` overrides this.
 DEFAULT_MENTAL_MODEL_MIN_REFRESH_INTERVAL_SECONDS = 0
-# Trigger fields layered over the engine's built-in knowledge-page default
-# (MemoryEngine.KNOWLEDGE_PAGE_DEFAULT_TRIGGER) when a page is created; a request's
+# Trigger fields layered over the engine's built-in page default
+# (MemoryEngine.PAGE_DEFAULT_TRIGGER) when a page is created; a request's
 # own trigger still wins. JSON object, e.g. {"refresh_cron": "0 * * * *"}.
-DEFAULT_KNOWLEDGE_PAGE_DEFAULT_TRIGGER: dict | None = None
+DEFAULT_PAGE_DEFAULT_TRIGGER: dict | None = None
 # Reflect options applied whenever a reflect request leaves them unset, e.g.
 # {"reflect_search_observations_max_tokens": 3000}. Fields are those of ReflectDefaultOptions;
 # an explicit request value always wins. Mental-model refreshes do not read it (they use their trigger).
@@ -2144,7 +2250,7 @@ DEFAULT_CONSOLIDATION_WALL_TIMEOUT = 7200  # seconds (2 hours)
 
 # Reflect agent settings
 DEFAULT_REFLECT_MAX_ITERATIONS = 10  # Max tool call iterations before forcing response
-# Whether reflect (and, separately, a knowledge-page refresh) is decision-orchestrated when a
+# Whether reflect (and, separately, a page refresh) is decision-orchestrated when a
 # reflect decision model is set up: the retrieval layers run in parallel rounds and the decision
 # model prunes the evidence and judges when it is enough, in place of the LLM's per-layer turns.
 # On by default, so setting up a decision model is what turns it on; a bank can opt out.
@@ -2265,6 +2371,12 @@ DEFAULT_RETENTION_SWEEP_INTERVAL_SECONDS = 3600
 # retention sweeps it deletes rows whose retention is counted in days, so a slow
 # cadence costs nothing but avoids a per-tick cross-tenant probe. 0 disables it.
 DEFAULT_OPERATION_CLEANUP_INTERVAL_SECONDS = 900
+
+# How often attachments their document does not reference are deleted — the images
+# and files of a retain that failed after the API stored them. It looks only at the
+# attachments stored in the past week, so a daily run touches each one a handful of
+# times. 0 disables it.
+DEFAULT_ATTACHMENT_SWEEP_INTERVAL_SECONDS = 86400
 
 # Upper bound on the random delay applied before a process runs its first
 # maintenance tick. Every job is due on the first tick, so without this a fleet
@@ -3299,7 +3411,8 @@ class DecisionModelConfig:
     base_url: str
     timeout: float
     max_concurrent: int
-    max_request_tokens: int
+    #: None: the endpoint fits requests itself, so they are split only to stay under its body-size limit.
+    max_request_tokens: int | None
     #: The vocabulary ``max_request_tokens`` and the reranker's caps are counted in; None
     #: counts with HINDSIGHT_API_TOKENIZER_ENCODING.
     tokenizer: str | None = None
@@ -3836,6 +3949,7 @@ class HindsightConfig:
     default_timezone: str  # IANA zone for retain times that carry no UTC offset
     enable_document_export_api: bool
     enable_document_import_api: bool
+    enable_knowledge_banks: bool
 
     # Observations settings (consolidated knowledge from facts)
     enable_observations: bool
@@ -3846,7 +3960,7 @@ class HindsightConfig:
     enable_mental_model_history: bool
     mental_model_history_max_entries: int
     mental_model_min_refresh_interval_seconds: int
-    knowledge_page_default_trigger: dict | None
+    page_default_trigger: dict | None
     consolidation_batch_size: int
     consolidation_dedup_threshold: float
     consolidation_max_memories_per_round: int
@@ -4112,6 +4226,7 @@ class HindsightConfig:
     # the lever a large deployment tunes. 0 disables the job.
     retention_sweep_interval_seconds: int = DEFAULT_RETENTION_SWEEP_INTERVAL_SECONDS
     operation_cleanup_interval_seconds: int = DEFAULT_OPERATION_CLEANUP_INTERVAL_SECONDS
+    attachment_sweep_interval_seconds: int = DEFAULT_ATTACHMENT_SWEEP_INTERVAL_SECONDS
     maintenance_start_jitter_seconds: int = DEFAULT_MAINTENANCE_START_JITTER_SECONDS
 
     # Retry/backoff applied to remote embedding API calls (see engine/remote_retry.py's RetryPolicy).
@@ -4156,6 +4271,36 @@ class HindsightConfig:
     consolidation_decision_model_api_key: str | None = None
     consolidation_decision_model_model: str | None = None
     consolidation_decision_model_base_url: str | None = None
+    # Knowledge banks (static, server-level: one embedding space per server)
+    knowledge_embeddings_provider: str = DEFAULT_KNOWLEDGE_EMBEDDINGS_PROVIDER
+    knowledge_embeddings_model: str | None = None  # None: the provider's default
+    knowledge_embeddings_api_key: str | None = None
+    knowledge_embeddings_dimensions: int | None = None  # None: the model's native size
+    knowledge_embeddings_base_url: str | None = None  # openai provider: the server's /v1 URL
+    knowledge_embeddings_modalities: str = "text,image"  # openai provider: what the remote model embeds
+    knowledge_embeddings_device: str | None = None  # None: auto (cuda, mps, cpu)
+    knowledge_embeddings_batch_size: int = DEFAULT_KNOWLEDGE_EMBEDDINGS_BATCH_SIZE
+    knowledge_disabled_media_types: frozenset[str] = frozenset()
+    #: The "text" knowledge provider's own embeddings config (HINDSIGHT_API_KNOWLEDGE_TEXT_EMBEDDINGS_*),
+    #: or None to use the memory banks' embedder.
+    knowledge_text_embeddings: "HindsightConfig | None" = None
+    knowledge_image_tokens: int = DEFAULT_KNOWLEDGE_IMAGE_TOKENS
+    knowledge_max_file_mb: int = DEFAULT_KNOWLEDGE_MAX_FILE_MB
+    knowledge_max_media_seconds: int = DEFAULT_KNOWLEDGE_MAX_MEDIA_SECONDS
+    knowledge_max_pdf_pages: int = DEFAULT_KNOWLEDGE_MAX_PDF_PAGES
+    knowledge_audio_window_seconds: int = DEFAULT_KNOWLEDGE_AUDIO_WINDOW_SECONDS
+    knowledge_video_window_seconds: int = DEFAULT_KNOWLEDGE_VIDEO_WINDOW_SECONDS
+    knowledge_media_overlap_seconds: int = DEFAULT_KNOWLEDGE_MEDIA_OVERLAP_SECONDS
+    knowledge_pdf_page_pixels: int = DEFAULT_KNOWLEDGE_PDF_PAGE_PIXELS
+    knowledge_pdf_text_weight: float = DEFAULT_KNOWLEDGE_PDF_TEXT_WEIGHT
+    knowledge_pdf_bands: bool = DEFAULT_KNOWLEDGE_PDF_BANDS
+    knowledge_keyword_weight: float = DEFAULT_KNOWLEDGE_KEYWORD_WEIGHT
+    knowledge_text_passage_tokens: int = DEFAULT_KNOWLEDGE_TEXT_PASSAGE_TOKENS
+    knowledge_store_extension: str | None = None
+    ingest_strategies: dict | None = None
+    ingest_default_strategy: str | None = None
+    # Per bank: the knowledge banks a memory bank's reflect reads, as the authority
+    knowledge_banks: list[str] | None = None
 
     # Class-level sets for configuration categorization
 
@@ -4293,7 +4438,7 @@ class HindsightConfig:
         "consolidation_strategies",
         # Mental model settings
         "mental_model_min_refresh_interval_seconds",
-        "knowledge_page_default_trigger",
+        "page_default_trigger",
         # Reflect settings
         "reflect_mission",
         "reflect_use_decision_model",
@@ -4326,6 +4471,8 @@ class HindsightConfig:
         "llm_gemini_safety_settings",
         # Memory Defense policy (validated against DefensePolicy schema on write)
         "memory_defense",
+        # Knowledge banks a memory bank reads as authoritative documents
+        "knowledge_banks",
     }
 
     @property
@@ -4682,6 +4829,7 @@ class HindsightConfig:
         # embeds anything, and validate() skips its dependency checks.
         config.query_embeddings = cls._embeddings_side_from_env(EMBEDDINGS_SIDE_QUERY)
         config.passage_embeddings = cls._embeddings_side_from_env(EMBEDDINGS_SIDE_PASSAGE)
+        config.knowledge_text_embeddings = cls._embeddings_side_from_env(EMBEDDINGS_SIDE_KNOWLEDGE_TEXT)
         config.validate()
         return config
 
@@ -5606,6 +5754,53 @@ class HindsightConfig:
             file_conversion_max_batch_size=int(
                 os.getenv(ENV_FILE_CONVERSION_MAX_BATCH_SIZE, str(DEFAULT_FILE_CONVERSION_MAX_BATCH_SIZE))
             ),
+            knowledge_embeddings_provider=os.getenv(
+                ENV_KNOWLEDGE_EMBEDDINGS_PROVIDER, DEFAULT_KNOWLEDGE_EMBEDDINGS_PROVIDER
+            ).lower(),
+            knowledge_embeddings_model=os.getenv(ENV_KNOWLEDGE_EMBEDDINGS_MODEL) or None,
+            knowledge_embeddings_api_key=os.getenv(ENV_KNOWLEDGE_EMBEDDINGS_API_KEY) or None,
+            knowledge_embeddings_dimensions=int(os.environ[ENV_KNOWLEDGE_EMBEDDINGS_DIMENSIONS])
+            if os.getenv(ENV_KNOWLEDGE_EMBEDDINGS_DIMENSIONS)
+            else None,
+            knowledge_embeddings_device=os.getenv(ENV_KNOWLEDGE_EMBEDDINGS_DEVICE) or None,
+            knowledge_embeddings_base_url=os.getenv(ENV_KNOWLEDGE_EMBEDDINGS_BASE_URL) or None,
+            knowledge_embeddings_modalities=os.getenv(ENV_KNOWLEDGE_EMBEDDINGS_MODALITIES, "text,image").lower(),
+            knowledge_embeddings_batch_size=int(
+                os.getenv(ENV_KNOWLEDGE_EMBEDDINGS_BATCH_SIZE, str(DEFAULT_KNOWLEDGE_EMBEDDINGS_BATCH_SIZE))
+            ),
+            knowledge_image_tokens=int(os.getenv(ENV_KNOWLEDGE_IMAGE_TOKENS, str(DEFAULT_KNOWLEDGE_IMAGE_TOKENS))),
+            knowledge_disabled_media_types=_parse_knowledge_media_types(os.getenv(ENV_KNOWLEDGE_DISABLED_MEDIA_TYPES)),
+            knowledge_max_file_mb=int(os.getenv(ENV_KNOWLEDGE_MAX_FILE_MB, str(DEFAULT_KNOWLEDGE_MAX_FILE_MB))),
+            knowledge_max_media_seconds=int(
+                os.getenv(ENV_KNOWLEDGE_MAX_MEDIA_SECONDS, str(DEFAULT_KNOWLEDGE_MAX_MEDIA_SECONDS))
+            ),
+            knowledge_max_pdf_pages=int(os.getenv(ENV_KNOWLEDGE_MAX_PDF_PAGES, str(DEFAULT_KNOWLEDGE_MAX_PDF_PAGES))),
+            knowledge_audio_window_seconds=int(
+                os.getenv(ENV_KNOWLEDGE_AUDIO_WINDOW_SECONDS, str(DEFAULT_KNOWLEDGE_AUDIO_WINDOW_SECONDS))
+            ),
+            knowledge_video_window_seconds=int(
+                os.getenv(ENV_KNOWLEDGE_VIDEO_WINDOW_SECONDS, str(DEFAULT_KNOWLEDGE_VIDEO_WINDOW_SECONDS))
+            ),
+            knowledge_media_overlap_seconds=int(
+                os.getenv(ENV_KNOWLEDGE_MEDIA_OVERLAP_SECONDS, str(DEFAULT_KNOWLEDGE_MEDIA_OVERLAP_SECONDS))
+            ),
+            knowledge_pdf_page_pixels=int(
+                os.getenv(ENV_KNOWLEDGE_PDF_PAGE_PIXELS, str(DEFAULT_KNOWLEDGE_PDF_PAGE_PIXELS))
+            ),
+            knowledge_keyword_weight=float(
+                os.getenv(ENV_KNOWLEDGE_KEYWORD_WEIGHT, str(DEFAULT_KNOWLEDGE_KEYWORD_WEIGHT))
+            ),
+            knowledge_pdf_bands=os.getenv(ENV_KNOWLEDGE_PDF_BANDS, str(DEFAULT_KNOWLEDGE_PDF_BANDS)).lower() == "true",
+            knowledge_pdf_text_weight=float(
+                os.getenv(ENV_KNOWLEDGE_PDF_TEXT_WEIGHT, str(DEFAULT_KNOWLEDGE_PDF_TEXT_WEIGHT))
+            ),
+            knowledge_text_passage_tokens=int(
+                os.getenv(ENV_KNOWLEDGE_TEXT_PASSAGE_TOKENS, str(DEFAULT_KNOWLEDGE_TEXT_PASSAGE_TOKENS))
+            ),
+            knowledge_store_extension=os.getenv(ENV_KNOWLEDGE_STORE_EXTENSION) or None,
+            ingest_strategies=_parse_ingest_strategies(os.getenv(ENV_INGEST_STRATEGIES)),
+            ingest_default_strategy=os.getenv(ENV_INGEST_DEFAULT_STRATEGY) or None,
+            knowledge_banks=None,  # per bank only (bank config); no server-wide default
             enable_file_upload_api=os.getenv(ENV_ENABLE_FILE_UPLOAD_API, str(DEFAULT_ENABLE_FILE_UPLOAD_API)).lower()
             == "true",
             file_delete_after_retain=os.getenv(
@@ -5621,6 +5816,8 @@ class HindsightConfig:
             enable_document_import_api=os.getenv(
                 ENV_ENABLE_DOCUMENT_IMPORT_API, str(DEFAULT_ENABLE_DOCUMENT_IMPORT_API)
             ).lower()
+            == "true",
+            enable_knowledge_banks=os.getenv(ENV_ENABLE_KNOWLEDGE_BANKS, str(DEFAULT_ENABLE_KNOWLEDGE_BANKS)).lower()
             == "true",
             # Observations settings (consolidated knowledge from facts)
             enable_observations=os.getenv(ENV_ENABLE_OBSERVATIONS, str(DEFAULT_ENABLE_OBSERVATIONS)).lower() == "true",
@@ -5662,10 +5859,11 @@ class HindsightConfig:
                     or DEFAULT_MENTAL_MODEL_MIN_REFRESH_INTERVAL_SECONDS
                 ),
             ),
-            knowledge_page_default_trigger=json.loads(
-                os.getenv(ENV_KNOWLEDGE_PAGE_DEFAULT_TRIGGER, "").strip() or "null"
+            page_default_trigger=json.loads(
+                (os.getenv(ENV_PAGE_DEFAULT_TRIGGER) or os.getenv(ENV_PAGE_DEFAULT_TRIGGER_DEPRECATED) or "").strip()
+                or "null"
             )
-            or DEFAULT_KNOWLEDGE_PAGE_DEFAULT_TRIGGER,
+            or DEFAULT_PAGE_DEFAULT_TRIGGER,
             consolidation_batch_size=int(
                 os.getenv(ENV_CONSOLIDATION_BATCH_SIZE, str(DEFAULT_CONSOLIDATION_BATCH_SIZE))
             ),
@@ -5959,6 +6157,11 @@ class HindsightConfig:
                 os.getenv(ENV_OPERATION_CLEANUP_INTERVAL_SECONDS),
                 DEFAULT_OPERATION_CLEANUP_INTERVAL_SECONDS,
             ),
+            attachment_sweep_interval_seconds=_parse_non_negative_int(
+                ENV_ATTACHMENT_SWEEP_INTERVAL_SECONDS,
+                os.getenv(ENV_ATTACHMENT_SWEEP_INTERVAL_SECONDS),
+                DEFAULT_ATTACHMENT_SWEEP_INTERVAL_SECONDS,
+            ),
             maintenance_start_jitter_seconds=_parse_non_negative_int(
                 ENV_MAINTENANCE_START_JITTER_SECONDS,
                 os.getenv(ENV_MAINTENANCE_START_JITTER_SECONDS),
@@ -6079,11 +6282,21 @@ class HindsightConfig:
         if provider == "hindsight" and operation == "recall" and own_provider is None:
             return None
         defaults = DECISION_MODEL_PROVIDER_DEFAULTS[provider]
-        max_request_tokens = (
-            self.decision_model_max_request_tokens
-            or defaults.max_request_tokens
-            or DEFAULT_DECISION_MODEL_MAX_REQUEST_TOKENS
-        )
+        inherits_global = provider == (self.decision_model_provider or "").lower()
+
+        def setting(name: str) -> str | None:
+            own = getattr(self, f"{operation}_decision_model_{name}")
+            if own is not None or not inherits_global:
+                return own
+            return getattr(self, f"decision_model_{name}")
+
+        base_url = setting("base_url") or defaults.base_url
+        if self.decision_model_max_request_tokens:
+            max_request_tokens: int | None = self.decision_model_max_request_tokens
+        elif defaults.default_url_fits_requests and (base_url or "").rstrip("/") == defaults.base_url:
+            max_request_tokens = None
+        else:
+            max_request_tokens = defaults.max_request_tokens or DEFAULT_DECISION_MODEL_MAX_REQUEST_TOKENS
         # Checked here, not on the first request: a ceiling no request fits, or a cap no
         # request gets through, would otherwise surface as every decision failing.
         if self.decision_model_timeout <= 0:
@@ -6092,18 +6305,11 @@ class HindsightConfig:
             raise ValueError(
                 f"{ENV_DECISION_MODEL_MAX_CONCURRENT} must be at least 1, not {self.decision_model_max_concurrent}"
             )
-        if max_request_tokens < MIN_DECISION_MODEL_MAX_REQUEST_TOKENS:
+        if max_request_tokens is not None and max_request_tokens < MIN_DECISION_MODEL_MAX_REQUEST_TOKENS:
             raise ValueError(
                 f"{ENV_DECISION_MODEL_MAX_REQUEST_TOKENS} must be at least {MIN_DECISION_MODEL_MAX_REQUEST_TOKENS}, "
                 f"not {max_request_tokens}"
             )
-        inherits_global = provider == (self.decision_model_provider or "").lower()
-
-        def setting(name: str) -> str | None:
-            own = getattr(self, f"{operation}_decision_model_{name}")
-            if own is not None or not inherits_global:
-                return own
-            return getattr(self, f"decision_model_{name}")
 
         def required(value: str | None, env_setting: str) -> str:
             if not value:
@@ -6138,7 +6344,7 @@ class HindsightConfig:
             provider=provider,
             api_key=required(api_key, "API_KEY"),
             model=setting("model") or defaults.model,
-            base_url=required(setting("base_url") or defaults.base_url, "BASE_URL"),
+            base_url=required(base_url, "BASE_URL"),
             timeout=self.decision_model_timeout,
             max_concurrent=self.decision_model_max_concurrent,
             max_request_tokens=max_request_tokens,

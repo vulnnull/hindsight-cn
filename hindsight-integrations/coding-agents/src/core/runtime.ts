@@ -9,7 +9,7 @@
  *                                     NOT computed here; onPrompt builds it per session)
  *   - onPrompt(sessionId, prompt)   : each user turn -> recall + build this turn's injection
  *   - getInjection(sessionId)       : the text to inject into this turn's user message (or undefined)
- *   - toolSpecs()                   : the hindsight_* knowledge/recall tools to register natively
+ *   - toolSpecs()                   : the hindsight_* page/recall tools to register natively
  *   - onTranscript(sessionId, turns, lastTurnComplete): full transcript -> write back (on by default)
  *   - onSessionIdle(sessionId)      : assistant finished -> refetch + write back the completed
  *                                     exchange (the Stop-equivalent these hosts lack)
@@ -22,8 +22,8 @@ import { DAEMON_WAIT_RETAIN_MS, DAEMON_WAIT_SESSION_START_MS, ensureDaemon } fro
 import { diag } from "./diag";
 import { describeError, log, setLogLevel } from "./log";
 import type { HindsightClient } from "./hindsight";
-import { buildKnowledgePreamble } from "./knowledge-injection";
-import { buildKnowledgeTools, type ToolSpec } from "./knowledge-tools";
+import { buildPagesPreamble } from "./page-injection";
+import { buildPageTools, type ToolSpec } from "./page-tools";
 import { buildPageTrigger } from "./missions";
 import { retainLiveSession, type TransportTurn } from "./chat";
 import { memoryCursorStore } from "./retain-cursor";
@@ -32,6 +32,7 @@ import { buildRetainStamp } from "./retain-stamp";
 import { buildSessionStartContext } from "./session-start";
 import { syncCompanionSkill } from "./skill-sync";
 import { buildHookOutput } from "./hook";
+import { stripInjectedMemory } from "./transcript-util";
 import { sessionCacheFile, writeSessionCache } from "./session-cache";
 
 const HARNESS = "opencode";
@@ -84,9 +85,9 @@ export class RuntimeCore {
     this.fetchTranscript = fetch;
   }
 
-  /** The hindsight_* knowledge + recall tools, bound to this bank, for the harness to register natively. */
+  /** The hindsight_* page + recall tools, bound to this bank, for the harness to register natively. */
   toolSpecs(): ToolSpec[] {
-    return buildKnowledgeTools(this.client, this.bankId, {
+    return buildPageTools(this.client, this.bankId, {
       repoDir: this.projectDir,
       harness: this.harness,
       pageTrigger: buildPageTrigger(this.cfg),
@@ -111,7 +112,7 @@ export class RuntimeCore {
    * git-log seed + codebase survey. Reuses the exact hook-harness logic
    * (`buildSessionStartContext`) so opencode seeds identically. Never throws.
    *
-   * It deliberately does NOT keep that call's knowledge preamble. This runs once per PROCESS and
+   * It deliberately does NOT keep that call's pages preamble. This runs once per PROCESS and
    * these hosts outlive every session, so a roster captured here is stale for every session but
    * the first — `onPrompt` builds its own from the session's live page list (#4607).
    */
@@ -164,12 +165,15 @@ export class RuntimeCore {
    * intentionally replaces the old in-memory reflect/page state, keeping lifecycle behavior
    * identical across hosts while this adapter retains only delivery-specific state.
    */
-  async onPrompt(sessionId: string | undefined, prompt: string): Promise<void> {
+  async onPrompt(sessionId: string | undefined, rawPrompt: string): Promise<void> {
     if (process.env.HINDSIGHT_DISABLE_HOOKS) return; // anti-recursion (see seedIfCold)
     if (!sessionId) return;
+    // Same cleaning as the hook harnesses' runHook: a host's tagged block ahead of the user's
+    // words would otherwise become the reflect goal and the length-capped recall query (#6488).
+    const prompt = stripInjectedMemory(rawPrompt).trim();
     // No prompt text means no recall, so no block for this turn either: the previous turn's block
     // must not be handed out again, since every host now persists it into the user message.
-    if (!prompt.trim()) {
+    if (!prompt) {
       this.injection.delete(sessionId);
       return;
     }
@@ -195,11 +199,11 @@ export class RuntimeCore {
     // The SessionStart-equivalent preamble, injected once on the first turn (later turns get the
     // periodic refresh below). Built HERE, from this session's own roster, rather than reused from
     // plugin load: that one is a process-lifetime snapshot, so a host started before the pages
-    // existed told every later session "No knowledge pages yet" while the same turn's memory block
+    // existed told every later session "No pages yet" while the same turn's memory block
     // listed pages by id (#4607).
     if (turns === 1) {
       blocks.push(
-        buildKnowledgePreamble(output.pages, {
+        buildPagesPreamble(output.pages, {
           reflectOnNewGoals: this.cfg.autoInject !== "reflect",
           extra: this.cfg.toolGuideExtra,
         })
