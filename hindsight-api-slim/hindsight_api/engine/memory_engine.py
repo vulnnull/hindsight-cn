@@ -103,6 +103,7 @@ from ..metrics import get_metrics_collector
 from ..schema_context import _current_bank_id, _current_schema, get_current_schema
 from ..tracing import create_operation_span, extract_task_trace_context, inject_task_trace_context
 from ..utils import mask_network_location
+from ..worker.backpressure import RATE_LIMIT_DEFERRED_TASKS, is_store_backpressure, is_upstream_rate_limit
 from ..worker.exceptions import DeferOperation, RetryTaskAt, format_task_error
 from ..worker.stage import set_stage
 from .audit import AuditLogger, audit_context
@@ -700,11 +701,13 @@ if TYPE_CHECKING:
     from hindsight_api.config_resolver import ValidatedBankConfigUpdate
     from hindsight_api.models import RequestContext
 
+    from ..knowledge.service import KnowledgeService
     from ..webhooks.url_guard import GuardedWebhookClient
     from . import bank_aliases as bank_aliases_mod
     from .audit import AuditLogEntry, AuditLogListResponse, AuditLogStatsResponse, AuditLogSummary
-    from .memories import MemoriesExtension, MemoryScopeWatermark
+    from .memories import MemoriesExtension, MemoryScopeWatermark, ReflectFreshness
     from .memories.base import AttachmentRef, EntityResolverHandle, StoredMemory
+    from .observation_tree import TreeFolder
     from .prompt_preview import PromptPreview
     from .retain.attachment_content import AttachmentOccurrence, LoadedAttachment, RetainAttachment
     from .retain.attachment_store import StoredAttachment
@@ -2399,6 +2402,7 @@ def _summarize_refresh_tool_calls(
                 result_count=result_count,
                 duration_ms=tc.duration_ms,
                 iteration=tc.iteration,
+                started_at_ms=tc.started_at_ms,
             )
         )
     return summaries
@@ -3068,6 +3072,8 @@ class MemoryEngine(MemoryEngineInterface):
         memory_llm_base_url = memory_llm_base_url or config.get_llm_base_url() or None
         # Track pg0 instance (if used)
         self._pg0: EmbeddedPostgres | None = None
+        # The knowledge-bank service, created on first use (knowledge/service.py get_knowledge_service).
+        self._knowledge_service: KnowledgeService | None = None
 
         # Initialize PostgreSQL connection URL
         # The actual URL will be set during initialize() after starting the server
@@ -5306,6 +5312,18 @@ class MemoryEngine(MemoryEngineInterface):
                     # failure of the task, and it clears once a server on the new model runs it.
                     logger.warning(f"Task deferred: {task_type} needs a server on the new embedding model ({e})")
                     raise DeferOperation(exec_date=datetime.now(UTC) + timedelta(seconds=60), reason=str(e)) from e
+                if task_type in RATE_LIMIT_DEFERRED_TASKS and is_upstream_rate_limit(e):
+                    # The embedder still rate-limiting after its own retries: not a failure, and not a
+                    # retry to count. Passed up as is for the poller to defer, with its own backoff and
+                    # count (worker/poller.py, worker/backpressure.RATE_LIMIT_DEFERRED_TASKS).
+                    raise
+                if is_store_backpressure(e):
+                    # A store shedding the write is "not now", whatever the task. Re-raised as is so
+                    # the poller defers it with its own backoff and cap; turned into a RetryTaskAt
+                    # below it would spend a retry, and a long backlog would fail the task (#6528).
+                    # Checked after the embedding-model mismatch: the re-embed guard's refusal also
+                    # says "writes are shed", but it has its own delay and must never hit the cap.
+                    raise
                 # exc_info, not a bare print_exc(): the traceback is the only pointer
                 # to the offending call site, and under production log volume the
                 # stderr copy is unattributed and rotates away first (issue #3218).
@@ -15354,6 +15372,16 @@ class MemoryEngine(MemoryEngineInterface):
         # hypothetical bank on server defaults would send.
         await self._require_bank_exists(bank_id)
 
+    async def _refuse_knowledge_bank_config(self, bank_id: str) -> None:
+        """Same id space, different settings: a knowledge bank's are read and written through
+        /v1/default/knowledge-banks/{bank_id}/config. Through here a reset would wipe them, and a
+        read would answer with memory-bank settings that bank never uses."""
+        if await bank_utils.bank_kind(await self._get_backend(), bank_id) == "knowledge":
+            raise OperationValidationError(
+                f"'{bank_id}' is a knowledge bank; configure it through /v1/default/knowledge-banks/{bank_id}/config",
+                status_code=400,
+            )
+
     async def get_bank_config(
         self,
         bank_id: str,
@@ -15362,6 +15390,7 @@ class MemoryEngine(MemoryEngineInterface):
     ) -> BankConfigState:
         """Return resolved bank configuration after read authorization."""
         await self._authorize_bank_config_read(bank_id, request_context)
+        await self._refuse_knowledge_bank_config(bank_id)
         return await self._get_bank_config_authenticated(bank_id, request_context)
 
     async def update_bank_config(
@@ -15376,6 +15405,7 @@ class MemoryEngine(MemoryEngineInterface):
         await self._refuse_bank_wide_if_scoped(bank_id, request_context, "change the bank's config")
         preauthorized_updates = self._consume_preauthorized_config_update(bank_id, updates, request_context)
         if preauthorized_updates is not None:
+            await self._refuse_knowledge_bank_config(bank_id)
             await self._config_resolver._persist_bank_config(bank_id, preauthorized_updates)
             return await self._get_bank_config_authenticated(bank_id, request_context)
 
@@ -15386,6 +15416,8 @@ class MemoryEngine(MemoryEngineInterface):
                 request_context=request_context,
             )
             await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
+        # After the validator: refused first, a caller it rejects would still learn the bank is a knowledge bank.
+        await self._refuse_knowledge_bank_config(bank_id)
         await self._update_bank_config_authenticated(
             bank_id,
             updates,
@@ -15409,6 +15441,8 @@ class MemoryEngine(MemoryEngineInterface):
                 request_context=request_context,
             )
             await self._validate_operation(self._operation_validator.validate_bank_write(context))
+        # After the validator, as in update_bank_config: a rejected caller learns nothing about the bank.
+        await self._refuse_knowledge_bank_config(bank_id)
         await self._config_resolver.reset_bank_config(bank_id)
         return await self._get_bank_config_authenticated(bank_id, request_context)
 
@@ -16262,20 +16296,21 @@ class MemoryEngine(MemoryEngineInterface):
         # (not held during LLM calls which can be slow)
         backend = await self._get_backend()
 
-        # Pull only the consolidation freshness — get_bank_stats also computes
-        # link aggregations that reflect() does not use and which can take many
-        # seconds on large banks.
-        # Internal read: reflect is already authorized (validate_reflect + the caller's
-        # scope); the public get_bank_freshness is a bank-wide read scoped callers can't make.
-        freshness = await self._bank_freshness(bank_id)
+        # The store's reflect read, not the exact freshness. reflect used to read
+        # consolidation_freshness (through get_bank_freshness's helper), which is exact for
+        # the gates that act on `pending` — and a store-owned backend can pay seconds to make
+        # it exact on a bank under write churn, all before reflect's first LLM call. reflect
+        # needs only a hint and a write time that is never too early (see
+        # MemoriesExtension.reflect_freshness). Internal read: reflect is already authorized
+        # (validate_reflect + the caller's scope); the public get_bank_freshness is a
+        # bank-wide read scoped callers can't make.
+        freshness = await self._reflect_freshness(bank_id)
         _mark("freshness")
-        last_consolidated_at = freshness.get("last_consolidated_at")
-        pending_consolidation = freshness.get("pending_consolidation", 0)
+        pending_consolidation = freshness.pending
         # Resolved once for the whole reflect: a mental model refreshed at or
         # after this needs no scoped staleness query at all (see
         # tool_search_mental_models).
-        raw_watermark = freshness.get("last_memory_write_at")
-        last_memory_write_at = datetime.fromisoformat(raw_watermark) if raw_watermark else None
+        last_memory_write_at = freshness.last_memory_write_at
 
         # Create tool callbacks that acquire connections only when needed
         from .retain import embedding_utils
@@ -16399,7 +16434,6 @@ class MemoryEngine(MemoryEngineInterface):
                 tags=tags,
                 tags_match=tags_match,
                 tag_groups=tag_groups,
-                last_consolidated_at=last_consolidated_at,
                 pending_consolidation=pending_consolidation,
                 source_facts_max_tokens=reflect_source_facts_max_tokens,
                 include_entities=effective_observations_include_entities,
@@ -16572,6 +16606,7 @@ class MemoryEngine(MemoryEngineInterface):
                     input=tc.input,
                     output=tc.output,
                     duration_ms=tc.duration_ms,
+                    started_at_ms=tc.started_at_ms,
                     iteration=tc.iteration,
                 )
                 for tc in agent_result.tool_trace
@@ -16579,7 +16614,8 @@ class MemoryEngine(MemoryEngineInterface):
 
             # Convert agent LLM trace to LLMCallTrace objects
             llm_trace_result = [
-                LLMCallTrace(scope=lc.scope, duration_ms=lc.duration_ms) for lc in agent_result.llm_trace
+                LLMCallTrace(scope=lc.scope, duration_ms=lc.duration_ms, started_at_ms=lc.started_at_ms)
+                for lc in agent_result.llm_trace
             ]
 
             # Extract memories and observations from tool outputs - only include those the agent actually used
@@ -16837,6 +16873,66 @@ class MemoryEngine(MemoryEngineInterface):
                 limit=limit,
                 offset=offset,
             )
+
+    async def get_observation_tree(
+        self,
+        bank_id: str,
+        *,
+        tags: list[str] | None = None,
+        tags_match: TagsMatch = "any",
+        tag_groups: list[TagGroup] | None = None,
+        request_context: "RequestContext",
+    ) -> "TreeFolder":
+        """The bank's observations as a bounded tree of topic folders (see ``observation_tree``). No LLM.
+
+        ``tags`` / ``tags_match`` / ``tag_groups`` scope the tree the way they scope recall: only
+        matching observations are grouped, so a scope gets its own topics, not a filtered copy of
+        the whole bank's.
+
+        # ponytail: scans every observation and rebuilds on each call (~0.06s for 2.5k observations).
+        # Cache by the bank's last write once banks are large.
+        """
+        from .memories import get_memories
+        from .observation_tree import TreeObservation, build_observation_tree
+
+        await self._authenticate_tenant(request_context)
+        tag_scope = await self._authorize_bank_read(bank_id, BankReadOperation.LIST_MEMORY_UNITS, request_context)
+        await self._require_bank_exists(bank_id)
+        tag_groups = await self._resolve_fuzzy_tag_groups(bank_id, tag_groups)
+        # The caller's tag scope narrows the tree like any other read's.
+        if tag_scope:
+            tag_groups = [*(tag_groups or []), *tag_scope]
+        store = get_memories()
+        async with self._store_read_conn(bank_id) as conn:
+            units = await store.scan_all_memories(
+                conn=conn,
+                fq_table=fq_table,
+                bank_id=bank_id,
+                fact_types=["observation"],
+                tags=tags,
+                tags_match=tags_match,
+                tag_groups=tag_groups or None,
+            )
+            # An observation inherits its source memories' entities.
+            entity_map = await store.entity_map_for_units(
+                conn=conn, fq_table=fq_table, bank_id=bank_id, unit_ids=[u.unit_id for u in units]
+            )
+        observations = [
+            TreeObservation(
+                id=u.unit_id,
+                text=u.text,
+                proof_count=u.proof_count or 1,
+                entities=[e["canonical_name"] for e in entity_map.get(u.unit_id, [])],
+                occurred_start=u.occurred_start,
+                occurred_end=u.occurred_end,
+                mentioned_at=u.mentioned_at,
+                updated_at=u.updated_at,
+                tags=list(u.tags or []),
+            )
+            for u in units
+        ]
+        # CPU-bound (~0.1s per few thousand observations): off the event loop, like the entity graph.
+        return await asyncio.to_thread(build_observation_tree, observations, bank_id)
 
     async def get_entity_graph(
         self,
@@ -17229,12 +17325,11 @@ class MemoryEngine(MemoryEngineInterface):
         *,
         request_context: "RequestContext",
     ) -> dict[str, Any]:
-        """Cheap subset of bank stats consumed by reflect().
+        """Cheap subset of bank stats: the freshness fields, exact.
 
-        Returns only the freshness fields: when the bank was last consolidated,
-        when a memory was last written, and how many units are pending or
-        failed. reflect() calls this on every invocation, so it must not pay for
-        any cross-table joins or link aggregations.
+        Returns when the bank was last consolidated, when a memory was last
+        written, and how many units are pending or failed — without the
+        cross-table joins or link aggregations get_bank_stats pays for.
         """
         await self._authenticate_tenant(request_context)
         if self._operation_validator:
@@ -17244,22 +17339,6 @@ class MemoryEngine(MemoryEngineInterface):
             await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         # Answered for the whole bank, not narrowed to a tag scope: refuse scoped callers.
         await self._refuse_bank_wide_if_scoped(bank_id, request_context, "read the bank's statistics")
-        return await self._bank_freshness(bank_id)
-
-    async def _bank_freshness(self, bank_id: str) -> dict[str, Any]:
-        """``get_bank_freshness`` without the authorization, for callers that already
-        authorized the request themselves.
-
-        reflect() is one: it reads freshness only to decide how stale its own sources are,
-        under its own ``validate_reflect`` and the caller's tag scope. Routing it through
-        the public method made a scoped caller's reflect hit the bank-wide statistics
-        check and be refused, though reflect itself is narrowed to the scope.
-        """
-        # The current reflect() caller reads last_consolidated_at,
-        # pending_consolidation and last_memory_write_at, but `failed` is part of
-        # this method's published contract (see interface.get_bank_freshness) so
-        # the returned shape stays a strict subset of get_bank_stats. All four
-        # come from one scan, so keeping `failed` costs nothing extra.
         from .memories import get_memories
 
         async with self._store_read_conn(bank_id) as conn:
@@ -17273,6 +17352,15 @@ class MemoryEngine(MemoryEngineInterface):
             "pending_consolidation": fresh["pending"],
             "failed_consolidation": fresh["failed"],
         }
+
+    async def _reflect_freshness(self, bank_id: str) -> "ReflectFreshness":
+        """The store's ``reflect_freshness``, for reflect() — which reads it under its own
+        authorization (validate_reflect and the caller's tag scope), so it skips the bank-wide
+        statistics check the public :meth:`get_bank_freshness` makes and a scoped caller fails."""
+        from .memories import get_memories
+
+        async with self._store_read_conn(bank_id) as conn:
+            return await get_memories().reflect_freshness(conn=conn, fq_table=fq_table, bank_id=bank_id)
 
     async def _probe_llm(self, llm: Any) -> _LlmProbeOutcome:
         """Probe one LLM client (status only). The detailed provider error is logged

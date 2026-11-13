@@ -11,6 +11,7 @@ from hindsight_api.config import HindsightConfig, clear_config_cache
 from hindsight_api.knowledge.embedders import (
     CohereEmbedder,
     EmbedInput,
+    OpenAIEmbedder,
     TextEmbedder,
     UnsupportedModalityError,
     VoyageEmbedder,
@@ -203,8 +204,8 @@ async def test_a_disabled_media_type_is_refused_whatever_the_embedder(api_client
     disabled_media("image, VIDEO")
     r = await _upload(api_client, kb, [("p.png", PNG, "image/png")])
     assert r.status_code == 415 and "HINDSIGHT_API_KNOWLEDGE_DISABLED_MEDIA_TYPES" in r.text
-    described = (await api_client.get(f"{KB}/config")).json()["media_types"]
-    assert "image" not in described and "video" not in described and "document" in described
+    # The bank's settings report what the server refuses, as what the bank refuses too.
+    assert (await api_client.get(f"{KB}/{kb}/config")).json()["config"]["disabled_media_types"] == ["image", "video"]
     r = await api_client.post(f"{KB}/{kb}/ingest", json={"items": [{"text": "still fine"}]})
     assert r.is_success, r.text
 
@@ -225,5 +226,74 @@ async def test_a_text_only_embedder_ingests_pdfs_from_their_text_layer(api_clien
     assert detail["status"] == "ready" and detail["passages"][0]["page"] == 1
     # Every vector of the page was a text one: the embedder was never handed an image.
     assert all(i.modality == "text" for call in fake_embedder.calls for i in call)
-    described = (await api_client.get(f"{KB}/config")).json()["media_types"]
-    assert described == ["document", "text"]
+    r = await _upload(api_client, kb, [("p.png", PNG, "image/png")])
+    assert r.status_code == 415 and "only embeds text" in r.text
+
+
+async def test_remote_embedder_requests_in_flight_are_capped_across_callers(monkeypatch):
+    import asyncio
+
+    from hindsight_api.config import clear_config_cache
+    from hindsight_api.knowledge import embedders
+
+    monkeypatch.setenv("HINDSIGHT_API_KNOWLEDGE_EMBEDDINGS_MAX_IN_FLIGHT", "3")
+    clear_config_cache()
+    try:
+        now = peak = 0
+
+        async def one() -> None:
+            nonlocal now, peak
+            async with embedders._in_flight():
+                now += 1
+                peak = max(peak, now)
+                await asyncio.sleep(0.01)
+                now -= 1
+
+        await asyncio.gather(*(one() for _ in range(20)))
+        assert peak == 3
+    finally:
+        monkeypatch.delenv("HINDSIGHT_API_KNOWLEDGE_EMBEDDINGS_MAX_IN_FLIGHT")
+        clear_config_cache()
+
+
+# --- mixed queries -----------------------------------------------------------------------------------
+
+
+async def test_a_query_with_text_image_and_video_is_one_vector():
+    handler, seen = _recorder(lambda body: {"data": [{"index": 0, "embedding": [3.0, 4.0]}]})
+    async with stub_server(handler) as base_url:
+        openai = OpenAIEmbedder(
+            "m",
+            base_url=base_url + "/v1",
+            api_key=None,
+            dimensions=None,
+            modalities=frozenset({"text", "image", "video"}),
+            batch_size=8,
+        )
+        assert await openai.embed_query("red car", None, MP4) == [0.6, 0.8]
+        # EmbeddingGemma 2 embeds one medium per input: an image and a video go apart, then are averaged.
+        assert await openai.embed_query("red car", PNG, MP4) == [0.6, 0.8]
+        voyage = VoyageEmbedder("m", api_key="k", base_url=base_url, dimensions=None, batch_size=8)
+        await voyage.embed_query("red car", PNG, MP4)
+    (video_only,) = (m["content"] for m in seen[0][1]["messages"])
+    assert [c["type"] for c in video_only] == ["video_url", "text"]
+    assert video_only[0]["video_url"]["url"].startswith("data:video/mp4;base64,")
+    mixed = sorted(tuple(c["type"] for c in body["messages"][0]["content"]) for _, body in seen[1:3])
+    assert mixed == [("image_url", "text"), ("video_url", "text")]
+    assert [c["type"] for c in seen[3][1]["inputs"][0]["content"]] == ["text", "image_base64", "video_base64"]
+
+
+async def test_a_video_query_is_refused_by_a_model_without_video():
+    cohere = CohereEmbedder("m", api_key="k", base_url="http://unused", dimensions=None, batch_size=8)
+    with pytest.raises(UnsupportedModalityError):
+        await cohere.embed_query("q", None, MP4)
+    images_only = OpenAIEmbedder(
+        "m",
+        base_url="http://unused/v1",
+        api_key=None,
+        dimensions=None,
+        modalities=frozenset({"text", "image"}),
+        batch_size=8,
+    )
+    with pytest.raises(UnsupportedModalityError):
+        await images_only.embed_query(None, None, MP4)

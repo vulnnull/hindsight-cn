@@ -6,17 +6,14 @@ import {
   errorMessage,
   fillTimeseries,
   firstPassageUrl,
-  groupByMediaType,
   isPicturePassage,
-  splitContext,
   formatBytes,
   formatMs,
   formatWindow,
   knowledgeApi,
+  packUploads,
   parseTags,
   proxiedMediaUrl,
-  type KnowledgeSearchResult,
-  type MediaType,
 } from "@/lib/knowledge-banks";
 
 describe("formatting", () => {
@@ -80,6 +77,15 @@ describe("buildUploadForm", () => {
     expect(JSON.parse(form.get("request") as string)).toEqual({
       files: [{ tags: ["v2"] }, { document_id: "b", tags: [] }],
     });
+  });
+});
+
+describe("packUploads", () => {
+  it("packs in order up to the cap, and sends an oversized item alone", () => {
+    const id = (n: number) => n;
+    expect(packUploads([10, 20, 30, 50, 5], id, 60)).toEqual([[10, 20, 30], [50, 5]]);
+    expect(packUploads([100, 1, 1], id, 60)).toEqual([[100], [1, 1]]);
+    expect(packUploads([], id, 60)).toEqual([]);
   });
 });
 
@@ -147,26 +153,6 @@ describe("fillTimeseries", () => {
   });
 });
 
-describe("groupByMediaType", () => {
-  it("groups hits by media type, ordered by each group's best hit, keeping overall ranks", () => {
-    const hit = (document_id: string, media_type: MediaType) =>
-      ({ document_id, media_type }) as KnowledgeSearchResult;
-    const groups = groupByMediaType([
-      hit("a", "document"),
-      hit("b", "audio"),
-      hit("c", "document"),
-      hit("d", "image"),
-    ]);
-    expect(
-      groups.map((g) => [g.mediaType, g.hits.map((h) => `${h.result.document_id}#${h.rank}`)])
-    ).toEqual([
-      ["document", ["a#1", "c#3"]],
-      ["audio", ["b#2"]],
-      ["image", ["d#4"]],
-    ]);
-  });
-});
-
 describe("isPicturePassage", () => {
   it("treats images and rendered document pages with media as pictures", () => {
     expect(isPicturePassage({ media_type: "document", passage_url: "/p" })).toBe(true);
@@ -176,18 +162,3 @@ describe("isPicturePassage", () => {
   });
 });
 
-describe("splitContext", () => {
-  it("splits the context around the hit", () => {
-    expect(splitContext("A. B is the hit. C.", "B is the hit.")).toEqual({
-      before: "A. ",
-      hit: "B is the hit.",
-      after: " C.",
-    });
-  });
-
-  it("gives up when there is no context or the hit is not in it", () => {
-    expect(splitContext(null, "x")).toBeNull();
-    expect(splitContext("abc", null)).toBeNull();
-    expect(splitContext("abc", "zzz")).toBeNull();
-  });
-});

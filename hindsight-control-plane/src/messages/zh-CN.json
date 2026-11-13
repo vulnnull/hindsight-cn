@@ -188,7 +188,9 @@
     "cloneIncludeHistory": "历史",
     "cloneIncludeHistoryHint": "审计日志和 LLM 请求追踪。",
     "cloneNothingSelected": "请至少选择一项要复制的内容。",
-    "pagesDescription": "由该记忆库的记忆综合沉淀出的页面与知识摘要。"
+    "pagesDescription": "由该记忆库的记忆综合沉淀出的页面与知识摘要。",
+    "observationTree": "观察",
+    "observationTreeDescription": "此记忆库学到的一切，以可浏览、搜索和导出的 Markdown 文件夹呈现——与代理可以列出和用 grep 搜索的是同一批文件。每个主题文件包含其全部观察；每个文件夹的 index.md 提供概览。"
   },
   "bankProfile": {
     "noBankSelected": "未选择记忆库",
@@ -688,7 +690,9 @@
     "pageDefaultTriggerDescription": "本记忆库中每个新页面的初始刷新设置：何时刷新、如何刷新以及读取哪些内容。已有页面保留各自的设置，创建页面时指定的设置优先。",
     "pageDefaultTriggerEdit": "自定义",
     "pageDefaultTriggerDialogHint": "适用于此后创建的页面。",
-    "pageDefaultTriggerDialogTitle": "新页面的默认设置"
+    "pageDefaultTriggerDialogTitle": "新页面的默认设置",
+    "linkedKnowledgeBanksLabel": "文档库",
+    "linkedKnowledgeBanksDescription": "在此库上反思时,也会搜索关联的文档库,文档优先于与之冲突的记忆。召回和知识摘要不会读取这些文档。"
   },
   "bankOperations": {
     "title": "后台操作",
@@ -727,7 +731,8 @@
       "importDocuments": "导入文档",
       "exportBank": "导出记忆库",
       "importBank": "导入记忆库",
-      "cloneBank": "克隆记忆库"
+      "cloneBank": "克隆记忆库",
+      "knowledgeIngest": "知识导入"
     },
     "table": {
       "id": "操作 ID",
@@ -1282,7 +1287,29 @@
     "maxTokensLabel": "最大令牌数",
     "tagsLabel": "标签",
     "tagsMatchLabel": "标签匹配",
-    "excludeIdsRowLabel": "排除的知识摘要 ID"
+    "excludeIdsRowLabel": "排除的知识摘要 ID",
+    "traceAgentFailed": "智能体调用失败",
+    "traceAgentFailedDetail": "LLM 调用出错，已重试该步骤",
+    "traceAgentDone": "智能体认为已足够",
+    "traceAgentDoneDetail": "调用 done：不再搜索",
+    "traceRoundQuery": "编写搜索查询",
+    "traceRoundQueryDetail": "将请求改写为一个搜索查询",
+    "traceSufficiency": "证据够吗？",
+    "traceSufficiencyDetail": "决策模型评估了目前的证据",
+    "tracePagesSufficiency": "页面能回答吗？",
+    "tracePagesSufficiencyDetail": "决策模型仅评估了知识摘要",
+    "tracePrune": "精简证据",
+    "tracePruneDetail": "决策模型保留了相关内容",
+    "traceClosingDoneDetail": "用全部证据请求 done",
+    "traceFinalDetail": "基于所有收集的证据合成",
+    "traceFinalMap": "总结证据第 {part} 部分",
+    "traceFinalMapDetail": "证据过大：分段总结",
+    "traceRewrite": "缩短回答",
+    "traceRewriteDetail": "按长度预算改写",
+    "traceStructured": "构建结构化回答",
+    "traceStructuredDetail": "填写响应模式",
+    "traceOtherCall": "LLM 调用",
+    "traceOtherCallDetail": "{scope}"
   },
   "searchDebug": {
     "noBankSelected": "未选择记忆库",
@@ -2262,6 +2289,9 @@
         "updateNode": "更新页面节点失败",
         "deleteNode": "删除页面节点失败",
         "search": "搜索页面失败"
+      },
+      "request": {
+        "tooLarge": "请求过大。请上传更少或更小的文件（上限：HINDSIGHT_CP_MAX_UPLOAD_SIZE）。"
       }
     }
   },
@@ -2610,7 +2640,8 @@
       "noMatchesBody": "换个名称、类型或状态试试。",
       "layout": "布局",
       "viewList": "列表",
-      "viewGrid": "网格"
+      "viewGrid": "网格",
+      "viewConstellation": "星座图"
     },
     "detail": {
       "download": "下载原文件",
@@ -2668,7 +2699,23 @@
       "context": "上下文",
       "contextHelp": "每个文本命中前后作为上下文返回的段落数",
       "showContext": "显示上下文",
-      "hideContext": "隐藏上下文"
+      "hideContext": "隐藏上下文",
+      "addMedia": "图片 / 视频",
+      "mediaHint": "粘贴、拖放或选择一张图片或一段 MP4 视频进行搜索,可单独使用或配合文本。",
+      "videoQuery": "正在用此视频搜索",
+      "removeMedia": "移除",
+      "notMedia": "只能使用图片或 MP4 视频作为搜索查询",
+      "pastedMedia": "粘贴的文件",
+      "maxTokens": "最大 token 数",
+      "maxTokensHelp": "返回文本的总量:最佳段落,以及能容纳的前后文。",
+      "budget": "预算",
+      "budgetHelp": "搜索排序的深度:低最快,高找得最远。",
+      "budgetLow": "低",
+      "budgetMid": "中",
+      "budgetHigh": "高",
+      "options": "选项",
+      "showMore": "显示更多",
+      "showLess": "收起"
     },
     "linked": {
       "title": "文档库",
@@ -2679,7 +2726,9 @@
       "open": "打开",
       "missing": "已不存在",
       "save": "保存关联",
-      "saved": "已保存关联的文档库"
+      "saved": "已保存关联的文档库",
+      "noneLinked": "未关联",
+      "search": "搜索知识库…"
     },
     "selector": {
       "select": "选择文档库...",
@@ -2703,7 +2752,10 @@
       "noneInPeriod": "此期间未添加文档",
       "noDocuments": "暂无文档",
       "pending": "{count} 个处理中",
-      "failed": "{count} 个失败"
+      "failed": "{count} 个失败",
+      "constellationTitle": "星座图",
+      "viewAll": "查看全部",
+      "failedNotice": "{count} 个文档处理失败。查看原因"
     },
     "settings": {
       "title": "设置",
@@ -2730,7 +2782,15 @@
       "linkDescription": "关联此库的记忆库在召回时会获得其中的段落,作为权威来源。",
       "linkHowTo": "从记忆库中关联:打开记忆库,然后进入 库配置 → 配置 → 文档库。",
       "delete": "删除库",
-      "mediaTypes": "可写入的媒体类型"
+      "mediaTypes": "可写入的媒体类型",
+      "tabGeneral": "常规",
+      "tabConfiguration": "配置",
+      "generalIntro": "知识库包含的内容，以及正在处理的上传。",
+      "aboutTitle": "关于",
+      "aboutDescription": "库的名称和标识。",
+      "resetConfig": "重置配置",
+      "resetConfigTitle": "重置配置？",
+      "resetConfigPrompt": "{bankId} 的每项设置都将恢复为服务器默认值。已导入的文件在重新上传之前保留现有段落。"
     },
     "addDocument": {
       "dialogSubtitle": "向文档库添加新文档：",
@@ -2748,7 +2808,109 @@
       "tagsFor": "{name} 的标签",
       "uploaded": "{count, plural, other {已上传 # 个文件}}。就绪后即可搜索。",
       "someFailed": "{count, plural, other {# 个文件}}上传失败",
-      "written": "文档已添加。就绪后即可搜索。"
+      "written": "文档已添加。就绪后即可搜索。",
+      "unchanged": "{count, plural, other {# 个文件}}未变化:已按原样导入。",
+      "writtenUnchanged": "未变化:此文档已按原样导入。"
+    },
+    "constellation": {
+      "empty": "暂无可显示的段落",
+      "hudStats": "{documents} 个文档 · {passages} 个段落 · {visible} 个可见 · {labels} 个标签 · {links} 条链接 · 缩放 {zoom}x"
+    },
+    "config": {
+      "intro": "此知识库如何把文件切分为段落。更改对此后导入的文件生效；重新上传文件即可按新设置重新切分。",
+      "loadFailed": "无法加载此知识库的设置。",
+      "saveFailed": "无法保存。",
+      "serverDefault": "服务器默认值",
+      "serverDefaultValue": "服务器默认值（{value}）",
+      "on": "开",
+      "off": "关",
+      "overridden": "已为此知识库设置",
+      "useServerDefault": "使用服务器默认值",
+      "serverOff": "服务器已为所有知识库关闭。",
+      "accept": "接受{kind}文件",
+      "sections": {
+        "text": {
+          "title": "文本",
+          "description": "文本（包括文档中的文本）如何切分为段落。"
+        },
+        "pdf": {
+          "title": "PDF",
+          "description": "如何读取 PDF 页面。"
+        },
+        "images": {
+          "title": "图片",
+          "description": "如何读取图片。"
+        },
+        "media": {
+          "title": "音频和视频",
+          "description": "音频和视频如何切分为按时间的段落。"
+        },
+        "types": {
+          "title": "媒体类型",
+          "description": "此知识库接受哪些文件类型。它可以比服务器关闭更多类型，但不能更少。"
+        }
+      },
+      "fields": {
+        "text_passage_tokens": {
+          "label": "段落大小（token）",
+          "description": "一个段落包含多少文本：越小定位越精确，越大保留的上下文越多。"
+        },
+        "pdf_page_pixels": {
+          "label": "页面尺寸（像素）",
+          "description": "读取前每个 PDF 页面按最长边绘制的像素数。"
+        },
+        "pdf_bands": {
+          "label": "页面条带",
+          "description": "同时把每个 PDF 页面读作三条横向条带，更容易找到小字，但导入速度约减半。"
+        },
+        "max_pdf_pages": {
+          "label": "最多页数",
+          "description": "页数超过此值的 PDF 会被拒绝；只能低于服务器的上限。"
+        },
+        "image_tokens": {
+          "label": "图片细节（token）",
+          "description": "每张图片按多少 token 读取，范围 70 到 1120：越多看到的细节越细，但越慢。"
+        },
+        "audio_window_seconds": {
+          "label": "音频段落时长（秒）",
+          "description": "一个段落包含多少秒音频。"
+        },
+        "video_window_seconds": {
+          "label": "视频段落时长（秒）",
+          "description": "一个段落包含多少秒视频。"
+        },
+        "media_overlap_seconds": {
+          "label": "重叠（秒）",
+          "description": "每个段落与下一段共享的秒数，避免在切分处丢失内容；必须短于两种时长。"
+        },
+        "max_media_seconds": {
+          "label": "最长文件（秒）",
+          "description": "超过此时长的音频或视频会被拒绝；只能低于服务器的上限。"
+        }
+      }
     }
+  },
+  "observationTree": {
+    "empty": "此库还没有观察。",
+    "pickFile": "请在左侧选择一个文件。",
+    "findPlaceholder": "在记忆中查找（文本或正则）",
+    "showRaw": "原始 .md",
+    "exportZip": "导出 .zip",
+    "recencyLegend": "新近度 · 提及",
+    "showRendered": "渲染视图",
+    "clearFind": "清除",
+    "noMatches": "没有匹配。",
+    "matchSummary": "{files} 个文件中有 {matches} 处匹配",
+    "matchesInFile": "{total} 条中有 {shown} 条匹配",
+    "observationCount": "{count} 条观察",
+    "sources": "{count} 个来源",
+    "updated": "{when}更新",
+    "related": "相关：",
+    "topics": "主题",
+    "bestSupported": "支持最多",
+    "observations": "观察",
+    "filesMode": "文件",
+    "constellationMode": "星图",
+    "sourcesLegend": "来源"
   }
 }

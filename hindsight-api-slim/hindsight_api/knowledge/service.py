@@ -19,22 +19,22 @@ import re
 import threading
 import time
 import uuid
-import weakref
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
-
-import asyncpg
+from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
 from ..config import get_config
 from ..engine import bank_aliases
 from ..engine.db_utils import acquire_with_retry
+from ..engine.operation_metadata import KnowledgeIngestChildMetadata, KnowledgeIngestParentMetadata
 from ..engine.response_models import KnowledgeDocumentHit
 from ..engine.retain import bank_utils
+from ..engine.retain import timing as _timing
 from ..engine.schema import fq_table
 from ..engine.storage import bank_storage_prefix, key_segment
+from ..engine.token_encoding import count_tokens
 from ..extensions.operation_validator import (
     BankListScope,
     CreateKnowledgeBankContext,
@@ -45,7 +45,9 @@ from ..extensions.operation_validator import (
     KnowledgeBankWriteOperation,
     OperationValidationError,
 )
-from . import ingest_strategy, media
+from ..tracing import inject_task_trace_context
+from . import bank_config, ingest_strategy, media
+from .bank_config import KnowledgeBankOverrides, KnowledgeBankSettings
 from .embedders import (
     EmbedInput,
     KnowledgeEmbedder,
@@ -61,6 +63,7 @@ from .store import (
     KnowledgePassage,
     KnowledgeStore,
     PassageReplacement,
+    PassageStage,
     RoleVector,
     SearchFilters,
     SearchHit,
@@ -78,11 +81,33 @@ logger = logging.getLogger(__name__)
 TASK_TYPE = "knowledge_ingest"
 KIND = "knowledge"
 # Bumped whenever splitting changes what a file becomes, so rewriting an unchanged file re-splits it.
-_PIPELINE_VERSION = 9  # 9: PDF page units pack whole lines (as benchmarked)
+_PIPELINE_VERSION = 10  # 10: PDF pages also get sentence vectors; 9: units pack whole lines
 # How many passages are embedded and stored per round, so a 2h video never sits in memory whole.
 _EMBED_ROUND = 16
 #: Files an ingest saves at once.
 _FILE_SAVE_CONCURRENCY = 16
+#: Passage files (page images, clips) an ingest writes at once, in the background of its embed rounds.
+#: Lower than the upload's: these run alongside the rounds' vector commits, and 16 at once stalled a
+#: local Postgres long enough for its other queries to time out.
+_PASSAGE_FILE_CONCURRENCY = 8
+#: Embed rounds in flight at once while the next passages are cut. One round at a time left the
+#: splitter, the embedder and the file writes taking turns: a 1,110-page PDF batch spent ~40 s
+#: rendering, ~40 s writing page images one by one and the embed calls, end to end, never at once.
+_EMBED_ROUNDS_IN_FLIGHT = 4
+#: A document with at least this many passages commits on its own as soon as they are embedded.
+_EARLY_COMMIT_PASSAGES = 2 * _EMBED_ROUND
+#: Passages that commit together: a batch's finished documents are written in groups of about this many
+#: as they finish, not all at the end, so what a batch holds does not grow with how many documents it has.
+_COMMIT_GROUP_PASSAGES = 256
+#: What one vector is estimated to cost before it is embedded (768 dimensions as a Python list of floats,
+#: ~25 KB); corrected to its real size once it is.
+_VECTOR_BYTES_ESTIMATE = 25_000
+#: Vectors a passage with a file (a PDF page, a clip) is estimated to carry before it is embedded: a page is
+#: its image, bands, text units and sentences.
+_FILE_PASSAGE_VECTORS_ESTIMATE = 24
+#: Documents in one child of an async ingest, however small: a child is one store read, status write
+#: and passage write, and many tiny documents would make those writes the batch.
+_CHILD_DOCUMENTS = 100
 
 
 #: Passages reflect's recall tool reads from a memory bank's linked knowledge banks. Fixed: a per-bank
@@ -141,45 +166,67 @@ class IngestResult:
     unchanged_document_ids: list[str] = field(default_factory=list)
 
 
+class _FileGone(Exception):
+    """The document's stored original is not there: replaced by a newer upload, or lost."""
+
+
 @dataclass
 class SearchRequest:
     query: str | None
     query_image: bytes | None
-    top_k: int
     filters: SearchFilters
-    # Text hits come back with this many passages on each side as `context`; hits whose windows
-    # overlap in one document are merged into the best one (CHUNKING.md: ±1 was the step that paid).
-    neighbors: int = 1
-    # Exact text (case-insensitive; a POSIX regular expression when `regex`): passages containing it
-    # rank first. Alone, without a query, it ranks documents by how many of their passages match.
-    pattern: str | None = None
-    regex: bool = False
+    # What the hits may weigh in all, the text around them included: see ``_within_budget``.
+    max_tokens: int = 4096
+    # How deep the search ranks before the token budget picks from it (``SEARCH_CANDIDATES``).
+    budget: SearchBudget = "mid"
+    # An MP4 clip to search with, alone or with the text and the image: all of them make one vector.
+    query_video: bytes | None = None
+
+
+SearchBudget = Literal["low", "mid", "high"]
+#: Candidates a search ranks before ``max_tokens`` picks from them, by ``budget``, as memory-bank recall
+#: names its effort: low is fastest, mid the old ``top_k`` ceiling, high reaches deepest (past the HNSW
+#: ``ef_search`` of 200, so its candidate scan iterates and is slower).
+SEARCH_CANDIDATES: dict[SearchBudget, int] = {"low": 50, "mid": 200, "high": 500}
+#: What a hit with no text of its own (an image, a page's picture, a clip) costs the budget, on top of
+#: any text it carries: its media is a URL and a few fields to whoever reads the results.
+MEDIA_HIT_TOKENS = 64
+#: How far context may grow around a text hit, in passages on each side, once every hit that fits has
+#: its first neighbour on each side.
+MAX_CONTEXT_PASSAGES = 5
+
+
+@dataclass
+class _Window:
+    """A text hit's returned run of passages, ``first..last`` of its document."""
+
+    item: SearchResultItem
+    document_id: str
+    first: int
+    last: int
+    #: A side stops growing at the document's edge or at another hit's window.
+    grows_before: bool = True
+    grows_after: bool = True
 
 
 @dataclass
 class SearchResultItem:
     hit: SearchHit
+    #: A text hit's run of passages, which the API returns as the hit's ``text``.
     context: str | None = None
+    #: Which passages that run spans. Not in the API (its ``index`` names the matched passage); kept so
+    #: the budget's windows can be checked directly.
     context_first: int | None = None
     context_last: int | None = None
 
 
 @dataclass
-class KnowledgeConfig:
-    """The server's knowledge embedder and the limits a write is held to."""
+class KnowledgeBankConfig:
+    """A bank's ingest settings as it splits files with them, and which of them it overrides."""
 
-    provider: str
-    model: str
-    dimension: int
-    media_types: list[str]
-    max_file_bytes: int
-    max_media_seconds: int
-    max_pdf_pages: int
-    audio_window_seconds: int
-    video_window_seconds: int
-    media_overlap_seconds: int
-    pdf_page_pixels: int
-    text_passage_tokens: int
+    bank_id: str
+    settings: KnowledgeBankSettings
+    overrides: KnowledgeBankOverrides
 
 
 @dataclass
@@ -232,6 +279,9 @@ class _Work:
     strategy: str | None = None
     handler: ingest_strategy.Handler | None = None
     was_split: bool = False
+    #: The stored file's size, which sizes the child operations an async ingest is split into. Not in
+    #: the payload: a worker has the file itself.
+    size: int = 0
 
     def to_payload(self) -> dict[str, Any]:
         out: dict[str, Any] = {"document_id": self.document_id, "storage_key": self.storage_key}
@@ -257,7 +307,86 @@ class _Work:
 
 
 def _work(entry: _Entry, saved: _Saved) -> _Work:
-    return _Work(entry.document_id, saved.storage_key, entry.plan.strategy, entry.plan.handler, saved.was_split)
+    return _Work(
+        entry.document_id,
+        saved.storage_key,
+        entry.plan.strategy,
+        entry.plan.handler,
+        saved.was_split,
+        len(entry.item.data),
+    )
+
+
+def _vector_bytes(vector: list[float]) -> int:
+    return 56 + 32 * len(vector)  # the list, plus a pointer and a float object per dimension
+
+
+def _passage_estimate(draft: media.PassageDraft) -> int:
+    vectors = _FILE_PASSAGE_VECTORS_ESTIMATE if draft.data is not None else 1
+    return len(draft.data or b"") + len(draft.text or "") + vectors * _VECTOR_BYTES_ESTIMATE
+
+
+def _passage_bytes(draft: media.PassageDraft, vectors: list[list[float]]) -> int:
+    return len(draft.data or b"") + len(draft.text or "") + sum(_vector_bytes(v) for v in vectors)
+
+
+class _MemoryBudget:
+    """The bytes of cut-but-uncommitted passages (their text, file and vectors) one batch may hold, as
+    retain bounds its extracted-but-unwritten facts: the splitter reserves a passage's cost before queueing
+    it, and a document's commit gives its share back. Under the budget nothing waits; at it the splitter
+    does, which is the batch throttling itself rather than the worker being killed for its memory.
+
+    It cannot deadlock: before waiting, the splitter starts what can free room (the queued round, the
+    finished documents' commit), and a reservation is admitted whatever its size when everything held is
+    the document being cut, since that document must be held whole to commit (its passages are replaced
+    in one write). A limit of 0 turns the budget off."""
+
+    def __init__(self, limit: int) -> None:
+        self.limit = limit
+        self.held = 0
+        self.peak = 0
+        self._freed = asyncio.Event()
+        self._failed: BaseException | None = None
+
+    def _fits(self, n: int, own: int) -> bool:
+        return self.limit <= 0 or self.held + n <= self.limit or self.held <= own
+
+    async def reserve(self, n: int, own: int, make_room: Callable[[], Awaitable[None]]) -> None:
+        if not self._fits(n, own):
+            await make_room()
+            async with _timing.timed("split.wait_memory"):
+                while not self._fits(n, own):
+                    if self._failed is not None:
+                        raise self._failed
+                    self._freed.clear()
+                    await self._freed.wait()
+        self.adjust(n)
+
+    def fail(self, exc: BaseException) -> None:
+        """A round failed: what it held will not be committed, so a splitter waiting for room stops."""
+        self._failed = exc
+        self._freed.set()
+
+    def adjust(self, delta: int) -> None:
+        self.held += delta
+        self.peak = max(self.peak, self.held)
+        if delta < 0:
+            self._freed.set()
+
+
+def _children(work: list[_Work], budget: int) -> list[list[_Work]]:
+    """Pack an async ingest's documents, in order, into children of about ``budget`` bytes and at most
+    ``_CHILD_DOCUMENTS`` documents. A document is never split across children, and one over the budget
+    is a child on its own: it is processed in one batch either way."""
+    out: list[list[_Work]] = []
+    size = 0
+    for w in work:
+        if not out or size + w.size > budget or len(out[-1]) >= _CHILD_DOCUMENTS:
+            out.append([])
+            size = 0
+        out[-1].append(w)
+        size += w.size
+    return out
 
 
 @dataclass
@@ -272,6 +401,24 @@ class _InFlight:
     media_keys: list[str] = field(default_factory=list)
     error: Exception | None = None
     split: bool = False
+    #: Passages are queued in order and embedded by rounds that may finish out of order: each is
+    #: given its index when queued and lands here, and ``passages`` is put together once all are in.
+    queued: int = 0
+    done: dict[int, KnowledgePassage] = field(default_factory=dict)
+    #: The embed rounds holding this document's passages, and whether its commit has started.
+    rounds: list[asyncio.Task[None]] = field(default_factory=list)
+    committing: bool = False
+    #: Its files' background writes (see ``_embed_round``).
+    saves: list[asyncio.Task[None]] = field(default_factory=list)
+    #: Bytes it holds against the batch's memory budget, given back once it is committed; and how many
+    #: passages it committed, kept for the batch's log line after its passages are dropped.
+    reserved: int = 0
+    committed_passages: int = 0
+    #: Passages already staged for its next version (a document too big to hold whole goes in pieces), the
+    #: language they were staged with, and whether the store skipped it as replaced meanwhile.
+    staged: int = 0
+    language: str | None = None
+    replaced: bool = False
 
 
 @dataclass
@@ -280,6 +427,13 @@ class _Waiting:
 
     doc: _InFlight
     draft: media.PassageDraft
+    index: int
+    #: What it reserved against the memory budget when queued: an estimate, corrected once embedded.
+    cost: int = 0
+
+
+#: Writes one passage's file for a document in the background (see ``KnowledgeService._embed_round``).
+_SaveFile = Callable[[_InFlight, str, media.PassageDraft], Awaitable[None]]
 
 
 @dataclass
@@ -334,30 +488,6 @@ class KnowledgeService:
             # A remote model's size is known only from its first answer.
             await self.embedder.embed_query("dimension probe")
         await self.store.ensure_ready(self.embedder.dimension)
-
-    async def describe(self) -> KnowledgeConfig:
-        if not self.embedder.dimension:
-            await self.embedder.embed_query("dimension probe")
-        config = get_config()
-        e = self.embedder
-        return KnowledgeConfig(
-            provider=e.provider,
-            model=e.model,
-            dimension=e.dimension,
-            media_types=[
-                t
-                for t in media.MEDIA_TYPES
-                if _NEEDS[_SPLIT_OF[t]] & e.modalities and t not in config.knowledge_disabled_media_types
-            ],
-            max_file_bytes=config.knowledge_max_file_mb * 1024 * 1024,
-            max_media_seconds=config.knowledge_max_media_seconds,
-            max_pdf_pages=config.knowledge_max_pdf_pages,
-            audio_window_seconds=config.knowledge_audio_window_seconds,
-            video_window_seconds=config.knowledge_video_window_seconds,
-            media_overlap_seconds=config.knowledge_media_overlap_seconds,
-            pdf_page_pixels=config.knowledge_pdf_page_pixels,
-            text_passage_tokens=config.knowledge_text_passage_tokens,
-        )
 
     # --- banks ------------------------------------------------------------------------------
 
@@ -515,6 +645,65 @@ class KnowledgeService:
         await self._engine.delete_bank(bank_id, request_context=request_context, _knowledge_bank=True)
         await self._engine._file_storage.delete_prefix(f"{bank_storage_prefix(bank_id)}kb/")
 
+    # --- per-bank settings ------------------------------------------------------------------
+
+    async def _overrides(self, bank_id: str) -> KnowledgeBankOverrides:
+        async with acquire_with_retry(await self._engine._get_backend()) as conn:
+            raw = await conn.fetchval(
+                f"SELECT config FROM {fq_table('banks')} WHERE bank_id = $1 AND kind = $2", bank_id, KIND
+            )
+        return bank_config.stored_overrides(raw)
+
+    async def _bank_settings(self, bank_id: str) -> KnowledgeBankSettings:
+        """The settings an ingest splits this bank's files with: read once per request or batch."""
+        return bank_config.resolve(await self._overrides(bank_id))
+
+    def _bank_config(self, bank_id: str, overrides: KnowledgeBankOverrides) -> KnowledgeBankConfig:
+        return KnowledgeBankConfig(bank_id, bank_config.resolve(overrides), overrides)
+
+    async def get_bank_config(self, bank_id: str, request_context: RequestContext) -> KnowledgeBankConfig:
+        await self._open_bank(bank_id, KnowledgeBankReadOperation.GET_KNOWLEDGE_BANK_CONFIG, request_context)
+        return self._bank_config(bank_id, await self._overrides(bank_id))
+
+    async def update_bank_config(
+        self, bank_id: str, updates: dict[str, Any], request_context: RequestContext
+    ) -> KnowledgeBankConfig:
+        """Merge ``updates`` into the bank's overrides (None clears one). The row is locked while the
+        merged overrides are checked and written, so two concurrent edits cannot each pass the
+        overlap-below-window check against a value the other is replacing."""
+        await self._open_bank(bank_id, KnowledgeBankWriteOperation.UPDATE_KNOWLEDGE_BANK_CONFIG, request_context)
+        async with acquire_with_retry(await self._engine._get_backend()) as conn, conn.transaction():
+            raw = await conn.fetchval(
+                f"SELECT config FROM {fq_table('banks')} WHERE bank_id = $1 AND kind = $2 FOR UPDATE", bank_id, KIND
+            )
+            try:
+                overrides = bank_config.validate_overrides(bank_config.stored_overrides(raw), updates)
+            except ValueError as exc:
+                raise KnowledgeBankError(str(exc)) from exc
+            await self._write_overrides(conn, bank_id, overrides)
+        return self._bank_config(bank_id, overrides)
+
+    async def reset_bank_config(self, bank_id: str, request_context: RequestContext) -> KnowledgeBankConfig:
+        await self._open_bank(bank_id, KnowledgeBankWriteOperation.RESET_KNOWLEDGE_BANK_CONFIG, request_context)
+        overrides = KnowledgeBankOverrides()
+        async with acquire_with_retry(await self._engine._get_backend()) as conn:
+            await self._write_overrides(conn, bank_id, overrides)
+        return self._bank_config(bank_id, overrides)
+
+    async def _write_overrides(self, conn: Any, bank_id: str, overrides: KnowledgeBankOverrides) -> None:
+        # Only this bank's knowledge keys are replaced: anything else in the column is left as it is.
+        await conn.execute(
+            f"""
+            UPDATE {fq_table("banks")}
+            SET config = (COALESCE(config, '{{}}'::jsonb) - $1::text[]) || $2::jsonb, updated_at = now()
+            WHERE bank_id = $3 AND kind = $4
+            """,
+            [bank_config.STORED_PREFIX + f for f in bank_config.OVERRIDABLE_FIELDS],
+            json.dumps(bank_config.to_stored(overrides)),
+            bank_id,
+            KIND,
+        )
+
     # --- ingest -----------------------------------------------------------------------------
 
     def _strategy(self, name: str | None) -> ingest_strategy.IngestStrategy | None:
@@ -530,7 +719,7 @@ class KnowledgeService:
             )
         return strategies[name]
 
-    def _check_item(self, item: IngestItem, *, depth: int = 0) -> _Plan:
+    def _check_item(self, item: IngestItem, settings: KnowledgeBankSettings, *, depth: int = 0) -> _Plan:
         """How the file will be split; refuses what cannot be ingested."""
         limit = get_config().knowledge_max_file_mb * 1024 * 1024
         if len(item.data) > limit:
@@ -557,10 +746,12 @@ class KnowledgeService:
             except Exception as exc:
                 raise KnowledgeBankError(f"ingestion strategy '{strategy.name}': {exc}", 500) from exc
             return _Plan(kind=kind, strategy=strategy.name, handler=handler)
-        self._check_kind(kind, item)
+        self._check_kind(kind, item, settings)
         return _Plan(kind=kind, strategy=strategy.name if strategy else None)
 
-    def _check_kind(self, kind: media.Kind | None, item: IngestItem | KnowledgeDocument) -> media.Kind:
+    def _check_kind(
+        self, kind: media.Kind | None, item: IngestItem | KnowledgeDocument, settings: KnowledgeBankSettings
+    ) -> media.Kind:
         if kind is None:
             raise KnowledgeBankError(
                 f"unsupported file type for '{item.filename}' ({item.content_type}). Knowledge banks take PDF, "
@@ -574,36 +765,39 @@ class KnowledgeService:
                 "(HINDSIGHT_API_KNOWLEDGE_DISABLED_MEDIA_TYPES)",
                 415,
             )
+        if media_type in settings.disabled_media_types:
+            raise KnowledgeBankError(
+                f"'{item.filename}' is {media_type}, which this bank does not ingest (its disabled_media_types)",
+                415,
+            )
         if not _NEEDS[kind] & self.embedder.modalities:
             raise KnowledgeBankError(
-                f"'{item.filename}' is {media_type}, but the knowledge embedder ({self.embedder.provider}) only embeds "
+                f"'{item.filename}' is {media_type}, but the knowledge embedder only embeds "
                 f"{', '.join(sorted(self.embedder.modalities))}. Configure HINDSIGHT_API_KNOWLEDGE_EMBEDDINGS_PROVIDER "
                 "with a model that embeds it.",
                 415,
             )
         return kind
 
-    def _check_passage_modality(self, modality: str) -> None:
+    def _check_passage_modality(self, modality: str, settings: KnowledgeBankSettings) -> None:
         """A passage an ingest extension emitted: something this server embeds and ingests."""
         if modality not in self.embedder.modalities:
             raise media.MediaError(f"the ingest extension emitted {modality} passages, which the embedder cannot embed")
-        if modality in get_config().knowledge_disabled_media_types:
-            raise media.MediaError(
-                f"the ingest extension emitted {modality} passages, which this server does not ingest"
-            )
+        if modality in settings.disabled_media_types:
+            raise media.MediaError(f"the ingest extension emitted {modality} passages, which this bank does not ingest")
 
-    def _content_hash(self, item: IngestItem, plan: _Plan) -> str:
-        # The splitting settings are part of the hash: rewriting the same file after they change
-        # must re-split it, not be skipped as unchanged. So is a strategy, its settings and version.
+    def _content_hash(self, item: IngestItem, plan: _Plan, s: KnowledgeBankSettings) -> str:
+        # The splitting settings (the bank's) are part of the hash: rewriting the same file after they
+        # change must re-split it, not be skipped as unchanged. So is a strategy, its settings and version.
         c = get_config()
         how: str = plan.kind or ""
         if plan.handler is not None:
             version = ingest_strategy.load_extension(plan.handler).version
             how = f"strategy:{plan.strategy}:{plan.handler.key}:{version}"
         settings = (
-            f"v{_PIPELINE_VERSION}|{how}|{self.embedder.provider}:{self.embedder.model}:{self.embedder.dimension}|{c.knowledge_pdf_page_pixels}"
-            f"|{c.knowledge_image_tokens}|{c.knowledge_audio_window_seconds}|{c.knowledge_video_window_seconds}"
-            f"|{c.knowledge_media_overlap_seconds}|{c.knowledge_pdf_text_weight}|{c.knowledge_pdf_bands}|{c.knowledge_text_passage_tokens}"
+            f"v{_PIPELINE_VERSION}|{how}|{self.embedder.provider}:{self.embedder.model}:{self.embedder.dimension}|{s.pdf_page_pixels}"
+            f"|{s.image_tokens}|{s.audio_window_seconds}|{s.video_window_seconds}"
+            f"|{s.media_overlap_seconds}|{c.knowledge_pdf_text_weight}|{s.pdf_bands}|{s.text_passage_tokens}"
         )
         return hashlib.sha256(item.data + settings.encode()).hexdigest()
 
@@ -616,8 +810,11 @@ class KnowledgeService:
         files a strategy splits one into are still queued, as their own operation. If any failed it
         raises, after the others committed, as with a retain."""
         await self._open_bank(bank_id, KnowledgeBankWriteOperation.INGEST_KNOWLEDGE_BANK, request_context)
+        settings = await self._bank_settings(bank_id)
         # All-or-nothing: check every item before storing any.
-        entries = [_Entry(item.document_id or str(uuid.uuid4()), item, self._check_item(item)) for item in items]
+        entries = [
+            _Entry(item.document_id or str(uuid.uuid4()), item, self._check_item(item, settings)) for item in items
+        ]
         seen: set[str] = set()
         for e in entries:
             if e.document_id in seen:
@@ -628,7 +825,7 @@ class KnowledgeService:
             caller["_tenant_id"] = request_context.tenant_id
         if request_context.api_key_id:
             caller["_api_key_id"] = request_context.api_key_id
-        saved = await self._save(bank_id, entries)
+        saved = await self._save(bank_id, entries, settings)
         work = [_work(e, s) for e, s in zip(entries, saved, strict=True) if s is not None]
         operation_id: str | None = None
         if work and wait:
@@ -642,21 +839,77 @@ class KnowledgeService:
         )
 
     async def _queue(self, bank_id: str, work: list[_Work], caller: dict[str, Any], depth: int = 0) -> str:
-        """Queue one operation that processes every stored document of ``work``; returns its id. One task
-        row and one operation row however many documents, like an async retain of a batch."""
-        payload: dict[str, Any] = {"documents": [w.to_payload() for w in work], **caller}
-        if depth:
-            payload["depth"] = depth
-        op = await self._engine._submit_async_operation(
-            bank_id=bank_id,
-            operation_type=TASK_TYPE,
-            task_type=TASK_TYPE,
-            task_payload=payload,
-            result_metadata={"document_ids": [w.document_id for w in work]},
-        )
-        return str(op["operation_id"])
+        """Queue an async ingest as one parent operation and its children, and return the parent's id.
 
-    async def _save(self, bank_id: str, entries: list[_Entry]) -> list[_Saved | None]:
+        Always a parent, even for one child, so an async ingest has one shape to track: the parent has no
+        task of its own and completes (or fails) once every child has, like a batch retain's. Each child
+        is a worker task over a slice of the documents (see ``_children``), so a big upload spreads across
+        free slots, and a retry redoes one child, not the whole upload."""
+        children = _children(work, get_config().knowledge_ingest_child_bytes)
+        parent_id = uuid.uuid4()
+        payloads: list[dict[str, Any]] = []
+        backend = await self._engine._get_backend()
+        table = fq_table("async_operations")
+        # Parent and children in one transaction, as a batch retain's are: a parent written without its
+        # children would be pending forever (no task runs it, no child ever completes it).
+        async with acquire_with_retry(backend) as conn:
+            async with conn.transaction():
+                if await conn.fetchval(f"SELECT 1 FROM {fq_table('banks')} WHERE bank_id = $1", bank_id) is None:
+                    raise KnowledgeBankError(f"knowledge bank '{bank_id}' not found", status_code=404)
+                await conn.execute(
+                    f"INSERT INTO {table} (operation_id, bank_id, operation_type, result_metadata, status) "
+                    "VALUES ($1, $2, $3, $4, $5)",
+                    parent_id,
+                    bank_id,
+                    TASK_TYPE,
+                    json.dumps(
+                        KnowledgeIngestParentMetadata(
+                            document_ids=[w.document_id for w in work], num_sub_batches=len(children)
+                        ).to_dict()
+                    ),
+                    "pending",
+                )
+                for i, child in enumerate(children, 1):
+                    child_id = uuid.uuid4()
+                    payload: dict[str, Any] = {
+                        "type": TASK_TYPE,
+                        "operation_id": str(child_id),
+                        "bank_id": bank_id,
+                        "documents": [w.to_payload() for w in child],
+                        **caller,
+                    }
+                    if depth:
+                        payload["depth"] = depth
+                    inject_task_trace_context(payload)
+                    meta = KnowledgeIngestChildMetadata(
+                        parent_operation_id=str(parent_id),
+                        sub_batch_index=i,
+                        total_sub_batches=len(children),
+                        document_ids=[w.document_id for w in child],
+                    )
+                    await conn.execute(
+                        f"INSERT INTO {table} (operation_id, bank_id, operation_type, result_metadata, status, "
+                        "task_payload) VALUES ($1, $2, $3, $4, $5, $6::jsonb)",
+                        child_id,
+                        bank_id,
+                        TASK_TYPE,
+                        json.dumps(meta.to_dict()),
+                        "pending",
+                        json.dumps(payload),
+                    )
+                    payloads.append(payload)
+        if len(children) > 1:
+            logger.info(
+                f"Knowledge ingest {bank_id}: {len(work)} documents queued as {len(children)} child operations "
+                f"of {parent_id}"
+            )
+        # After the commit: a synchronous task backend (tests) runs each task right here, against rows
+        # it must be able to see.
+        for payload in payloads:
+            await self._engine._task_backend.submit_task(payload)
+        return str(parent_id)
+
+    async def _save(self, bank_id: str, entries: list[_Entry], settings: KnowledgeBankSettings) -> list[_Saved | None]:
         """Store checked files as pending documents; None for one that is unchanged. One read and one write
         of the store for the whole batch. The files are saved first, concurrently, and only then the rows,
         so a document row never names a file that is not there yet."""
@@ -669,7 +922,7 @@ class KnowledgeService:
         for e in entries:
             item = e.item
             item.filename = item.filename or f"{e.document_id}.md"
-            content_hash = self._content_hash(item, e.plan)
+            content_hash = self._content_hash(item, e.plan, settings)
             before = existing.get(e.document_id)
             if (
                 before
@@ -724,46 +977,56 @@ class KnowledgeService:
         return saved
 
     async def _delete_keys(self, keys: list[str]) -> None:
-        for key in keys:
-            try:
-                await self._engine._file_storage.delete(key)
-            except Exception as exc:  # an orphaned blob is harmless; a failed write over it is not
-                logger.warning(f"Could not delete knowledge file {key}: {exc}")
+        if not keys:
+            return
+        async with _timing.timed("file.delete"):
+            for key in keys:
+                try:
+                    await self._engine._file_storage.delete(key)
+                except Exception as exc:  # an orphaned blob is harmless; a failed write over it is not
+                    logger.warning(f"Could not delete knowledge file {key}: {exc}")
+        _timing.record("file.delete", 0.0, calls=len(keys) - 1)  # one round trip per key
 
     # --- ingest (worker) --------------------------------------------------------------------
 
-    def _drafts(self, document: KnowledgeDocument, data: bytes) -> Iterator[media.PassageDraft]:
-        c = get_config()
+    def _drafts(
+        self, document: KnowledgeDocument, data: bytes, s: KnowledgeBankSettings
+    ) -> Iterator[media.PassageDraft]:
         kind = media.classify(document.content_type, document.filename)
         if kind == "pdf":
             return media.split_pdf(
                 data,
-                page_pixels=c.knowledge_pdf_page_pixels,
-                max_pages=c.knowledge_max_pdf_pages,
-                bands=c.knowledge_pdf_bands,
+                page_pixels=s.pdf_page_pixels,
+                max_pages=s.max_pdf_pages,
+                bands=s.pdf_bands,
             )
         if kind == "image":
             return iter(media.split_image(data))
         if kind in ("audio", "video"):
-            window = c.knowledge_audio_window_seconds if kind == "audio" else c.knowledge_video_window_seconds
+            window = s.audio_window_seconds if kind == "audio" else s.video_window_seconds
             return media.split_media(
                 data,
                 kind,
                 filename=document.filename,
                 window_seconds=window,
-                overlap_seconds=c.knowledge_media_overlap_seconds,
-                max_seconds=c.knowledge_max_media_seconds,
+                overlap_seconds=s.media_overlap_seconds,
+                max_seconds=s.max_media_seconds,
             )
         text = media.read_text(data, document.filename)
-        return iter(media.split_text(text, tokens=c.knowledge_text_passage_tokens))
+        return iter(media.split_text(text, tokens=s.text_passage_tokens))
 
     def _vectors_to_embed(
-        self, draft: media.PassageDraft, document: KnowledgeDocument, title: str | None
+        self,
+        draft: media.PassageDraft,
+        document: KnowledgeDocument,
+        title: str | None,
+        image_tokens: int | None = None,
     ) -> list[_Embedding]:
         """The vectors one passage is stored as. A PDF page (PDF_GEMMA.md): the whole page image at 560
-        vision tokens with the file name, three overlapping horizontal bands at 280, the page text and its
-        128-token units, all titled with the file name. Anything else: one vector, with the asset's name and
-        tags in the same input (GAME_ASSETS.md)."""
+        vision tokens with the file name, three overlapping horizontal bands at 280, the page text's 128-token
+        units and its sentences, all titled with the file name (a text-only model also gets the whole page
+        text, as the primary vector). Anything else: one vector, with the asset's name and tags in the same
+        input (GAME_ASSETS.md)."""
         if (
             draft.page is not None
             and document.media_type == "document"
@@ -773,9 +1036,11 @@ class KnowledgeService:
             # A text-only model: the page is found by its text layer alone (a scanned page by its title).
             page_text = draft.embed_text or draft.text or ""
             units = media.pack_lines(page_text, tokens=media.PDF_TEXT_UNIT_TOKENS) if page_text else []
-            return [_Embedding(None, 0, EmbedInput(modality="text", text=page_text, title=title))] + [
-                _Embedding("unit", n, EmbedInput(modality="text", text=u, title=title)) for n, u in enumerate(units)
-            ]
+            return (
+                [_Embedding(None, 0, EmbedInput(modality="text", text=page_text, title=title))]
+                + [_Embedding("unit", n, EmbedInput(modality="text", text=u, title=title)) for n, u in enumerate(units)]
+                + (_sentence_vectors(page_text, title) if page_text else [])
+            )
         if draft.page is not None and document.media_type == "document" and draft.modality == "image":
             out = [
                 _Embedding(
@@ -799,11 +1064,14 @@ class KnowledgeService:
                 for n, band in enumerate(draft.bands)
             ]
             if draft.embed_text and "text" in self.embedder.modalities:
-                out.append(_Embedding("page_text", 0, EmbedInput(modality="text", text=draft.embed_text, title=title)))
+                # No whole-page text vector next to the sentences: its best match is nearly always a unit's
+                # or a sentence's (ViDoRe hr -0.24, computer_science +0.06 nDCG@10 without it), and it was
+                # half the text a page embedded, so dropping it pays for most of the sentences.
                 units = media.pack_lines(draft.embed_text, tokens=media.PDF_TEXT_UNIT_TOKENS)
                 out += [
                     _Embedding("unit", n, EmbedInput(modality="text", text=u, title=title)) for n, u in enumerate(units)
                 ]
+                out += _sentence_vectors(draft.embed_text, title)
             return out
         return [
             _Embedding(
@@ -816,11 +1084,31 @@ class KnowledgeService:
                     mime=draft.mime,
                     title=title,
                     tags=tuple(document.tags) if draft.modality != "text" else (),
+                    image_tokens=image_tokens if draft.modality == "image" else None,
                 ),
             )
         ]
 
     async def process_batch(
+        self,
+        bank_id: str,
+        work: list[_Work],
+        *,
+        retries_left: bool = False,
+        depth: int = 0,
+        caller: dict[str, Any] | None = None,
+    ) -> None:
+        # Every phase of the batch is attributed (seconds and round trips) and emitted as one
+        # `[knowledge_ingest-timing]` line plus the phase metrics, as a retain's are: a slow batch is
+        # otherwise only attributable by guessing which of storage, splitting, the embedder or the
+        # knowledge store it was. Rounds, file writes and early commits run concurrently, so phases
+        # overlap: read each against the batch's `wall`, not against the others.
+        async with _timing.retain_timing(
+            op="knowledge_ingest", bank_id=bank_id, store=type(self.store).__name__, documents=len(work)
+        ):
+            await self._process_batch(bank_id, work, retries_left=retries_left, depth=depth, caller=caller)
+
+    async def _process_batch(
         self,
         bank_id: str,
         work: list[_Work],
@@ -839,7 +1127,12 @@ class KnowledgeService:
         embedder down) commits nothing and propagates, for the worker to retry; a document this batch
         already committed is ``ready`` under the same storage key and is skipped on the retry."""
         await self._ready(None)
-        rows = await self.store.get_documents(bank_id, [w.document_id for w in work])
+        settings = await self._bank_settings(bank_id)
+        # An image's vision tokens, sent only when the bank overrides the server's: None keeps each
+        # embedder's own default, which for a remote one is not necessarily the server setting.
+        image_tokens = settings.image_tokens if settings.image_tokens != get_config().knowledge_image_tokens else None
+        async with _timing.timed("store.read"):
+            rows = await self.store.get_documents(bank_id, [w.document_id for w in work])
         docs: list[_InFlight] = []
         for w in work:
             row = rows.get(w.document_id)
@@ -850,18 +1143,197 @@ class KnowledgeService:
             docs.append(_InFlight(w, row, _title_hint(row), media_prefix))
         if not docs:
             return
-        await self.store.set_statuses(
-            bank_id, [StatusUpdate(d.work.document_id, "processing", storage_key=d.work.storage_key) for d in docs]
-        )
+        async with _timing.timed("store.status"):
+            await self.store.set_statuses(
+                bank_id, [StatusUpdate(d.work.document_id, "processing", storage_key=d.work.storage_key) for d in docs]
+            )
         started = time.perf_counter()
         committed: set[str] = set()
+        rounds: list[asyncio.Task[None]] = []
+        slots = asyncio.Semaphore(_EMBED_ROUNDS_IN_FLIGHT)
+        budget = _MemoryBudget(get_config().knowledge_ingest_memory_budget_mb * 1024 * 1024)
+
+        async def run_round(batch: list[_Waiting]) -> None:
+            try:
+                await self._embed_round(batch, save, budget.adjust, image_tokens)
+            except BaseException as exc:
+                budget.fail(exc)
+                raise
+            finally:
+                slots.release()
+
+        async def launch(batch: list[_Waiting]) -> None:
+            # at most _EMBED_ROUNDS_IN_FLIGHT; the splitter waits for a free one -- timed, because a
+            # splitter that spends its time here is a batch bound by the embedder, not by splitting.
+            async with _timing.timed("split.wait_embed"):
+                await slots.acquire()
+            task = asyncio.create_task(run_round(batch))
+            rounds.append(task)
+            for doc in {id(w.doc): w.doc for w in batch}.values():
+                doc.rounds.append(task)
+
+        early: list[asyncio.Task[None]] = []
+        file_slots = asyncio.Semaphore(_PASSAGE_FILE_CONCURRENCY)
+
+        async def write(key: str, data: bytes, mime: str | None) -> None:
+            try:
+                async with _timing.timed("media.write"):
+                    await self._engine._file_storage.store(
+                        file_data=data, key=key, metadata={"content_type": mime or ""}
+                    )
+            finally:
+                file_slots.release()
+
+        async def save(doc: _InFlight, key: str, draft: media.PassageDraft) -> None:
+            """Write a passage's file in the background; its key is noted first, so a failed write's
+            siblings are still cleaned up. The slot is taken before the write is started, so writes that
+            fall behind hold the round back instead of piling their files up in memory."""
+            assert draft.data is not None
+            doc.media_keys.append(key)
+            async with _timing.timed("media.wait_slot"):
+                await file_slots.acquire()
+            doc.saves.append(asyncio.create_task(write(key, draft.data, draft.mime)))
+
+        def saves_of(group: list[_InFlight]) -> list[asyncio.Task[None]]:
+            return [t for d in group for t in d.saves]
+
+        async def commit(group: list[_InFlight]) -> None:
+            """Write these documents' passages in one go; each is marked ready, or failed when it held
+            nothing. The store commits each one only while it still holds the file this batch read: one
+            replaced or deleted meanwhile is skipped (it used to be re-read here first, which left a gap
+            between the check and the write), and its passages belong to nobody."""
+            await asyncio.gather(*saves_of(group))  # a document commits once its files are all written
+            for d in group:
+                d.committing = True
+                d.passages = [d.done[i] for i in sorted(d.done)]
+                if d.error is None and not d.split and not d.replaced and not d.passages and not d.staged:
+                    d.error = media.MediaError("the file holds nothing to search")
+            # A version replaced meanwhile has nothing of its own to commit: its newer task writes the document.
+            # What it already wrote (media of pieces staged before the store turned it away) is dropped here,
+            # as the store's skip below used to drop it.
+            done = [d for d in group if d.error is None and not d.split and not d.replaced]
+            for d in group:
+                if d.replaced:
+                    await self._delete_keys(d.media_keys)
+                    d.media_keys = []  # the transient cleanup must not delete them a second time
+            try:
+                if done:
+                    await write_passages(done)
+            finally:
+                # Committed (or failed): its passages are not needed any more, and nor is their memory.
+                for d in group:
+                    d.committed_passages = d.staged + len(d.passages)
+                    d.passages, d.done = [], {}
+                    budget.adjust(-d.reserved)
+                    d.reserved = 0
+
+        async def write_passages(done: list[_InFlight]) -> None:
+            t0 = time.perf_counter()
+            languages = [
+                d.language if d.staged else detect_language("\n".join(p.text or "" for p in d.passages)) for d in done
+            ]
+            _timing.record("language", time.perf_counter() - t0, calls=len(done))
+            async with _timing.timed("store.write"):
+                replaced = await self.store.replace_passages(
+                    bank_id,
+                    [
+                        PassageReplacement(
+                            d.work.document_id, d.passages, language, storage_key=d.work.storage_key, staged=d.staged
+                        )
+                        for d, language in zip(done, languages, strict=True)
+                    ],
+                )
+            skipped = set(replaced.skipped_document_ids)
+            for d in done:
+                if d.work.document_id in skipped:
+                    await self._delete_keys(d.media_keys)
+            kept = [d for d in done if d.work.document_id not in skipped]
+            committed.update(d.work.document_id for d in kept)
+            await self._delete_keys(replaced.stale_media_keys)
+            # Only a document that used to be split can have split-out documents to drop now.
+            was_split = [d.work.document_id for d in kept if d.work.was_split]
+            if was_split:
+                derived = await self.store.derived_documents(bank_id, was_split)
+                await self._delete_trees(bank_id, [c for children in derived.values() for c in children])
+
+        async def commit_when_embedded(group: list[_InFlight]) -> None:
+            await asyncio.gather(*{id(t): t for d in group for t in d.rounds}.values())
+            await commit(group)
+
+        waiting: list[_Waiting] = []
+        finished: list[_InFlight] = []  # cut and queued, not yet committing
+
+        async def flush_round() -> None:
+            if waiting:
+                batch = list(waiting)
+                waiting.clear()
+                await launch(batch)
+
+        async def stage(doc: _InFlight) -> None:
+            """Write what a document has embedded so far out of sight, as a piece of its next version, and
+            give back its memory: a document too big for the budget is held one piece at a time, not
+            whole, and commits once it is all cut (``PassageReplacement(staged=n)``)."""
+            await flush_round()
+            await asyncio.gather(*doc.rounds)  # every passage queued so far is embedded
+            await asyncio.gather(*doc.saves)
+            if doc.error is not None:
+                return
+            piece = [doc.done[i] for i in sorted(doc.done)]
+            if doc.staged == 0:
+                # The version's language is the first piece's: later pieces are indexed by it as they go.
+                doc.language = detect_language("\n".join(p.text or "" for p in piece))
+            async with _timing.timed("store.stage"):
+                skipped = await self.store.stage_passages(
+                    bank_id,
+                    [PassageStage(doc.work.document_id, piece, doc.language, doc.work.storage_key, doc.staged)],
+                )
+            if skipped:  # replaced or deleted meanwhile: what is left of it would belong to nobody
+                doc.replaced = True
+            doc.staged += len(piece)
+            doc.done = {}
+            budget.adjust(-doc.reserved)
+            doc.reserved = 0
+
+        async def commit_finished() -> None:
+            """Start the commit of every document cut so far: it runs once their rounds are embedded,
+            while the next documents are cut."""
+            await flush_round()
+            if finished:
+                group = list(finished)
+                finished.clear()
+                for d in group:
+                    d.committing = True  # now, so the batch's final commit never takes it too
+                early.append(asyncio.create_task(commit_when_embedded(group)))
+
+        async def settle() -> None:
+            """Wait for every round; re-raise the first transient error once all have stopped, so the
+            cleanup below never deletes a file a round is still writing."""
+            results = await asyncio.gather(*rounds, return_exceptions=True)
+            rounds.clear()
+            errors = [r for r in results if isinstance(r, BaseException)]
+            if errors:
+                raise errors[0]
+
         try:
-            waiting: list[_Waiting] = []
             for doc in docs:
                 try:
-                    drafts = await self._open(bank_id, doc, caller or {}, depth)
+                    drafts = await self._open(bank_id, doc, caller or {}, depth, settings)
                 except ValueError as exc:
                     doc.error = exc
+                    continue
+                except _FileGone as exc:
+                    # A newer upload can replace the file between the check above and this read, and it
+                    # deletes the old one: this version is then superseded, and its newer task ingests it.
+                    # Retrying (what this did before) only read the missing file again until retries ran
+                    # out. Gone under the current version, the file cannot come back: the document fails.
+                    current = (await self.store.get_documents(bank_id, [doc.work.document_id])).get(
+                        doc.work.document_id
+                    )
+                    if current is None or current.storage_key != doc.work.storage_key:
+                        doc.replaced = True
+                        logger.info(f"Knowledge ingest skipped: {bank_id}/{doc.work.document_id} was replaced")
+                    else:
+                        doc.error = exc
                     continue
                 if drafts is None:  # split into files, each its own document now, and itself ready
                     doc.split = True
@@ -870,50 +1342,40 @@ class KnowledgeService:
                 try:
                     # A document an embed round refused stops here: its remaining passages (a long
                     # video's windows) would only be cut to be thrown away.
-                    while doc.error is None and (draft := await asyncio.to_thread(_next_draft, drafts)) is not None:
-                        waiting.append(_Waiting(doc, draft))
+                    while (
+                        doc.error is None
+                        and not doc.replaced
+                        and (draft := await _split(_next_draft, drafts)) is not None
+                    ):
+                        cost = _passage_estimate(draft)
+                        if budget.limit > 0 and doc.reserved + cost > budget.limit and doc.queued > doc.staged:
+                            await stage(doc)
+                        await budget.reserve(cost, doc.reserved, commit_finished)
+                        doc.reserved += cost
+                        waiting.append(_Waiting(doc, draft, doc.queued, cost))
+                        doc.queued += 1
                         if len(waiting) >= _EMBED_ROUND:
-                            await self._embed_round(waiting)
-                            waiting = []
+                            await flush_round()
                 except ValueError as exc:
                     doc.error = exc
                 finally:
                     # Close the splitter now, off the event loop, rather than whenever it is collected.
-                    await asyncio.to_thread(_close_drafts, drafts)
-            if waiting:
-                await self._embed_round(waiting)
-            for doc in docs:
-                if doc.error is None and not doc.split and not doc.passages:
-                    doc.error = media.MediaError("the file holds nothing to search")
-
-            done = [d for d in docs if d.error is None and not d.split]
-            # The store commits each one only while it still holds the file this batch read: one replaced
-            # or deleted meanwhile is skipped (it used to be re-read here first, which left a gap between
-            # the check and the write), and its passages belong to nobody.
-            replaced = await self.store.replace_passages(
-                bank_id,
-                [
-                    PassageReplacement(
-                        d.work.document_id,
-                        d.passages,
-                        detect_language("\n".join(p.text or "" for p in d.passages)),
-                        storage_key=d.work.storage_key,
-                    )
-                    for d in done
-                ],
-            )
-            skipped = set(replaced.skipped_document_ids)
-            for d in done:
-                if d.work.document_id in skipped:
-                    await self._delete_keys(d.media_keys)
-            kept = [d for d in done if d.work.document_id not in skipped]
-            committed |= {d.work.document_id for d in kept}
-            await self._delete_keys(replaced.stale_media_keys)
-            # Only a document that used to be split can have split-out documents to drop now.
-            was_split = [d.work.document_id for d in kept if d.work.was_split]
-            if was_split:
-                derived = await self.store.derived_documents(bank_id, was_split)
-                await self._delete_trees(bank_id, [c for children in derived.values() for c in children])
+                    await _split(_close_drafts, drafts)
+                finished.append(doc)
+                # Finished documents commit as soon as they are embedded, while the next ones are cut, in
+                # groups: a big document (a long PDF, a video) on its own, small ones together. Writing a
+                # batch's every vector at the end held them all at once, and was a third of a PDF batch's
+                # ingest with nothing else running.
+                if (doc.error is None and doc.queued >= _EARLY_COMMIT_PASSAGES) or sum(
+                    d.queued for d in finished
+                ) >= _COMMIT_GROUP_PASSAGES:
+                    await commit_finished()
+            await flush_round()
+            await settle()
+            # Whatever did not commit early commits here, together.
+            await commit([d for d in docs if not d.committing])
+            await asyncio.gather(*early)  # an early commit's error propagates like any other
+            kept = [d for d in docs if d.work.document_id in committed]
             failed = [d for d in docs if d.error is not None]
             for d in failed:
                 await self._delete_keys(d.media_keys)
@@ -926,18 +1388,32 @@ class KnowledgeService:
                     ],
                 )
             logger.info(
-                f"Knowledge ingest {bank_id}: {len(kept)} documents, {sum(len(d.passages) for d in kept)} passages, "
-                f"{len(failed)} failed, in {time.perf_counter() - started:.1f}s"
+                f"Knowledge ingest {bank_id}: {len(kept)} documents, "
+                f"{sum(d.committed_passages for d in kept)} passages, "
+                f"{len(failed)} failed, in {time.perf_counter() - started:.1f}s, holding at most "
+                f"{budget.peak / 2**20:.0f} MB of passages"
             )
         except Exception as exc:
+            # No round, file write or early commit may still be running when the cleanup deletes files.
+            await asyncio.gather(*rounds, *early, return_exceptions=True)
+            await asyncio.gather(*saves_of(docs), return_exceptions=True)
             # Transient: nothing of what is not committed is kept. Until the retries run out a document is
             # still on its way, so it stays pending with the error noted (it used to be marked failed at
             # once, and clients waiting for ready/failed gave up on it).
             pending = [d for d in docs if d.work.document_id not in committed]
             for d in pending:
                 await self._delete_keys(d.media_keys)
-            status: DocumentStatus = "pending" if retries_left else "failed"
-            note = f"retrying after: {exc!r}" if retries_left else repr(exc)
+            # An embedder still rate-limiting is deferred by the worker, not failed (worker/backpressure.py),
+            # so its documents stay on their way whatever the retries left.
+            from ..worker.backpressure import is_store_backpressure, is_upstream_rate_limit
+
+            # A ValueError is permanent (the engine marks the operation failed without a retry, e.g. a
+            # write at another vector size than the bank's): left pending, its documents would wait for
+            # a retry that never comes.
+            permanent = isinstance(exc, ValueError)
+            on_its_way = not permanent and (retries_left or is_upstream_rate_limit(exc) or is_store_backpressure(exc))
+            status: DocumentStatus = "pending" if on_its_way else "failed"
+            note = f"retrying after: {exc!r}" if on_its_way else repr(exc)
             await self.store.set_statuses(
                 bank_id, [StatusUpdate(d.work.document_id, status, note[:2000], d.work.storage_key) for d in pending]
             )
@@ -949,14 +1425,20 @@ class KnowledgeService:
             )
 
     async def _open(
-        self, bank_id: str, doc: _InFlight, caller: dict[str, Any], depth: int
+        self, bank_id: str, doc: _InFlight, caller: dict[str, Any], depth: int, settings: KnowledgeBankSettings
     ) -> Iterator[media.PassageDraft] | None:
         """One document's passages to embed, as a lazy iterator; None when its strategy split it into files."""
         document, w = doc.document, doc.work
-        data = await self._engine._file_storage.retrieve(w.storage_key)
+        async with _timing.timed("file.read"):
+            try:
+                data = await self._engine._file_storage.retrieve(w.storage_key)
+            except FileNotFoundError as exc:
+                # Only the stored original being gone means "superseded or lost" to the batch; a missing
+                # file further in (a splitter's helper, a temp file) stays an ordinary, retried error.
+                raise _FileGone(str(exc)) from exc
         if w.handler is None:
             # Splitting is blocking (pdfium, ffmpeg): it runs in a thread, one draft at a time.
-            return await asyncio.to_thread(self._drafts, document, data)
+            return await _split(self._drafts, document, data, settings)
         made = await ingest_strategy.load_extension(w.handler).ingest(
             ingest_strategy.IngestFile(
                 bank_id=bank_id,
@@ -968,58 +1450,65 @@ class KnowledgeService:
             ),
         )
         if made.files is not None:
-            await self._write_derived(bank_id, document, w.storage_key, made.files, w.strategy, caller, depth)
+            await self._write_derived(bank_id, document, w.storage_key, made.files, w.strategy, caller, depth, settings)
             return None
         # A strategy that returned passages has done the splitting already.
         emitted = _drafts_of(made.passages or [])
         for d in emitted:
-            self._check_passage_modality(d.modality)
+            self._check_passage_modality(d.modality, settings)
         return iter(emitted)
 
-    async def _embed_round(self, waiting: list[_Waiting]) -> None:
+    async def _embed_round(
+        self,
+        waiting: list[_Waiting],
+        save: _SaveFile,
+        adjust: Callable[[int], None] = lambda _: None,
+        image_tokens: int | None = None,
+    ) -> None:
         """Embed one round of passages, from any documents, in one call, and hand each to its document. A
-        permanent error is narrowed to the documents it comes from, embedding each one's share alone."""
+        permanent error is narrowed to the documents it comes from, embedding each one's share alone.
+        Each passage's file is handed to ``save``, which writes it in the background: the round does not
+        wait for it (a round that waited held its slot through the file writes and left the embedder idle
+        most of the time); the document's commit does."""
         live = [w for w in waiting if w.doc.error is None]
         if not live:
             return
-        plans = [self._vectors_to_embed(w.draft, w.doc.document, w.doc.title) for w in live]
+        plans = [self._vectors_to_embed(w.draft, w.doc.document, w.doc.title, image_tokens) for w in live]
         try:
-            embedded = await self.embedder.embed_documents([e.input for plan in plans for e in plan])
+            async with _timing.timed("embed"):
+                embedded = await self.embedder.embed_documents([e.input for plan in plans for e in plan])
         except ValueError as exc:
             if len({id(w.doc) for w in live}) == 1:
                 live[0].doc.error = exc
                 return
             # By identity: an _InFlight is a mutable dataclass, so it has no hash to dedupe on.
             for doc in {id(w.doc): w.doc for w in live}.values():
-                await self._embed_round([w for w in live if w.doc is doc])
+                await self._embed_round([w for w in live if w.doc is doc], save, adjust, image_tokens)
             return
+        keys = {id(w): f"{w.doc.media_prefix}{w.index}.{w.draft.extension}" for w in live if w.draft.data is not None}
+        for w in live:
+            if id(w) in keys:
+                await save(w.doc, keys[id(w)], w.draft)
         cursor = 0
         for w, plan in zip(live, plans, strict=True):
             mine = embedded[cursor : cursor + len(plan)]
             cursor += len(plan)
-            doc, draft = w.doc, w.draft
-            index = len(doc.passages)
-            key = None
-            if draft.data is not None:
-                key = f"{doc.media_prefix}{index}.{draft.extension}"
-                await self._engine._file_storage.store(
-                    file_data=draft.data, key=key, metadata={"content_type": draft.mime or ""}
-                )
-                doc.media_keys.append(key)
-            doc.passages.append(
-                KnowledgePassage(
-                    index=index,
-                    modality=draft.modality,
-                    text=draft.text,
-                    page=draft.page,
-                    start_ms=draft.start_ms,
-                    end_ms=draft.end_ms,
-                    media_key=key,
-                    embedding=mine[0],
-                    extra_vectors=[
-                        RoleVector(e.role, e.n, v) for e, v in zip(plan[1:], mine[1:], strict=True) if e.role
-                    ],
-                )
+            doc, draft, index = w.doc, w.draft, w.index
+            key = keys.get(id(w))
+            # The estimate it reserved, corrected to what its vectors really weigh.
+            actual = _passage_bytes(draft, mine)
+            adjust(actual - w.cost)
+            doc.reserved += actual - w.cost
+            doc.done[index] = KnowledgePassage(
+                index=index,
+                modality=draft.modality,
+                text=draft.text,
+                page=draft.page,
+                start_ms=draft.start_ms,
+                end_ms=draft.end_ms,
+                media_key=key,
+                embedding=mine[0],
+                extra_vectors=[RoleVector(e.role, e.n, v) for e, v in zip(plan[1:], mine[1:], strict=True) if e.role],
             )
 
     async def _write_derived(
@@ -1031,6 +1520,7 @@ class KnowledgeService:
         strategy: str | None,
         caller: dict[str, Any],
         depth: int,
+        settings: KnowledgeBankSettings,
     ) -> None:
         """Ingest the raw files an extension split ``document`` into, each as its own document: chunked by
         us, or by the same strategy again when it maps their type. They are queued as one operation."""
@@ -1049,14 +1539,14 @@ class KnowledgeService:
                 strategy=strategy,
             )
             try:
-                plan = self._check_item(item, depth=depth + 1)
+                plan = self._check_item(item, settings, depth=depth + 1)
             except KnowledgeBankError as exc:  # the same file would be refused next time too
                 raise media.MediaError(f"'{f.name}': {exc}") from exc
             children.append(_Entry(f"{document.document_id}/{f.name}", item, plan, document.document_id))
         current = (await self.store.get_documents(bank_id, [document.document_id])).get(document.document_id)
         if current is None or current.storage_key != storage_key:
             return  # replaced or deleted while the strategy ran
-        saved = await self._save(bank_id, children)
+        saved = await self._save(bank_id, children, settings)
         work = [_work(c, s) for c, s in zip(children, saved, strict=True) if s is not None]
         if work:
             await self._queue(bank_id, work, caller, depth + 1)
@@ -1144,90 +1634,175 @@ class KnowledgeService:
         )
 
     async def timeseries(
-        self, bank_id: str, period: str, trunc: str, request_context: RequestContext
+        self,
+        bank_id: str,
+        period: str,
+        trunc: str,
+        request_context: RequestContext,
+        *,
+        media_type: str | None = None,
     ) -> list[TimeBucket]:
         await self._open_bank(bank_id, KnowledgeBankReadOperation.GET_KNOWLEDGE_BANK, request_context)
         days = {"1d": 1, "7d": 7, "30d": 30, "90d": 90}[period]
         since = datetime.now(UTC) - timedelta(days=days)
-        return await self.store.timeseries(bank_id, since=since, trunc=trunc)
+        return await self.store.timeseries(bank_id, since=since, trunc=trunc, media_type=media_type)
 
     # --- search -----------------------------------------------------------------------------
 
     async def search(
         self, bank_id: str, request: SearchRequest, request_context: RequestContext
     ) -> list[SearchResultItem]:
-        await self._open_bank(bank_id, KnowledgeBankReadOperation.SEARCH_KNOWLEDGE_BANK, request_context)
-        return await self._with_context(bank_id, await self._search(bank_id, request), request.neighbors)
-
-    async def _search(self, bank_id: str, request: SearchRequest) -> list[SearchHit]:
-        pattern = request.pattern if (request.pattern or "").strip() else None
-        has_query = bool((request.query or "").strip()) or request.query_image is not None
-        if not has_query and pattern is None:
-            raise KnowledgeBankError("search needs a query, a query_image or a pattern")
-        try:
-            if not has_query and pattern is not None:
-                return await self.store.grep(
-                    bank_id, pattern, top_k=request.top_k, filters=request.filters, regex=request.regex
-                )
+        # One `[knowledge_search-timing]` line per search, phase by phase, as an ingest batch has: a
+        # slow search is otherwise only attributable by guessing which of the bank checks, the
+        # embedder, the store or the budget's context reads it was.
+        async with _timing.retain_timing(op="knowledge_search", bank_id=bank_id, store=type(self.store).__name__):
+            has_query = (
+                bool((request.query or "").strip())
+                or request.query_image is not None
+                or request.query_video is not None
+            )
+            if not has_query:
+                raise KnowledgeBankError("search needs a query, a query_image or a query_video")
+            # The query is embedded while the bank is opened, not after: the embedding reads nothing
+            # of the bank, and the two are each a network round trip. The store is not touched until
+            # the bank is open, so a caller refused by the checks still learns nothing about it.
+            embedding = asyncio.ensure_future(self._embed_query(request))
             try:
-                vector = await self.embedder.embed_query(request.query, request.query_image)
+                async with _timing.timed("open_bank"):
+                    await self._open_bank(bank_id, KnowledgeBankReadOperation.SEARCH_KNOWLEDGE_BANK, request_context)
+            except BaseException:
+                embedding.cancel()
+                raise
+            vector = await embedding
+            async with _timing.timed("store.search"):
+                hits = await self._search(bank_id, request, vector)
+            async with _timing.timed("context"):
+                return await self._within_budget(bank_id, hits, request.max_tokens)
+
+    async def _embed_query(self, request: SearchRequest) -> list[float]:
+        async with _timing.timed("embed"):
+            try:
+                return await self.embedder.embed_query(request.query, request.query_image, request.query_video)
             except UnsupportedModalityError as exc:
                 raise KnowledgeBankError(str(exc), 415) from exc
-            return await self.store.search(
-                bank_id,
-                vector,
-                top_k=request.top_k,
-                filters=request.filters,
-                text_weight=get_config().knowledge_pdf_text_weight,
-                query_text=request.query,
-                keyword_weight=get_config().knowledge_keyword_weight,
-                pattern=pattern,
-                regex=request.regex,
-            )
-        except asyncpg.InvalidRegularExpressionError as exc:
-            raise KnowledgeBankError(f"invalid regular expression: {exc}") from exc
 
-    async def _with_context(self, bank_id: str, hits: list[SearchHit], neighbors: int) -> list[SearchResultItem]:
-        """Expand text hits to their neighbouring passages, merging overlapping windows per document."""
-        items: list[SearchResultItem] = []
-        windows: dict[str, list[SearchResultItem]] = {}
-        for hit in hits:
-            if neighbors <= 0 or hit.passage.modality != "text":
-                items.append(SearchResultItem(hit))
-                continue
-            first, last = max(0, hit.passage.index - neighbors), hit.passage.index + neighbors
-            same_doc = windows.setdefault(hit.document.document_id, [])
-            merged = next(
-                (w for w in same_doc if first <= (w.context_last or 0) + 1 and last >= (w.context_first or 0) - 1),
-                None,
-            )
-            if merged is not None:  # a better hit already covers (or touches) this one
-                merged.context_first = min(merged.context_first or 0, first)
-                merged.context_last = max(merged.context_last or 0, last)
-                # Grown, it may now reach another window of the document: fold that one in too, or the
-                # passages between them would come back twice.
-                for other in [w for w in same_doc if w is not merged]:
-                    if (other.context_first or 0) <= (merged.context_last or 0) + 1 and (other.context_last or 0) >= (
-                        merged.context_first or 0
-                    ) - 1:
-                        merged.context_first = min(merged.context_first or 0, other.context_first or 0)
-                        merged.context_last = max(merged.context_last or 0, other.context_last or 0)
-                        same_doc.remove(other)
-                        items.remove(other)
-                continue
-            item = SearchResultItem(hit, context_first=first, context_last=last)
-            same_doc.append(item)
-            items.append(item)
-        windowed = [i for i in items if i.context_first is not None and i.context_last is not None]
-        # Every window's passages in one store call, not one per hit.
-        ranges = await self.store.passage_ranges(
-            bank_id, [(i.hit.document.document_id, i.context_first or 0, i.context_last or 0) for i in windowed]
+    async def _search(self, bank_id: str, request: SearchRequest, vector: list[float]) -> list[SearchHit]:
+        return await self.store.search(
+            bank_id,
+            vector,
+            top_k=SEARCH_CANDIDATES[request.budget],
+            filters=request.filters,
+            text_weight=get_config().knowledge_pdf_text_weight,
+            query_text=request.query,
+            keyword_weight=get_config().knowledge_keyword_weight,
         )
-        for item in windowed:
-            passages = ranges[(item.hit.document.document_id, item.context_first or 0, item.context_last or 0)]
-            item.context = "\n\n".join(p.text or "" for p in passages)
-            item.context_first = passages[0].index if passages else item.context_first
-            item.context_last = passages[-1].index if passages else item.context_last
+
+    async def _within_budget(self, bank_id: str, hits: list[SearchHit], max_tokens: int) -> list[SearchResultItem]:
+        """The ranked hits that fit in ``max_tokens``, each text hit with the passages around it as its
+        ``context``. In rank order, a text hit comes with one passage on each side (the query-time step that
+        paid, CHUNKING.md), or alone if only that fits, and a hit another one's context already holds is not
+        repeated: that context grows to take it in. What is left then widens the best hits' context, one
+        passage a side at a time, up to ``MAX_CONTEXT_PASSAGES``. A hit with no text of its own costs
+        ``MEDIA_HIT_TOKENS`` plus its text. This replaced ``top_k`` and ``neighbors``: a caller holds a token
+        budget, and a count of hits said nothing about how much text came back."""
+        text_hits = [h for h in hits if h.passage.modality == "text"]
+        passages: dict[tuple[str, int], KnowledgePassage] = {}
+
+        async def load(ranges: list[tuple[str, int, int]]) -> None:
+            wanted = [r for r in ranges if any((r[0], i) not in passages for i in range(r[1], r[2] + 1))]
+            if not wanted:
+                return
+            found = await self.store.passage_ranges(bank_id, wanted)
+            for (document_id, _first, _last), run in found.items():
+                for p in run:
+                    passages[(document_id, p.index)] = p
+
+        tokens: dict[tuple[str, int], int] = {}
+
+        def cost(document_id: str, index: int) -> int:
+            key = (document_id, index)
+            if key not in tokens:
+                tokens[key] = count_tokens(passages[key].text or "") if key in passages else 0
+            return tokens[key]
+
+        await load([(h.document.document_id, max(0, h.passage.index - 1), h.passage.index + 1) for h in text_hits])
+        items: list[SearchResultItem] = []
+        windows: list[_Window] = []
+        held: dict[str, set[int]] = {}  # per document, the passages some window already returns
+        used = 0
+        for hit in hits:
+            document_id, index = hit.document.document_id, hit.passage.index
+            if hit.passage.modality != "text":
+                weight = MEDIA_HIT_TOKENS + count_tokens(hit.passage.text or "")
+                if used + weight <= max_tokens:
+                    items.append(SearchResultItem(hit))
+                    used += weight
+                continue
+            mine = held.setdefault(document_id, set())
+            around = [i for i in (index - 1, index, index + 1) if (document_id, i) in passages]
+            owner = next(
+                (w for w in windows if w.document_id == document_id and w.first - 1 <= index <= w.last + 1), None
+            )
+            for span in (around, [index]):  # with a passage on each side, or alone
+                new = [i for i in span if i not in mine]
+                weight = sum(cost(document_id, i) for i in new)
+                if used + weight > max_tokens:
+                    continue
+                used += weight
+                mine.update(new)
+                if owner is not None:  # a better hit's context reaches it: that context takes it in
+                    owner.first, owner.last = min(owner.first, *span), max(owner.last, *span)
+                    # Grown, it may now reach another window of the document: fold that one in, or the
+                    # passages they share would come back twice.
+                    # The better-ranked of two meeting windows is the one kept, and holds both: the hit
+                    # that reached them first decides the merged result's rank.
+                    for other in [w for w in windows if w is not owner and w.document_id == document_id]:
+                        if other.first <= owner.last + 1 and other.last >= owner.first - 1:
+                            keep, drop = (
+                                (other, owner) if windows.index(other) < windows.index(owner) else (owner, other)
+                            )
+                            keep.first, keep.last = min(keep.first, drop.first), max(keep.last, drop.last)
+                            windows.remove(drop)
+                            items.remove(drop.item)
+                            owner = keep
+                else:
+                    item = SearchResultItem(hit)
+                    items.append(item)
+                    windows.append(_Window(item, document_id, min(span), max(span)))
+                break
+        for _ in range(MAX_CONTEXT_PASSAGES - 1):
+            growing = [w for w in windows if w.grows_before or w.grows_after]
+            if not growing:
+                break
+            await load(
+                [(w.document_id, w.first - 1, w.first - 1) for w in growing if w.grows_before and w.first > 0]
+                + [(w.document_id, w.last + 1, w.last + 1) for w in growing if w.grows_after]
+            )
+            for w in growing:  # rank order: the best hits widen first
+                for side in ("before", "after"):
+                    if not (w.grows_before if side == "before" else w.grows_after):
+                        continue
+                    i = w.first - 1 if side == "before" else w.last + 1
+                    mine = held[w.document_id]
+                    blocked = i < 0 or (w.document_id, i) not in passages or i in mine
+                    if not blocked and used + cost(w.document_id, i) <= max_tokens:
+                        used += cost(w.document_id, i)
+                        mine.add(i)
+                        if side == "before":
+                            w.first = i
+                        else:
+                            w.last = i
+                    elif side == "before":
+                        w.grows_before = False
+                    else:
+                        w.grows_after = False
+        for w in windows:
+            w.item.context_first, w.item.context_last = w.first, w.last
+            w.item.context = "\n\n".join(
+                passages[(w.document_id, i)].text or ""
+                for i in range(w.first, w.last + 1)
+                if (w.document_id, i) in passages
+            )
         return items
 
     async def search_linked(
@@ -1299,7 +1874,7 @@ async def documents_for_memory_bank(
                 page=r.page,
                 start_ms=r.start_ms,
                 end_ms=r.end_ms,
-                score=r.score,
+                score=linked.hit.score,
                 passage_url=r.passage_url,
                 document_url=r.document_url,
                 tags=r.tags,
@@ -1308,13 +1883,44 @@ async def documents_for_memory_bank(
     return out
 
 
+#: Letter runs in a file name that say nothing about its content: what cameras, phones, screen
+#: recorders and exporters name files (``IMG_4821``, ``DSC01234``, ``video7020``, ``scan_003``).
+_GENERIC_NAME_WORDS = frozenset(
+    "img image images dsc dscn dscf pxl mvimg vid video videos mov clip photo pic picture frame scan "
+    "screenshot screen recording rec audio sound track file untitled copy final new export output".split()
+)
+
+
+def _sentence_vectors(text: str, title: str | None) -> list[_Embedding]:
+    """A PDF page's sentences, one vector each. A fact is one sentence, and a 128-token unit dilutes it
+    with its neighbours: on ViDoRe hr and computer_science (Gemini Embedding 2) adding the page's best
+    sentence gained +1.3 and +1.0 nDCG@10. Pairs of neighbouring sentences added +0.55 and +0.06 more
+    but embedded every sentence twice again (hr ingest +53% instead of about +25%), so they were dropped."""
+    return [
+        _Embedding("sentence", n, EmbedInput(modality="text", text=s, title=title))
+        for n, s in enumerate(media.sentences(text))
+    ]
+
+
 def _title_hint(document: KnowledgeDocument) -> str | None:
     """The file name without its extension: the embedder's "title: ..." prompt slot. None for the name
     a text write gets when it has none (``<document_id>.md``): an id, often a UUID, is not a title. A
-    file named like its id (``report.pdf`` as ``report``) keeps it: the title is worth 2-10 nDCG@10."""
+    file named like its id (``report.pdf`` as ``report``) keeps it: the title is worth 2-10 nDCG@10.
+
+    None too when the name has no real word in it (a number, a hash, a camera name): on Flickr30k,
+    photos named ``1007129816.jpg`` embedded as "title: 1007129816" scored R@1 79.8; the image alone
+    scored 93.3. A named asset (``footstep_gravel_03``) still gets its title."""
     if not document.filename or document.filename == f"{document.document_id}.md":
         return None
     stem = Path(document.filename).stem
+    words = [
+        w
+        for w in re.findall(r"[^\W\d_]{3,}", stem)
+        if w.lower() not in _GENERIC_NAME_WORDS
+        and not re.fullmatch(r"[0-9a-fA-F]{8,}", w)  # a hash, not "face" or "bed"
+    ]
+    if not words:
+        return None
     return re.sub(r"[_\-]+", " ", stem).strip()  # "footstep_gravel_03" reads as words
 
 
@@ -1337,6 +1943,16 @@ def _drafts_of(passages: list[ingest_strategy.OutputPassage]) -> list[media.Pass
     return drafts
 
 
+_T = TypeVar("_T")
+
+
+async def _split(fn: Callable[..., _T], *args: Any) -> _T:
+    """Run a blocking step of splitting (opening a file, cutting its next passage) off the event
+    loop, timed as the batch's ``split`` phase."""
+    async with _timing.timed("split"):
+        return await asyncio.to_thread(fn, *args)
+
+
 def _close_drafts(drafts: Iterator[media.PassageDraft]) -> None:
     close = getattr(drafts, "close", None)  # generators release the PDF / media they hold
     if close is not None:
@@ -1347,19 +1963,21 @@ def _next_draft(drafts: Iterator[media.PassageDraft]) -> media.PassageDraft | No
     return next(drafts, None)
 
 
-_services: weakref.WeakKeyDictionary[MemoryEngine, KnowledgeService] = weakref.WeakKeyDictionary()
-
-
-# A threading lock, not an asyncio one: the map is process-wide and the critical section never awaits.
+# A threading lock, not an asyncio one: engines are reached from more than one thread and the critical
+# section never awaits.
 _services_lock = threading.Lock()
 
 
 def get_knowledge_service(engine: MemoryEngine) -> KnowledgeService:
-    """One service per engine (one embedder, loaded once), created on first use."""
+    """One service per engine (one embedder, loaded once), created on first use and kept on the engine,
+    so it lives exactly as long as the engine does. It used to sit in a process-wide WeakKeyDictionary
+    keyed by the engine, but the service holds its engine, and a value that holds its own key keeps the
+    entry (and the engine, with its pools and caches) alive for ever: every engine a test created leaked,
+    until an api-slim CI shard ran out of memory and its runner was killed."""
     with _services_lock:
-        service = _services.get(engine)
+        service = engine._knowledge_service
         if service is None:
-            service = _services[engine] = KnowledgeService(engine)
+            service = engine._knowledge_service = KnowledgeService(engine)
         return service
 
 

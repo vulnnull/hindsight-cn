@@ -6,11 +6,9 @@ import base64
 import binascii
 import json
 import mimetypes
-import time
 from collections.abc import Callable
-from dataclasses import asdict
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import quote
 
 import aiohttp
@@ -22,9 +20,11 @@ from ..config import get_config
 from ..engine.aiohttp_session import UpstreamHTTPError
 from ..extensions.operation_validator import OperationValidationError
 from ..models import RequestContext
+from .bank_config import KnowledgeBankOverrides, KnowledgeBankSettings
 from .service import (
     IngestItem,
     IngestResult,
+    KnowledgeBankConfig,
     KnowledgeBankError,
     KnowledgeBankInfo,
     KnowledgeService,
@@ -40,19 +40,20 @@ PREFIX = "/v1/default/knowledge-banks"
 # --- models ---------------------------------------------------------------------------------
 
 
-class KnowledgeConfigResponse(BaseModel):
-    provider: str
-    model: str
-    dimension: int
-    media_types: list[str] = Field(description="Media types this server's embedder can write.")
-    max_file_bytes: int
-    max_media_seconds: int
-    max_pdf_pages: int
-    audio_window_seconds: int
-    video_window_seconds: int
-    media_overlap_seconds: int
-    pdf_page_pixels: int
-    text_passage_tokens: int
+class KnowledgeBankConfigResponse(BaseModel):
+    bank_id: str
+    config: KnowledgeBankSettings = Field(
+        description="Every per-bank ingest setting as the bank splits files with it: its override, else "
+        "the server's default."
+    )
+    overrides: KnowledgeBankOverrides = Field(description="Only the settings this bank overrides.")
+
+
+class KnowledgeBankConfigUpdate(BaseModel):
+    updates: dict[str, Any] = Field(
+        description="Settings to override (named as in `config`); a null value clears that override. "
+        "Each change applies to files ingested after it: re-uploading an unchanged file re-splits it."
+    )
 
 
 class CreateKnowledgeBankRequest(BaseModel):
@@ -187,28 +188,29 @@ class KnowledgeTimeseriesResponse(BaseModel):
 class KnowledgeSearchRequest(BaseModel):
     query: str | None = Field(default=None, description="Text query.")
     query_image: str | None = Field(default=None, description="Base64 image to search with (alone or with text).")
-    top_k: int = Field(default=10, ge=1, le=200)
+    query_video: str | None = Field(
+        default=None,
+        description="Base64 MP4 clip to search with. Text, image and video can be combined: they are "
+        "embedded together as one query.",
+    )
+    budget: Literal["low", "mid", "high"] = Field(
+        default="mid",
+        description="How deep the search ranks before `max_tokens` picks from it: low is fastest, high reaches "
+        "the most candidates (as memory-bank recall's budget).",
+    )
+    max_tokens: int = Field(
+        default=4096,
+        ge=1,
+        le=1_000_000,
+        description="What the results may weigh in all, as the tokens of their text. Hits come best first, each "
+        "text hit with the passages around it joined into its `text`, as many as fit; the rest of the budget widens the "
+        "best hits' context. An image, page or clip costs a small fixed amount plus its text.",
+    )
     tags: list[str] | None = None
     tags_match: Literal["any", "all"] = Field(default="any", title="Knowledge Tags Match")
     document_ids: list[str] | None = None
-    neighbors: int = Field(
-        default=1,
-        ge=0,
-        le=5,
-        description="Text hits come back with this many passages on each side as `context`; overlapping "
-        "windows in one document are merged into the best hit. 0 turns it off.",
-    )
     media_types: list[Literal["document", "image", "audio", "video", "text"]] | None = Field(
         default=None, title="Knowledge Media Types"
-    )
-    pattern: str | None = Field(
-        default=None,
-        description="Exact text (case-insensitive), e.g. an error code or a name. Passages containing it rank "
-        "above all others; without `query`/`query_image`, documents are ranked by how many passages match.",
-    )
-    regex: bool = Field(
-        default=False,
-        description="Treat `pattern` as a POSIX regular expression (case-insensitive), e.g. `timebox|time-box`.",
     )
 
 
@@ -216,22 +218,14 @@ class KnowledgeSearchResult(KnowledgePassageResponse):
     document_id: str
     filename: str | None
     tags: list[str]
-    score: float = Field(
-        description="Relevance: cosine similarity, fused with keyword matching when the query and document "
-        "share a language, plus 1 when the passage contains `pattern`. Without a query, the number of the "
-        "document's passages that contain `pattern`. Comparable within one response only."
-    )
     document_url: str
-    context: str | None = Field(
-        default=None, description="The hit with its neighbouring passages (text only; see `neighbors`)."
-    )
-    context_first_index: int | None = None
-    context_last_index: int | None = None
 
 
 class KnowledgeSearchResponse(BaseModel):
+    """Results best first. Ranks are what a caller compares: scores are fused per query and mean nothing
+    across responses, so the response does not carry them."""
+
     results: list[KnowledgeSearchResult]
-    took_ms: float
 
 
 # --- mapping --------------------------------------------------------------------------------
@@ -293,17 +287,21 @@ def search_result(bank_id: str, hit: SearchHit) -> KnowledgeSearchResult:
         document_id=d.document_id,
         filename=d.filename,
         tags=d.tags,
-        score=round(hit.score, 6),
         document_url=f"{_doc_url(bank_id, d.document_id)}/file",
     )
 
 
 def item_result(bank_id: str, item: SearchResultItem) -> KnowledgeSearchResult:
+    """A hit as the API returns it: a text hit's ``text`` is the run of passages the budget gave it, the
+    matched one (``index``) and the text around it; a context field beside it said the same thing twice."""
     result = search_result(bank_id, item.hit)
-    result.context = item.context
-    result.context_first_index = item.context_first
-    result.context_last_index = item.context_last
+    if item.context is not None:
+        result.text = item.context
     return result
+
+
+def config_response(state: KnowledgeBankConfig) -> KnowledgeBankConfigResponse:
+    return KnowledgeBankConfigResponse(bank_id=state.bank_id, config=state.settings, overrides=state.overrides)
 
 
 def _ingest_response(result: IngestResult) -> KnowledgeIngestResponse:
@@ -323,6 +321,14 @@ def _content_type(upload: UploadFile) -> str:
 
 
 def _http_error(exc: Exception) -> HTTPException:
+    # A store shedding the call (indexing behind its writers) is "not now": 503 with Retry-After, the
+    # memory banks' own rule, not a 500 that tells a bulk ingest its request is broken. Imported here:
+    # api/http.py builds this router, so a module-level import would load the whole of it first.
+    from ..api.http import _store_unavailable
+
+    unavailable = _store_unavailable(exc)
+    if unavailable is not None:
+        return unavailable
     if isinstance(exc, KnowledgeBankError):
         return HTTPException(status_code=exc.status_code, detail=str(exc))
     if isinstance(exc, OperationValidationError):
@@ -351,6 +357,16 @@ def _require_enabled() -> None:
         raise HTTPException(status_code=404, detail="Not Found")
 
 
+def _require_config_writes() -> None:
+    # The memory banks' switch for per-bank config writes covers these too: an operator who froze
+    # bank settings froze all of them.
+    if not get_config().enable_bank_config_api:
+        raise HTTPException(
+            status_code=404,
+            detail="Bank configuration API is disabled. Set HINDSIGHT_API_ENABLE_BANK_CONFIG_API=true to re-enable.",
+        )
+
+
 def build_router(get_request_context: Callable[..., RequestContext]) -> APIRouter:
     # Out of the OpenAPI spec while knowledge banks are a hidden feature: no generated client,
     # CLI command or API reference page names them. Back in the spec at launch.
@@ -363,15 +379,6 @@ def build_router(get_request_context: Callable[..., RequestContext]) -> APIRoute
 
     def service(request: Request) -> KnowledgeService:
         return get_knowledge_service(request.app.state.memory)
-
-    @router.get(
-        "/config",
-        response_model=KnowledgeConfigResponse,
-        summary="Knowledge embedder and limits",
-        operation_id="get_knowledge_config",
-    )
-    async def get_config_route(request: Request) -> KnowledgeConfigResponse:
-        return KnowledgeConfigResponse(**asdict(await service(request).describe()))
 
     @router.post(
         "",
@@ -437,6 +444,57 @@ def build_router(get_request_context: Callable[..., RequestContext]) -> APIRoute
             raise _http_error(exc) from exc
         return KnowledgeDeletedResponse()
 
+    # `overrides` lists only what the bank sets: its unset fields are left out, not sent as null.
+    @router.get(
+        "/{bank_id}/config",
+        response_model=KnowledgeBankConfigResponse,
+        response_model_exclude_none=True,
+        summary="Get a knowledge bank's ingest settings",
+        operation_id="get_knowledge_bank_config",
+    )
+    async def get_bank_config(
+        bank_id: str, request: Request, rc: RequestContext = Depends(get_request_context)
+    ) -> KnowledgeBankConfigResponse:
+        try:
+            return config_response(await service(request).get_bank_config(bank_id, rc))
+        except Exception as exc:
+            raise _http_error(exc) from exc
+
+    @router.patch(
+        "/{bank_id}/config",
+        response_model=KnowledgeBankConfigResponse,
+        response_model_exclude_none=True,
+        summary="Override a knowledge bank's ingest settings",
+        operation_id="update_knowledge_bank_config",
+        dependencies=[Depends(_require_config_writes)],
+    )
+    async def update_bank_config(
+        bank_id: str,
+        body: KnowledgeBankConfigUpdate,
+        request: Request,
+        rc: RequestContext = Depends(get_request_context),
+    ) -> KnowledgeBankConfigResponse:
+        try:
+            return config_response(await service(request).update_bank_config(bank_id, body.updates, rc))
+        except Exception as exc:
+            raise _http_error(exc) from exc
+
+    @router.delete(
+        "/{bank_id}/config",
+        response_model=KnowledgeBankConfigResponse,
+        response_model_exclude_none=True,
+        summary="Reset a knowledge bank's ingest settings to the server's",
+        operation_id="reset_knowledge_bank_config",
+        dependencies=[Depends(_require_config_writes)],
+    )
+    async def reset_bank_config(
+        bank_id: str, request: Request, rc: RequestContext = Depends(get_request_context)
+    ) -> KnowledgeBankConfigResponse:
+        try:
+            return config_response(await service(request).reset_bank_config(bank_id, rc))
+        except Exception as exc:
+            raise _http_error(exc) from exc
+
     @router.get(
         "/{bank_id}/stats/timeseries",
         response_model=KnowledgeTimeseriesResponse,
@@ -447,11 +505,14 @@ def build_router(get_request_context: Callable[..., RequestContext]) -> APIRoute
         bank_id: str,
         request: Request,
         period: Literal["1d", "7d", "30d", "90d"] = Query(default="7d"),
+        media_type: Literal["document", "image", "audio", "video", "text"] | None = Query(
+            default=None, description="Only documents of this media type."
+        ),
         rc: RequestContext = Depends(get_request_context),
     ) -> KnowledgeTimeseriesResponse:
         trunc: Literal["hour", "day"] = "hour" if period == "1d" else "day"
         try:
-            buckets = await service(request).timeseries(bank_id, period, trunc, rc)
+            buckets = await service(request).timeseries(bank_id, period, trunc, rc, media_type=media_type)
         except Exception as exc:
             raise _http_error(exc) from exc
         return KnowledgeTimeseriesResponse(
@@ -641,17 +702,20 @@ def build_router(get_request_context: Callable[..., RequestContext]) -> APIRoute
     @router.post(
         "/{bank_id}/search",
         response_model=KnowledgeSearchResponse,
-        summary="Search passages by meaning (text or image query) and exact text",
+        summary="Search passages by meaning: a text, image or video query, alone or combined",
         operation_id="search_knowledge_bank",
     )
     async def search(
         bank_id: str, body: KnowledgeSearchRequest, request: Request, rc: RequestContext = Depends(get_request_context)
     ) -> KnowledgeSearchResponse:
-        started = time.perf_counter()
         try:
             image = base64.b64decode(body.query_image, validate=True) if body.query_image else None
         except (binascii.Error, ValueError) as exc:
             raise HTTPException(status_code=400, detail="query_image must be base64") from exc
+        try:
+            video = base64.b64decode(body.query_video, validate=True) if body.query_video else None
+        except (binascii.Error, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="query_video must be base64") from exc
         filters = SearchFilters(
             tags=body.tags,
             tags_match=body.tags_match,
@@ -664,18 +728,15 @@ def build_router(get_request_context: Callable[..., RequestContext]) -> APIRoute
                 SearchRequest(
                     query=body.query,
                     query_image=image,
-                    top_k=body.top_k,
+                    query_video=video,
                     filters=filters,
-                    neighbors=body.neighbors,
-                    pattern=body.pattern,
-                    regex=body.regex,
+                    max_tokens=body.max_tokens,
+                    budget=body.budget,
                 ),
                 rc,
             )
         except Exception as exc:
             raise _http_error(exc) from exc
-        return KnowledgeSearchResponse(
-            results=[item_result(bank_id, h) for h in hits], took_ms=round((time.perf_counter() - started) * 1000, 1)
-        )
+        return KnowledgeSearchResponse(results=[item_result(bank_id, h) for h in hits])
 
     return router

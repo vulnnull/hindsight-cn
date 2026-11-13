@@ -15,11 +15,11 @@ import { ThinkView } from "@/components/think-view";
 import { SearchDebugView } from "@/components/search-debug-view";
 import { BankProfileView } from "@/components/bank-profile-view";
 import { BankConfigView } from "@/components/bank-config-view";
-import { LinkedKnowledgeBanks } from "@/components/linked-knowledge-banks";
 import { MemoryDefenseSection } from "@/components/memory-defense-section";
 import { BankStatsView } from "@/components/bank-stats-view";
 import { BankOperationsView } from "@/components/bank-operations-view";
 import { MentalModelsView } from "@/components/mental-models-view";
+import { ObservationTreeView } from "@/components/observation-tree-view";
 import { WebhooksView } from "@/components/webhooks-view";
 import { AuditLogsView } from "@/components/audit-logs-view";
 import { LLMRequestsView } from "@/components/llm-requests-view";
@@ -81,7 +81,7 @@ type NavItem =
   | "pages"
   | "profile";
 type DataSubTab = "world" | "experience" | "observations";
-type PagesTab = "pages" | "models";
+type PagesTab = "pages" | "models" | "tree";
 type BankConfigTab =
   | "general"
   | "memory-defense"
@@ -530,9 +530,6 @@ export default function BankPage() {
                     )}
                     {bankConfigTab === "configuration" && bankConfigEnabled && (
                       <div className="space-y-6">
-                        {bankId && features?.knowledge_banks && (
-                          <LinkedKnowledgeBanks bankId={bankId} />
-                        )}
                         <BankConfigView />
                       </div>
                     )}
@@ -706,6 +703,7 @@ export default function BankPage() {
                     tabs={[
                       { id: "pages", label: t("pages") },
                       { id: "models", label: t("mentalModels") },
+                      { id: "tree", label: t("observationTree") },
                     ]}
                   />
 
@@ -720,6 +718,14 @@ export default function BankPage() {
                         {t("mentalModelsDescription")}
                       </p>
                       <MentalModelsView key="mental-models" />
+                    </div>
+                  )}
+                  {pagesTab === "tree" && (
+                    <div>
+                      <p className="text-sm text-muted-foreground mb-4">
+                        {t("observationTreeDescription")}
+                      </p>
+                      <ObservationTreeView key={bankId ?? "no-bank"} />
                     </div>
                   )}
                 </div>

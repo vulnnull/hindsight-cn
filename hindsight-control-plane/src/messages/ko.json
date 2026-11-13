@@ -185,7 +185,9 @@
     "cloneIncludeBankConfigHint": "설정 재정의, 디렉티브, 웹훅 — 복사본도 같은 웹훅 엔드포인트를 호출합니다.",
     "cloneIncludeHistory": "기록",
     "cloneIncludeHistoryHint": "감사 로그와 LLM 요청 추적.",
-    "cloneNothingSelected": "복사할 항목을 하나 이상 선택하세요."
+    "cloneNothingSelected": "복사할 항목을 하나 이상 선택하세요.",
+    "observationTree": "관찰",
+    "observationTreeDescription": "이 뱅크가 학습한 모든 내용을 탐색, 검색, 내보내기가 가능한 마크다운 파일 폴더로 보여줍니다. 에이전트가 나열하고 grep으로 검색하는 것과 같은 파일입니다. 각 주제 파일에는 모든 관찰이 담겨 있고, 각 폴더의 index.md가 개요를 제공합니다."
   },
   "bankProfile": {
     "noBankSelected": "선택된 뱅크 없음",
@@ -690,7 +692,9 @@
         "retain_mission": "여기에 먼저 붙어 일반 추출 규칙보다 우선합니다.",
         "retain_optional_fact_dimensions": "모델이 \"N/A\"를 쓰는 대신 \"언제\", \"어디서\", \"누가\", \"왜\"를 비워 둘 수 있게 합니다."
       }
-    }
+    },
+    "linkedKnowledgeBanksLabel": "지식 뱅크",
+    "linkedKnowledgeBanksDescription": "이 뱅크의 리플렉트는 연결된 지식 뱅크도 검색하며, 그 문서를 상충하는 기억보다 우선합니다. 리콜과 멘탈 모델은 문서를 읽지 않습니다."
   },
   "bankOperations": {
     "title": "백그라운드 작업",
@@ -729,7 +733,8 @@
       "importDocuments": "문서 가져오기",
       "exportBank": "뱅크 내보내기",
       "importBank": "뱅크 가져오기",
-      "cloneBank": "뱅크 복제"
+      "cloneBank": "뱅크 복제",
+      "knowledgeIngest": "지식 수집"
     },
     "table": {
       "id": "작업 ID",
@@ -1240,6 +1245,28 @@
     "executingToolsPlural": "도구 {count}개 실행 중",
     "toolInputLabel": "입력:",
     "toolOutputLabel": "출력:",
+    "traceAgentFailed": "에이전트 호출 실패",
+    "traceAgentFailedDetail": "LLM 호출이 실패해 다시 시도했습니다",
+    "traceAgentDone": "에이전트가 충분하다고 판단",
+    "traceAgentDoneDetail": "done 호출: 검색 종료",
+    "traceRoundQuery": "검색 쿼리 작성",
+    "traceRoundQueryDetail": "요청을 하나의 검색 쿼리로 재작성",
+    "traceSufficiency": "근거가 충분한가?",
+    "traceSufficiencyDetail": "판단 모델이 지금까지의 근거를 평가",
+    "tracePagesSufficiency": "페이지로 답할 수 있나?",
+    "tracePagesSufficiencyDetail": "판단 모델이 멘탈 모델만 평가",
+    "tracePrune": "근거 정리",
+    "tracePruneDetail": "판단 모델이 관련된 것만 남김",
+    "traceClosingDoneDetail": "전체 근거로 done 요청",
+    "traceFinalDetail": "모은 근거 전체로 합성",
+    "traceFinalMap": "근거 {part}부 요약",
+    "traceFinalMapDetail": "근거가 너무 커서 나눠 요약",
+    "traceRewrite": "답변 단축",
+    "traceRewriteDetail": "길이 예산에 맞게 재작성",
+    "traceStructured": "구조화된 답변 생성",
+    "traceStructuredDetail": "응답 스키마 작성",
+    "traceOtherCall": "LLM 호출",
+    "traceOtherCallDetail": "{scope}",
     "basedOnTitle": "기반",
     "basedOnDescription": "{count}개 항목 사용",
     "notIncludedBasedOn": "포함되지 않음",
@@ -2213,6 +2240,9 @@
         "updateNode": "노드 업데이트 실패",
         "deleteNode": "노드 삭제 실패",
         "search": "페이지 검색 실패"
+      },
+      "request": {
+        "tooLarge": "요청이 너무 큽니다. 더 적거나 작은 파일을 업로드하세요 (한도: HINDSIGHT_CP_MAX_UPLOAD_SIZE)."
       }
     }
   },
@@ -2330,8 +2360,6 @@
     "traceResults": "결과 {count}건",
     "executionTraceTitle": "실행 추적",
     "noOperations": "작업 없음",
-    "responseGenerated": "응답이 생성되었습니다",
-    "agentDecided": "에이전트가 결정했습니다",
     "toolInputLabel": "입력:",
     "executionTraceDescription": "LLM 호출 {iterations}회 • 총 {totalMs}ms",
     "executingTools": "호출한 도구: {count}",
@@ -2455,10 +2483,10 @@
       "documentsTitle": "문서",
       "documentsDescription": "이 뱅크의 파일과 텍스트입니다. 각 항목은 구절로 나뉘어 임베딩됩니다. 여기 아무 곳에나 파일을 놓으면 업로드됩니다.",
       "searchTitle": "검색",
-      "searchDescription": "텍스트 쿼리, 이미지 또는 둘 다로 의미에 맞는 구절을 찾습니다."
+      "searchDescription": "텍스트, 이미지, 동영상 클립을 단독 또는 함께 써서 하나의 순위 목록으로 구절을 찾습니다."
     },
     "documents": {
-      "filterPlaceholder": "이름, 제목 또는 ID로 필터…",
+      "filterPlaceholder": "파일 이름 또는 ID로 필터…",
       "kindFilter": "종류로 필터",
       "statusFilter": "상태로 필터",
       "allKinds": "모든 종류",
@@ -2467,7 +2495,6 @@
       "upload": "파일 업로드",
       "dropToUpload": "파일을 놓아 업로드",
       "columnDocument": "문서",
-      "columnStatus": "상태",
       "columnPassages": "구절",
       "columnSize": "크기",
       "columnTags": "태그",
@@ -2483,7 +2510,8 @@
       "noMatchesBody": "다른 이름, 종류 또는 상태로 시도해 보세요.",
       "layout": "레이아웃",
       "viewList": "목록",
-      "viewGrid": "그리드"
+      "viewGrid": "그리드",
+      "viewConstellation": "별자리"
     },
     "detail": {
       "download": "원본 다운로드",
@@ -2514,45 +2542,42 @@
       "originalUnsupported": "이 파일 형식은 브라우저에서 미리 볼 수 없습니다."
     },
     "search": {
-      "placeholder": "의미로 검색하세요. 예: API 키는 어떻게 교체하나요?",
-      "addImage": "이미지",
-      "imageHint": "이미지를 붙여 넣거나, 놓거나, 선택해 검색하세요. 텍스트와 함께 써도 됩니다.",
-      "modeMeaning": "의미로 검색",
-      "modeExact": "정확한 텍스트",
-      "modeHelp": "정확한 텍스트는 단어가 그대로 들어 있는 구절을 찾습니다(코드, ID, 이름). 텍스트만 읽습니다: 텍스트 파일과 PDF 텍스트 레이어.",
+      "placeholder": "검색 (예: API 키를 교체하려면?)",
+      "addMedia": "이미지 / 동영상",
+      "mediaHint": "이미지나 MP4 클립을 붙여 넣거나, 놓거나, 선택해 검색하세요. 텍스트와 함께 써도 됩니다.",
       "imageQuery": "이 이미지로 검색 중",
-      "removeImage": "이미지 제거",
-      "notAnImage": "검색어로는 이미지만 사용할 수 있습니다",
-      "pastedImage": "붙여 넣은 이미지",
-      "topK": "결과 수",
+      "videoQuery": "이 동영상으로 검색 중",
+      "removeMedia": "제거",
+      "notMedia": "검색어로는 이미지나 MP4 동영상만 사용할 수 있습니다",
+      "pastedMedia": "붙여 넣은 파일",
+      "maxTokens": "최대 토큰",
+      "maxTokensHelp": "돌려받을 전체 텍스트 양: 가장 좋은 구절과, 들어가는 만큼의 앞뒤 문맥.",
+      "budget": "예산",
+      "budgetHelp": "검색이 얼마나 깊이 순위를 매길지: 낮음은 가장 빠르고, 높음은 가장 멀리 찾습니다.",
+      "budgetLow": "낮음",
+      "budgetMid": "보통",
+      "budgetHigh": "높음",
       "submit": "검색",
-      "filters": "필터",
+      "options": "옵션",
       "tags": "태그",
       "tagsMatch": "태그 일치 방식",
       "tagsAny": "하나라도",
       "tagsAll": "모두",
       "noResults": "이 검색과 일치하는 구절이 없습니다.",
-      "idle": "이 뱅크의 구절을 텍스트나 이미지로 검색하세요.",
-      "scoreHelp": "검색어와 구절 간의 코사인 유사도",
+      "idle": "텍스트, 이미지, 동영상 클립 또는 그 조합으로 이 뱅크를 검색합니다.",
       "openPassage": "문서에서 열기",
       "failed": "검색에 실패했습니다",
       "mediaTypes": "미디어 유형",
       "mediaTypesHelp": "아무것도 선택하지 않으면 모든 미디어 유형을 검색합니다.",
-      "context": "컨텍스트",
-      "contextHelp": "각 텍스트 결과의 앞뒤로 컨텍스트에 포함할 구절 수",
-      "showContext": "컨텍스트 보기",
-      "hideContext": "컨텍스트 숨기기"
+      "showMore": "더 보기",
+      "showLess": "간단히 보기"
     },
     "linked": {
       "title": "지식 뱅크",
-      "description": "이 뱅크의 리플렉트는 연결된 지식 뱅크도 검색하며, 그 문서를 상충하는 기억보다 우선합니다. 리콜과 멘탈 모델은 문서를 읽지 않습니다.",
       "none": "아직 지식 뱅크가 없습니다.",
-      "createOne": "지식 뱅크 만들기",
-      "counts": "{documents, plural, other {문서 #개}} · {passages, plural, other {구절 #개}}",
-      "open": "열기",
-      "missing": "더 이상 존재하지 않음",
-      "save": "연결 저장",
-      "saved": "연결된 지식 뱅크를 저장했습니다"
+      "noneLinked": "연결된 항목 없음",
+      "search": "지식 뱅크 검색…",
+      "missing": "더 이상 존재하지 않음"
     },
     "selector": {
       "select": "지식 뱅크 선택...",
@@ -2563,7 +2588,6 @@
       "countsLegend": "문서 · 구절"
     },
     "home": {
-      "embedder": "{model}(으)로 임베딩됨 ({dimension}차원)",
       "documents": "문서",
       "passages": "구절",
       "size": "크기",
@@ -2576,34 +2600,28 @@
       "noneInPeriod": "이 기간에 추가된 문서가 없습니다",
       "noDocuments": "아직 문서가 없습니다",
       "pending": "{count}개 진행 중",
-      "failed": "{count}개 실패"
+      "failed": "{count}개 실패",
+      "constellationTitle": "별자리",
+      "viewAll": "모두 보기",
+      "failedNotice": "문서 {count}개를 처리하지 못했습니다. 이유 보기"
     },
     "settings": {
       "title": "설정",
-      "description": "이 지식 뱅크를 관리하고 문서가 어떻게 임베딩되는지 확인합니다.",
-      "generalTitle": "일반",
-      "generalDescription": "뱅크의 이름과 식별 정보입니다.",
+      "description": "이 뱅크의 개요, 수집 작업, 그리고 파일을 패시지로 나누는 방식입니다.",
+      "tabGeneral": "일반",
+      "tabConfiguration": "구성",
+      "generalIntro": "뱅크에 담긴 내용과 처리 중인 업로드입니다.",
+      "aboutTitle": "정보",
+      "aboutDescription": "뱅크의 이름과 식별 정보입니다.",
       "bankId": "뱅크 ID",
       "created": "생성일",
-      "embedderTitle": "임베딩 모델 및 제한",
-      "embedderDescription": "모든 지식 뱅크에 대해 서버에서 설정됩니다. 참고용으로 표시됩니다.",
-      "provider": "제공자",
-      "model": "모델",
-      "dimension": "차원",
-      "maxFile": "최대 파일 크기",
-      "maxMedia": "최장 오디오 또는 동영상",
-      "maxPdfPages": "최대 PDF 페이지 수",
-      "audioWindow": "오디오 윈도우",
-      "videoWindow": "동영상 윈도우",
-      "overlap": "윈도우 겹침",
-      "pdfPixels": "PDF 페이지 크기(긴 변)",
-      "textTokens": "텍스트 구절 크기(토큰)",
-      "seconds": "{count, plural, other {#초}}",
       "linkTitle": "메모리 뱅크",
-      "linkDescription": "이 뱅크를 연결한 메모리 뱅크는 리콜 시 이 뱅크의 구절을 신뢰할 수 있는 출처로 받습니다.",
+      "linkDescription": "이 뱅크를 연결한 메모리 뱅크의 reflect는 이 뱅크도 검색하고, 그 문서를 권위로 취급합니다.",
       "linkHowTo": "메모리 뱅크에서 연결하세요: 메모리 뱅크를 열고 뱅크 구성 → 구성 → 지식 뱅크로 이동합니다.",
       "delete": "뱅크 삭제",
-      "mediaTypes": "쓸 수 있는 미디어 유형"
+      "resetConfig": "구성 초기화",
+      "resetConfigTitle": "구성을 초기화할까요?",
+      "resetConfigPrompt": "{bankId}의 모든 설정이 서버 기본값으로 돌아갑니다. 이미 수집된 파일은 다시 업로드할 때까지 지금의 패시지를 유지합니다."
     },
     "addDocument": {
       "dialogSubtitle": "지식 뱅크에 새 문서 추가: ",
@@ -2612,16 +2630,117 @@
       "tagsHelp": "쉼표로 구분합니다. 검색에서 이것으로 필터링할 수 있습니다.",
       "filenameLabel": "파일 이름",
       "filenamePlaceholder": "기본값: 문서 ID.md",
-      "uploadHint": "PDF 페이지와 이미지는 그림으로, 오디오는 {audio}초 구간, 동영상은 {video}초 구간으로 임베딩됩니다. 파일당 최대 {max}.",
+      "uploadHint": "PDF 페이지와 이미지는 그림으로, 오디오와 동영상은 짧은 구간으로 임베딩됩니다. 서버가 받을 수 없는 파일은 여기에 이유가 표시됩니다.",
       "allTagsLabel": "모든 파일의 태그",
       "applyToAll": "모두에 적용",
-      "tooLarge": "너무 큽니다: 제한은 {max}입니다",
       "editFile": "이 파일의 태그와 ID 편집",
       "remove": "{name} 제거",
       "tagsFor": "{name}의 태그",
       "uploaded": "{count, plural, other {파일 #개를 업로드했습니다}}. 준비되면 검색할 수 있습니다.",
       "someFailed": "{count, plural, other {파일 #개}} 업로드에 실패했습니다",
-      "written": "문서를 추가했습니다. 준비되면 검색할 수 있습니다."
+      "written": "문서를 추가했고 검색할 수 있습니다.",
+      "unchanged": "{count, plural, other {파일 #개}} 변경 없음: 이미 같은 내용으로 수집되었습니다.",
+      "writtenUnchanged": "변경 없음: 이 문서는 이미 같은 내용으로 수집되었습니다."
+    },
+    "constellation": {
+      "empty": "아직 표시할 구절이 없습니다",
+      "hudStats": "{documents}개 문서 · {passages}개 패시지 · {visible}개 표시 · {labels}개 레이블 · {links}개 링크 · 줌 {zoom}x"
+    },
+    "config": {
+      "intro": "이 뱅크가 파일을 패시지로 나누는 방식입니다. 변경 사항은 지금부터 수집되는 파일에 적용됩니다. 새 설정으로 다시 나누려면 파일을 다시 업로드하세요.",
+      "loadFailed": "이 뱅크의 설정을 불러오지 못했습니다.",
+      "saveFailed": "저장하지 못했습니다.",
+      "serverDefault": "서버 기본값",
+      "serverDefaultValue": "서버 기본값 ({value})",
+      "on": "켜짐",
+      "off": "꺼짐",
+      "overridden": "이 뱅크에서 설정함",
+      "useServerDefault": "서버 기본값 사용",
+      "serverOff": "서버에서 모든 뱅크에 대해 꺼져 있습니다.",
+      "accept": "{kind} 파일 받기",
+      "sections": {
+        "text": {
+          "title": "텍스트",
+          "description": "텍스트(문서 안의 텍스트 포함)를 패시지로 나누는 방식입니다."
+        },
+        "pdf": {
+          "title": "PDF",
+          "description": "PDF 페이지를 읽는 방식입니다."
+        },
+        "images": {
+          "title": "이미지",
+          "description": "이미지를 읽는 방식입니다."
+        },
+        "media": {
+          "title": "오디오 및 비디오",
+          "description": "오디오와 비디오를 시간 단위 패시지로 나누는 방식입니다."
+        },
+        "types": {
+          "title": "미디어 유형",
+          "description": "이 뱅크가 받는 파일 종류입니다. 서버보다 더 많은 종류를 끌 수 있지만, 더 적게는 할 수 없습니다."
+        }
+      },
+      "fields": {
+        "text_passage_tokens": {
+          "label": "패시지 크기(토큰)",
+          "description": "한 패시지에 들어가는 텍스트 양입니다. 작을수록 더 정확한 위치를 찾고, 클수록 문맥을 더 많이 함께 담습니다."
+        },
+        "pdf_page_pixels": {
+          "label": "페이지 크기(픽셀)",
+          "description": "읽기 전에 각 PDF 페이지를 긴 변 기준 몇 픽셀로 그릴지입니다."
+        },
+        "pdf_bands": {
+          "label": "페이지 띠",
+          "description": "각 PDF 페이지를 가로 띠 3개로도 읽습니다. 작은 글씨를 더 잘 찾지만 수집이 약 2배 느려집니다."
+        },
+        "max_pdf_pages": {
+          "label": "최대 페이지 수",
+          "description": "이보다 페이지가 많은 PDF는 거부됩니다. 서버 한도보다 낮게만 설정할 수 있습니다."
+        },
+        "image_tokens": {
+          "label": "이미지 세부 정도(토큰)",
+          "description": "각 이미지를 몇 토큰으로 읽을지입니다(70~1120). 많을수록 세부를 더 보지만 느려집니다."
+        },
+        "audio_window_seconds": {
+          "label": "오디오 패시지 길이(초)",
+          "description": "한 패시지에 들어가는 오디오 초 수입니다."
+        },
+        "video_window_seconds": {
+          "label": "비디오 패시지 길이(초)",
+          "description": "한 패시지에 들어가는 비디오 초 수입니다."
+        },
+        "media_overlap_seconds": {
+          "label": "겹침(초)",
+          "description": "잘리는 곳에서 잃는 것이 없도록 각 패시지가 다음 패시지와 공유하는 초 수입니다. 두 길이보다 짧아야 합니다."
+        },
+        "max_media_seconds": {
+          "label": "가장 긴 파일(초)",
+          "description": "이보다 긴 오디오나 비디오는 거부됩니다. 서버 한도보다 낮게만 설정할 수 있습니다."
+        }
+      }
     }
+  },
+  "observationTree": {
+    "empty": "이 뱅크에는 아직 관찰이 없습니다.",
+    "pickFile": "왼쪽에서 파일을 선택하세요.",
+    "findPlaceholder": "메모리에서 찾기 (텍스트 또는 정규식)",
+    "showRaw": "원본 .md",
+    "exportZip": ".zip 내보내기",
+    "recencyLegend": "최신성 · 언급",
+    "showRendered": "렌더링",
+    "clearFind": "지우기",
+    "noMatches": "일치 항목 없음.",
+    "matchSummary": "{files}개 파일에서 {matches}개 일치",
+    "matchesInFile": "{total}개 중 {shown}개 일치",
+    "observationCount": "관찰 {count}개",
+    "sources": "출처 {count}개",
+    "updated": "{when} 업데이트",
+    "related": "관련:",
+    "topics": "주제",
+    "bestSupported": "가장 잘 뒷받침됨",
+    "observations": "관찰",
+    "filesMode": "파일",
+    "constellationMode": "별자리",
+    "sourcesLegend": "출처"
   }
 }

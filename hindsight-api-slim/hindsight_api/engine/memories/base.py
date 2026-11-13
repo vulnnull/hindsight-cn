@@ -65,7 +65,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 logger = logging.getLogger(__name__)
 
-#: The page :meth:`MemoriesExtension._scan_all_memories` asks for — no larger than a store's page
+#: The page :meth:`MemoriesExtension.scan_all_memories` asks for — no larger than a store's page
 #: cap, so every page is served whole.
 _SCAN_ALL_PAGE = 1000
 
@@ -760,6 +760,18 @@ def watermark_may_postdate(last_refreshed_at: datetime | None, watermark: dateti
     if watermark.tzinfo is None:
         watermark = watermark.replace(tzinfo=timezone.utc)
     return watermark > last_refreshed_at
+
+
+@dataclass(frozen=True)
+class ReflectFreshness:
+    """What reflect reads about a bank before it starts (see ``MemoriesExtension.reflect_freshness``).
+
+    ``pending`` may lag the bank's writes; ``last_memory_write_at`` may be later than the
+    bank's newest write but never earlier, and is None only for an empty bank.
+    """
+
+    pending: int
+    last_memory_write_at: datetime | None
 
 
 @dataclass(frozen=True)
@@ -2044,7 +2056,7 @@ class MemoriesExtension(Extension, ABC):
         returns rather than what it reads.
         """
 
-    async def _scan_all_memories(self, **filters: Any) -> list[StoredMemory]:
+    async def scan_all_memories(self, **filters: Any) -> list[StoredMemory]:
         """Every memory :meth:`scan_memories` matches for ``filters``, paged to the end.
 
         Never one oversized page: a store caps what one page holds, so a single call with a huge
@@ -2337,6 +2349,27 @@ class MemoriesExtension(Extension, ABC):
         fresh = await self.consolidation_freshness(conn=conn, fq_table=fq_table, bank_id=bank_id)
         return fresh.get("last_memory_write_at")
 
+    async def reflect_freshness(self, *, conn, fq_table, bank_id: str) -> ReflectFreshness:
+        """What reflect reads about the bank before it starts.
+
+        Reflect waits on this, so it may be cheaper than :meth:`consolidation_freshness`, and
+        each value may be loose in one direction only:
+
+        - ``pending`` may lag the bank's writes. Reflect only turns it into a hint for the
+          model (up to date, slightly stale, stale), so a count a few seconds old is fine.
+        - ``last_memory_write_at`` may be LATER than the bank's newest write, never earlier.
+          Reflect rules a mental model fresh without a scoped check when the model read the
+          memories at or after it, so an earlier value would call a stale model fresh. A
+          later one only costs that model its scoped check. None means the bank is empty.
+
+        The gates that act on ``pending`` (the retraction deferral, the refresh scheduler)
+        stay on :meth:`consolidation_freshness`, which is exact.
+
+        The default is :meth:`consolidation_freshness`, which meets both rules exactly.
+        """
+        fresh = await self.consolidation_freshness(conn=conn, fq_table=fq_table, bank_id=bank_id)
+        return ReflectFreshness(pending=fresh["pending"], last_memory_write_at=fresh.get("last_memory_write_at"))
+
     async def live_memory_ids(self, *, conn, fq_table, bank_id: str, unit_ids: list[Any]) -> set[str]:
         """Which of ``unit_ids`` still exist among the bank's live memories.
 
@@ -2403,7 +2436,8 @@ class MemoriesExtension(Extension, ABC):
 
         ``pending`` / ``failed`` count the world/experience facts not yet folded
         into an observation, and those the LLM gave up on. Backs
-        ``get_bank_freshness``, which reflect() calls often, so keep it cheap.
+        ``get_bank_freshness`` and the gates that act on ``pending``, so it must be
+        exact; reflect reads the looser :meth:`reflect_freshness` instead.
 
         ``last_memory_write_at`` is the newest write time (``updated_at``) across
         the bank's memories, or None for an empty bank. It is the bank-wide
@@ -3099,7 +3133,7 @@ class MemoriesExtension(Extension, ABC):
             # take it off, so the payload is the same shape on either backend.
             "attachment_filenames": document_attachment_filenames(_rec),
         }
-        _units = await self._scan_all_memories(conn=conn, fq_table=fq_table, bank_id=bank_id, document_id=document_id)
+        _units = await self.scan_all_memories(conn=conn, fq_table=fq_table, bank_id=bank_id, document_id=document_id)
         doc["unit_count"] = len(_units)
         doc["world_count"] = sum(1 for m in _units if m.fact_type == "world")
         doc["experience_count"] = sum(1 for m in _units if m.fact_type == "experience")
@@ -3118,7 +3152,7 @@ class MemoriesExtension(Extension, ABC):
 
         Default: a scan of the document's memories and :meth:`document_memory_counts`. Postgres
         reads `memory_units`."""
-        sources = await self._scan_all_memories(
+        sources = await self.scan_all_memories(
             conn=conn, fq_table=fq_table, bank_id=bank_id, document_id=document_id, fact_types=["experience", "world"]
         )
         _doc_counts = await self.document_memory_counts(
@@ -3267,7 +3301,7 @@ class MemoriesExtension(Extension, ABC):
         :meth:`delete_stale_observations` (which requeues surviving co-sources) and
         :meth:`mark_consolidated`. Postgres runs the same cascade as SQL."""
         invalidated_obs = 0
-        _doc_units = await self._scan_all_memories(
+        _doc_units = await self.scan_all_memories(
             conn=conn, fq_table=fq_table, bank_id=bank_id, document_id=document_id
         )
         from ..consolidation.consolidator import write_scopes_changed
@@ -3441,7 +3475,7 @@ class MemoriesExtension(Extension, ABC):
         if fact_type in ("experience", "world"):
             unit_ids = [
                 m.unit_id
-                for m in await self._scan_all_memories(
+                for m in await self.scan_all_memories(
                     conn=conn, fq_table=fq_table, bank_id=bank_id, fact_types=[fact_type]
                 )
             ]
@@ -3500,7 +3534,7 @@ class MemoriesExtension(Extension, ABC):
         await self.delete_observations(conn=conn, fq_table=fq_table, bank_id=bank_id)
         src_ids = [
             m.unit_id
-            for m in await self._scan_all_memories(
+            for m in await self.scan_all_memories(
                 conn=conn, fq_table=fq_table, bank_id=bank_id, fact_types=["experience", "world"]
             )
         ]
@@ -3789,7 +3823,7 @@ class MemoriesExtension(Extension, ABC):
         from ..consolidation.consolidator import write_scopes_changed
         from ..metadata_utils import drop_null_values
 
-        units = await self._scan_all_memories(conn=conn, fq_table=fq_table, bank_id=bank_id, document_id=document_id)
+        units = await self.scan_all_memories(conn=conn, fq_table=fq_table, bank_id=bank_id, document_id=document_id)
         # Metadata too, not just tags: a survivor left carrying the PREVIOUS retain's metadata is
         # exactly what this exists to prevent — measured on an append, older units still read
         # {"source": "email"} after a retain carrying {"source": "crm"}.

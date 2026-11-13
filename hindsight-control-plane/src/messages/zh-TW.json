@@ -185,7 +185,9 @@
     "cloneIncludeBankConfigHint": "設定覆寫、指令與 Webhook——副本會呼叫相同的 Webhook 端點。",
     "cloneIncludeHistory": "歷史",
     "cloneIncludeHistoryHint": "稽核紀錄與 LLM 請求追蹤。",
-    "cloneNothingSelected": "請至少選擇一項要複製的內容。"
+    "cloneNothingSelected": "請至少選擇一項要複製的內容。",
+    "observationTree": "觀察",
+    "observationTreeDescription": "此記憶庫學到的一切，以可瀏覽、搜尋和匯出的 Markdown 資料夾呈現——與代理可以列出和用 grep 搜尋的是同一批檔案。每個主題檔案包含其全部觀察；每個資料夾的 index.md 提供概覽。"
   },
   "bankProfile": {
     "noBankSelected": "未選擇記憶庫",
@@ -690,7 +692,9 @@
         "retain_mission": "會放在這裡，優先於一般擷取規則。",
         "retain_optional_fact_dimensions": "允許模型將「何時」、「何地」、「何人」和「為何」留空，而不是寫「N/A」。"
       }
-    }
+    },
+    "linkedKnowledgeBanksLabel": "文件庫",
+    "linkedKnowledgeBanksDescription": "在此庫上反思時,也會搜尋連結的文件庫,文件優先於與之衝突的記憶。召回和心智模型不會讀取這些文件。"
   },
   "bankOperations": {
     "title": "背景作業",
@@ -729,7 +733,8 @@
       "importDocuments": "匯入文件",
       "exportBank": "匯出記憶庫",
       "importBank": "匯入記憶庫",
-      "cloneBank": "複製記憶庫"
+      "cloneBank": "複製記憶庫",
+      "knowledgeIngest": "知識匯入"
     },
     "table": {
       "id": "操作 ID",
@@ -1240,6 +1245,28 @@
     "executingToolsPlural": "正在執行 {count} 個工具",
     "toolInputLabel": "輸入：",
     "toolOutputLabel": "輸出：",
+    "traceAgentFailed": "代理呼叫失敗",
+    "traceAgentFailedDetail": "LLM 呼叫出錯，已重試該步驟",
+    "traceAgentDone": "代理認為已足夠",
+    "traceAgentDoneDetail": "呼叫 done：不再搜尋",
+    "traceRoundQuery": "撰寫搜尋查詢",
+    "traceRoundQueryDetail": "將請求改寫為一個搜尋查詢",
+    "traceSufficiency": "證據夠嗎？",
+    "traceSufficiencyDetail": "決策模型評估了目前的證據",
+    "tracePagesSufficiency": "頁面能回答嗎？",
+    "tracePagesSufficiencyDetail": "決策模型僅評估了心智模型",
+    "tracePrune": "精簡證據",
+    "tracePruneDetail": "決策模型保留了相關內容",
+    "traceClosingDoneDetail": "以全部證據請求 done",
+    "traceFinalDetail": "根據所有收集的證據合成",
+    "traceFinalMap": "總結證據第 {part} 部分",
+    "traceFinalMapDetail": "證據過大：分段總結",
+    "traceRewrite": "縮短回答",
+    "traceRewriteDetail": "依長度預算改寫",
+    "traceStructured": "建立結構化回答",
+    "traceStructuredDetail": "填寫回應結構",
+    "traceOtherCall": "LLM 呼叫",
+    "traceOtherCallDetail": "{scope}",
     "basedOnTitle": "依據",
     "basedOnDescription": "使用了 {count} 個條目",
     "notIncludedBasedOn": "未納入",
@@ -2213,6 +2240,9 @@
         "updateNode": "更新頁面節點失敗",
         "deleteNode": "刪除頁面節點失敗",
         "search": "搜尋頁面失敗"
+      },
+      "request": {
+        "tooLarge": "請求過大。請上傳較少或較小的檔案（上限：HINDSIGHT_CP_MAX_UPLOAD_SIZE）。"
       }
     }
   },
@@ -2330,8 +2360,6 @@
     "traceResults": "{count} 筆結果",
     "executionTraceTitle": "執行追蹤",
     "noOperations": "沒有操作",
-    "responseGenerated": "已產生回應",
-    "agentDecided": "代理已決策",
     "toolInputLabel": "輸入：",
     "executionTraceDescription": "{iterations} 次 LLM 呼叫 • 共 {totalMs} 毫秒",
     "executingTools": "呼叫的工具：{count}",
@@ -2455,10 +2483,10 @@
       "documentsTitle": "文件",
       "documentsDescription": "此庫中的檔案和文字。每份文件都會切分為段落並嵌入;將檔案拖放到此處任意位置即可上傳。",
       "searchTitle": "搜尋",
-      "searchDescription": "透過文字查詢、圖片或兩者,依語意尋找段落。"
+      "searchDescription": "用文字、圖片或影片片段(單獨或一起)尋找段落,結果為一個排序清單。"
     },
     "documents": {
-      "filterPlaceholder": "依名稱、標題或 ID 篩選…",
+      "filterPlaceholder": "依檔名或 ID 篩選…",
       "kindFilter": "依類型篩選",
       "statusFilter": "依狀態篩選",
       "allKinds": "所有類型",
@@ -2467,7 +2495,6 @@
       "upload": "上傳檔案",
       "dropToUpload": "拖放檔案即可上傳",
       "columnDocument": "文件",
-      "columnStatus": "狀態",
       "columnPassages": "段落",
       "columnSize": "大小",
       "columnTags": "標籤",
@@ -2483,7 +2510,8 @@
       "noMatchesBody": "換個名稱、類型或狀態試試。",
       "layout": "版面配置",
       "viewList": "清單",
-      "viewGrid": "格狀"
+      "viewGrid": "格狀",
+      "viewConstellation": "星座圖"
     },
     "detail": {
       "download": "下載原始檔",
@@ -2514,45 +2542,42 @@
       "originalUnsupported": "此檔案類型無法在瀏覽器中預覽。"
     },
     "search": {
-      "placeholder": "依語意搜尋,例如:如何輪替 API 金鑰?",
-      "addImage": "圖片",
-      "imageHint": "貼上、拖放或選擇一張圖片來搜尋,可單獨使用或搭配文字。",
-      "modeMeaning": "依意義",
-      "modeExact": "精確文字",
-      "modeHelp": "精確文字會找出原樣包含這些字詞的段落（代碼、ID、名稱）。只讀取文字：文字檔與 PDF 的文字層。",
+      "placeholder": "搜尋,例如:如何輪替 API 金鑰?",
+      "addMedia": "圖片 / 影片",
+      "mediaHint": "貼上、拖放或選擇一張圖片或一段 MP4 影片來搜尋,可單獨使用或搭配文字。",
       "imageQuery": "正在以此圖片搜尋",
-      "removeImage": "移除圖片",
-      "notAnImage": "只能使用圖片作為搜尋查詢",
-      "pastedImage": "貼上的圖片",
-      "topK": "結果數",
+      "videoQuery": "正在以此影片搜尋",
+      "removeMedia": "移除",
+      "notMedia": "只能使用圖片或 MP4 影片作為搜尋查詢",
+      "pastedMedia": "貼上的檔案",
+      "maxTokens": "最大 token 數",
+      "maxTokensHelp": "傳回文字的總量:最佳段落,以及能容納的前後文。",
+      "budget": "預算",
+      "budgetHelp": "搜尋排序的深度:低最快,高找得最遠。",
+      "budgetLow": "低",
+      "budgetMid": "中",
+      "budgetHigh": "高",
       "submit": "搜尋",
-      "filters": "篩選",
+      "options": "選項",
       "tags": "標籤",
       "tagsMatch": "標籤比對",
       "tagsAny": "任一",
       "tagsAll": "全部",
       "noResults": "沒有符合此搜尋的段落。",
-      "idle": "以文字或圖片搜尋此庫中的段落。",
-      "scoreHelp": "查詢與段落之間的餘弦相似度",
+      "idle": "用文字、圖片、影片片段或它們的任意組合搜尋此庫。",
       "openPassage": "在文件中開啟",
       "failed": "搜尋失敗",
       "mediaTypes": "媒體類型",
       "mediaTypesHelp": "未勾選任何項目時會搜尋所有媒體類型。",
-      "context": "上下文",
-      "contextHelp": "每個文字命中前後作為上下文傳回的段落數",
-      "showContext": "顯示上下文",
-      "hideContext": "隱藏上下文"
+      "showMore": "顯示更多",
+      "showLess": "收合"
     },
     "linked": {
       "title": "文件庫",
-      "description": "在此庫上反思時,也會搜尋連結的文件庫,文件優先於與之衝突的記憶。召回和心智模型不會讀取這些文件。",
       "none": "尚無文件庫。",
-      "createOne": "新增文件庫",
-      "counts": "{documents, plural, other {# 份文件}} · {passages, plural, other {# 個段落}}",
-      "open": "開啟",
-      "missing": "已不存在",
-      "save": "儲存連結",
-      "saved": "已儲存連結的文件庫"
+      "noneLinked": "未連結",
+      "search": "搜尋知識庫…",
+      "missing": "已不存在"
     },
     "selector": {
       "select": "選擇文件庫...",
@@ -2563,7 +2588,6 @@
       "countsLegend": "文件 · 段落"
     },
     "home": {
-      "embedder": "使用 {model} 嵌入({dimension} 維)",
       "documents": "文件",
       "passages": "段落",
       "size": "大小",
@@ -2576,34 +2600,28 @@
       "noneInPeriod": "此期間未新增文件",
       "noDocuments": "尚無文件",
       "pending": "{count} 個處理中",
-      "failed": "{count} 個失敗"
+      "failed": "{count} 個失敗",
+      "constellationTitle": "星座圖",
+      "viewAll": "查看全部",
+      "failedNotice": "{count} 個文件處理失敗。查看原因"
     },
     "settings": {
       "title": "設定",
-      "description": "管理此文件庫,並查看其文件的嵌入方式。",
-      "generalTitle": "一般",
-      "generalDescription": "庫的名稱和識別資訊。",
+      "description": "此知識庫的概覽、匯入作業，以及它如何將檔案切分為段落。",
+      "tabGeneral": "一般",
+      "tabConfiguration": "組態",
+      "generalIntro": "知識庫包含的內容，以及正在處理的上傳。",
+      "aboutTitle": "關於",
+      "aboutDescription": "庫的名稱和識別資訊。",
       "bankId": "庫 ID",
       "created": "建立時間",
-      "embedderTitle": "嵌入模型與限制",
-      "embedderDescription": "在伺服器上為所有文件庫統一設定,此處僅供參考。",
-      "provider": "提供者",
-      "model": "模型",
-      "dimension": "維度",
-      "maxFile": "最大檔案",
-      "maxMedia": "最長音訊或影片",
-      "maxPdfPages": "PDF 最大頁數",
-      "audioWindow": "音訊視窗",
-      "videoWindow": "影片視窗",
-      "overlap": "視窗重疊",
-      "pdfPixels": "PDF 頁面尺寸(長邊)",
-      "textTokens": "文字段落大小(token)",
-      "seconds": "{count, plural, other {# 秒}}",
       "linkTitle": "記憶庫",
-      "linkDescription": "關聯此庫的記憶庫在召回時會取得其中的段落,作為權威來源。",
+      "linkDescription": "連結了此庫的記憶庫在 reflect 時也會搜尋它,並以其文件為準。",
       "linkHowTo": "從記憶庫關聯:開啟記憶庫,然後前往 庫設定 → 設定 → 文件庫。",
       "delete": "刪除庫",
-      "mediaTypes": "可寫入的媒體類型"
+      "resetConfig": "重設組態",
+      "resetConfigTitle": "要重設組態嗎？",
+      "resetConfigPrompt": "{bankId} 的每項設定都會恢復為伺服器預設值。已匯入的檔案在重新上傳前會保留現有段落。"
     },
     "addDocument": {
       "dialogSubtitle": "向文件庫新增新文件：",
@@ -2612,16 +2630,117 @@
       "tagsHelp": "以逗號分隔。搜尋可依標籤篩選。",
       "filenameLabel": "檔案名稱",
       "filenamePlaceholder": "預設:文件 ID.md",
-      "uploadHint": "PDF 頁面和圖片以影像嵌入,音訊以 {audio} 秒片段、影片以 {video} 秒片段嵌入。每個檔案最大 {max}。",
+      "uploadHint": "PDF 頁面和圖片以影像嵌入,音訊和影片以短片段嵌入。伺服器無法接收的檔案會在這裡顯示原因。",
       "allTagsLabel": "所有檔案的標籤",
       "applyToAll": "全部套用",
-      "tooLarge": "檔案過大:上限為 {max}",
       "editFile": "編輯此檔案的標籤和 ID",
       "remove": "移除 {name}",
       "tagsFor": "{name} 的標籤",
       "uploaded": "{count, plural, other {已上傳 # 個檔案}}。就緒後即可搜尋。",
       "someFailed": "{count, plural, other {# 個檔案}}上傳失敗",
-      "written": "文件已新增。就緒後即可搜尋。"
+      "written": "文件已新增,可以搜尋。",
+      "unchanged": "{count, plural, other {# 個檔案}}未變更:已按原樣匯入。",
+      "writtenUnchanged": "未變更:此文件已按原樣匯入。"
+    },
+    "constellation": {
+      "empty": "尚無可顯示的段落",
+      "hudStats": "{documents} 份文件 · {passages} 個段落 · {visible} 個可見 · {labels} 個標籤 · {links} 條連結 · 縮放 {zoom}x"
+    },
+    "config": {
+      "intro": "此知識庫如何將檔案切分為段落。變更會套用到之後匯入的檔案；重新上傳檔案即可依新設定重新切分。",
+      "loadFailed": "無法載入此知識庫的設定。",
+      "saveFailed": "無法儲存。",
+      "serverDefault": "伺服器預設值",
+      "serverDefaultValue": "伺服器預設值（{value}）",
+      "on": "開",
+      "off": "關",
+      "overridden": "已為此知識庫設定",
+      "useServerDefault": "使用伺服器預設值",
+      "serverOff": "伺服器已為所有知識庫關閉。",
+      "accept": "接受{kind}檔案",
+      "sections": {
+        "text": {
+          "title": "文字",
+          "description": "文字（包括文件中的文字）如何切分為段落。"
+        },
+        "pdf": {
+          "title": "PDF",
+          "description": "如何讀取 PDF 頁面。"
+        },
+        "images": {
+          "title": "圖片",
+          "description": "如何讀取圖片。"
+        },
+        "media": {
+          "title": "音訊與影片",
+          "description": "音訊與影片如何切分為依時間的段落。"
+        },
+        "types": {
+          "title": "媒體類型",
+          "description": "此知識庫接受哪些檔案類型。它可以比伺服器關閉更多類型，但不能更少。"
+        }
+      },
+      "fields": {
+        "text_passage_tokens": {
+          "label": "段落大小（token）",
+          "description": "一個段落包含多少文字：越小定位越精確，越大保留的上下文越多。"
+        },
+        "pdf_page_pixels": {
+          "label": "頁面尺寸（像素）",
+          "description": "讀取前每個 PDF 頁面依最長邊繪製的像素數。"
+        },
+        "pdf_bands": {
+          "label": "頁面條帶",
+          "description": "同時將每個 PDF 頁面讀作三條橫向條帶，較容易找到小字，但匯入速度約減半。"
+        },
+        "max_pdf_pages": {
+          "label": "最多頁數",
+          "description": "頁數超過此值的 PDF 會被拒絕；只能低於伺服器的上限。"
+        },
+        "image_tokens": {
+          "label": "圖片細節（token）",
+          "description": "每張圖片以多少 token 讀取，範圍 70 到 1120：越多看到的細節越細，但越慢。"
+        },
+        "audio_window_seconds": {
+          "label": "音訊段落長度（秒）",
+          "description": "一個段落包含多少秒音訊。"
+        },
+        "video_window_seconds": {
+          "label": "影片段落長度（秒）",
+          "description": "一個段落包含多少秒影片。"
+        },
+        "media_overlap_seconds": {
+          "label": "重疊（秒）",
+          "description": "每個段落與下一段共用的秒數，避免在切分處遺失內容；必須短於兩種長度。"
+        },
+        "max_media_seconds": {
+          "label": "最長檔案（秒）",
+          "description": "超過此長度的音訊或影片會被拒絕；只能低於伺服器的上限。"
+        }
+      }
     }
+  },
+  "observationTree": {
+    "empty": "此庫還沒有觀察。",
+    "pickFile": "請在左側選擇一個檔案。",
+    "findPlaceholder": "在記憶中尋找（文字或正規表示式）",
+    "showRaw": "原始 .md",
+    "exportZip": "匯出 .zip",
+    "recencyLegend": "新近度 · 提及",
+    "showRendered": "渲染檢視",
+    "clearFind": "清除",
+    "noMatches": "沒有符合項目。",
+    "matchSummary": "{files} 個檔案中有 {matches} 處符合",
+    "matchesInFile": "{total} 筆中有 {shown} 筆符合",
+    "observationCount": "{count} 筆觀察",
+    "sources": "{count} 個來源",
+    "updated": "{when}更新",
+    "related": "相關：",
+    "topics": "主題",
+    "bestSupported": "支持最多",
+    "observations": "觀察",
+    "filesMode": "檔案",
+    "constellationMode": "星圖",
+    "sourcesLegend": "來源"
   }
 }
