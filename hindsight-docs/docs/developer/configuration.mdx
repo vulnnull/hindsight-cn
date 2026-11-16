@@ -461,7 +461,7 @@ export HINDSIGHT_API_LLM_MODEL=gpt-5.6-luna
 
 # Claude Code (Claude Pro/Max subscription - uses OAuth)
 export HINDSIGHT_API_LLM_PROVIDER=claude-code
-export HINDSIGHT_API_LLM_MODEL=claude-sonnet-4-5-20250929
+export HINDSIGHT_API_LLM_MODEL=claude-sonnet-5-5
 # No API key needed - uses `claude auth login` credentials.
 # Set HINDSIGHT_API_LLM_API_KEY to a token from `claude setup-token` to authenticate with a key instead.
 
@@ -515,7 +515,7 @@ export HINDSIGHT_API_LLM_MODEL=deepseek-v4-flash
 # z.ai (Zhipu GLM series, OpenAI-compatible, https://z.ai)
 export HINDSIGHT_API_LLM_PROVIDER=zai
 export HINDSIGHT_API_LLM_API_KEY=your-zai-api-key
-export HINDSIGHT_API_LLM_MODEL=glm-4.5-flash  # or glm-4.5-air for the paid tier
+export HINDSIGHT_API_LLM_MODEL=glm-5.3-flash  # or glm-4.5-flash for the free tier
 # Default base_url: https://api.z.ai/api/coding/paas/v4 (override with HINDSIGHT_API_LLM_BASE_URL if needed)
 
 # opencode-go (OpenAI-compatible)
@@ -658,6 +658,8 @@ The strategy JSON supports three modes:
 - `{"mode": "round-robin"}` — rotate the starting member per request to spread load, then fall through the rest on failure. Add `"weights": [3, 1, ...]` (positive ints, one per member, primary first) for an **unbalanced** rotation.
 - `{"mode": "metadata", "routes": [...]}` — **retain only**: pick the member from each retained item's own `metadata`. See [Metadata routing](#metadata-routing) below.
 
+In `failover` and `round-robin`, a retain reply with no `facts` list (for example a model answering with the JSON schema it was shown instead of the facts) also moves that chunk to the next member. It does not start the member's cooldown: the member is not down, it just failed that input.
+
 **Cooldown.** In `failover` and `round-robin`, a member that fails (after its own retries) is moved to the back of the order for `cooldown_seconds` (default `60`), so later requests stop waiting on its errors and timeouts — useful when a member has run out of a daily or weekly quota. If it fails again once the cooldown is over, the cooldown doubles, up to one hour; its next success clears it. A cooling member is only deprioritized, never dropped: if every other member fails too, it is still tried. Set `"cooldown_seconds": 0` to try every member in order on every request. The cooldown is held in memory per process, so a restart clears it.
 
 **A member that is not signed in.** A provider that runs on a stored login (`chatgpt`, `openai-codex`, `nous`, `github-copilot`) and finds none when the server starts does not stop the server. It logs a warning with the login command to run, fails every call it gets, and the chain fails over past it. Sign in again and restart the server to bring it back.
@@ -790,7 +792,7 @@ Different memory operations have different requirements. **Retain** (fact extrac
 | `HINDSIGHT_API_REFLECT_LLM_REASONING_EFFORT` | Reasoning effort for reflect operations | Falls back to `HINDSIGHT_API_LLM_REASONING_EFFORT` |
 | `HINDSIGHT_API_REFLECT_LLM_EXTRA_BODY` | Extra request-body params (JSON dict) for reflect operations | Falls back to `HINDSIGHT_API_LLM_EXTRA_BODY` |
 | `HINDSIGHT_API_REFLECT_LLM_CACHE_AFFINITY` | Prompt-cache affinity mode for reflect operations | Falls back to `HINDSIGHT_API_LLM_CACHE_AFFINITY` |
-| `HINDSIGHT_API_REFLECT_MAX_COMPLETION_TOKENS` | Transport-level output cap (`max_completion_tokens`) for reflect's final synthesis call. Unset means uncapped: the model runs to a natural stop and the reflect/mental-model `max_tokens` governs *visible* length via a prompt directive plus a post-hoc rewrite, not by truncating the provider call. On thinking models the raw provider budget is consumed by reasoning tokens, so a hard cap here would cut pages off mid-word. Set an integer only to enforce a hard cost ceiling on the synthesis call. | Unset (uncapped) |
+| `HINDSIGHT_API_REFLECT_MAX_COMPLETION_TOKENS` | Transport-level output cap (`max_completion_tokens`) for reflect's final synthesis call. Unset means uncapped: the model runs to a natural stop and the reflect/mental-model `max_tokens` governs *visible* length via a prompt directive plus a post-hoc rewrite, not by truncating the provider call. On thinking models the raw provider budget is consumed by reasoning tokens, so a hard cap here would cut pages off mid-word. Set an integer only to enforce a hard cost ceiling on the synthesis call. When set, the same cap applies to every reflect loop turn; when unset, a loop turn that only picks the next search is capped at 1024 tokens. | Unset (uncapped) |
 | `HINDSIGHT_API_CONSOLIDATION_LLM_PROVIDER` | LLM provider for observation consolidation | Falls back to `HINDSIGHT_API_LLM_PROVIDER` |
 | `HINDSIGHT_API_CONSOLIDATION_LLM_API_KEY` | API key for consolidation LLM | Falls back to `HINDSIGHT_API_LLM_API_KEY` |
 | `HINDSIGHT_API_CONSOLIDATION_LLM_MODEL` | Model for consolidation operations | Falls back to `HINDSIGHT_API_LLM_MODEL` |
