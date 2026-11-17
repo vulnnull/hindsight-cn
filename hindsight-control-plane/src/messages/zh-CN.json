@@ -692,7 +692,19 @@
     "pageDefaultTriggerDialogHint": "适用于此后创建的页面。",
     "pageDefaultTriggerDialogTitle": "新页面的默认设置",
     "linkedKnowledgeBanksLabel": "文档库",
-    "linkedKnowledgeBanksDescription": "在此库上反思时,也会搜索关联的文档库,文档优先于与之冲突的记忆。召回和知识摘要不会读取这些文档。"
+    "linkedKnowledgeBanksDescription": "在此库上反思时,也会搜索关联的文档库,文档优先于与之冲突的记忆。召回和知识摘要不会读取这些文档。",
+    "knowledgeSectionTitle": "知识库",
+    "knowledgeSectionDescription": "此库的 reflect 还会搜索的知识库，以及搜索方式。",
+    "knowledgeFailedToSave": "保存知识库设置失败",
+    "kbSearchMediaTypesLabel": "reflect 读取的文档类型",
+    "kbSearchMediaTypesDescription": "reflect 搜索可以返回的关联文档类型。全部勾选表示不限制。",
+    "kbSearchApplyTagsLabel": "按 reflect 的标签筛选",
+    "kbSearchApplyTagsDescription": "带标签的 reflect 只读取这些标签允许的关联文档，规则与其记忆相同。关闭：标签只筛选记忆。",
+    "kbMediaType_document": "PDF 和 Office",
+    "kbMediaType_image": "图片",
+    "kbMediaType_audio": "音频",
+    "kbMediaType_video": "视频",
+    "kbMediaType_text": "文本"
   },
   "bankOperations": {
     "title": "后台操作",
@@ -2715,7 +2727,10 @@
       "budgetHigh": "高",
       "options": "选项",
       "showMore": "显示更多",
-      "showLess": "收起"
+      "showLess": "收起",
+      "tagGroups": "标签组 (JSON)",
+      "tagGroupsHelp": "布尔标签筛选，全部以 AND 组合，与记忆 recall 相同。叶节点可以设置 \"resolve\": \"fuzzy\"。",
+      "tagGroupsInvalid": "标签组必须是有效的 JSON。"
     },
     "linked": {
       "title": "文档库",
