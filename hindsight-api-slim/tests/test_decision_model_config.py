@@ -8,9 +8,11 @@ import pytest
 from aiohttp import web
 
 from hindsight_api.config import DecisionModelConfig, HindsightConfig
+from hindsight_api.engine.aiohttp_session import UpstreamHTTPError
 from hindsight_api.engine.decision_model import (
     MAX_REQUEST_BYTES,
     DecisionAnswer,
+    DecisionAsset,
     DecisionModel,
     DecisionQuestion,
     DecisionRefusedError,
@@ -76,6 +78,21 @@ def test_operation_override_wins_and_falls_back_per_setting(monkeypatch):
     recall = config.decision_model_config("recall")
     assert recall is not None
     assert (recall.model, recall.api_key) == ("jev-latest", "global-key")
+
+
+def test_the_knowledge_reranker_is_any_cohere_rerank_endpoint(monkeypatch):
+    config = _config(monkeypatch, {})
+    assert config.kb_reranker_url is None
+    # Sized for a long-window reranker that reads pictures: what the published runs use.
+    assert (config.kb_reranker_max_tokens, config.kb_reranker_images) == (120_000, True)
+    url = {"HINDSIGHT_API_KB_RERANKER_URL": "https://rerank.test/v1/rerank"}
+    with pytest.raises(ValueError, match="KB_RERANKER_MODEL"):
+        _config(monkeypatch, url).validate()
+    config = _config(
+        monkeypatch, {**url, "HINDSIGHT_API_KB_RERANKER_MODEL": "m", "HINDSIGHT_API_KB_RERANKER_IMAGES": "0"}
+    )
+    config.validate()
+    assert (config.kb_reranker_model, config.kb_reranker_images) == ("m", False)
 
 
 def test_operation_can_opt_out(monkeypatch):
@@ -156,6 +173,7 @@ def test_keys_and_endpoints_are_credentials():
     for prefix in ("", "recall_", "reflect_", "consolidation_"):
         assert f"{prefix}decision_model_api_key" in credentials
         assert f"{prefix}decision_model_base_url" in credentials
+    assert {"kb_reranker_api_key", "kb_reranker_url"} <= credentials
 
 
 _QUESTIONS = {
@@ -231,6 +249,52 @@ async def test_typesafe_speaks_system_one():
     assert upstream.paths == ["/v1/systemone"]
     assert upstream.auth == ["Bearer k"]
     assert upstream.bodies == [{"model": "jev-preview", "state": {"fact": "x"}, "questions": _SYSTEM_ONE_QUESTIONS}]
+
+
+async def test_a_question_looking_at_an_image_goes_alone_with_its_image():
+    seen: list[tuple[Any, str | None]] = []
+
+    async def handle(request: web.Request) -> web.StreamResponse:
+        body = await request.json()
+        seen.append((body, request.headers.get("TypeSafe-Danger-Zone-Images")))
+        return web.json_response({"answers": {key: {"type": "noul", "noul": 0.5} for key in body["questions"]}})
+
+    photo = DecisionAsset(format="jpg", data_base64="aGk=")
+    questions = {
+        "m0": DecisionQuestion(type="noul", instructions={"memory": "img-0"}),
+        "m1": DecisionQuestion(type="noul", instructions={"memory": "plain text"}),
+        "m2": DecisionQuestion(type="noul", instructions={"memory": "more text"}),
+    }
+    async with stub_server(handle) as base_url:
+        answers = await _client("typesafe", base_url, "jev").ask_all(
+            "q", questions, scope="decision_test", assets={"img-0": photo}
+        )
+
+    assert set(answers) == {"m0", "m1", "m2"}
+    with_image = [(body, header) for body, header in seen if "assets" in body]
+    assert with_image == [
+        (
+            {
+                "model": "jev",
+                "state": "q",
+                "questions": {"m0": {"type": "noul", "instructions": {"memory": "img-0"}}},
+                "assets": {"img-0": {"type": "image", "format": "jpg", "data_base64": "aGk="}},
+            },
+            "true",
+        )
+    ]
+    # The text questions still share one request, with no image and no opt-in header.
+    assert [(set(body["questions"]), header) for body, header in seen if "assets" not in body] == [({"m1", "m2"}, None)]
+
+
+async def test_openai_takes_no_images():
+    with pytest.raises(ValueError, match="no images"):
+        await _client("openai", "http://unused", "gpt").ask(
+            "q",
+            {"m0": DecisionQuestion(type="noul", instructions="img-0")},
+            scope="decision_test",
+            assets={"img-0": DecisionAsset(format="jpg", data_base64="aGk=")},
+        )
 
 
 async def test_cloudflare_posts_system_one_to_the_workers_ai_model_and_unwraps_the_envelope():

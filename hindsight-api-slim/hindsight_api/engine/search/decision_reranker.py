@@ -99,19 +99,20 @@ class DecisionModelReranker(CrossEncoderModel):
     async def initialize(self) -> None:
         pass
 
-    async def _rerank(self, query: str, docs: list[str], indices: list[int], scores: list[float]) -> None:
+    async def _rerank(
+        self,
+        query: str,
+        docs: list[str],
+        indices: list[int],
+        scores: list[float],
+    ) -> None:
         """Scores ``indices`` by position, best first."""
         rerank = self._client.rerank_interface()
         options = rerank_options.get()
         subset = [docs[index] for index in indices]
-        asked = rerank.questions(subset)
-        questions = {question.key: DecisionQuestion.model_validate(question.system_one()) for question in asked}
         state = rerank.state(query, rerank_shared_context.get())
-        # Every memory is capped (see DecisionRerank.questions), so no single question can
-        # outgrow the window: a failed request now raises instead of ranking its candidates last.
-        answers = await self._client.ask_all(state, questions, scope="decision_recall_rerank")
+        nouls = await self._judge(query, subset)
         # Stable on the caller's input order, so equal answers keep their RRF order.
-        nouls = [answers[question.key].noul if question.key in answers else None for question in asked]
         ranked = rerank.pruned(nouls) if options.prune else rerank.scores(nouls)
         if options.dedup:
             # The second request: its pairs depend on the ranking answers above.
@@ -126,6 +127,18 @@ class DecisionModelReranker(CrossEncoderModel):
                 ranked = rerank.deduped(ranked, repeats, {key: answer.noul for key, answer in found.items()})
         for slot, score in enumerate(ranked):
             scores[indices[slot]] = score
+
+    async def _judge(self, query: str, docs: list[str]) -> list[float | None]:
+        """One Noul per doc, in one batch of requests: whether showing it would help answer ``query``."""
+        rerank = self._client.rerank_interface()
+        asked = rerank.questions(docs)
+        questions = {question.key: DecisionQuestion.model_validate(question.system_one()) for question in asked}
+        # Every memory is capped (see DecisionRerank.questions), so no single question can
+        # outgrow the window: a failed request now raises instead of ranking its candidates last.
+        answers = await self._client.ask_all(
+            rerank.state(query, rerank_shared_context.get()), questions, scope="decision_recall_rerank"
+        )
+        return [answers[question.key].noul if question.key in answers else None for question in asked]
 
     @staticmethod
     async def _alike(

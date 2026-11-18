@@ -505,6 +505,10 @@ class RerankStub:
     #: retrieval order, which is not stable enough to pin.
     verdicts: dict[str, float]
 
+    #: What the Cohere-shaped /rerank scores a document, keyed by text it contains, for
+    #: the stories about a reranker's order (knowledge search's). Others are scored lexically.
+    rerank_scores: dict[str, float]
+
     #: The state each of those questions arrived with, so a story can see what the
     #: model was told besides the memory.
     states: list[str]
@@ -516,6 +520,9 @@ class RerankStub:
     #: The candidates of every ranking question, as the decision model read them.
     ranked: list[str]
 
+    #: The image formats each decision-model request carried, by placeholder (empty: no images).
+    assets: list[dict[str, str]]
+
     #: Answer every decision-model request with this provider error instead, for the
     #: stories about a recall whose decision model fails. The /rerank endpoint ignores it.
     fail_with_status: int | None = None
@@ -526,9 +533,11 @@ class RerankStub:
 
     def __init__(self) -> None:
         self.verdicts = {}
+        self.rerank_scores = {}
         self.states = []
         self.repeats = set()
         self.ranked = []
+        self.assets = []
 
     def repeat(self, memory_a: str, memory_b: str) -> float:
         return 0.9 if any(a in memory_a and b in memory_b for a, b in self.repeats) else 0.1
@@ -536,6 +545,10 @@ class RerankStub:
     def verdict(self, state: str, memory: str) -> float:
         scripted = next((score for text, score in self.verdicts.items() if text in memory), None)
         return self.score(state, memory) if scripted is None else scripted
+
+    def reranked(self, query: str, document: str) -> float:
+        scripted = next((score for text, score in self.rerank_scores.items() if text in document), None)
+        return self.score(query, document) if scripted is None else scripted
 
     def score(self, query: str, document: str) -> float:
         from .lexical import lexical_relevance
@@ -618,8 +631,10 @@ class Stubs:
         self.embeddings.calls.clear()
         self.rerank.cut_level = RerankStub.cut_level
         self.rerank.verdicts = {}
+        self.rerank.rerank_scores = {}
         self.rerank.states = []
         self.rerank.repeats = set()
+        self.rerank.assets = []
         self.rerank.fail_with_status = None
         self.rerank.rerank_fail_with_status = None
         self.triage.reset()

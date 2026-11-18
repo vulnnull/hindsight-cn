@@ -294,6 +294,7 @@ def create_stub_app(stubs: Stubs) -> FastAPI:
                 answers[question_id] = {"type": "choice", "choice": pick, "probabilities": probabilities}
             return JSONResponse({"model": "stub", "answers": answers, "usage": {"input_tokens": 1, "output_tokens": 1}})
 
+        stubs.rerank.assets.append({name: asset["format"] for name, asset in body.get("assets", {}).items()})
         for question_id, question in body["questions"].items():
             if question["type"] == "noul" and "memory_a" in question["instructions"]:
                 instructions = question["instructions"]
@@ -351,9 +352,15 @@ def create_stub_app(stubs: Stubs) -> FastAPI:
             return _provider_error(f"stub provider error {status}", code="stub_error", status=status)
 
         query = body["query"]
+        # An image document (knowledge search's page or photo) is scored by its text; its picture is
+        # recorded like a decision model's asset, by its format.
+        documents = [document if isinstance(document, str) else document["text"] for document in body["documents"]]
+        stubs.rerank.assets.append(
+            {str(index): "jpg" for index, document in enumerate(body["documents"]) if not isinstance(document, str)}
+        )
         results = [
-            {"index": index, "relevance_score": stubs.rerank.score(query, document)}
-            for index, document in enumerate(body["documents"])
+            {"index": index, "relevance_score": stubs.rerank.reranked(query, document)}
+            for index, document in enumerate(documents)
         ]
         results.sort(key=lambda item: item["relevance_score"], reverse=True)
         return JSONResponse({"id": "rerank-stub", "results": results})
