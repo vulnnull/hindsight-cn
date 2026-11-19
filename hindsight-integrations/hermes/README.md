@@ -165,7 +165,7 @@ which is what records the current pin.
 hermes memory setup    # select "hindsight"
 ```
 
-The setup wizard installs nothing (dependencies come with the plugin), walks you through configuration, and offers to seed the bank with a **starter memory template** (a curated set of dispositions/instructions for common agent roles) — you can skip it, and it warns before overwriting an already-configured bank.
+The setup wizard installs nothing (dependencies come with the plugin), walks you through configuration, and offers to seed the bank with a **starter memory template** (a curated set of dispositions/instructions for common agent roles) — you can skip it, and it warns before overwriting an already-configured bank. A template's mental models refresh once an hour, each at its own minute, rather than after every consolidation, and an hour with nothing new costs nothing. To move an existing bank to that schedule, set a `refresh_cron` on each mental model in the control plane.
 
 Or manually (cloud mode with defaults):
 ```bash
@@ -231,8 +231,8 @@ Some keys also accept an older name: `apiKey` for `api_key`, `budget` for `recal
 | `additional_banks` | — | Extra banks to write to and recall from, in priority order. |
 | `recall_additional_banks` | — | Extra banks to recall from but never write to, searched after the write banks. Alias `recallAdditionalBanks`, the name the Claude Code integration uses. A bank also listed in `additional_banks` stays writable. |
 | `trusted_project_dirs` | — | Absolute folders whose git repositories may choose their own bank with a `.hindsight/config.toml`. Empty by default, so a cloned repository cannot redirect your memory. |
-| `bank_mission` | — | Read but not applied to the bank. To set a bank's reflect mission, use the bank's config (control plane or `PATCH /v1/default/banks/{bank_id}/config`). |
-| `bank_retain_mission` | — | Read but not applied to the bank. To set a bank's retain mission, use the bank's config, as above. |
+
+A bank's missions, dispositions, mental models and directives come from a [bank template](https://hindsight.vectorize.io/templates), which `hermes memory setup` offers to apply, or from the bank's config (control plane or `PATCH /v1/default/banks/{bank_id}/config`). The old `bank_mission` and `bank_retain_mission` keys were never applied and are no longer read.
 
 #### Multiple banks
 
@@ -255,6 +255,7 @@ The lookup stops at the repository root. Only `bank_id` is read.
 | Key | Default | Description |
 |-----|---------|-------------|
 | `recall_budget` | `mid` | Recall thoroughness: `low` / `mid` / `high` |
+| `reflect_budget` | same as `recall_budget` | Reflect thoroughness for the `hindsight_reflect` tool and `recall_prefetch_method: reflect`: `low` / `mid` / `high`. Keep it `low` on a large bank where a `mid` reflect runs past the server's timeout, while recall stays `mid`. |
 | `recall_prefetch_method` | `recall` | Auto-recall method: `recall` (raw facts) or `reflect` (LLM synthesis) |
 | `recall_max_tokens` | `4096` | Maximum tokens for recall results |
 | `recall_max_input_chars` | `800` | Maximum input query length for auto-recall |
@@ -266,6 +267,7 @@ The lookup stops at the repository root. Only `bank_id` is read.
 | `recall_types` | `observation` | Fact types surfaced by recall (both auto-recall and the `hindsight_recall` tool). Comma-separated string or JSON list. **Default narrowed to `observation` only** (see "Behavior change" below). Set to `observation,world,experience` to also include raw facts. |
 | `recall_min_scores` | — | Minimum relevance per score field, as a JSON object (e.g. `{"reranker": 0.25}` or `{"semantic": 0.5}`). Applies to both auto-recall and the `hindsight_recall` tool. See the tip below. |
 | `auto_recall` | `true` | Automatically recall memories before each turn |
+| `recall_cron` | `false` | Also auto-recall in scheduled (cron) runs. Off by default: Hermes starts every cron prompt with a fixed notice longer than `recall_max_input_chars`, so the recall would search for that notice instead of the job and inject unrelated memories. The `hindsight_recall` and `hindsight_reflect` tools still work in cron runs. |
 | `recall_sync` | `false` | Recall synchronously against the *current* message each turn (higher relevance, adds recall latency). Default off: recall runs in the background and is injected on the next turn. |
 | `recall_indicator` | `true` | Show a `👁️ Hindsight — recalled N memories` status line when auto-recall injects memory. Turn off for customer-facing agents. |
 
@@ -292,8 +294,9 @@ The lookup stops at the repository root. Only `bank_id` is read.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `auto_retain` | `true` | Automatically retain conversation turns. Sub-agent (`delegate_task`) runs and kanban workers are never auto-retained; their parent session keeps its own turns. |
+| `auto_retain` | `true` | Automatically retain conversation turns. Sub-agent (`delegate_task`) runs are never auto-retained, and kanban workers only with `retain_kanban`; their parent session keeps its own turns. |
 | `retain_cron` | `false` | Also auto-retain scheduled (cron) runs. Off by default, so job output stays out of the user's memory; the `hindsight_retain` tool still works in cron runs. |
+| `retain_kanban` | `false` | Let kanban workers write to memory: auto-retain of their turns, the `hindsight_retain` tool and the copy of built-in memory writes. Off by default, so a worker recalls and reflects on its profile's bank but never writes to it. Turn it on when the workers' runs are the only record of their work. |
 | `retain_async` | `true` | Process retain asynchronously on the Hindsight server |
 | `retain_every_n_turns` | `1` | Retain every N turns (1 = every turn) |
 | `retain_context` | `conversation between Hermes Agent and the User` | Context label for retained memories |
@@ -389,6 +392,7 @@ These are used **only when there is no config file at all**. Once `hermes memory
 |----------|-------------|
 | `HINDSIGHT_MODE` | Mode: `cloud`, `local_embedded` or `local_external` (`mode`) |
 | `HINDSIGHT_BUDGET` | Recall budget (`recall_budget`) |
+| `HINDSIGHT_REFLECT_BUDGET` | Reflect budget (`reflect_budget`) |
 | `HINDSIGHT_RETAIN_CONTEXT` | Label stored with each retained conversation (`retain_context`) |
 | `HINDSIGHT_RETAIN_INDICATOR` | `false` hides the "saving to memory" status line (`retain_indicator`) |
 | `HINDSIGHT_RECALL_INDICATOR` | `false` hides the "recalled N memories" status line (`recall_indicator`) |

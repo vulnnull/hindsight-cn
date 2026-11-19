@@ -332,6 +332,29 @@ describe("kimi-code installer", () => {
     const mcp = JSON.parse(readFileSync(join(ctx.home, ".kimi-code", "mcp.json"), "utf8"));
     expect(mcp.mcpServers.hindsight).toBeUndefined();
   });
+
+  // #6557: with no `node` on PATH a bare `node` can never start, so this Node's path is written —
+  // and uninstall must still recognise those entries as ours.
+  it.skipIf(process.platform === "win32")(
+    "writes this Node's path when PATH has no node, and still uninstalls it",
+    () => {
+      const ctx = makeCtx();
+      vi.stubEnv("PATH", ctx.home); // a directory with no node in it
+      try {
+        expect(run(["install", "kimi-code"], ctx)).toBe(0);
+        const toml = readFileSync(join(ctx.home, ".kimi-code", "config.toml"), "utf8");
+        expect(toml).toContain(process.execPath);
+        const mcpPath = join(ctx.home, ".kimi-code", "mcp.json");
+        expect(JSON.parse(readFileSync(mcpPath, "utf8")).mcpServers.hindsight.command).toBe(
+          process.execPath
+        );
+        expect(run(["uninstall", "kimi-code"], ctx)).toBe(0);
+        expect(JSON.parse(readFileSync(mcpPath, "utf8")).mcpServers.hindsight).toBeUndefined();
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    }
+  );
 });
 
 describe("qwen-code installer", () => {
@@ -1604,6 +1627,17 @@ describe("opencode2 installer", () => {
     run(["install", "opencode"], ctx);
     run(["install", "opencode2"], ctx);
     expect(readJson(cfgPath(ctx)).plugin).toEqual([ctx.pkgRoot]);
+  });
+
+  it("clears our entry from v2's `plugins` key on install and uninstall, keeping others (#6094)", () => {
+    const ctx = makeCtx();
+    writeJsonAt(cfgPath(ctx), { plugins: ["other-plugin", "/x/.hindsight/coding-agents"] });
+    run(["install", "opencode2"], ctx);
+    expect(readJson(cfgPath(ctx))).toEqual({ plugins: ["other-plugin"], plugin: [ctx.pkgRoot] });
+
+    writeJsonAt(cfgPath(ctx), { plugins: ["other-plugin", "/x/.hindsight/coding-agents"] });
+    run(["uninstall", "opencode2"], ctx);
+    expect(readJson(cfgPath(ctx))).toEqual({ plugins: ["other-plugin"] });
   });
 
   it("detects on the binary alone — ~/.config/opencode must not sway it", () => {

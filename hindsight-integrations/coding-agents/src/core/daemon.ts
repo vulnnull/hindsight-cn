@@ -43,6 +43,7 @@ import type { Config } from "./config";
 import { USER_AGENT } from "./hindsight";
 import { diag } from "./diag";
 import { log } from "./log";
+import { nodeBinary } from "./util";
 
 /**
  * How long each hook is willing to block waiting for a cold daemon. Both sit well inside the
@@ -193,6 +194,9 @@ export function daemonEnv(
   return out;
 }
 
+/** Carries the spawning session's resolved config to the detached starter (daemon-start.ts). */
+export const DAEMON_CONFIG_ENV = "HINDSIGHT_CODING_AGENTS_DAEMON_CONFIG";
+
 /**
  * Launch the starter as a DETACHED process, the way seeding and the codebase survey are launched.
  *
@@ -211,10 +215,14 @@ export function startDaemonDetached(
 ): void {
   try {
     const starter = join(dirname(fileURLToPath(import.meta.url)), "daemon-start.js");
-    const child = spawnFn("node", [starter, "--harness", harness], {
+    const child = spawnFn(nodeBinary(), [starter, "--harness", harness], {
       detached: true,
       stdio: "ignore",
       windowsHide: true,
+      // The caller's config is already resolved for its directory and bank. Re-reading the file in
+      // the starter lost `paths` / `banks` overrides, so a daemon enabled only there never started
+      // (#6334).
+      env: { ...process.env, [DAEMON_CONFIG_ENV]: JSON.stringify(cfg) },
     });
     // spawn() failures often surface ASYNCHRONOUSLY as an 'error' event; unhandled, that would
     // crash the hook.

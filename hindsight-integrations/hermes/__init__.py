@@ -90,6 +90,15 @@ _EXTRA_BANK_TIMEOUT_SHARE = 0.8
 _EXTRA_BANK_COOLDOWN = 300.0
 _RETAIN_CONTEXT_DEFAULT = "conversation between Hermes Agent and the User"
 
+# Injected instead of nothing when recall raises, so the agent can tell "memory is down" from
+# "nothing found" (#6482). Fixed text, never the exception: errors can carry hosts and URLs. It is
+# worded so a customer-facing agent need not announce an outage, only not read the gap as fact.
+_RECALL_FAILED_NOTE = (
+    "# Hindsight Memory\n"
+    "Memory lookup failed this turn, so context from earlier sessions is missing. Don't conclude "
+    "the user never told you something just because it is not here."
+)
+
 
 def _plugin_version() -> str:
     """Read the version from plugin.yaml — Hermes loads this directory, not a pip package."""
@@ -445,6 +454,7 @@ def _load_config() -> dict:
                 "enabled": True,
             }
         },
+        "reflect_budget": os.environ.get("HINDSIGHT_REFLECT_BUDGET", ""),
     }
 
 
@@ -531,7 +541,7 @@ class HindsightMemoryProvider(MemoryProvider):
         self._api_url, self._mode = _DEFAULT_API_URL, "cloud"
         self._timeout, self._idle_timeout = _DEFAULT_TIMEOUT, _DEFAULT_IDLE_TIMEOUT
         self._bank_id, self._budget, self._bank_id_template = "hermes", "mid", ""
-        self._bank_mission, self._bank_retain_mission = "", None
+        self._reflect_budget = "mid"
         self._mirror_to_own_bank = False
         self._static_bank_id = "hermes"
         self._project, self._bank_source = "", "bank_id"
@@ -611,9 +621,9 @@ class HindsightMemoryProvider(MemoryProvider):
             # fail; a gateway started before the install runs without it (#6063).
             if not _check_local_runtime(_CLIENT_MODULES).available:
                 return False
-            return mode == "local_external" or bool(
-                _cloud_api_key(cfg) or cfg.get("api_url") or get_secret("HINDSIGHT_API_URL", "")
-            )
+            # Cloud needs a key: a URL alone used to pass, and every request then went out
+            # unauthenticated (#6438). A keyless self-hosted server is what local_external is for.
+            return mode == "local_external" or bool(_cloud_api_key(cfg))
         except Exception:
             logger.debug("Hindsight availability check failed", exc_info=True)
             return False
@@ -627,11 +637,20 @@ class HindsightMemoryProvider(MemoryProvider):
         guidance here, where agent_init warns about an unavailable provider.
         """
         try:
-            local = _load_config().get("mode", "cloud") in _LOCAL_MODES
+            cfg = _load_config()
         except Exception:
             return ""
-        status = _check_local_runtime() if local else _check_local_runtime(_CLIENT_MODULES)
-        return "" if status.available else _local_runtime_hint(status.reason).strip()
+        mode = cfg.get("mode", "cloud")
+        status = _check_local_runtime() if mode in _LOCAL_MODES else _check_local_runtime(_CLIENT_MODULES)
+        if not status.available:
+            return _local_runtime_hint(status.reason).strip()
+        if mode == "cloud" and not _cloud_api_key(cfg):
+            return (
+                "Hindsight cloud mode needs an API key: set HINDSIGHT_API_KEY (or api_key in "
+                "hindsight/config.json), or run `hermes memory setup`. For a self-hosted server "
+                "without a key, use mode local_external."
+            )
+        return ""
 
     def save_config(self, values, hermes_home):
         """Merge *values* into $HERMES_HOME/hindsight/config.json."""
@@ -731,12 +750,15 @@ class HindsightMemoryProvider(MemoryProvider):
                 "description": "Optional template to derive bank_id dynamically. Placeholders: {profile}, {workspace}, {project}, {platform}, {user}, {session}. {project} is the git repository name (shared across worktrees, empty outside a repository). Example: hermes-{project}",
                 "default": "",
             },
-            {"key": "bank_mission", "description": "Mission/purpose description for the memory bank"},
-            {"key": "bank_retain_mission", "description": "Custom extraction prompt for memory retention"},
             {
                 "key": "recall_budget",
                 "description": "Recall thoroughness",
                 "default": "mid",
+                "choices": ["low", "mid", "high"],
+            },
+            {
+                "key": "reflect_budget",
+                "description": "Reflect thoroughness (unset = same as recall_budget)",
                 "choices": ["low", "mid", "high"],
             },
             {
@@ -838,6 +860,16 @@ class HindsightMemoryProvider(MemoryProvider):
             {
                 "key": "retain_cron",
                 "description": "Also auto-retain scheduled (cron) runs; off by default so job output stays out of the user's memory",
+                "default": False,
+            },
+            {
+                "key": "retain_kanban",
+                "description": "Let kanban workers write to memory (auto-retain, the retain tool, built-in memory mirror); off by default so workers only read the shared bank",
+                "default": False,
+            },
+            {
+                "key": "recall_cron",
+                "description": "Also auto-recall in scheduled (cron) runs; off by default because the query would be Hermes' fixed cron notice, not the job",
                 "default": False,
             },
             {"key": "retain_every_n_turns", "description": "Retain every N turns (1 = every turn)", "default": 1},
@@ -1503,12 +1535,15 @@ class HindsightMemoryProvider(MemoryProvider):
         )
         budget = cfg.get("recall_budget") or cfg.get("budget") or banks.get("budget", "mid")
         self._budget = budget if budget in _VALID_BUDGETS else "mid"
+        # Reflect runs an agentic loop per budget step, so the recall budget that suits search can
+        # push reflect past the server's timeout on a big bank (#6246). Unset follows recall_budget,
+        # which is what reflect used before this setting existed.
+        reflect_budget = cfg.get("reflect_budget")
+        self._reflect_budget = reflect_budget if reflect_budget in _VALID_BUDGETS else self._budget
         memory_mode = cfg.get("memory_mode", "hybrid")
         self._memory_mode = memory_mode if memory_mode in _SYSTEM_PROMPT_TAILS else "hybrid"
         prefetch_method = cfg.get("recall_prefetch_method") or cfg.get("prefetch_method", "recall")
         self._prefetch_method = prefetch_method if prefetch_method in {"recall", "reflect"} else "recall"
-        self._bank_mission = cfg.get("bank_mission", "")
-        self._bank_retain_mission = cfg.get("bank_retain_mission") or None
 
     def _apply_retain_settings(self, cfg: dict) -> None:
         def _cfg_or_env(key: str, env_var: str, default: str = "") -> Any:
@@ -1538,11 +1573,20 @@ class HindsightMemoryProvider(MemoryProvider):
 
     def _apply_retain_policy(self, cfg: dict) -> None:
         """Pure-config retain knobs (no env/secret reads; ``{}`` yields the defaults)."""
-        # Hermes' provider contract: skip automatic writes for non-primary runs (#5555). retain_cron opts
-        # scheduled runs back in; sub-agents and kanban workers report to a parent that retains its own turns.
+        # Hermes' provider contract: skip automatic writes for non-primary runs (#5555). retain_cron and
+        # retain_kanban opt those runs back in; sub-agents report to a parent that retains its own turns.
         context = getattr(self, "_agent_context", "primary")
-        skip = context in ("subagent", "kanban") or (context == "cron" and not cfg.get("retain_cron", False))
+        retain_kanban = bool(cfg.get("retain_kanban", False))
+        skip = (
+            context == "subagent"
+            or (context == "kanban" and not retain_kanban)
+            or (context == "cron" and not cfg.get("retain_cron", False))
+        )
         self._auto_retain = bool(cfg.get("auto_retain", True)) and not skip
+        # A kanban worker shares its profile's bank to READ it. Skipping auto-retain alone still let the
+        # retain tool and the built-in memory mirror write task chatter into it, mostly duplicate reports
+        # the parent already retains (#6124). Unless retain_kanban opts it in (#6419), it writes nothing.
+        self._writes_disabled = context == "kanban" and not retain_kanban
         self._retain_every_n_turns = max(1, _parse_int_setting(cfg.get("retain_every_n_turns"), 1))
         self._retain_context = cfg.get("retain_context", _RETAIN_CONTEXT_DEFAULT)
         self._retain_async = cfg.get("retain_async", True)
@@ -1564,7 +1608,11 @@ class HindsightMemoryProvider(MemoryProvider):
         # so inheriting them would quietly narrow it for every install that sets them (#5170).
         self._reflect_tags = _normalize_string_list(cfg.get("reflect_tags")) or None
         self._reflect_tags_match = cfg.get("reflect_tags_match", "any")
-        self._auto_recall = cfg.get("auto_recall", True)
+        # A cron prompt opens with Hermes' fixed ~1.1k-char cron notice, so the first
+        # recall_max_input_chars of every cron query were that notice, not the job: each fire injected
+        # ~4k tokens of unrelated memories (#6145). recall_cron opts back in; the tools still work.
+        cron_skip = getattr(self, "_agent_context", "primary") == "cron" and not cfg.get("recall_cron", False)
+        self._auto_recall = cfg.get("auto_recall", True) and not cron_skip
         self._recall_sync = bool(cfg.get("recall_sync", False))
         self._recall_max_tokens = _parse_int_setting(cfg.get("recall_max_tokens"), 4096)
         self._recall_max_input_chars = _parse_int_setting(cfg.get("recall_max_input_chars"), 800)
@@ -1663,6 +1711,8 @@ class HindsightMemoryProvider(MemoryProvider):
         label = "" if mode == "hybrid" else f" ({mode} mode)"
         # With auto_recall off nothing is injected, so hybrid must not promise injected context.
         tail = _TOOL_GUIDANCE if mode == "hybrid" and not self._auto_recall else _SYSTEM_PROMPT_TAILS[mode]
+        if self._writes_disabled:  # the retain tool is not offered to a read-only kanban worker
+            tail = tail.replace(" Use hindsight_retain to store facts.", "")
         return f"# Hindsight Memory\nActive{label}. Bank: {self._bank_id}, budget: {self._budget}.\n{tail}"
 
     # -- recall ------------------------------------------------------------------
@@ -1747,7 +1797,7 @@ class HindsightMemoryProvider(MemoryProvider):
         return results
 
     def _reflect(self, query: str) -> str | None:
-        kwargs: Dict[str, Any] = {"bank_id": self._bank_id, "query": query, "budget": self._budget}
+        kwargs: Dict[str, Any] = {"bank_id": self._bank_id, "query": query, "budget": self._reflect_budget}
         if self._reflect_tags:
             kwargs.update(tags=self._reflect_tags, tags_match=self._reflect_tags_match)
         try:
@@ -1760,7 +1810,8 @@ class HindsightMemoryProvider(MemoryProvider):
 
     def _do_recall(self, query: str) -> tuple[str, int]:
         """One recall/reflect for *query* (background prefetch and ``recall_sync`` paths)
-        -> (text, memory count); the count is 0 for reflect (synthesis) and on error."""
+        -> (text, memory count); the count is 0 for reflect (synthesis) and on error, where the text
+        is ``_RECALL_FAILED_NOTE``."""
         if self._recall_max_input_chars:
             query = query[: self._recall_max_input_chars]
         try:
@@ -1775,10 +1826,13 @@ class HindsightMemoryProvider(MemoryProvider):
             return "\n".join(f"- {r.text}" for r in results if r.text), len(results)
         except Exception as e:
             logger.warning("Hindsight recall failed: %s", e, exc_info=True)
-            return "", 0
+            return _RECALL_FAILED_NOTE, 0
 
     def _finish_prefetch(self, result: str, count: int) -> str:
         """Record indicator state (cleared on empty turns, never a stale count); format the block."""
+        if result == _RECALL_FAILED_NOTE:
+            self._last_recall_returned, self._last_recall_count = False, 0
+            return result
         self._last_recall_returned, self._last_recall_count = bool(result), count if result else 0
         if not result:
             logger.debug("Prefetch: no results available")
@@ -2075,7 +2129,7 @@ class HindsightMemoryProvider(MemoryProvider):
         """Retain built-in memory adds and replaces (``target``: memory | user) on the writer
         thread, so an entry the agent later prunes from the size-capped file stays in the bank.
         Removals are not retained."""
-        if action not in ("add", "replace") or not content or self._shutting_down.is_set():
+        if action not in ("add", "replace") or not content or self._shutting_down.is_set() or self._writes_disabled:
             return
         item = self._build_retain_kwargs(
             content,
@@ -2103,9 +2157,15 @@ class HindsightMemoryProvider(MemoryProvider):
     # -- tools -------------------------------------------------------------------
 
     def get_tool_schemas(self) -> List[Dict[str, Any]]:
-        return [] if self._memory_mode == "context" else [RETAIN_SCHEMA, RECALL_SCHEMA, REFLECT_SCHEMA]
+        if self._memory_mode == "context":
+            return []
+        return (
+            [RECALL_SCHEMA, REFLECT_SCHEMA] if self._writes_disabled else [RETAIN_SCHEMA, RECALL_SCHEMA, REFLECT_SCHEMA]
+        )
 
     def _tool_retain(self, args: dict) -> str:
+        if self._writes_disabled:
+            return "hindsight_retain is disabled for kanban workers; set retain_kanban to allow it."
         content, context = args["content"], args.get("context")
         item = self._build_retain_kwargs(
             content, context=context, tags=args.get("tags"), occurred_at=args.get("occurred_at")
@@ -2137,7 +2197,7 @@ class HindsightMemoryProvider(MemoryProvider):
     def _tool_reflect(self, args: dict) -> str:
         query = args["query"]
         logger.debug(
-            "Tool hindsight_reflect: bank=%s, query_len=%d, budget=%s", self._bank_id, len(query), self._budget
+            "Tool hindsight_reflect: bank=%s, query_len=%d, budget=%s", self._bank_id, len(query), self._reflect_budget
         )
         text = self._reflect(query) or ""
         logger.debug("Tool hindsight_reflect: response_len=%d", len(text))
@@ -2157,7 +2217,8 @@ class HindsightMemoryProvider(MemoryProvider):
         if not args.get(required, ""):
             return tool_error(f"Missing required parameter: {required}")
         try:
-            return json.dumps({"result": handler(self, args)})
+            # ensure_ascii=False: escaped CJK costs ~3x the tokens in the tool result (#6561).
+            return json.dumps({"result": handler(self, args)}, ensure_ascii=False)
         except Exception as e:
             logger.warning("%s failed: %s", tool_name, e, exc_info=True)
             return tool_error(f"{failure}: {str(e) or type(e).__name__}")

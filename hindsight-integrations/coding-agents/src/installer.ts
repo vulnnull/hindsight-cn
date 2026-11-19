@@ -45,7 +45,7 @@ import { HOOK_HARNESSES, type HookHarnessName } from "./harness/hook-lifecycle";
 import { importLocalHistory } from "./core/history";
 import { detectLlm, hasRustToolchain, hasUvx, type LlmChoice } from "./core/daemon";
 import { readLegacyEndpoint } from "./core/legacy";
-import { isOurMcpEntry } from "./core/util";
+import { hookNode, hookNodeShell, isOurMcpEntry, nodeBinary } from "./core/util";
 import { SKILL_DIRS, resolveSkillDirs, traecodeDotDirName } from "./core/skill-dirs";
 import {
   enableWorkspaceMcpSetting,
@@ -225,7 +225,7 @@ function setOrDelete(obj: Record<string, any>, key: string, arr: any[]): void {
 }
 
 const cmdHook = (dist: string, file: string, timeout: number) => ({
-  hooks: [{ type: "command", command: `node "${join(dist, file)}"`, timeout }],
+  hooks: [{ type: "command", command: `${hookNodeShell()} "${join(dist, file)}"`, timeout }],
 });
 
 /** The command STRING for a host that runs `node <script>`. The path is quoted only when it needs
@@ -233,13 +233,13 @@ const cmdHook = (dist: string, file: string, timeout: number) => ({
  *  of the path, it reads `"C:\…"` as relative and fails with MODULE_NOT_FOUND (#5913). cursor-cli
  *  and copilot-cli share the flat hook branch; they run through a shell, where both forms are equal. */
 export const nodeCommand = (script: string): string =>
-  script.includes(" ") ? `node "${script}"` : `node ${script}`;
+  script.includes(" ") ? `${hookNodeShell()} "${script}"` : `${hookNodeShell()} ${script}`;
 
 /** ZCode's registration shape: the same matcher group, but an argv rather than a command STRING —
  *  it spawns hooks without a shell, so `node "…/zcode-hook.js"` would be looked up as one
  *  executable name and never run — and a `timeoutMs` budget rather than `timeout` seconds. */
 const processHook = (dist: string, file: string, timeoutMs: number) => ({
-  hooks: [{ type: "process", command: "node", args: [join(dist, file)], timeoutMs }],
+  hooks: [{ type: "process", command: hookNode(), args: [join(dist, file)], timeoutMs }],
 });
 
 /**
@@ -258,7 +258,7 @@ const mcpServerEntry = (
   harness: HookHarnessName | "cline-cli",
   extraArgs: string[] = []
 ) => ({
-  command: "node",
+  command: hookNode(),
   args: [join(dist, "mcp-server.js"), ...extraArgs],
   env: { HINDSIGHT_MCP_HARNESS: harness },
 });
@@ -423,17 +423,33 @@ function registerOpencodePlugin(c: InstallCtx, name: string): void {
   // writeJsonc, not writeJson: this config routinely carries comments, and re-serializing the
   // parsed object would strip every one of them even though the read succeeded.
   writeJsonc(path, "plugin", [...plugins.filter((p) => !String(p).includes(MARKER)), c.pkgRoot]);
+  // v2 merges `plugins` with the legacy key, so an entry of ours there would load twice (#6094).
+  dropOursFromV2Plugins(path, cfg);
   c.log?.(`${name}: plugin registered in ${path}`);
+}
+
+/** Remove our entries from v2's `plugins` key (hand-added or user-migrated), keeping the rest. */
+function dropOursFromV2Plugins(path: string, cfg: Record<string, any>): boolean {
+  if (!Array.isArray(cfg.plugins)) return false;
+  const kept = cfg.plugins.filter((p: unknown) => !String(p).includes(MARKER));
+  if (kept.length === cfg.plugins.length) return false;
+  writeJsonc(path, "plugins", kept.length ? kept : undefined);
+  return true;
 }
 
 function unregisterOpencodePlugin(c: InstallCtx, name: string): void {
   const path = opencodeConfigPath(c);
   if (!existsSync(path)) return;
   const cfg = parseJsonc(readFileSync(path, "utf8"));
-  if (!cfg || !Array.isArray(cfg.plugin)) return;
-  const kept = cfg.plugin.filter((p: unknown) => !String(p).includes(MARKER));
-  writeJsonc(path, "plugin", kept.length ? kept : undefined);
-  c.log?.(`${name}: plugin entry removed`);
+  if (!cfg) return;
+  // An entry under v2's `plugins` key keeps memory wired just the same (#6094).
+  let removed = dropOursFromV2Plugins(path, cfg);
+  if (Array.isArray(cfg.plugin)) {
+    const kept = cfg.plugin.filter((p: unknown) => !String(p).includes(MARKER));
+    writeJsonc(path, "plugin", kept.length ? kept : undefined);
+    removed = true;
+  }
+  if (removed) c.log?.(`${name}: plugin entry removed`);
 }
 
 const opencode: HarnessInstaller = {
@@ -605,7 +621,7 @@ const claudeCode: HarnessInstaller = {
         "--env",
         "HINDSIGHT_MCP_HARNESS=claude-code",
         "--",
-        "node",
+        hookNode(),
         join(c.dist, "mcp-server.js"),
       ])
     ) {
@@ -613,7 +629,7 @@ const claudeCode: HarnessInstaller = {
     } else {
       c.log?.(
         `claude-code: could not run \`claude mcp add\` — register the tools manually:\n` +
-          `  claude mcp add --scope user hindsight --env HINDSIGHT_MCP_HARNESS=claude-code -- node "${join(c.dist, "mcp-server.js")}"`
+          `  claude mcp add --scope user hindsight --env HINDSIGHT_MCP_HARNESS=claude-code -- ${hookNodeShell()} "${join(c.dist, "mcp-server.js")}"`
       );
     }
   },
@@ -651,7 +667,7 @@ const CODEX_MCP_BLOCK_RE = /^\[mcp_servers\.hindsight(?:\.[^\]]+)?\][^\n]*\n(?:(
 
 /** Inline `env`, so CODEX_MCP_BLOCK_RE never has to straddle a `[mcp_servers.hindsight.env]` table. */
 const codexMcpBlock = (dist: string) =>
-  `[mcp_servers.hindsight]\ncommand = "node"\nargs = [${JSON.stringify(join(dist, "mcp-server.js"))}]\n` +
+  `[mcp_servers.hindsight]\ncommand = ${JSON.stringify(hookNode())}\nargs = [${JSON.stringify(join(dist, "mcp-server.js"))}]\n` +
   `env = { HINDSIGHT_MCP_HARNESS = "codex" }`;
 
 const codex: HarnessInstaller = {
@@ -813,15 +829,15 @@ const antigravity: HarnessInstaller = {
 };
 
 /**
- * Probe the `node` on PATH — not this process — because that is the interpreter the installed hook
- * command (`node "<dist>/devin-stop-hook.js"`) will actually run under. An installer started through
+ * Probe `hookNode()` — the `node` on PATH, or this Node only when PATH has none — because that is
+ * the interpreter the installed hook command will actually run under. An installer started through
  * npx, a version manager or a wrapper script is easily a different build than the one the agent
  * later uses. `-e` runs as CommonJS regardless of the surrounding package type, so `require` here
  * is safe.
  */
 function pathNodeHasSqlite(): boolean {
   try {
-    execFileSync("node", ["-e", "require('node:sqlite')"], { stdio: "pipe", timeout: 10_000 });
+    execFileSync(hookNode(), ["-e", "require('node:sqlite')"], { stdio: "pipe", timeout: 10_000 });
     return true;
   } catch {
     return false;
@@ -830,7 +846,7 @@ function pathNodeHasSqlite(): boolean {
 
 function pathNodeVersion(): string {
   try {
-    return execFileSync("node", ["-v"], { encoding: "utf8", stdio: "pipe" }).trim();
+    return execFileSync(hookNode(), ["-v"], { encoding: "utf8", stdio: "pipe" }).trim();
   } catch {
     return "not found";
   }
@@ -1504,7 +1520,7 @@ const kimi: HarnessInstaller = {
       .map(
         (h) =>
           `[[hooks]]\nevent = ${JSON.stringify(h.event)}\n` +
-          `command = ${JSON.stringify(`node "${join(c.dist, h.entry)}"`)}\n` +
+          `command = ${JSON.stringify(`${hookNodeShell()} "${join(c.dist, h.entry)}"`)}\n` +
           `timeout = ${h.timeout}\n`
       )
       .join("\n");
@@ -1837,7 +1853,7 @@ const qwen: HarnessInstaller = {
         "-e",
         "HINDSIGHT_MCP_HARNESS=qwen-code",
         "hindsight",
-        "node",
+        hookNode(),
         join(c.dist, "mcp-server.js"),
       ])
     ) {
@@ -1845,7 +1861,7 @@ const qwen: HarnessInstaller = {
     } else {
       c.log?.(
         `qwen-code: could not run \`qwen mcp add\` — register the tools manually:\n` +
-          `  qwen mcp add -s user -e HINDSIGHT_MCP_HARNESS=qwen-code hindsight node "${join(c.dist, "mcp-server.js")}"`
+          `  qwen mcp add -s user -e HINDSIGHT_MCP_HARNESS=qwen-code hindsight ${hookNodeShell()} "${join(c.dist, "mcp-server.js")}"`
       );
     }
   },
@@ -2408,9 +2424,13 @@ function importConversations(harness: string, ctx: InstallCtx): void {
       `this runs extraction and may take a while`
   );
   try {
-    execFileSync("node", [join(ctx.dist, "deepen.js"), "--repo", repo, "--conversations", file], {
-      stdio: "inherit",
-    });
+    execFileSync(
+      nodeBinary(),
+      [join(ctx.dist, "deepen.js"), "--repo", repo, "--conversations", file],
+      {
+        stdio: "inherit",
+      }
+    );
   } catch {
     // The wiring is already in place; a failed backfill must not make `install` look failed.
     ctx.log?.(`${harness}: conversation import did not finish — re-run it any time with:`);

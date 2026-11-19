@@ -13,11 +13,15 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import hashlib
+import io
 import itertools
 import json
 import logging
+import os
 import re
+import tempfile
 import threading
 import time
 import uuid
@@ -25,7 +29,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
+from typing import TYPE_CHECKING, Any, BinaryIO, Literal, TypeVar, cast
 
 import aiohttp
 
@@ -70,6 +74,7 @@ from .store import (
     BankStats,
     DocumentPage,
     DocumentStatus,
+    KnowledgeBankNotFound,
     KnowledgeDocument,
     KnowledgePassage,
     KnowledgeStore,
@@ -79,6 +84,7 @@ from .store import (
     SearchFilters,
     SearchHit,
     StatusUpdate,
+    StoreSearchResult,
     StoreSearchTrace,
     TagPage,
     TimeBucket,
@@ -251,6 +257,34 @@ class IngestItem:
     tags: list[str] = field(default_factory=list)
     #: The ingestion strategy for this item; None falls back to the server's default.
     strategy: str | None = None
+    #: An uploaded file, read from where the HTTP layer spooled it to disk instead of from ``data``
+    #: (then empty): a 2 GB video read whole was 2 GB of the API's memory before it was even refused.
+    file: BinaryIO | None = None
+
+    @property
+    def size(self) -> int:
+        if self.file is None:
+            return len(self.data)
+        return self.file.seek(0, io.SEEK_END)
+
+    def chunks(self) -> Iterator[bytes]:
+        """Its content, ``_FILE_CHUNK`` at a time."""
+        if self.file is None:
+            yield self.data
+            return
+        self.file.seek(0)
+        while chunk := self.file.read(_FILE_CHUNK):
+            yield chunk
+
+    async def stream(self) -> AsyncIterator[bytes]:
+        """``chunks`` with each disk read off the event loop."""
+        chunks = self.chunks()
+        while (chunk := await asyncio.to_thread(next, chunks, None)) is not None:
+            yield chunk
+
+
+#: How much of a file is read or written at once (the Postgres file store's chunk size).
+_FILE_CHUNK = 4 * 1024 * 1024
 
 
 @dataclass
@@ -467,7 +501,7 @@ def _work(entry: _Entry, saved: _Saved) -> _Work:
         entry.plan.strategy,
         entry.plan.handler,
         saved.was_split,
-        len(entry.item.data),
+        entry.item.size,
     )
 
 
@@ -493,8 +527,8 @@ def _content_tokens(item: IngestItem) -> int:
     """A document's billable content size. Text (the text-ingest API, or an uploaded .txt/.md) is
     counted by its tokens; any other file is counted by its size at ``_MEDIA_BYTES_PER_CONTENT_TOKEN``."""
     if (item.content_type or "").startswith("text/"):
-        return count_tokens(item.data.decode("utf-8", "ignore"))
-    return -(-len(item.data) // _MEDIA_BYTES_PER_CONTENT_TOKEN)  # ceil(bytes / rate)
+        return sum(count_tokens(chunk.decode("utf-8", "ignore")) for chunk in item.chunks())
+    return -(-item.size // _MEDIA_BYTES_PER_CONTENT_TOKEN)  # ceil(bytes / rate)
 
 
 class _MemoryBudget:
@@ -705,6 +739,7 @@ class KnowledgeService:
         request_context: RequestContext,
         *,
         needs_vectors: bool = True,
+        check_exists: bool = True,
     ) -> None:
         # ``needs_vectors=False`` for an operation that never reads or writes a vector (a delete): the
         # store's first-use setup asks the embedder for its size, and an unreachable embedder must not
@@ -714,7 +749,9 @@ class KnowledgeService:
         else:
             await self._engine._authenticate_tenant(request_context)
         await self._authorize(bank_id, operation, request_context)
-        await self._require_bank(bank_id)
+        # ``check_exists=False`` for a search, which checks it in its own statement (``KnowledgeStore.search``).
+        if check_exists:
+            await self._require_bank(bank_id)
 
     async def create_bank(self, bank_id: str, request_context: RequestContext) -> KnowledgeBankInfo:
         await self._ready(request_context)
@@ -934,16 +971,22 @@ class KnowledgeService:
 
     def _check_item(self, item: IngestItem, settings: KnowledgeBankSettings, *, depth: int = 0) -> _Plan:
         """How the file will be split; refuses what cannot be ingested."""
-        limit = get_config().kb_max_file_mb * 1024 * 1024
-        if len(item.data) > limit:
+        kind = media.classify(item.content_type, item.filename)
+        config = get_config()
+        media_type = media.media_type_of(kind, item.filename) if kind else None
+        typed = config.kb_max_file_mb_by_media_type.get(media_type or "")
+        limit_mb = typed or config.kb_max_file_mb
+        size = item.size
+        if size > limit_mb * 1024 * 1024:
+            env = "HINDSIGHT_API_KB_MAX_FILE_MB_BY_MEDIA_TYPE" if typed else "HINDSIGHT_API_KB_MAX_FILE_MB"
             raise KnowledgeBankError(
-                f"'{item.filename}' is {len(item.data) / 1048576:.1f}MB; the limit is "
-                f"{get_config().kb_max_file_mb}MB (HINDSIGHT_API_KB_MAX_FILE_MB)",
+                f"'{item.filename}' is {size / 1048576:.1f}MB; the limit"
+                + (f" for {media_type}" if typed else "")
+                + f" is {limit_mb}MB ({env})",
                 413,
             )
-        if not item.data:
+        if not size:
             raise KnowledgeBankError(f"'{item.filename}' is empty")
-        kind = media.classify(item.content_type, item.filename)
         strategy = self._strategy(item.strategy)
         # A file inside a file inside ... stops at MAX_DEPTH: deeper ones are chunked as they are.
         handler = (
@@ -1012,7 +1055,11 @@ class KnowledgeService:
             f"|{s.image_tokens}|{s.audio_window_seconds}|{s.video_window_seconds}"
             f"|{s.media_overlap_seconds}|{c.kb_pdf_text_weight}|{s.pdf_bands}|{s.text_passage_tokens}"
         )
-        return hashlib.sha256(item.data + settings.encode()).hexdigest()
+        digest = hashlib.sha256()
+        for chunk in item.chunks():
+            digest.update(chunk)
+        digest.update(settings.encode())
+        return digest.hexdigest()
 
     async def ingest(
         self, bank_id: str, items: list[IngestItem], request_context: RequestContext, *, wait: bool = False
@@ -1135,7 +1182,8 @@ class KnowledgeService:
         for e in entries:
             item = e.item
             item.filename = item.filename or f"{e.document_id}.md"
-            content_hash = self._content_hash(item, e.plan, settings)
+            # Off the event loop: both read the whole file (hundreds of MB), and every request waited meanwhile.
+            content_hash = await asyncio.to_thread(self._content_hash, item, e.plan, settings)
             before = existing.get(e.document_id)
             if (
                 before
@@ -1149,6 +1197,7 @@ class KnowledgeService:
             ):
                 saved.append(None)  # unchanged: nothing to do
                 continue
+            content_tokens = await asyncio.to_thread(_content_tokens, item)
             storage_key = f"{bank_storage_prefix(bank_id)}kb/files/{uuid.uuid4()}/{key_segment(item.filename)}"
             files.append((storage_key, e))
             # A ready document without passages is one a strategy split into files (anything else ready
@@ -1163,7 +1212,7 @@ class KnowledgeService:
                     content_type=item.content_type,
                     # A type only a strategy reads is filed as a document until it is split.
                     media_type=media.media_type_of(e.plan.kind, item.filename) if e.plan.kind else "document",
-                    size_bytes=len(item.data),
+                    size_bytes=item.size,
                     storage_key=storage_key,
                     content_hash=content_hash,
                     status="pending",
@@ -1171,7 +1220,7 @@ class KnowledgeService:
                     passage_count=before.passage_count if before else 0,
                     tags=item.tags,
                     source_document_id=e.source_document_id,
-                    content_tokens=_content_tokens(item),
+                    content_tokens=content_tokens,
                 )
             )
         # Saved one after another, these were most of an ingest's time (a commit each on Postgres, a few
@@ -1180,11 +1229,11 @@ class KnowledgeService:
 
         async def store(key: str, e: _Entry) -> None:
             async with limit:
-                await self._engine._file_storage.store(
-                    file_data=e.item.data,
-                    key=key,
-                    metadata={"content_type": e.item.content_type, "bank_id": bank_id, "document_id": e.document_id},
-                )
+                metadata = {"content_type": e.item.content_type, "bank_id": bank_id, "document_id": e.document_id}
+                if e.item.file is None:
+                    await self._engine._file_storage.store(file_data=e.item.data, key=key, metadata=metadata)
+                else:  # in pieces, never whole
+                    await self._engine._file_storage.store_stream(key=key, stream=e.item.stream(), metadata=metadata)
 
         await asyncio.gather(*(store(key, e) for key, e in files))
         previous = await self.store.put_documents(bank_id, rows)
@@ -1205,7 +1254,7 @@ class KnowledgeService:
     # --- ingest (worker) --------------------------------------------------------------------
 
     def _drafts(
-        self, document: KnowledgeDocument, data: bytes, s: KnowledgeBankSettings
+        self, document: KnowledgeDocument, data: media.Source, s: KnowledgeBankSettings
     ) -> Iterator[media.PassageDraft]:
         kind = media.classify(document.content_type, document.filename)
         if kind == "pdf":
@@ -1216,7 +1265,7 @@ class KnowledgeService:
                 bands=s.pdf_bands,
             )
         if kind == "image":
-            return iter(media.split_image(data))
+            return iter(media.split_image(data, max_megapixels=get_config().kb_max_image_megapixels))
         if kind in ("audio", "video"):
             window = s.audio_window_seconds if kind == "audio" else s.video_window_seconds
             return media.split_media(
@@ -1655,16 +1704,23 @@ class KnowledgeService:
     ) -> Iterator[media.PassageDraft] | None:
         """One document's passages to embed, as a lazy iterator; None when its strategy split it into files."""
         document, w = doc.document, doc.work
+        if w.handler is None:
+            # To a local file, in pieces: the splitters open it by name and read as far as they need, so a
+            # 2 GB video costs a window's worth of memory, not 2 GB (it was read whole, then cut).
+            path = await self._download(w.storage_key, document.filename)
+            # Splitting is blocking (pdfium, PyAV): it runs in a thread, one draft at a time.
+            try:
+                drafts = await _split(self._drafts, document, path, settings)
+            except BaseException:
+                _unlink(path)
+                raise
+            return _deleting(path, drafts)
         async with _timing.timed("file.read"):
             try:
+                # ponytail: an extension takes bytes, so its file is read whole; a path when one needs more.
                 data = await self._engine._file_storage.retrieve(w.storage_key)
             except FileNotFoundError as exc:
-                # Only the stored original being gone means "superseded or lost" to the batch; a missing
-                # file further in (a splitter's helper, a temp file) stays an ordinary, retried error.
                 raise _FileGone(str(exc)) from exc
-        if w.handler is None:
-            # Splitting is blocking (pdfium, PyAV): it runs in a thread, one draft at a time.
-            return await _split(self._drafts, document, data, settings)
         made = await ingest_strategy.load_extension(w.handler).ingest(
             ingest_strategy.IngestFile(
                 bank_id=bank_id,
@@ -1683,6 +1739,25 @@ class KnowledgeService:
         for d in emitted:
             self._check_passage_modality(d.modality, settings)
         return iter(emitted)
+
+    async def _download(self, key: str, filename: str | None) -> str:
+        """A local copy of stored file ``key``, written in pieces; the caller deletes it. It keeps the file's
+        extension: ffmpeg reads a raw stream (an .aac with an ID3 tag) only with that hint."""
+        fd, path = tempfile.mkstemp(prefix="hs-kb-src-", suffix=Path(filename or "").suffix[:16])
+        try:
+            async with _timing.timed("file.read"):
+                with os.fdopen(fd, "wb") as f:
+                    async for chunk in self._engine._file_storage.retrieve_stream(key):
+                        await asyncio.to_thread(f.write, chunk)
+        except FileNotFoundError as exc:
+            _unlink(path)
+            # Only the stored original being gone means "superseded or lost" to the batch; a missing
+            # file further in (a splitter's helper, a temp file) stays an ordinary, retried error.
+            raise _FileGone(str(exc)) from exc
+        except BaseException:
+            _unlink(path)
+            raise
+        return path
 
     async def _embed_round(
         self,
@@ -1920,18 +1995,29 @@ class KnowledgeService:
             embedding = asyncio.ensure_future(self._embed_query(request))
             try:
                 async with _timing.timed("open_bank"):
-                    await self._open_bank(bank_id, KnowledgeBankReadOperation.SEARCH_KNOWLEDGE_BANK, request_context)
+                    # The store's search finds out in its own statement that the bank is not a knowledge
+                    # bank, except when fuzzy tags must first be resolved against the bank's tags: a
+                    # missing bank has none, and that would answer 422 where it is a 404.
+                    await self._open_bank(
+                        bank_id,
+                        KnowledgeBankReadOperation.SEARCH_KNOWLEDGE_BANK,
+                        request_context,
+                        check_exists=needs_resolution(request.filters.tag_groups),
+                    )
             except BaseException:
                 embedding.cancel()
                 raise
             vector = await embedding
             request = await self._with_exact_tag_groups(bank_id, request)
             async with _timing.timed("store.search"):
-                hits = await self._search(bank_id, request, vector, trace)
+                try:
+                    found = await self._search(bank_id, request, vector, trace)
+                except KnowledgeBankNotFound as exc:
+                    raise KnowledgeBankError(f"knowledge bank '{bank_id}' not found", 404) from exc
             async with _timing.timed("rerank"):
-                hits = await self._reranked(bank_id, request, hits)
+                hits = await self._reranked(request, found)
             async with _timing.timed("context"):
-                budgeted = await self._within_budget(bank_id, hits, request.max_tokens, trace)
+                budgeted = self._within_budget(hits, found.nearby, request.max_tokens, trace)
             if trace is not None:
                 trace.seconds = dict(timing.seconds)
             # Fires even with no results: a search is a search.
@@ -2008,7 +2094,7 @@ class KnowledgeService:
 
     async def _search(
         self, bank_id: str, request: SearchRequest, vector: list[float], trace: SearchTrace | None = None
-    ) -> list[SearchHit]:
+    ) -> StoreSearchResult:
         return await self.store.search(
             bank_id,
             vector,
@@ -2017,10 +2103,12 @@ class KnowledgeService:
             text_weight=get_config().kb_pdf_text_weight,
             query_text=request.query,
             keyword_weight=get_config().kb_keyword_weight,
+            # What the reranker shows around a text hit, or else what the budget may widen it by.
+            around=_JUDGE_SPAN if self.reranker is not None else MAX_CONTEXT_PASSAGES - 1,
             trace=trace.store if trace is not None else None,
         )
 
-    async def _reranked(self, bank_id: str, request: SearchRequest, hits: list[SearchHit]) -> list[SearchHit]:
+    async def _reranked(self, request: SearchRequest, found: StoreSearchResult) -> list[SearchHit]:
         """``hits`` with the best of them reordered by the knowledge reranker; the rest keep the search's order.
 
         Candidates go in search order into one request, as many as ``kb_reranker_max_tokens`` holds counted
@@ -2034,6 +2122,7 @@ class KnowledgeService:
         its search place. A search is reranked when it has text or a picture the reranker takes: the reranker
         scores the hits against it. A search by a video (alone or with text) is reranked by its text, never by
         the clip."""
+        hits = found.hits
         reranker = self.reranker
         text = (request.query or "").strip()
         config = get_config()
@@ -2050,7 +2139,7 @@ class KnowledgeService:
             if text:
                 query["text"] = text
         pool = hits[:_JUDGE_POOL]
-        texts = await self._judged_texts(bank_id, pool)
+        texts = _judged_texts(pool, found.nearby)
         # Candidates in search order, each the hits sharing what the reranker would read. On ViDoRe markdown
         # the best 100 hits held a median 43 distinct pages: the rest were pieces of those pages.
         groups: list[list[int]] = []
@@ -2093,9 +2182,7 @@ class KnowledgeService:
         # The query rides in the request too, its picture with it.
         query_cost = count_tokens(text, encoding) + _CANDIDATE_TOKENS + (JUDGE_PICTURE_TOKENS if query_picture else 0)
         seen = list(range(fitting(costs, window - query_cost)))
-        pictures = await asyncio.gather(
-            *(self._picture(pool[groups[shown[m]][0]]) if has_picture[m] else asyncio.sleep(0) for m in seen)
-        )
+        pictures = await self._pictures([pool[groups[shown[m]][0]] if has_picture[m] else None for m in seen])
         documents: list[str | dict[str, str]] = [
             shown_text[m]
             if picture is None
@@ -2119,24 +2206,6 @@ class KnowledgeService:
         order = reranked_order(head, score_of) + list(range(len(head), len(groups)))
         return [pool[i] for n in order for i in groups[n]] + hits[len(pool) :]
 
-    async def _judged_texts(self, bank_id: str, hits: list[SearchHit]) -> list[str]:
-        """The text each hit is judged by: a text passage with the passages around it, grown evenly on both
-        sides up to ``JUDGE_CONTEXT_TOKENS``; any other hit its own text."""
-
-        def span(hit: SearchHit) -> tuple[str, int, int]:
-            index = hit.passage.index
-            return hit.document.document_id, max(0, index - _JUDGE_SPAN), index + _JUDGE_SPAN
-
-        found = await self.store.passage_ranges(bank_id, [span(h) for h in hits if h.passage.modality == "text"])
-        out = []
-        for hit in hits:
-            own = hit.passage.text or ""
-            if hit.passage.modality != "text":
-                out.append(own)
-                continue
-            out.append(_around(found.get(span(hit), []), hit.passage.index, JUDGE_CONTEXT_TOKENS) or own)
-        return out
-
     async def _query_picture(self, request: SearchRequest) -> bytes | None:
         """The JPEG the reranker judges the hits against when the search is by an image, or None: no query
         image, a search by a video (its image, if any, is one of several inputs the reranker cannot take
@@ -2146,18 +2215,28 @@ class KnowledgeService:
         picture = await asyncio.to_thread(media.query_picture, request.query_image, *JEV_IMAGE_SIDE)
         return picture if picture is not None and jev_accepts("image/jpeg", picture) else None
 
-    async def _picture(self, hit: SearchHit) -> bytes | None:
-        """The JPEG the reranker judges an image or PDF page hit by, or None for a hit judged by its text: any
-        other hit, and a picture outside 280-1568 px a side (a small photo, or a long receipt shrunk to fit),
-        which image rerankers refuse, and one refused image fails the whole request."""
-        if hit.passage.modality != "image" or not hit.passage.media_key:
-            return None
-        data = await self._engine._file_storage.retrieve(hit.passage.media_key)
-        picture = await asyncio.to_thread(media.judge_picture, data)
-        return picture if jev_accepts("image/jpeg", picture) else None
+    async def _pictures(self, hits: list[SearchHit | None]) -> list[bytes | None]:
+        """The JPEG the reranker judges each image or PDF page hit by, or None for a hit judged by its text: any
+        other hit (and None), and a picture outside 280-1568 px a side (a small photo, or a long receipt shrunk
+        to fit), which image rerankers refuse, and one refused image fails the whole request. The files are
+        read in one request: one each was ~50 connections a PDF search, all at once."""
+        keys = [h.passage.media_key if h and h.passage.modality == "image" else None for h in hits]
+        data = await self._engine._file_storage.retrieve_many([k for k in keys if k])
 
-    async def _within_budget(
-        self, bank_id: str, hits: list[SearchHit], max_tokens: int, trace: SearchTrace | None = None
+        async def judged(key: str | None) -> bytes | None:
+            if not key:
+                return None
+            picture = await asyncio.to_thread(media.judge_picture, data[key])
+            return picture if jev_accepts("image/jpeg", picture) else None
+
+        return list(await asyncio.gather(*(judged(k) for k in keys)))
+
+    def _within_budget(
+        self,
+        hits: list[SearchHit],
+        passages: dict[tuple[str, int], KnowledgePassage],
+        max_tokens: int,
+        trace: SearchTrace | None = None,
     ) -> _Budgeted:
         """The ranked hits that fit in ``max_tokens``, each text hit with the passages around it as its
         ``context``. In rank order, a text hit comes with one passage on each side (the query-time step that
@@ -2165,19 +2244,9 @@ class KnowledgeService:
         another result already holds comes back there (merged), and that result does not grow. What is
         left then widens the best results, one passage a side at a time, up to ``MAX_CONTEXT_PASSAGES``. A hit with no text of its own costs
         ``MEDIA_HIT_TOKENS`` plus its text. This replaced ``top_k`` and ``neighbors``: a caller holds a token
-        budget, and a count of hits said nothing about how much text came back."""
-        text_hits = [h for h in hits if h.passage.modality == "text"]
-        passages: dict[tuple[str, int], KnowledgePassage] = {}
-
-        async def load(ranges: list[tuple[str, int, int]]) -> None:
-            wanted = [r for r in ranges if any((r[0], i) not in passages for i in range(r[1], r[2] + 1))]
-            if not wanted:
-                return
-            found = await self.store.passage_ranges(bank_id, wanted)
-            for (document_id, _first, _last), run in found.items():
-                for p in run:
-                    passages[(document_id, p.index)] = p
-
+        budget, and a count of hits said nothing about how much text came back. ``passages`` are the ones
+        around the text hits, read with the search (``KnowledgeStore.search``, ``around``): this read them
+        itself, once for the hits and again for each widening."""
         tokens: dict[tuple[str, int], int] = {}
 
         def cost(document_id: str, index: int) -> int:
@@ -2186,7 +2255,6 @@ class KnowledgeService:
                 tokens[key] = count_tokens(passages[key].text or "") if key in passages else 0
             return tokens[key]
 
-        await load([(h.document.document_id, max(0, h.passage.index - 1), h.passage.index + 1) for h in text_hits])
         items: list[SearchResultItem] = []
         windows: list[_Window] = []
         held: dict[str, set[int]] = {}  # per document, the passages some window already returns
@@ -2240,10 +2308,6 @@ class KnowledgeService:
             ]
             if not growing:
                 break
-            await load(
-                [(w.document_id, w.first - 1, w.first - 1) for w in growing if w.grows_before and w.first > 0]
-                + [(w.document_id, w.last + 1, w.last + 1) for w in growing if w.grows_after]
-            )
             for w in growing:  # rank order: the best hits widen first
                 for side in ("before", "after"):
                     if not (w.grows_before if side == "before" else w.grows_after):
@@ -2275,6 +2339,25 @@ class KnowledgeService:
             trace.tokens_used = used
             trace.hits = [_traced(hit, items, windows) for hit in hits]
         return _Budgeted(items, used)
+
+
+def _judged_texts(hits: list[SearchHit], nearby: dict[tuple[str, int], KnowledgePassage]) -> list[str]:
+    """The text each hit is judged by: a text passage with the passages around it (``nearby``, read with the
+    search), grown evenly on both sides up to ``JUDGE_CONTEXT_TOKENS``; any other hit its own text."""
+    out = []
+    for hit in hits:
+        own = hit.passage.text or ""
+        if hit.passage.modality != "text":
+            out.append(own)
+            continue
+        document_id, index = hit.document.document_id, hit.passage.index
+        run = [
+            nearby[(document_id, i)]
+            for i in range(max(0, index - _JUDGE_SPAN), index + _JUDGE_SPAN + 1)
+            if (document_id, i) in nearby
+        ]
+        out.append(_around(run, index, JUDGE_CONTEXT_TOKENS) or own)
+    return out
 
 
 def _traced(hit: SearchHit, items: list[SearchResultItem], windows: list[_Window]) -> TracedHit:
@@ -2451,6 +2534,20 @@ def _close_drafts(drafts: Iterator[media.PassageDraft]) -> None:
     close = getattr(drafts, "close", None)  # generators release the PDF / media they hold
     if close is not None:
         close()
+
+
+def _deleting(path: str, drafts: Iterator[media.PassageDraft]) -> Iterator[media.PassageDraft]:
+    """``drafts``, then ``path`` deleted: when they run out, fail, or are closed part-way."""
+    try:
+        yield from drafts
+    finally:
+        _close_drafts(drafts)
+        _unlink(path)
+
+
+def _unlink(path: str) -> None:
+    with contextlib.suppress(FileNotFoundError):
+        os.unlink(path)
 
 
 def _next_draft(drafts: Iterator[media.PassageDraft]) -> media.PassageDraft | None:

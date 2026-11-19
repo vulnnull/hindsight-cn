@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..api.content_disposition import content_disposition
 from ..config import get_config
 from ..engine.aiohttp_session import UpstreamHTTPError
 from ..engine.search.tags import TagGroup, TagsMatch
@@ -531,7 +532,7 @@ def _http_error(exc: Exception) -> HTTPException:
 def _content_disposition(filename: str | None) -> dict[str, str]:
     if not filename:
         return {}
-    return {"Content-Disposition": f"inline; filename*=UTF-8''{quote(filename)}"}
+    return {"Content-Disposition": content_disposition("inline", filename)}
 
 
 # --- router ---------------------------------------------------------------------------------
@@ -743,7 +744,9 @@ def build_router(get_request_context: Callable[..., RequestContext]) -> APIRoute
             opts = parsed.files[i] if parsed.files else KnowledgeIngestFileOptions()
             items.append(
                 IngestItem(
-                    data=await upload.read(),
+                    # Not read: Starlette spooled it to disk, and the service reads it from there in pieces.
+                    data=b"",
+                    file=upload.file,
                     filename=upload.filename,
                     content_type=_content_type(upload),
                     document_id=opts.document_id,

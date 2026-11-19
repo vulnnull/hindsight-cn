@@ -26,11 +26,12 @@ from urllib.parse import quote, unquote
 
 import orjson
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
-from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from hindsight_api.api.admission import AdmissionAbandoned, AdmissionRejected, build_controller_from_config
+from hindsight_api.api.content_disposition import content_disposition
 from hindsight_api.api.disconnect import ClientDisconnectCancellationMiddleware, get_scope_cancellation_token
+from hindsight_api.api.gzip_offload import OffloadingGZipMiddleware
 from hindsight_api.api.observability import HttpObservabilityMiddleware
 from hindsight_api.api.passthrough_headers import collect_passthrough_headers
 from hindsight_api.api.unknown_params import UnknownParamsRoute, use_unknown_params_routes
@@ -4669,7 +4670,7 @@ def create_app(
     # A negative floor drops the middleware entirely.
     gzip_min_size = get_config().gzip_min_size
     if gzip_min_size >= 0:
-        app.add_middleware(GZipMiddleware, minimum_size=gzip_min_size)
+        app.add_middleware(OffloadingGZipMiddleware, minimum_size=gzip_min_size)
 
     # ---------------------------------------------------------------------------
     # Patch OpenAPI schema: align ValidationError with Pydantic v2 error format
@@ -9089,7 +9090,7 @@ def _register_routes(app: FastAPI):
             if file_info is None:
                 raise HTTPException(status_code=404, detail="File not found")
 
-            headers = {"Content-Disposition": f'attachment; filename="{bank_id}-documents.zip"'}
+            headers = {"Content-Disposition": content_disposition("attachment", f"{bank_id}-documents.zip")}
             if file_info.size is not None:
                 headers["Content-Length"] = str(file_info.size)
 

@@ -12,6 +12,7 @@ import io
 import json
 import math
 import uuid
+from collections.abc import AsyncIterator
 from dataclasses import replace
 
 import pytest
@@ -263,6 +264,72 @@ def test_audio_and_video_are_cut_into_timed_windows():
     assert media.decode_audio_pcm(video[0].data or b"").size > 16000 * 7
     with pytest.raises(media.MediaError, match="limit is 5s"):
         list(media.split_media(_tone(8, video=False), "audio", window_seconds=30, overlap_seconds=5, max_seconds=5))  # fmt: skip
+
+
+def test_an_image_over_the_pixel_limit_is_refused_before_it_is_decoded():
+    big = _png((10, 20, 30), size=(2000, 1000))  # 2 MP
+    with pytest.raises(media.MediaError, match="limit is 1 MP"):
+        media.split_image(big, max_megapixels=1)
+    assert len(media.split_image(big, max_megapixels=2)) == 1
+
+
+def test_the_heic_fallback_is_not_a_way_around_the_pixel_limit():
+    # What Pillow cannot read goes to PyAV (HEIC); its picture size is checked before decoding too.
+    import av
+    import numpy as np
+
+    out = io.BytesIO()
+    with av.open(out, "w", format="mp4") as dst:
+        v = dst.add_stream("libx264", rate=1)
+        v.width, v.height, v.pix_fmt = 2000, 1000, "yuv420p"
+        dst.mux(v.encode(av.VideoFrame.from_ndarray(np.zeros((1000, 2000, 3), np.uint8), format="rgb24")))
+        dst.mux(v.encode(None))
+    with pytest.raises(media.MediaError, match="limit is 1 MP"):
+        media.split_image(out.getvalue(), max_megapixels=1)
+    assert len(media.split_image(out.getvalue(), max_megapixels=2)) == 1
+
+
+async def test_a_media_type_can_have_its_own_size_limit(api_client, kb, monkeypatch):
+    from hindsight_api.config import clear_config_cache
+
+    monkeypatch.setenv("HINDSIGHT_API_KB_MAX_FILE_MB_BY_MEDIA_TYPE", "image=1")
+    clear_config_cache()
+    try:
+        payload = b"\0" * (1024 * 1024 + 1)  # over 1 MB; never decoded, the size is checked first
+        r = await _upload(api_client, kb, [("big.png", payload, "image/png")])
+        assert r.status_code == 413 and "the limit for image is 1MB" in r.json()["detail"], r.text
+        # Every other type keeps the server's limit (500 MB).
+        r = await _upload(api_client, kb, [("big.txt", b"word " * 300_000, "text/plain")])
+        assert r.status_code == 202, r.text
+    finally:
+        monkeypatch.delenv("HINDSIGHT_API_KB_MAX_FILE_MB_BY_MEDIA_TYPE")
+        clear_config_cache()
+
+
+# pdf.js's test/pdfs/Pages-tree-refs.pdf: page 2's page tree loops back on itself ("Failed to load page").
+_BROKEN_PAGE_PDF = (
+    "JVBERi0xLjcKCjEgMCBvYmoKICA8PCAvVHlwZSAvQ2F0YWxvZwogICAgIC9QYWdlcyAyIDAgUgogID4+CmVuZG9iagoKMiAwIG9i"
+    "agogIDw8IC9UeXBlIC9QYWdlcwogICAgIC9LaWRzIFs2IDAgUiAzIDAgUl0KICAgICAvQ291bnQgMgogICAgIC9NZWRpYUJveCBb"
+    "MCAwIDU5NSA4NDJdCiAgPj4KZW5kb2JqCgozIDAgb2JqCiAgPDwgL1R5cGUgL1BhZ2VzCiAgICAgL0tpZHMgWzQgMCBSXQogICAg"
+    "IC9Db3VudCAxCiAgICAgL01lZGlhQm94IFswIDAgNTk1IDg0Ml0KICA+PgplbmRvYmoKCjQgMCBvYmoKICA8PCAvVHlwZSAvUGFn"
+    "ZXMKICAgICAvS2lkcyBbNSAwIFJdCiAgICAgL0NvdW50IDEKICAgICAvTWVkaWFCb3ggWzAgMCA1OTUgODQyXQogID4+CmVuZG9i"
+    "agoKNSAwIG9iagogIDw8IC9UeXBlIC9QYWdlcwogICAgIC9LaWRzIFszIDAgUl0KICAgICAvQ291bnQgMQogICAgIC9NZWRpYUJv"
+    "eCBbMCAwIDU5NSA4NDJdCiAgPj4KZW5kb2JqCgo2IDAgb2JqCiAgPDwgL1R5cGUgL1BhZ2UKICAgICAvUGFyZW50IDIgMCBSCiAg"
+    "ICAgL1Jlc291cmNlcwogICAgICA8PCAvRm9udAogICAgICAgICAgPDwgL0YxCiAgICAgICAgICAgICAgPDwgL1R5cGUgL0ZvbnQK"
+    "ICAgICAgICAgICAgICAgICAvU3VidHlwZSAvVHlwZTEKICAgICAgICAgICAgICAgICAvQmFzZUZvbnQgL0NvdXJpZXIKICAgICAg"
+    "ICAgICAgICA+PgogICAgICAgICAgPj4KICAgICAgPj4KICAgICAvQ29udGVudHMgWzcgMCBSXQogID4+CmVuZG9iagoKNyAwIG9i"
+    "agogIDw8IC9MZW5ndGggNjkgPj4Kc3RyZWFtCiAgQlQKICAgIC9GMSAyMiBUZgogICAgMzAgODAwIFRkCiAgICAoVGVzdGNhc2U6"
+    "ICdQYWdlcyBsb29wJykgVGoKICBFVAplbmRzdHJlYW0KZW5kb2JqCgp4cmVmCjAgOAowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAw"
+    "MDAwMTAgMDAwMDAgbiAKMDAwMDAwMDA2OSAwMDAwMCBuIAowMDAwMDAwMTc2IDAwMDAwIG4gCjAwMDAwMDAyNzcgMDAwMDAgbiAK"
+    "MDAwMDAwMDM3OCAwMDAwMCBuIAowMDAwMDAwNDc5IDAwMDAwIG4gCjAwMDAwMDA3NDQgMDAwMDAgbiAKdHJhaWxlcgogIDw8IC9S"
+    "b290IDEgMCBSCiAgICAgL1NpemUgOAogID4+CnN0YXJ0eHJlZgo4NjYKJSVFT0YK"
+)
+
+
+def test_a_pdf_page_that_cannot_load_is_skipped_and_the_rest_kept():
+    # Raised, the page error was retried three times and lost page 1 with it.
+    pages = list(media.split_pdf(base64.b64decode(_BROKEN_PAGE_PDF), page_pixels=256, max_pages=10))
+    assert [p.page for p in pages] == [1] and pages[0].data
 
 
 def test_unreadable_media_is_a_media_error():
@@ -799,6 +866,81 @@ async def test_the_reranker_reranks_search_hits_by_their_pictures(api_client, kb
     assert judge.queries == ["red"]
 
 
+def _count_database_use(monkeypatch, memory) -> dict[str, int]:
+    """Connections the knowledge code takes, statements it runs on them, and file reads, as they happen."""
+    import contextlib
+
+    from hindsight_api.knowledge import service as service_module
+    from hindsight_api.knowledge import store as store_module
+
+    use = {"connections": 0, "statements": 0, "file_reads": 0, "file_batches": 0}
+    real_acquire = store_module.acquire_with_retry
+
+    class Counted:
+        def __init__(self, conn):
+            self._conn = conn
+
+        def __getattr__(self, name):
+            attr = getattr(self._conn, name)
+            if name not in ("fetch", "fetchrow", "fetchval", "execute"):
+                return attr
+
+            async def counted(*args, **kwargs):
+                use["statements"] += 1
+                return await attr(*args, **kwargs)
+
+            return counted
+
+    @contextlib.asynccontextmanager
+    async def acquire(*args, **kwargs):
+        async with real_acquire(*args, **kwargs) as conn:
+            use["connections"] += 1
+            yield Counted(conn)
+
+    monkeypatch.setattr(store_module, "acquire_with_retry", acquire)
+    monkeypatch.setattr(service_module, "acquire_with_retry", acquire)
+    storage = memory._file_storage
+    real_retrieve, real_many = storage.retrieve, storage.retrieve_many
+
+    async def retrieve(key):
+        use["file_reads"] += 1
+        return await real_retrieve(key)
+
+    async def retrieve_many(keys):
+        use["file_batches"] += 1
+        return await real_many(keys)
+
+    monkeypatch.setattr(storage, "retrieve", retrieve)
+    monkeypatch.setattr(storage, "retrieve_many", retrieve_many)
+    return use
+
+
+async def test_a_search_takes_one_connection_and_reads_its_pictures_at_once(api_client, memory, kb, judge, monkeypatch):
+    # The bank check, the keyword words' rarity, the candidates and their scores are one statement, the best
+    # pages' sentence vectors a second, the text around the hits a third: one connection. It was six (and a
+    # transaction for the scan settings), plus one per page picture shown to the reranker, all at once.
+    await _upload(
+        api_client,
+        kb,
+        [("manual.pdf", _pdf((250, 10, 10), (10, 10, 250)), "application/pdf")],
+        [{"document_id": "manual"}],
+    )
+    r = await api_client.post(f"{KB}/{kb}/ingest", json={"items": [{"document_id": "faq", "text": "red pages"}]})
+    assert r.status_code == 200, r.text
+    use = _count_database_use(monkeypatch, memory)
+    hits = await _search(api_client, kb, query="red pages")
+    assert {h["document_id"] for h in hits} == {"manual", "faq"}
+    assert len(judge.pictures) == 2  # both pages shown by their pictures
+    assert use == {"connections": 1, "statements": 3, "file_reads": 0, "file_batches": 1}
+    # A bank that is not a knowledge bank is found out by the same statement.
+    use.update(connections=0, statements=0)
+    assert (await api_client.post(f"{KB}/kb-missing/search", json={"query": "x"})).status_code == 404
+    assert (use["connections"], use["statements"]) == (1, 1)
+    # Fuzzy tags are resolved against the bank's tags first: the bank is checked before, still a 404.
+    fuzzy = {"query": "x", "tag_groups": [{"tags": ["clouds"], "match": "any", "resolve": "fuzzy"}]}
+    assert (await api_client.post(f"{KB}/kb-missing/search", json=fuzzy)).status_code == 404
+
+
 async def test_a_search_by_an_image_sends_the_picture_as_the_query_even_without_text(api_client, kb, judge):
     await _upload(
         api_client,
@@ -1037,7 +1179,7 @@ async def _scored(memory, bank_id: str, query: str) -> list:
 
     request = SearchRequest(query=query, query_image=None, filters=SearchFilters())
     service = get_knowledge_service(memory)
-    return await service._search(bank_id, request, await service._embed_query(request))
+    return (await service._search(bank_id, request, await service._embed_query(request))).hits
 
 
 async def test_pdf_pages_are_scored_from_image_bands_and_text_layer(api_client, memory, kb, monkeypatch):
@@ -1730,6 +1872,10 @@ async def test_one_document_over_the_memory_budget_goes_in_staged_pieces(
     api_client, memory, kb, fake_embedder, memory_budget_mb, caplog, monkeypatch
 ):
     memory_budget_mb(1)
+    from hindsight_api.knowledge import store as store_module
+
+    # Moved into place a few at a time (one statement once ran past the command timeout): all must arrive.
+    monkeypatch.setattr(store_module, "_MOVE_WINDOW", 3)
     store = get_knowledge_service(memory).store
     pieces: list[int] = []
     real = store.stage_passages
@@ -1936,10 +2082,10 @@ async def test_a_file_replaced_while_its_ingest_reads_it_is_skipped_not_retried(
     assert r.status_code == 200, r.text
     old_key = (await store.get_documents(kb, ["d"]))["d"].storage_key
     await store.set_statuses(kb, [StatusUpdate("d", "pending", None, old_key)])  # as if its task were queued
-    real = memory._file_storage.retrieve
+    real = memory._file_storage.retrieve_stream
     replaced = False
 
-    async def retrieve(key: str) -> bytes:
+    async def retrieve_stream(key: str) -> AsyncIterator[bytes]:
         # The newer upload lands between the batch's check and its read, deleting the old file.
         nonlocal replaced
         if key == old_key and not replaced:
@@ -1947,9 +2093,10 @@ async def test_a_file_replaced_while_its_ingest_reads_it_is_skipped_not_retried(
             r = await api_client.post(f"{KB}/{kb}/ingest", json={"items": [{"document_id": "d", "text": "new red"}]})
             assert r.status_code == 200, r.text
             raise FileNotFoundError(key)
-        return await real(key)
+        async for chunk in real(key):
+            yield chunk
 
-    monkeypatch.setattr(memory._file_storage, "retrieve", retrieve)
+    monkeypatch.setattr(memory._file_storage, "retrieve_stream", retrieve_stream)
     await service.process_batch(kb, [_Work("d", old_key)])  # no error, so no retry
     doc = (await store.get_documents(kb, ["d"]))["d"]
     assert doc.status == "ready" and doc.storage_key != old_key
@@ -1958,10 +2105,11 @@ async def test_a_file_replaced_while_its_ingest_reads_it_is_skipped_not_retried(
     # Gone under the current version, the file cannot come back: the document fails, once.
     await store.set_statuses(kb, [StatusUpdate("d", "pending", None, doc.storage_key)])
 
-    async def gone(key: str) -> bytes:
+    async def gone(key: str) -> AsyncIterator[bytes]:
         raise FileNotFoundError(key)
+        yield b""  # an async generator, as retrieve_stream is
 
-    monkeypatch.setattr(memory._file_storage, "retrieve", gone)
+    monkeypatch.setattr(memory._file_storage, "retrieve_stream", gone)
     with pytest.raises(media.MediaError):  # with retries left, a transient error would leave it pending
         await service.process_batch(kb, [_Work("d", doc.storage_key)], retries_left=True)
     failed = (await store.get_documents(kb, ["d"]))["d"]
@@ -1990,13 +2138,14 @@ async def test_each_hit_gets_its_own_result_and_none_holds_more_than_five_passag
     # Hits at 2 (best), 7, then 5: each is a result of its own with its free neighbours (5 gets 4, as 6 is
     # 7's). A window used to grow to take in a nearby hit and fold into the next: one whole-document result.
     hits = [SearchHit(passages[i], document, 1.0 - n / 10) for n, i in enumerate((2, 7, 5))]
-    items = (await service._within_budget(kb, hits, sum(weight[1:9]))).items
+    nearby = {("f", p.index): p for p in passages}
+    items = service._within_budget(hits, nearby, sum(weight[1:9])).items
     assert [(i.hit.passage.index, i.context_first, i.context_last) for i in items] == [(2, 1, 3), (7, 6, 8), (5, 4, 5)]
     # A hit already inside a better result comes back there, and nothing grows.
-    items = (await service._within_budget(kb, [hits[0], SearchHit(passages[3], document, 0.5)], sum(weight[1:4]))).items
+    items = service._within_budget([hits[0], SearchHit(passages[3], document, 0.5)], nearby, sum(weight[1:4])).items
     assert [(i.hit.passage.index, i.context_first, i.context_last) for i in items] == [(2, 1, 3)]
     # Leftover budget widens a result to five passages at most, however much is left.
-    items = (await service._within_budget(kb, [hits[0]], sum(weight))).items
+    items = service._within_budget([hits[0]], nearby, sum(weight)).items
     assert [(i.context_first, i.context_last) for i in items] == [(0, 4)]
 
 
@@ -2529,3 +2678,55 @@ async def test_each_bank_has_its_own_vector_index_that_its_search_uses(api_clien
     assert (await api_client.delete(f"{KB}/{kb}")).status_code == 200
     assert await indexes(kb) == [] and len(await indexes(other)) == 2
     await api_client.delete(f"{KB}/{other}")
+
+
+def test_overlapping_ranges_around_hits_are_read_once():
+    from hindsight_api.knowledge.store import _merged_ranges
+
+    spans = [("b", 0, 2), ("a", 5, 9), ("a", 0, 4), ("a", 12, 14), ("a", 8, 11)]
+    # Touching (0-4, 5-9) and overlapping (5-9, 8-11) spans of one document join; another document's never do.
+    assert _merged_ranges(spans) == [("a", 0, 14), ("b", 0, 2)]
+    assert _merged_ranges([("a", 0, 2), ("a", 4, 6)]) == [("a", 0, 2), ("a", 4, 6)]
+
+
+def test_a_size_limit_per_media_type_is_read_from_the_server_setting():
+    from hindsight_api.config import _parse_kb_size_limits
+
+    assert _parse_kb_size_limits(" video=2000, image=50 ") == {"video": 2000, "image": 50}
+    assert _parse_kb_size_limits(None) == {}
+    for bad in ("pictures=5", "video=lots", "video=0", "video"):
+        with pytest.raises(ValueError, match="MAX_FILE_MB_BY_MEDIA_TYPE"):
+            _parse_kb_size_limits(bad)
+
+
+async def test_a_document_with_more_passages_than_one_insert_holds_is_stored_whole(api_client, kb, monkeypatch):
+    # Passages go in in chunks: one insert of a big table's thousands ran past the command timeout.
+    from hindsight_api.knowledge import store
+
+    monkeypatch.setattr(store, "_INSERT_CHUNK", 3)
+    r = await api_client.patch(f"{KB}/{kb}/config", json={"updates": {"text_passage_tokens": 32}})
+    assert r.status_code == 200, r.text
+    text = "\n\n".join(f"Section {n}. " + ("Unrelated filler words. " * 20) for n in range(8))
+    r = await api_client.post(f"{KB}/{kb}/ingest", json={"items": [{"document_id": "manual", "text": text}]})
+    assert r.status_code == 200, r.text
+    detail = (await api_client.get(f"{KB}/{kb}/documents/manual")).json()
+    assert detail["passage_count"] > 3 and len(detail["passages"]) == detail["passage_count"]
+    assert [p["index"] for p in detail["passages"]] == list(range(detail["passage_count"]))
+
+
+def test_an_office_converter_that_dies_fails_its_file_and_the_next_gets_a_new_one(monkeypatch):
+    # The converter runs in a worker process: killed for its memory on one huge spreadsheet, it fails that
+    # file for good (no retry would fare better) and the next file starts a fresh worker.
+    from concurrent.futures import Future
+    from concurrent.futures.process import BrokenProcessPool
+
+    class DeadPool:
+        def submit(self, *args):
+            future: Future = Future()
+            future.set_exception(BrokenProcessPool("killed"))
+            return future
+
+    monkeypatch.setattr(media, "_OFFICE_POOL", DeadPool())
+    with pytest.raises(media.MediaError, match="converter died"):
+        media.read_text(b"PK", "huge.xlsx")
+    assert media._OFFICE_POOL is None

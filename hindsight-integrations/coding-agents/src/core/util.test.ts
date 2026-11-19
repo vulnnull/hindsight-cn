@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MIN_IDEMPOTENT_RETAIN_VERSION } from "./hindsight";
-import { binOnPath, semverGte } from "./util";
+import { binOnPath, hookNode, isOurMcpEntry, nodeBinary, semverGte } from "./util";
 
 describe("binOnPath", () => {
   let dir: string;
@@ -76,5 +76,60 @@ describe("semverGte", () => {
   it("treats a missing patch component as zero", () => {
     expect(semverGte("0.9", "0.8.6")).toBe(true);
     expect(semverGte("0.8", "0.8.6")).toBe(false);
+  });
+});
+
+describe("nodeBinary", () => {
+  const versions = process.versions as Record<string, string | undefined>;
+  afterEach(() => {
+    delete versions.bun;
+    delete versions.electron;
+  });
+
+  it("reuses the running Node, so background jobs don't need node on PATH (#6557)", () => {
+    expect(nodeBinary()).toBe(process.execPath);
+  });
+
+  it("falls back to `node` inside Bun or Electron, whose binary is not Node", () => {
+    versions.bun = "1.2.0";
+    expect(nodeBinary()).toBe("node");
+    delete versions.bun;
+    versions.electron = "33.0.0";
+    expect(nodeBinary()).toBe("node");
+  });
+});
+
+describe("hookNode", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "hooknode-"));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  // An absolute path would break every hook on the next Homebrew/nvm upgrade.
+  it("writes plain `node` when PATH has one", () => {
+    writeFileSync(join(dir, "node"), "");
+    chmodSync(join(dir, "node"), 0o755);
+    expect(hookNode({ platform: "darwin", env: { PATH: dir } })).toBe("node");
+  });
+
+  it("writes this Node's path when PATH has none, since `node` could not run at all (#6557)", () => {
+    expect(hookNode({ platform: "linux", env: { PATH: dir } })).toBe(process.execPath);
+  });
+
+  it("keeps `node` on Windows", () => {
+    expect(hookNode({ platform: "win32", env: { PATH: dir } })).toBe("node");
+  });
+});
+
+describe("isOurMcpEntry", () => {
+  const args = ["/h/.hindsight/coding-agents/dist/mcp-server.js"];
+  it("recognises our entry under plain `node` or an absolute Node path", () => {
+    expect(isOurMcpEntry({ command: "node", args })).toBe(true);
+    expect(isOurMcpEntry({ command: "/nix/store/x-nodejs/bin/node", args })).toBe(true);
+    expect(isOurMcpEntry({ command: "C:\\nodejs\\node.exe", args })).toBe(true);
+  });
+  it("rejects another command running the same script", () => {
+    expect(isOurMcpEntry({ command: "/usr/bin/bun", args })).toBe(false);
   });
 });
