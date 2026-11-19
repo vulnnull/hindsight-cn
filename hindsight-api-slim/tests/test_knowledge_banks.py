@@ -726,13 +726,15 @@ class _JudgeByPicture:
     relevant; a text document, not at all. ``settings`` are the server's knowledge reranker settings."""
 
     def __init__(self) -> None:
-        self.settings: dict[str, object] = {"kb_reranker_images": True}
+        self.settings: dict[str, object] = {"kb_reranker_images": True, "kb_reranker_query_images": True}
         self.pictures: list[Image.Image] = []
         self.texts: list[str] = []
         self.requests: list[int] = []  # how many documents each request held
+        self.queries: list[str | dict[str, str]] = []
 
     async def scores(self, query, documents):
         self.requests.append(len(documents))
+        self.queries.append(query)
         scores = []
         for document in documents:
             if isinstance(document, str):
@@ -793,10 +795,108 @@ async def test_the_reranker_reranks_search_hits_by_their_pictures(api_client, kb
     assert judge.requests == [3]
     assert (hits[0]["document_id"], hits[0]["page"]) == ("manual", 2)
 
-    # A search with no text is not reranked: the reranker scores the hits against the query's words.
-    judge.pictures.clear()
-    await _search(api_client, kb, query_image=base64.b64encode(_png((0, 0, 255))).decode())
-    assert judge.pictures == []
+    # A text search sends its query as the plain string.
+    assert judge.queries == ["red"]
+
+
+async def test_a_search_by_an_image_sends_the_picture_as_the_query_even_without_text(api_client, kb, judge):
+    await _upload(
+        api_client,
+        kb,
+        [("manual.pdf", _pdf((250, 10, 10), (10, 10, 250)), "application/pdf")],
+        [{"document_id": "manual"}],
+    )
+    r = await api_client.post(f"{KB}/{kb}/ingest", json={"items": [{"document_id": "faq", "text": "some notes"}]})
+    assert r.status_code == 200, r.text
+    photo = _png((0, 0, 255), size=(300, 300))
+    b64 = base64.b64encode(photo).decode()
+
+    await _search(api_client, kb, query_image=b64)
+    (query,) = judge.queries
+    assert isinstance(query, dict) and set(query) == {"type", "b64"} and query["type"] == "image"
+    sent = Image.open(io.BytesIO(base64.b64decode(query["b64"])))
+    assert sent.format == "JPEG" and sent.size == (300, 300)
+    assert judge.requests == [3]  # reranked: the pages and the note in one request
+
+    judge.queries.clear()
+    await _search(api_client, kb, query="blue", query_image=b64)
+    (query,) = judge.queries
+    assert isinstance(query, dict) and query["text"] == "blue" and query["type"] == "image"
+
+    # A reranker that reads no images is sent the text, and an image alone is not reranked.
+    judge.settings["kb_reranker_images"] = False
+    judge.queries.clear()
+    await _search(api_client, kb, query="blue", query_image=b64)
+    assert judge.queries == ["blue"]
+    judge.queries.clear()
+    await _search(api_client, kb, query_image=b64)
+    assert judge.queries == []
+
+
+async def test_the_query_picture_takes_its_share_of_the_rerank_window(api_client, kb, judge):
+    items = [{"document_id": f"note{i}", "text": f"note {i} about the blue key. " + "detail " * 140} for i in range(10)]
+    r = await api_client.post(f"{KB}/{kb}/ingest", json={"items": items})
+    assert r.status_code == 200, r.text
+    await _upload(api_client, kb, [("a.png", _png((0, 0, 255), size=(300, 300)), "image/png")], [{"document_id": "a"}])
+    judge.settings["kb_reranker_max_tokens"] = 4_000
+    image = base64.b64encode(_png((0, 0, 255), size=(300, 300))).decode()
+
+    await _search(api_client, kb, query="blue key", max_tokens=1_000_000)
+    await _search(api_client, kb, query="blue key", query_image=image, max_tokens=1_000_000)
+    by_text, with_picture = judge.requests
+    assert with_picture < by_text  # the picture's tokens come out of what the candidates may hold
+
+
+async def test_a_small_query_picture_is_enlarged_and_an_extreme_strip_left_out(api_client, kb, judge):
+    await _upload(api_client, kb, [("a.png", _png((0, 0, 255), size=(300, 300)), "image/png")], [{"document_id": "a"}])
+    r = await api_client.post(f"{KB}/{kb}/ingest", json={"items": [{"document_id": "faq", "text": "a blue note"}]})
+    assert r.status_code == 200, r.text
+
+    small = base64.b64encode(_png((0, 0, 255), size=(64, 64))).decode()
+    await _search(api_client, kb, query_image=small)
+    (query,) = judge.queries
+    assert Image.open(io.BytesIO(base64.b64decode(query["b64"]))).size == (280, 280)
+
+    # Aspect kept: 100x200 becomes 280x560.
+    judge.queries.clear()
+    await _search(api_client, kb, query_image=base64.b64encode(_png((0, 0, 255), size=(100, 200))).decode())
+    assert Image.open(io.BytesIO(base64.b64decode(judge.queries[0]["b64"]))).size == (280, 560)
+
+    # A 20x2000 strip cannot reach 280 on its short side within 1568 on the long one: left out.
+    judge.queries.clear()
+    strip = base64.b64encode(_png((0, 0, 255), size=(20, 2000))).decode()
+    await _search(api_client, kb, query_image=strip)
+    assert judge.queries == []
+    await _search(api_client, kb, query="blue", query_image=strip)
+    assert judge.queries == ["blue"]
+
+
+async def test_without_query_images_a_search_is_reranked_by_its_text_as_before(api_client, kb, judge):
+    judge.settings["kb_reranker_query_images"] = False
+    await _upload(api_client, kb, [("a.png", _png((0, 0, 255), size=(300, 300)), "image/png")], [{"document_id": "a"}])
+    r = await api_client.post(f"{KB}/{kb}/ingest", json={"items": [{"document_id": "faq", "text": "a blue note"}]})
+    assert r.status_code == 200, r.text
+    image = base64.b64encode(_png((0, 0, 255), size=(300, 300))).decode()
+
+    await _search(api_client, kb, query="blue", query_image=image)
+    assert judge.queries == ["blue"]  # the plain string, as before
+    judge.queries.clear()
+    await _search(api_client, kb, query_image=image)
+    assert judge.queries == []  # no text: not reranked
+
+
+async def test_a_search_by_a_video_is_reranked_by_its_text_only(api_client, kb, judge):
+    await _upload(api_client, kb, [("a.png", _png((0, 0, 255), size=(300, 300)), "image/png")], [{"document_id": "a"}])
+    r = await api_client.post(f"{KB}/{kb}/ingest", json={"items": [{"document_id": "faq", "text": "a blue note"}]})
+    assert r.status_code == 200, r.text
+    clip = base64.b64encode(_tone(6, video=True)).decode()
+    image = base64.b64encode(_png((0, 0, 255), size=(300, 300))).decode()
+
+    await _search(api_client, kb, query_video=clip)
+    await _search(api_client, kb, query_video=clip, query_image=image)
+    assert judge.queries == []
+    await _search(api_client, kb, query="blue", query_video=clip, query_image=image)
+    assert judge.queries == ["blue"]
 
 
 async def test_a_picture_too_small_for_the_reranker_is_judged_by_its_text(api_client, kb, judge):
@@ -2121,11 +2221,12 @@ async def test_media_hits_cost_a_fixed_amount_of_the_budget(api_client, kb):
 
 
 async def test_a_small_bank_finds_its_passages_next_to_a_big_one(api_client, memory, kb, monkeypatch):
-    """A small bank is searched exactly, not through the HNSW index shared by every bank (#6607).
+    """A small bank's search walks its own vectors, not a big bank's (#6607).
 
-    Statistics taken while one big bank filled the table make a generic plan scan that index;
-    filtered to a small bank, among thousands of equal vectors, it found none of the bank's own
-    passages. Every acquire here forces generic plans, as asyncpg's cached statements reach.
+    With one HNSW index shared by every bank, a generic plan (statistics taken while one big bank
+    filled the table) scanned it filtered to the small bank and, among thousands of equal vectors,
+    found none of its passages. Every acquire here forces generic plans, the worst case: the
+    per-bank index cannot serve one, so the small bank is scanned exactly.
     """
     from contextlib import asynccontextmanager
 
@@ -2383,3 +2484,48 @@ async def test_re_ingesting_with_reordered_tags_is_unchanged(api_client, kb):
         f"{KB}/{kb}/ingest", json={"items": [{"document_id": "a", "text": "red", "tags": ["y", "x"]}]}
     )
     assert r.json()["unchanged_document_ids"] == ["a"]
+
+
+async def test_each_bank_has_its_own_vector_index_that_its_search_uses(api_client, memory, kb, fake_embedder):
+    """A bank's search walks only its own vectors, not every bank's (one shared index returned short
+    once other banks' vectors crowded out the filtered ones)."""
+    from hindsight_api.engine.db_utils import acquire_with_retry
+    from hindsight_api.engine.schema import fq_table
+
+    other = f"kb-{uuid.uuid4().hex[:8]}"
+    assert (await api_client.post(KB, json={"bank_id": other})).status_code == 200
+    r = await api_client.post(f"{KB}/{kb}/ingest", json={"items": [{"document_id": "a", "text": "red key"}]})
+    assert r.status_code == 200, r.text
+
+    # The catalog, directly: which indexes exist is a storage fact no API reports.
+    async def indexes(bank_id: str) -> list[str]:
+        async with acquire_with_retry(await memory._get_backend()) as conn:
+            rows = await conn.fetch(
+                "SELECT indexname FROM pg_indexes WHERE tablename IN ('kb_passages', 'kb_passage_vectors') "
+                "AND indexdef LIKE '%hnsw%' AND indexdef LIKE $1",
+                f"%bank_id = '{bank_id}'%",
+            )
+            return sorted(r["indexname"] for r in rows)
+
+    names = await indexes(kb)
+    assert len(names) == 2 and len(await indexes(other)) == 2 and set(names).isdisjoint(await indexes(other))
+
+    async with acquire_with_retry(await memory._get_backend()) as conn, conn.transaction():
+        # A one-row bank is cheaper by its B-tree and a sort; with both off only a usable vector index is left.
+        await conn.execute("SET LOCAL enable_seqscan = off")
+        await conn.execute("SET LOCAL enable_sort = off")
+        vector = str(fake_embedder._norm([1.0] * fake_embedder.dimension))
+        plan = "\n".join(
+            r[0]
+            for r in await conn.fetch(
+                f"EXPLAIN SELECT idx FROM {fq_table('kb_passages')} x WHERE x.bank_id = $2 "
+                "ORDER BY x.embedding <=> $1::vector LIMIT 10",
+                vector,
+                kb,
+            )
+        )
+    assert any(n in plan for n in names), plan
+
+    assert (await api_client.delete(f"{KB}/{kb}")).status_code == 200
+    assert await indexes(kb) == [] and len(await indexes(other)) == 2
+    await api_client.delete(f"{KB}/{other}")
