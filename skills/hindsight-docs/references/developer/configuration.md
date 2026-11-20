@@ -297,7 +297,7 @@ For non-English banks (especially CJK) and the language/extraction-language trad
 | `HINDSIGHT_API_LLM_API_KEY` | API key for providers that require one; unused by `github-copilot`. Optional for `anthropic` when [Workload Identity Federation](https://platform.claude.com/docs/en/manage-claude/workload-identity-federation) is configured (see the Anthropic example below) | - |
 | `HINDSIGHT_API_LLM_MODEL` | Model name | `gpt-5-mini` |
 | `HINDSIGHT_API_LLM_BASE_URL` | Custom LLM endpoint | Provider default |
-| `HINDSIGHT_API_LLM_MAX_CONCURRENT` | Max concurrent LLM requests. When the cap is full, live API requests get the next free slot ahead of background jobs (async retain, consolidation) run by the in-process worker. | `32` |
+| `HINDSIGHT_API_LLM_MAX_CONCURRENT` | Max concurrent LLM requests. When the cap is full, live API requests get the next free slot ahead of background jobs (async retain, consolidation) run by the in-process worker. Waiting requests take turns by tenant, then by bank, and inside a bank the document closest to done goes first, so one large document cannot hold every slot while other banks wait. | `32` |
 | `HINDSIGHT_API_LLM_MAX_RETRIES` | Max retry attempts for LLM API calls | `3` |
 | `HINDSIGHT_API_LLM_INITIAL_BACKOFF` | Initial retry backoff in seconds (exponential backoff) | `1.0` |
 | `HINDSIGHT_API_LLM_MAX_BACKOFF` | Max retry backoff cap in seconds | `60.0` |
@@ -2685,6 +2685,16 @@ Disposition traits control how the bank reasons during reflect operations. Each 
 
 Knowledge banks hold documents (PDF, Office, images, audio, video, text) for search by meaning and keywords; a memory bank links them in its `knowledge_banks` config, and reflect reads them (see [Reflect](#reflect)). They are off by default while the feature is being built. The settings marked *per bank* can be overridden for one knowledge bank through `PATCH /v1/default/knowledge-banks/{bank_id}/config`; a bank can only narrow the server's limits, never widen them.
 
+**Limits on what one file may cost.** Each limit catches a different file, so a server that accepts uploads from users sets them together:
+
+- **Size** (`HINDSIGHT_API_KB_MAX_FILE_MB`, `HINDSIGHT_API_KB_MAX_FILE_MB_BY_MEDIA_TYPE`): checked at upload, before anything is stored.
+- **Pixels** (`HINDSIGHT_API_KB_MAX_IMAGE_MEGAPIXELS`): a small image file that decodes into a huge one.
+- **Length** (`HINDSIGHT_API_KB_MAX_MEDIA_SECONDS`, `HINDSIGHT_API_KB_MAX_PDF_PAGES`): how many passages a long recording or PDF becomes.
+- **Work** (`HINDSIGHT_API_KB_MAX_VIDEO_WORK_SECONDS`): the CPU it takes to cut a video, which depends on its frame size and rate, not its length or size.
+- **Memory** (`HINDSIGHT_API_KB_WORKER_MEMORY_MB`): what converting an Office file or rendering a PDF may hold, whatever the file declares. A PDF call also has 180 s.
+
+A file over a limit fails with the limit's name in its error, and its stored copy is deleted.
+
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `HINDSIGHT_API_ENABLE_KB` | Turn knowledge banks on. Off, their HTTP routes answer 404, reflect ignores linked knowledge banks and the control plane hides them. | `false` |
@@ -2698,7 +2708,7 @@ Knowledge banks hold documents (PDF, Office, images, audio, video, text) for sea
 | `HINDSIGHT_API_KB_EMBEDDINGS_BATCH_SIZE` | Passages per embedder request. | `32` |
 | `HINDSIGHT_API_KB_EMBEDDINGS_MAX_IN_FLIGHT` | Requests to a remote embedder in flight at once from this process, across every ingest and search. `0` removes the cap. | `16` |
 | `HINDSIGHT_API_KB_TEXT_EMBEDDINGS_*` | For the `text` provider: its own embeddings setup, any `HINDSIGHT_API_EMBEDDINGS_*` setting with this prefix (e.g. `HINDSIGHT_API_KB_TEXT_EMBEDDINGS_PROVIDER`). Unset uses the memory banks' embedder. | - |
-| `HINDSIGHT_API_KB_RERANKER_URL` | Rerank knowledge-bank search hits with any reranker speaking Cohere's rerank API (`{model, query, documents}` in, `{results: [{index, relevance_score}]}` out), at this full URL (e.g. `https://api.cohere.com/v2/rerank`). The best hits go in one request, in search order, as many as `HINDSIGHT_API_KB_RERANKER_MAX_TOKENS` holds; its scores reorder them, ties keeping the search's order, and the rest keep the search's order. A text hit is sent with the text around it (up to 2048 tokens); a video hit is not sent and keeps its search place; a search with neither text nor an image query is not reranked, and a search by a video is reranked by its text only (never by the clip). Reflect's search of the knowledge banks a memory bank links is reranked too; when the reranker is down, that bank's results are left out of the reflect. Unset: no rerank. | - |
+| `HINDSIGHT_API_KB_RERANKER_URL` | Rerank knowledge-bank search hits with any reranker speaking Cohere's rerank API (`{model, query, documents}` in, `{results: [{index, relevance_score}]}` out), at this full URL (e.g. `https://api.cohere.com/v2/rerank`). The best hits go in one request, in search order, as many as `HINDSIGHT_API_KB_RERANKER_MAX_TOKENS` holds; its scores reorder them, ties keeping the search's order, and the rest keep the search's order. A text hit is sent with the text around it (up to 2048 tokens); a video hit is not sent and keeps its search place; a search with neither text nor an image query is not reranked, and a search by a video is reranked by its text only (never by the clip). Reflect's search of the knowledge banks a memory bank links is reranked too; when the reranker is down, that bank's results are left out of the reflect. One search can skip it with `"enable_reranking": false` in the search request. Unset: no rerank. | - |
 | `HINDSIGHT_API_KB_RERANKER_MODEL` | The reranker's model. Required with the URL. | - |
 | `HINDSIGHT_API_KB_RERANKER_API_KEY` | Its API key, sent as a bearer token. | - |
 | `HINDSIGHT_API_KB_RERANKER_MAX_TOKENS` | Tokens of hits one rerank request holds on a `mid` or `high` search budget, which is how deep the rerank goes; a `low` budget holds at most 26,000. Sized for a reranker with a long window; lower it to your reranker's window, or it splits or refuses what it is sent. | `120000` |
@@ -2709,15 +2719,17 @@ Knowledge banks hold documents (PDF, Office, images, audio, video, text) for sea
 | `HINDSIGHT_API_KB_MAX_FILE_MB` | Largest file accepted. Server-only. A file is never held whole in memory: uploads are read from disk and stored in pieces, and the worker cuts a local copy. | `500` |
 | `HINDSIGHT_API_KB_MAX_FILE_MB_BY_MEDIA_TYPE` | Per media type, in place of `HINDSIGHT_API_KB_MAX_FILE_MB`: `<type>=<MB>` pairs, comma-separated (`document`, `image`, `audio`, `video`, `text`), e.g. `video=2000,image=50,text=100`. A type not listed uses the global limit. Server-only. Set `document` when Office files are accepted: a spreadsheet converts at about 100× its size in memory (a 27 MB `.xls` took 3.2 GB), one at a time per server. | - |
 | `HINDSIGHT_API_KB_MAX_IMAGE_MEGAPIXELS` | Largest image, in megapixels, checked from its header before decoding: decoding costs memory by pixels (about 3–4 bytes each), and a few-MB PNG can declare 30000×30000. Covers HEIC too. Server-only. | `178` |
+| `HINDSIGHT_API_KB_WORKER_MEMORY_MB` | Most memory one worker process converting an Office file or rendering a PDF may take, in MB (its address space; about 0.9 GB of it at rest). Past it that file fails and the server carries on: a 42 KB spreadsheet can declare 16.7 million cells and grow its converter until the container runs out, and on Kubernetes that kills the server with it. `0` sizes it from the machine: half the container's memory limit (or of the RAM) plus 1 GB. Server-only. | `0` |
 | `HINDSIGHT_API_KB_MAX_MEDIA_SECONDS` | Longest audio or video file. *Per bank*. | `7200` |
+| `HINDSIGHT_API_KB_MAX_VIDEO_WORK_SECONDS` | Most work one video may take to cut, in seconds of 1080p 30 fps video: cutting costs CPU by frames and their pixels, not by length or file size, so 4K at 60 fps counts about 3× per second and a file without a seek index (decoded from its start for every passage) far more. Checked from the header before decoding, and counted again while decoding. `0` turns it off. Server-only. | `7200` |
 | `HINDSIGHT_API_KB_MAX_PDF_PAGES` | Most pages in one PDF. *Per bank*. | `2000` |
-| `HINDSIGHT_API_KB_TEXT_PASSAGE_TOKENS` | Size of a text passage, in tokens; passages follow the document's structure. *Per bank*. | `256` |
+| `HINDSIGHT_API_KB_TEXT_PASSAGE_TOKENS` | Size of a text passage, in tokens; passages follow the document's structure. *Per bank*. | `512` |
 | `HINDSIGHT_API_KB_IMAGE_TOKENS` | Vision tokens per image for the `local` embedder (70–1120). *Per bank*. | `280` |
 | `HINDSIGHT_API_KB_PDF_PAGE_PIXELS` | Longest side of a rendered PDF page, in pixels. *Per bank*. | `1536` |
 | `HINDSIGHT_API_KB_PDF_BANDS` | Also embed three horizontal bands of each PDF page: better search, half the ingest speed. *Per bank*. | `false` |
 | `HINDSIGHT_API_KB_AUDIO_WINDOW_SECONDS` | Length of one audio passage. *Per bank*. | `60` |
 | `HINDSIGHT_API_KB_VIDEO_WINDOW_SECONDS` | Length of one video passage. *Per bank*. | `30` |
-| `HINDSIGHT_API_KB_MEDIA_OVERLAP_SECONDS` | Overlap between consecutive audio or video passages. *Per bank*. | `5` |
+| `HINDSIGHT_API_KB_MEDIA_OVERLAP_SECONDS` | Overlap between consecutive audio or video passages, at most half of each passage length (more is cut at half). *Per bank*. | `5` |
 | `HINDSIGHT_API_KB_PDF_TEXT_WEIGHT` | Search: a PDF page's score is `(1 - w)` × its image score + `w` × its best text score. | `0.7` |
 | `HINDSIGHT_API_KB_KEYWORD_WEIGHT` | Search: weight of the keyword match, fused in for a query with a word rare enough in the bank. | `0.2` |
 | `HINDSIGHT_API_KB_INGEST_CHILD_BYTES` | An async ingest is split into worker tasks of about this many bytes of files, so a big upload spreads across workers. | `1048576` |
@@ -2738,6 +2750,7 @@ Configuration for MCP server endpoints.
 | `HINDSIGHT_API_MCP_AUTH_TOKEN` | Bearer token for MCP authentication (optional) | - |
 | `HINDSIGHT_API_MCP_LOCAL_BANK_ID` | Memory bank ID for local MCP | `mcp` |
 | `HINDSIGHT_API_MCP_INSTRUCTIONS` | Additional instructions appended to retain/recall tool descriptions | - |
+| `HINDSIGHT_API_MCP_SERVER_INSTRUCTIONS` | Instructions sent to MCP clients in the `initialize` response when they connect to a single-bank endpoint (`/mcp/{bank_id}/`). At most 4,000 characters. Hierarchical — usually set per bank via the [config API](#hierarchical-configuration) as `mcp_server_instructions`. See [Per-bank server instructions](./mcp-server.md#per-bank-server-instructions). | - |
 
 **Tool Access Control:**
 
@@ -2765,6 +2778,19 @@ curl -X PATCH http://localhost:8888/v1/default/banks/config-demo-bank/config \
 ```
 
 When a bank-level `mcp_enabled_tools` is set, tools not in the list return a clear error when invoked (they still appear in the tools list for MCP protocol compatibility).
+
+**MCP server instructions per bank:**
+
+`mcp_server_instructions` is sent to MCP clients in the `initialize` response when they connect to the bank's single-bank endpoint. Set it per bank through the config API:
+
+```bash
+# Tell every MCP client that connects to this bank how to use it
+curl -X PATCH http://localhost:8888/v1/default/banks/config-demo-bank/config \
+  -H "Content-Type: application/json" \
+  -d '{"updates": {"mcp_server_instructions": "Read the document house-rules before anything else. Save new facts with the tag inbox."}}'
+```
+
+See [Per-bank server instructions](./mcp-server.md#per-bank-server-instructions) for how clients use it.
 
 **MCP Authentication:**
 

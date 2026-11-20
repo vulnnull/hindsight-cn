@@ -494,6 +494,9 @@
     "securityPrivacyFailedToSave": "Fehler beim Speichern der Sicherheits- und Datenschutzeinstellungen",
     "restrictToolsLabel": "Tools einschränken",
     "restrictToolsDescription": "Wenn deaktiviert, sind alle Tools verfügbar. Wenn aktiviert, können nur die ausgewählten Tools für diese Bank aufgerufen werden.",
+    "mcpServerInstructionsLabel": "MCP-Serveranweisungen",
+    "mcpServerInstructionsDescription": "Wird an KI-Tools gesendet, wenn sie sich mit der MCP-URL dieser Bank verbinden, damit sie wissen, wie die Bank zu nutzen ist: zum Beispiel, welches Dokument zuerst gelesen werden soll oder mit welchen Tags neue Fakten gespeichert werden. Bis zu 4.000 Zeichen.",
+    "mcpServerInstructionsPlaceholder": "Lies zuerst das Dokument 'house-rules'. Speichere neue Fakten mit dem Tag 'inbox'.",
     "modelsTitle": "Modelle",
     "modelsDescription": "Anbieterspezifische Modelleinstellungen",
     "geminiFailedToSave": "Gemini-Einstellungen konnten nicht gespeichert werden",
@@ -2722,7 +2725,7 @@
         },
         "media_overlap_seconds": {
           "label": "Überlappung (Sekunden)",
-          "description": "Wie viele Sekunden sich ein Abschnitt mit dem nächsten teilt, damit an einem Schnitt nichts verloren geht; muss kürzer als beide Längen sein."
+          "description": "Wie viele Sekunden sich ein Abschnitt mit dem nächsten teilt, damit an einem Schnitt nichts verloren geht; höchstens die Hälfte beider Längen."
         },
         "max_media_seconds": {
           "label": "Längste Datei (Sekunden)",
@@ -2738,6 +2741,8 @@
       "arm_extra_vectors_help": "Streifen, Text und Texteinheiten einer PDF-Seite, gleich durchsucht.",
       "arm_keyword": "Schlüsselwörter",
       "arm_keyword_help": "Volltexttreffer der selteneren Wörter der Anfrage, in jedem Dokument und jeder Sprache.",
+      "arm_document": "Ganze Dokumente",
+      "arm_document_help": "Jede Textpassage der 3 Dokumente, die die Suchen oben am besten einstufen, damit auch ein anders formulierter Teil bewertet wird.",
       "armScore": "Score in dieser Suche",
       "meaningTitle": "Bedeutungsscore",
       "meaningHelp": "Jeder der {count} Kandidaten, aus allen Vektoren bewertet und mit der besten Passage seines Dokuments gemittelt.",

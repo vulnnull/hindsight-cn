@@ -494,6 +494,9 @@
     "securityPrivacyFailedToSave": "Error al guardar la configuración de seguridad y privacidad",
     "restrictToolsLabel": "Restringir herramientas",
     "restrictToolsDescription": "Cuando está desactivado, todas las herramientas están disponibles. Cuando está activado, solo las herramientas seleccionadas pueden invocarse para este banco.",
+    "mcpServerInstructionsLabel": "Instrucciones del servidor MCP",
+    "mcpServerInstructionsDescription": "Se envían a las herramientas de IA cuando se conectan a la URL MCP de este banco, para que sepan cómo usarlo: por ejemplo, qué documento leer primero o con qué etiquetas guardar los hechos nuevos. Hasta 4000 caracteres.",
+    "mcpServerInstructionsPlaceholder": "Lee primero el documento 'house-rules'. Guarda los hechos nuevos con la etiqueta 'inbox'.",
     "modelsTitle": "Modelos",
     "modelsDescription": "Configuración de modelos específica del proveedor",
     "geminiFailedToSave": "Error al guardar la configuración de Gemini",
@@ -2722,7 +2725,7 @@
         },
         "media_overlap_seconds": {
           "label": "Solapamiento (segundos)",
-          "description": "Cuántos segundos comparte cada pasaje con el siguiente, para no perder nada en un corte; debe ser menor que ambas duraciones."
+          "description": "Cuántos segundos comparte cada pasaje con el siguiente, para no perder nada en un corte; como máximo la mitad de ambas duraciones."
         },
         "max_media_seconds": {
           "label": "Archivo más largo (segundos)",
@@ -2738,6 +2741,8 @@
       "arm_extra_vectors_help": "Bandas, texto y unidades de texto de una página PDF, buscados igual.",
       "arm_keyword": "Palabras clave",
       "arm_keyword_help": "Coincidencias de texto completo de las palabras más raras de la consulta, en todo documento e idioma.",
+      "arm_document": "Documentos completos",
+      "arm_document_help": "Cada pasaje de texto de los 3 documentos mejor clasificados por las búsquedas de arriba, para puntuar también una parte redactada distinto de la consulta.",
       "armScore": "Puntuación en esta búsqueda",
       "meaningTitle": "Puntuación de significado",
       "meaningHelp": "Cada uno de los {count} candidatos, puntuado con todos sus vectores y promediado con el mejor pasaje de su documento.",

@@ -494,6 +494,9 @@
     "securityPrivacyFailedToSave": "Échec de l'enregistrement des paramètres de sécurité et confidentialité",
     "restrictToolsLabel": "Restreindre les outils",
     "restrictToolsDescription": "Lorsque désactivé, tous les outils sont disponibles. Lorsqu'activé, seuls les outils sélectionnés peuvent être invoqués pour cette banque.",
+    "mcpServerInstructionsLabel": "Instructions du serveur MCP",
+    "mcpServerInstructionsDescription": "Envoyées aux outils d'IA lorsqu'ils se connectent à l'URL MCP de cette banque, pour qu'ils sachent comment l'utiliser : par exemple, quel document lire en premier ou avec quels tags enregistrer les nouveaux faits. Jusqu'à 4 000 caractères.",
+    "mcpServerInstructionsPlaceholder": "Lis d'abord le document 'house-rules'. Enregistre les nouveaux faits avec le tag 'inbox'.",
     "modelsTitle": "Modèles",
     "modelsDescription": "Paramètres de modèles spécifiques au fournisseur",
     "geminiFailedToSave": "Échec de l'enregistrement des paramètres Gemini",
@@ -2722,7 +2725,7 @@
         },
         "media_overlap_seconds": {
           "label": "Chevauchement (secondes)",
-          "description": "Combien de secondes un passage partage avec le suivant, pour ne rien perdre à une coupure ; doit être plus court que les deux durées."
+          "description": "Combien de secondes un passage partage avec le suivant, pour ne rien perdre à une coupure ; au plus la moitié des deux durées."
         },
         "max_media_seconds": {
           "label": "Fichier le plus long (secondes)",
@@ -2738,6 +2741,8 @@
       "arm_extra_vectors_help": "Bandes, texte et unités de texte d'une page PDF, cherchés de même.",
       "arm_keyword": "Mots-clés",
       "arm_keyword_help": "Correspondances plein texte des mots les plus rares de la requête, dans chaque document et chaque langue.",
+      "arm_document": "Documents entiers",
+      "arm_document_help": "Chaque passage de texte des 3 documents les mieux classés par les recherches ci-dessus, pour noter aussi une partie formulée autrement que la requête.",
       "armScore": "Score dans cette recherche",
       "meaningTitle": "Score de sens",
       "meaningHelp": "Chacun des {count} candidats, noté par tous ses vecteurs puis moyenné avec le meilleur passage de son document.",

@@ -90,6 +90,10 @@ class StatusUpdate:
     #: Only while the document still holds this file: an ingest of an older version must not overwrite
     #: the status of the newer one that replaced it meanwhile. None updates whatever is stored.
     storage_key: str | None = None
+    #: Forget the document's file (its storage key becomes NULL): a file that failed for good holds nothing
+    #: to search, and kept, it would sit in storage that nothing accounts for. The caller deletes the file
+    #: of each document ``set_statuses`` returns.
+    drop_file: bool = False
 
 
 @dataclass
@@ -183,8 +187,9 @@ class KnowledgeBankNotFound(Exception):
     """``search`` was asked for a bank that is not a knowledge bank: it checks that in its own statement."""
 
 
-#: The candidate searches: the passages' main vectors, their extra vectors, and keywords.
-ArmName = Literal["vector", "extra_vectors", "keyword"]
+#: The candidate searches: the passages' main vectors, their extra vectors, keywords, and every text
+#: passage of the documents the vector searches rank best (EXPAND_DOCUMENTS).
+ArmName = Literal["vector", "extra_vectors", "keyword", "document"]
 
 
 @dataclass
@@ -283,9 +288,10 @@ class KnowledgeStore(ABC):
     ) -> DocumentPage: ...
 
     @abstractmethod
-    async def set_statuses(self, bank_id: str, updates: list[StatusUpdate]) -> None:
+    async def set_statuses(self, bank_id: str, updates: list[StatusUpdate]) -> list[str]:
         """Set each document's status and error (see ``StatusUpdate``). A document set to "failed" also
-        drops whatever it had staged (see ``PassageStage``): that version will never commit it."""
+        drops whatever it had staged (see ``PassageStage``): that version will never commit it. Returns the
+        documents updated (those still holding the update's ``storage_key``)."""
 
     @abstractmethod
     async def stage_passages(self, bank_id: str, items: list[PassageStage]) -> list[str]:
@@ -633,9 +639,9 @@ class PostgresKnowledgeStore(KnowledgeStore):
             )
         return DocumentPage(documents=[_document(r) for r in rows], total=int(total or 0))
 
-    async def set_statuses(self, bank_id: str, updates: list[StatusUpdate]) -> None:
+    async def set_statuses(self, bank_id: str, updates: list[StatusUpdate]) -> list[str]:
         if not updates:
-            return
+            return []
         async with acquire_with_retry(await self._pool()) as conn:
             table = fq_table("kb_documents")
             async with conn.transaction():
@@ -647,8 +653,10 @@ class PostgresKnowledgeStore(KnowledgeStore):
                         SELECT document_id FROM {table}
                         WHERE bank_id = $1 AND document_id = ANY($2::text[]) ORDER BY document_id FOR UPDATE
                     )
-                    UPDATE {table} d SET status = u.status, error = u.error, updated_at = now()
-                    FROM unnest($2::text[], $3::text[], $4::text[], $5::text[]) AS u(document_id, status, error, key)
+                    UPDATE {table} d SET status = u.status, error = u.error, updated_at = now(),
+                        storage_key = CASE WHEN u.drop_file THEN NULL ELSE d.storage_key END
+                    FROM unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::bool[])
+                        AS u(document_id, status, error, key, drop_file)
                     WHERE d.bank_id = $1 AND d.document_id = u.document_id
                         AND d.document_id IN (SELECT document_id FROM locked)
                         AND (u.key IS NULL OR d.storage_key = u.key)
@@ -659,6 +667,7 @@ class PostgresKnowledgeStore(KnowledgeStore):
                     [u.status for u in updates],
                     [u.error for u in updates],
                     [u.storage_key for u in updates],
+                    [u.drop_file for u in updates],
                 )
                 # A document that failed for good will not commit what it staged, so the pieces go now
                 # (their vectors cascade). They used to stay until the document's next ingest started over,
@@ -675,6 +684,7 @@ class PostgresKnowledgeStore(KnowledgeStore):
                         bank_id,
                         failed,
                     )
+        return [r["document_id"] for r in rows]
 
     async def _held(self, conn: Any, bank_id: str, document_ids: list[str]) -> dict[str, str | None]:
         """Each document's storage key, its row locked: an ingest of a newer version cannot swap the file
@@ -995,6 +1005,9 @@ class PostgresKnowledgeStore(KnowledgeStore):
             # count and common ones barely. A word less than half as rare as the query's rarest one (IDF
             # under KEYWORD_IDF_SHARE of the best) is left out: next to a name or a code, "the" and "of"
             # say nothing about which passage answers, and matching them would pull in most of the bank.
+            # Unless it is rare enough on its own (KEYWORD_IDF_FLOOR): next to a party's name, the share
+            # dropped every word of the question itself ("Consider the merger of Eidos and BridgeBio; what
+            # is the termination fee?" searched for the names alone).
             # That drops them in any language and at any bank size, where a stopword list knew 6 languages.
             # Plain words ('simple': no language, no stemming), in every document: gated on a detected
             # language (stopwords of 6 languages, stemming per language), any other language never got
@@ -1015,7 +1028,8 @@ class PostgresKnowledgeStore(KnowledgeStore):
                     WHERE df.df > 0)""",
                 "idf AS (SELECT df.w, ln(1 + greatest(n.n - df.df, 0) / (df.df + 0.5) + 0.5 / (df.df + 0.5)) AS idf"
                 " FROM df, n)",
-                f"terms AS (SELECT w, idf FROM idf WHERE idf >= {KEYWORD_IDF_SHARE} * (SELECT max(idf) FROM idf))",
+                f"terms AS (SELECT w, idf FROM idf WHERE idf >= least({KEYWORD_IDF_SHARE} * (SELECT max(idf) FROM idf), "
+                f"{KEYWORD_IDF_FLOOR}))",
                 "tq AS (SELECT to_tsquery('simple', string_agg(quote_literal(w), ' | ')) AS q FROM terms)",
             ]
 
@@ -1046,8 +1060,21 @@ class PostgresKnowledgeStore(KnowledgeStore):
                 WHERE x.bank_id = $2{where} AND x.search_vector @@ (SELECT q FROM tq)
                 ORDER BY ts_rank_cd(x.search_vector, (SELECT q FROM tq)) DESC LIMIT {pool}
             """)
+        # Every text passage of the EXPAND_DOCUMENTS documents the vector searches rank best joins the
+        # candidates. A question about one part of a long document ("in the merger of X and Y, what is
+        # the termination fee?") finds the document by its cover, parties or contents, while the passage
+        # that answers is worded unlike the question and is in no search's top rows: it was never scored.
+        # LegalBench-RAG mergers: the answer reached the reranker for 41 of 50 questions, from 29.
+        # The filters need no repeating here: they are all on the document, and top_docs come from searches
+        # that applied them.
         ctes += [
-            "arms AS (" + " UNION ALL ".join(f"({a})" for a in arms) + ")",
+            "found_arms AS (" + " UNION ALL ".join(f"({a})" for a in arms) + ")",
+            "top_docs AS (SELECT document_id FROM found_arms WHERE arm <> 'keyword' GROUP BY document_id"
+            f" ORDER BY max(arm_score) DESC LIMIT {EXPAND_DOCUMENTS})",
+            f"""arms AS (SELECT * FROM found_arms UNION ALL (
+                SELECT x.document_id, x.idx, 'document' AS arm, NULL::float8 AS arm_score FROM {passages} x
+                WHERE x.bank_id = $2 AND x.modality = 'text' AND x.document_id IN (SELECT document_id FROM top_docs)
+                ORDER BY x.document_id, x.idx LIMIT {EXPAND_PASSAGES_CAP}))""",
             # Each candidate once, with every search that found it and its score there (the trace's lists).
             "c AS (SELECT document_id, idx, array_agg(arm || ':' || coalesce(arm_score, 0)::text) AS found"
             " FROM arms GROUP BY document_id, idx)",
@@ -1347,6 +1374,11 @@ def with_document_prior(document_ids: list[str], scores: list[float]) -> list[fl
 
 #: A query word takes part in keyword search when its IDF is at least this share of its rarest word's.
 KEYWORD_IDF_SHARE = 0.5
+#: ... or when its IDF reaches this on its own: in under ~13% of the bank's passages.
+KEYWORD_IDF_FLOOR = 2.0
+#: How many of the best documents have every text passage scored, and the most passages that adds.
+EXPAND_DOCUMENTS = 3
+EXPAND_PASSAGES_CAP = 3000
 #: Where a query word's document frequency stops being counted (see the IDF in ``search``).
 _DF_CAP = 50_000
 
@@ -1413,8 +1445,10 @@ def load_knowledge_store(backend_provider: Any, extension_path: str | None) -> K
 #: document's passages went in one call that a 1.6 MB numeric table (thousands of passages) ran past, three
 #: times; in pieces, each is well inside it, and the transaction around them still commits them together.
 _INSERT_CHUNK = 256
-#: Staged passages moved per statement when a version commits (server-side, so more than an insert's chunk).
-_MOVE_WINDOW = 1000
+#: Staged passages moved per statement when a version commits. Each moved row goes into the bank's vector
+#: (HNSW) and keyword indexes, which is the cost: 1,000 took ~2.3s on a dev cluster's database but ran past
+#: the 60s command timeout on a CPU-starved one (a 27 MB spreadsheet, #6705); 200 keeps a wide margin.
+_MOVE_WINDOW = 200
 
 
 def _chunks(rows: list[Any]) -> Iterator[list[Any]]:

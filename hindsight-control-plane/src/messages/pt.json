@@ -494,6 +494,9 @@
     "securityPrivacyFailedToSave": "Falha ao salvar configurações de segurança e privacidade",
     "restrictToolsLabel": "Restringir ferramentas",
     "restrictToolsDescription": "Quando desativado, todas as ferramentas estão disponíveis. Quando ativado, somente as ferramentas selecionadas podem ser invocadas para este banco.",
+    "mcpServerInstructionsLabel": "Instruções do servidor MCP",
+    "mcpServerInstructionsDescription": "Enviadas às ferramentas de IA quando se conectam à URL MCP deste banco, para que saibam como usá-lo: por exemplo, qual documento ler primeiro ou com quais tags salvar novos fatos. Até 4.000 caracteres.",
+    "mcpServerInstructionsPlaceholder": "Leia primeiro o documento 'house-rules'. Salve novos fatos com a tag 'inbox'.",
     "modelsTitle": "Modelos",
     "modelsDescription": "Configurações de modelos por provedor",
     "geminiFailedToSave": "Falha ao salvar configurações do Gemini",
@@ -2722,7 +2725,7 @@
         },
         "media_overlap_seconds": {
           "label": "Sobreposição (segundos)",
-          "description": "Quantos segundos cada passagem compartilha com a próxima, para nada se perder num corte; deve ser menor que as duas durações."
+          "description": "Quantos segundos cada passagem compartilha com a próxima, para nada se perder num corte; no máximo metade das duas durações."
         },
         "max_media_seconds": {
           "label": "Arquivo mais longo (segundos)",
@@ -2738,6 +2741,8 @@
       "arm_extra_vectors_help": "Faixas, texto e unidades de texto de uma página PDF, buscados igual.",
       "arm_keyword": "Palavras-chave",
       "arm_keyword_help": "Correspondências de texto completo das palavras mais raras da consulta, em todo documento e idioma.",
+      "arm_document": "Documentos inteiros",
+      "arm_document_help": "Cada passagem de texto dos 3 documentos mais bem classificados pelas buscas acima, para pontuar também uma parte escrita de outro jeito que a consulta.",
       "armScore": "Pontuação nesta busca",
       "meaningTitle": "Pontuação de significado",
       "meaningHelp": "Cada um dos {count} candidatos, pontuado por todos os seus vetores e com média do melhor trecho do documento.",

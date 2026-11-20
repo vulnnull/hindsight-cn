@@ -494,6 +494,9 @@
     "securityPrivacyFailedToSave": "儲存安全性同私隱設定失敗",
     "restrictToolsLabel": "限制工具",
     "restrictToolsDescription": "關閉時，所有工具均可用。開啟時，此記憶庫只能呼叫所選工具。",
+    "mcpServerInstructionsLabel": "MCP 伺服器指示",
+    "mcpServerInstructionsDescription": "當 AI 工具連接到呢個庫嘅 MCP URL 時傳送畀佢哋，等佢哋知道點樣用呢個庫：例如先讀邊份文件，或者用咩標籤儲存新事實。最多 4,000 個字元。",
+    "mcpServerInstructionsPlaceholder": "請先睇文件「house-rules」。儲存新事實時用標籤「inbox」。",
     "modelsTitle": "模型",
     "modelsDescription": "特定提供商的模型設定",
     "geminiFailedToSave": "未能儲存 Gemini 設定",
@@ -2722,7 +2725,7 @@
         },
         "media_overlap_seconds": {
           "label": "重疊（秒）",
-          "description": "每個段落同下一段共用幾多秒，等切開嗰度唔會漏嘢；一定要短過兩個長度。"
+          "description": "每個段落同下一段共用幾多秒，等切開嗰度唔會漏嘢；最多係兩個長度嘅一半。"
         },
         "max_media_seconds": {
           "label": "最長檔案（秒）",
@@ -2738,6 +2741,8 @@
       "arm_extra_vectors_help": "PDF 頁嘅條帶、文字同文字單元，用同樣方法搵。",
       "arm_keyword": "關鍵詞",
       "arm_keyword_help": "查詢入面較罕見字詞嘅全文配對（所有文件同語言）。",
+      "arm_document": "成份文件",
+      "arm_document_help": "上面搜尋排得最高嘅 3 份文件嘅每段文字，同查詢講法唔同嘅部分都會評分。",
       "armScore": "喺呢個搜尋嘅分數",
       "meaningTitle": "意思分數",
       "meaningHelp": "{count} 個候選逐個用所有向量評分，再同文件最好段落平均。",

@@ -11,6 +11,7 @@ import base64
 import io
 import json
 import math
+import sys
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import replace
@@ -266,6 +267,49 @@ def test_audio_and_video_are_cut_into_timed_windows():
         list(media.split_media(_tone(8, video=False), "audio", window_seconds=30, overlap_seconds=5, max_seconds=5))  # fmt: skip
 
 
+def test_overlap_is_at_most_half_a_window_so_a_moment_is_cut_at_most_twice():
+    # Asked for a 1 s step (overlap 3 of 4), the cut steps by 2: 3 windows over 8 s, not 5.
+    drafts = list(
+        media.split_media(_tone(8, video=False), "audio", window_seconds=4, overlap_seconds=3, max_seconds=60)
+    )
+    assert [d.start_ms for d in drafts] == [0, 2000, 4000]
+    # The amplification this stops: a 1800 s window stepping by 1 s over two hours cut 2,700 hours of video.
+    info = media.MediaInfo(duration=7200, has_video=True, has_audio=True, width=1920, height=1080, fps=30)
+    assert media.video_work(info, media.windows(7200, 1800, 1799)) > 1000 * 7200
+    assert media.video_work(info, media.windows(7200, 1800, 900)) <= 2 * 7200
+
+
+def test_video_work_follows_frames_and_pixels_as_measured():
+    def work(width, height, fps, *, seekable=True):
+        info = media.MediaInfo(3600, True, True, width=width, height=height, fps=fps, seekable=seekable)
+        return media.video_work(info, media.windows(3600, 30, 0))
+
+    assert work(1920, 1080, 30) == pytest.approx(3600)  # the unit: a second of 1080p 30 fps
+    # Measured: 4K60 took 40 CPU-seconds a minute, 1080p30 13.
+    assert work(3840, 2160, 60) / work(1920, 1080, 30) == pytest.approx(40 / 13, rel=0.05)
+    # Without a seek index, every window decodes from the start: the work grows with the square of the length.
+    assert work(1920, 1080, 30, seekable=False) > 50 * work(1920, 1080, 30)
+
+
+def test_a_video_over_its_work_limit_is_refused_before_it_is_decoded(monkeypatch):
+    video = _tone(8, video=True)  # 160x120 at 5 fps: about 1.1 s of 1080p 30 fps work
+    with pytest.raises(media.MediaWorkError, match="HINDSIGHT_API_KB_MAX_VIDEO_WORK_SECONDS"):
+        list(media.split_media(video, "video", window_seconds=30, overlap_seconds=5, max_seconds=60, max_video_work_seconds=1))  # fmt: skip
+    monkeypatch.setattr(media, "_cut", lambda *a, **k: pytest.fail("decoded a video over its limit"))
+    with pytest.raises(media.MediaWorkError):
+        list(media.split_media(video, "video", window_seconds=30, overlap_seconds=5, max_seconds=60, max_video_work_seconds=1))  # fmt: skip
+
+
+def test_a_video_whose_header_understates_its_frames_stops_at_the_limit(monkeypatch):
+    video = _tone(8, video=True)
+    real = media.probe(video)
+    assert len(list(media.split_media(video, "video", window_seconds=30, overlap_seconds=5, max_seconds=60, max_video_work_seconds=2))) == 1  # fmt: skip
+    # A header claiming 0.5 fps passes the estimate (0.1 s of work); the decode counts the 40 real frames.
+    monkeypatch.setattr(media, "probe", lambda data: replace(real, fps=0.5))
+    with pytest.raises(media.MediaWorkError, match="more work to cut than its header showed"):
+        list(media.split_media(video, "video", window_seconds=30, overlap_seconds=5, max_seconds=60, max_video_work_seconds=0.5))  # fmt: skip
+
+
 def test_an_image_over_the_pixel_limit_is_refused_before_it_is_decoded():
     big = _png((10, 20, 30), size=(2000, 1000))  # 2 MP
     with pytest.raises(media.MediaError, match="limit is 1 MP"):
@@ -486,6 +530,8 @@ async def test_a_bank_config_refuses_what_a_bank_may_not_set(api_client, kb):
     assert "image_tokens" in await refused({"image_tokens": 5000})
     assert "disabled_media_types" in await refused({"disabled_media_types": ["pictures"]})
     assert "media_overlap_seconds" in await refused({"media_overlap_seconds": 30, "video_window_seconds": 30})
+    # More than half a window: each overlap second is cut and stored again.
+    assert "at most half" in await refused({"media_overlap_seconds": 16, "video_window_seconds": 30})
     over = get_config().kb_max_pdf_pages + 1
     assert "server's limit" in await refused({"max_pdf_pages": over})
     assert (await api_client.get(f"{KB}/{kb}/config")).json()["overrides"] == {}
@@ -975,6 +1021,19 @@ async def test_a_search_by_an_image_sends_the_picture_as_the_query_even_without_
     assert judge.queries == []
 
 
+async def test_a_search_can_skip_the_reranker(api_client, kb, judge):
+    items = [{"document_id": "faq", "text": "a blue note"}, {"document_id": "faq2", "text": "another blue note"}]
+    r = await api_client.post(f"{KB}/{kb}/ingest", json={"items": items})
+    assert r.status_code == 200, r.text
+
+    await _search(api_client, kb, query="blue")
+    assert judge.queries == ["blue"]  # a configured reranker reranks a search that says nothing
+    hits = await _search(api_client, kb, query="blue", enable_reranking=False)
+    assert judge.queries == ["blue"] and {h["document_id"] for h in hits} == {"faq", "faq2"}  # skipped
+    await _search(api_client, kb, query="blue", enable_reranking=True)
+    assert judge.queries == ["blue", "blue"]
+
+
 async def test_the_query_picture_takes_its_share_of_the_rerank_window(api_client, kb, judge):
     items = [{"document_id": f"note{i}", "text": f"note {i} about the blue key. " + "detail " * 140} for i in range(10)]
     r = await api_client.post(f"{KB}/{kb}/ingest", json={"items": items})
@@ -1101,6 +1160,10 @@ async def test_a_long_page_is_shown_capped_to_the_context_it_gets(api_client, kb
 
 
 async def test_pieces_of_one_short_document_are_judged_once(api_client, kb, judge):
+    # Sized for 256-token passages (this test is about how passages combine, not their size).
+    assert (
+        await api_client.patch(f"{KB}/{kb}/config", json={"updates": {"text_passage_tokens": 256}})
+    ).status_code == 200
     # A guide long enough for several passages, short enough to be judged whole: every passage would show
     # the reranker the same text, so it is one candidate.
     guide = "\n\n".join(f"Step {i}. Rotate the red key in the console. " + "detail " * 60 for i in range(6))
@@ -1113,6 +1176,21 @@ async def test_pieces_of_one_short_document_are_judged_once(api_client, kb, judg
     assert {h["document_id"] for h in hits} == {"guide", "note"}
     assert len(judge.texts) == 2  # the guide once, whole, and the note
     assert any(text.count("Step") == 6 for text in judge.texts)
+
+
+async def test_a_text_hit_is_judged_alone_under_its_document_title(api_client, kb, judge):
+    # Three clauses of a contract, a 512-token passage each: the reranker is shown the asked clause by
+    # itself (TEXT_JUDGE_TOKENS), not its neighbours, and under the document's title, as it was embedded.
+    clauses = [f"Clause {i}. " + ("The red key is returned. " if i == 1 else "") + "term " * 420 for i in range(3)]
+    item = {"document_id": "supply", "text": "\n\n".join(clauses), "filename": "supply_agreement.txt"}
+    r = await api_client.post(f"{KB}/{kb}/ingest", json={"items": [item]})
+    assert r.status_code == 200, r.text
+    assert (await api_client.get(f"{KB}/{kb}")).json()["passage_count"] == 3
+
+    await _search(api_client, kb, query="red key", max_tokens=1_000_000)
+    asked = next(t for t in judge.texts if "red key" in t)
+    assert asked.startswith("Document: supply agreement\n\nClause 1.")
+    assert "Clause 0." not in asked and "Clause 2." not in asked
 
 
 async def test_a_failing_reranker_is_reported_as_itself(api_client, kb, judge, monkeypatch):
@@ -1179,7 +1257,7 @@ async def _scored(memory, bank_id: str, query: str) -> list:
 
     request = SearchRequest(query=query, query_image=None, filters=SearchFilters())
     service = get_knowledge_service(memory)
-    return (await service._search(bank_id, request, await service._embed_query(request))).hits
+    return (await service._search(bank_id, request, await service._embed_query(request), rerank=False)).hits
 
 
 async def test_pdf_pages_are_scored_from_image_bands_and_text_layer(api_client, memory, kb, monkeypatch):
@@ -1215,9 +1293,24 @@ def test_candidates_fill_the_window_in_search_order():
 def test_the_scores_reorder_the_candidates_and_leave_a_video_in_place():
     from hindsight_api.knowledge.service import reranked_order
 
-    assert reranked_order([0, 1, 2], {0: 0.05, 1: 0.05, 2: 0.9}) == [2, 0, 1]  # a tie keeps the search's order
+    one = ["d", "d", "d"]  # inside one document the reranker's order is the order
+    assert reranked_order([0, 1, 2], {0: 0.05, 1: 0.05, 2: 0.9}, one) == [2, 0, 1]  # a tie keeps the search's order
     # Candidate 1 (a video) was not shown: it keeps its place, the others swap around it.
-    assert reranked_order([0, 1, 2], {0: 0.05, 2: 0.95}) == [2, 1, 0]
+    assert reranked_order([0, 1, 2], {0: 0.05, 2: 0.95}, one) == [2, 1, 0]
+
+
+def test_the_reranker_picks_the_passage_and_the_search_the_document():
+    from hindsight_api.knowledge.service import reranked_order
+
+    # Candidates from few long documents: the search's best document ("asked") keeps the top even though the
+    # reranker likes the same clause of "other" a bit more; its best passage is first.
+    docs = ["asked"] * 6 + ["other"] * 2
+    scores = {0: 0.1, 1: 0.2, 2: 0.3, 3: 0.4, 4: 0.5, 5: 0.8, 6: 0.9, 7: 0.6}
+    assert reranked_order(list(range(8)), scores, docs)[0] == 5
+    # Each candidate a document of its own (a page): the document order is only the search's order again,
+    # and the reranker's order stands.
+    pages = ["p0", "p1", "p2"]
+    assert reranked_order([0, 1, 2], {0: 0.1, 1: 0.5, 2: 0.9}, pages) == [2, 1, 0]
 
 
 def test_a_text_hit_is_judged_with_the_passages_around_it():
@@ -1324,7 +1417,11 @@ async def test_an_unreachable_remote_embedder_is_a_503_not_a_crash(api_client, k
 
 
 async def test_text_hits_come_back_with_neighbours_and_overlapping_windows_merge(api_client, kb):
-    # Each paragraph fills one passage at the default size (256 tokens), so passage i is paragraph i.
+    # Sized for 256-token passages (this test is about how passages combine, not their size).
+    assert (
+        await api_client.patch(f"{KB}/{kb}/config", json={"updates": {"text_passage_tokens": 256}})
+    ).status_code == 200
+    # Each paragraph fills one 256-token passage, so passage i is paragraph i.
     paragraphs = [f"Paragraph {i}: " + ("invoice " if i in (4, 5) else "filler ") * 180 for i in range(10)]
     r = await api_client.post(
         f"{KB}/{kb}/ingest",
@@ -1470,6 +1567,42 @@ async def test_keywords_match_rare_words_in_every_language(api_client, kb):
     keyword = {h["document_id"]: h["keyword"] for h in trace["hits"]}
     assert keyword["fr-hit"] > 0 and keyword["ja-hit"] > 0 and keyword["filler-0"] == 0
     assert body["results"][0]["document_id"] == "en-hit"
+
+
+async def test_an_untitled_text_is_embedded_under_its_opening_and_its_best_documents_are_scored_whole(
+    api_client, kb, fake_embedder
+):
+    """A text with no file name gets its first words as its title (each passage then says what document it
+    is from), a named file keeps its name; every text passage of the best documents is a candidate."""
+    long = "\n\n".join(["Merger agreement between Acme and Beta."] + [f"Section {n}: the red box." for n in range(6)])
+    items = [
+        {"document_id": "deal", "text": long},
+        {"document_id": "named", "text": "a blue key", "filename": "keys.md"},
+    ]
+    r = await api_client.post(f"{KB}/{kb}/ingest", json={"items": items})
+    assert r.status_code == 200, r.text
+    titles = {i.title for call in fake_embedder.calls for i in call}
+    assert "keys" in titles and any(t and t.startswith("Merger agreement between Acme and Beta.") for t in titles)
+
+    trace = (await api_client.post(f"{KB}/{kb}/search", json={"query": "red", "trace": True})).json()["trace"]
+    arms = {a["name"]: a["results"] for a in trace["candidate_searches"]}
+    deal = {h["index"] for h in trace["hits"] if h["document_id"] == "deal"}
+    assert {r["index"] for r in arms["document"] if r["document_id"] == "deal"} == deal and len(deal) > 1
+
+
+async def test_a_question_word_rare_enough_on_its_own_stays_next_to_a_much_rarer_name(api_client, kb):
+    """In 300 passages a name in one has IDF ~5.3 and "termination", in 31, ~2.3: under half the name's,
+    so it was dropped and the search looked for the name alone. It clears KEYWORD_IDF_FLOOR (2.0)."""
+    docs = [("deal", "zorblat termination fee")]
+    docs += [(f"t-{n}", f"termination clause {n}") for n in range(30)]
+    docs += [(f"f-{n}", f"filler line {n}") for n in range(269)]
+    for start in range(0, len(docs), 100):  # an ingest takes at most 100 items
+        items = [{"document_id": d, "text": t} for d, t in docs[start : start + 100]]
+        r = await api_client.post(f"{KB}/{kb}/ingest", json={"items": items})
+        assert r.status_code == 200, r.text
+    body = {"query": "zorblat termination", "trace": True}
+    terms = (await api_client.post(f"{KB}/{kb}/search", json=body)).json()["trace"]["keyword_terms"]
+    assert terms["zorblat"] > 2 * terms["termination"] and terms["termination"] >= 2.0
 
 
 async def test_a_search_needs_a_query_and_a_bank(api_client, kb):
@@ -1739,6 +1872,31 @@ async def test_an_ingest_of_many_documents_costs_a_fixed_number_of_calls(api_cli
     # One row write, one passage write, and embed calls in rounds across documents (100 passages / 16).
     assert counts == {"put_documents": 1, "replace_passages": 1}
     assert len(fake_embedder.calls) == math.ceil(100 / _EMBED_ROUND)
+
+
+async def test_a_file_that_fails_for_good_is_not_kept(api_client, memory, kb, monkeypatch):
+    deleted: list[str] = []
+    real_delete = memory._file_storage.delete
+
+    async def delete(key: str) -> None:
+        deleted.append(key)
+        await real_delete(key)
+
+    monkeypatch.setattr(memory._file_storage, "delete", delete)
+    assert (await api_client.patch(f"{KB}/{kb}/config", json={"updates": {"max_pdf_pages": 1}})).is_success
+    await _upload(api_client, kb, [("two.pdf", _pdf((250, 0, 0), (0, 0, 250)), "application/pdf")], [{"document_id": "p"}])  # fmt: skip
+    # The document stays, failed, with why; its file is gone from storage, not kept unaccounted for.
+    detail = (await api_client.get(f"{KB}/{kb}/documents/p")).json()
+    assert detail["status"] == "failed" and "the limit is 1" in detail["error"], detail
+    assert (await api_client.get(f"{KB}/{kb}/documents/p/file")).status_code == 404
+    assert len(deleted) == 1
+    with pytest.raises(FileNotFoundError):
+        await memory._file_storage.retrieve(deleted[0])
+    # Uploading it again, once it fits, starts over.
+    assert (await api_client.patch(f"{KB}/{kb}/config", json={"updates": {"max_pdf_pages": None}})).is_success
+    await _upload(api_client, kb, [("two.pdf", _pdf((250, 0, 0), (0, 0, 250)), "application/pdf")], [{"document_id": "p"}])  # fmt: skip
+    assert (await api_client.get(f"{KB}/{kb}/documents/p")).json()["status"] == "ready"
+    assert (await api_client.get(f"{KB}/{kb}/documents/p/file")).status_code == 200
 
 
 async def test_a_bad_document_fails_alone_and_a_sync_ingest_reports_it(api_client, kb):
@@ -2528,6 +2686,10 @@ def test_a_heading_waits_for_its_content_instead_of_standing_alone():
 
 
 async def test_a_traced_search_explains_every_rank_and_what_the_budget_kept(api_client, kb):
+    # Sized for 256-token passages (this test is about how passages combine, not their size).
+    assert (
+        await api_client.patch(f"{KB}/{kb}/config", json={"updates": {"text_passage_tokens": 256}})
+    ).status_code == 200
     paragraphs = [
         f"Paragraph {i}: " + ("the invoice is in the box " if i == 4 else "this is the filler of it ") * 30
         for i in range(10)
@@ -2715,8 +2877,8 @@ async def test_a_document_with_more_passages_than_one_insert_holds_is_stored_who
 
 
 def test_an_office_converter_that_dies_fails_its_file_and_the_next_gets_a_new_one(monkeypatch):
-    # The converter runs in a worker process: killed for its memory on one huge spreadsheet, it fails that
-    # file for good (no retry would fare better) and the next file starts a fresh worker.
+    # The converter runs in a worker process: killed for its memory on one huge spreadsheet, and again when
+    # the file is retried alone, it fails that file for good and the next file starts a fresh worker.
     from concurrent.futures import Future
     from concurrent.futures.process import BrokenProcessPool
 
@@ -2726,7 +2888,290 @@ def test_an_office_converter_that_dies_fails_its_file_and_the_next_gets_a_new_on
             future.set_exception(BrokenProcessPool("killed"))
             return future
 
+    def dies_again(*args):
+        raise BrokenProcessPool("killed again")
+
     monkeypatch.setattr(media, "_OFFICE_POOL", DeadPool())
+    monkeypatch.setattr(media, "_alone", dies_again)
     with pytest.raises(media.MediaError, match="converter died"):
         media.read_text(b"PK", "huge.xlsx")
     assert media._OFFICE_POOL is None
+
+
+def test_a_table_of_all_caps_rows_is_cut_into_passages_of_their_size():
+    # Each "| AARON | GA |" row reads as a heading; a run of headings waiting for content grew into one
+    # passage of 399k tokens (a Govdocs1 spreadsheet), which the embedder refused.
+    from hindsight_api.engine.token_encoding import count_tokens
+    from hindsight_api.knowledge.text_passages import split_into_passages
+
+    rows = "\n".join(f"| TOWN{n:05d} | GA |" for n in range(3000))
+    passages = split_into_passages(rows, passage_size=64)
+    assert len(passages) > 1 and max(count_tokens(p) for p in passages) <= 64
+    assert "\n".join(passages) == rows  # exact slices, in order, nothing lost
+
+
+def test_a_page_whose_first_body_is_empty_is_read_for_its_text():
+    # A Govdocs1 export opens <body> twice, the first time still inside <head>: the parser keeps that empty
+    # body, markitdown converts <body> only, and a page of 1,500 words failed "nothing to search".
+    page = (
+        b'<html><head><title>CBP Today</title><style>p { color: red }</style><body topmargin="0"></head>'
+        b"<body><p>Unified to secure the borders.</p><script>var x = 1;</script></body></html>"
+    )
+    text = media.read_text(page, "page.html")
+    assert "Unified to secure the borders." in text and "color" not in text and "var x" not in text
+
+
+def test_a_pdf_that_crashes_the_renderer_fails_alone_and_the_next_renders():
+    # pdfium aborts the process on some files (a JPEG 2000 image: SIGTRAP), which took the API down with it;
+    # it runs in a worker now, so a crash fails that file and the next PDF gets a fresh worker.
+    import os
+
+    with pytest.raises(media.MediaError, match="renderer crashed"):
+        media._in_pdf_worker(os.abort)
+    assert [d.page for d in media.split_pdf(_pdf((255, 0, 0), (0, 0, 255)), page_pixels=128, max_pages=10)] == [1, 2]
+
+
+def test_a_page_with_no_sentence_ends_is_embedded_in_pieces_the_model_reads():
+    # pdf.js's perf_text_labels.pdf is thousands of labels with no full stop: one "sentence" of 14k tokens,
+    # which the embedder refused (EmbeddingGemma 2 reads 8,192).
+    from hindsight_api.engine.token_encoding import count_tokens
+
+    labels = " ".join(f"label{n}" for n in range(5000))
+    pieces = media.sentences(labels)
+    assert len(pieces) > 1 and max(count_tokens(p) for p in pieces) <= media._MAX_SENTENCE_TOKENS
+    assert " ".join(pieces) == labels
+    assert media.sentences("A short sentence of more than eight words here. And another one.") == [
+        "A short sentence of more than eight words here. And another one."
+    ]
+
+
+def test_a_pdf_rendering_beside_one_that_crashes_the_renderer_still_succeeds():
+    # A crash breaks every call in flight on the worker pool: the innocent one is retried alone.
+    import os
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    media._in_pdf_worker(time.sleep, 0)  # the pool is up before the race
+    with ThreadPoolExecutor(2) as threads:
+        innocent = threads.submit(media._in_pdf_worker, time.sleep, 2)
+        time.sleep(0.5)
+        crash = threads.submit(media._in_pdf_worker, os.abort)
+        with pytest.raises(media.MediaError, match="renderer crashed"):
+            crash.result()
+        assert innocent.result() is None
+
+
+def test_a_pdf_that_renders_forever_fails_in_time_and_the_next_renders(monkeypatch):
+    # pdf.js's tiling-pattern-tiny-steps*.pdf held both PDF workers at 100% CPU for over 10 minutes, and every
+    # PDF waited behind them: a call past the limit fails its file, and its worker is killed.
+    import time
+
+    monkeypatch.setattr(media, "_PDF_CALL_TIMEOUT", 1.0)
+    started = time.monotonic()
+    with pytest.raises(media.MediaError, match="took over 1s"):
+        media._in_pdf_worker(time.sleep, 30)
+    assert time.monotonic() - started < 20
+    assert [d.page for d in media.split_pdf(_pdf((255, 0, 0)), page_pixels=128, max_pages=10)] == [1]
+
+
+def _docx(parts: dict[str, str]) -> bytes:
+    """A Word file of ``parts``, each a part's root element with ``W`` where its namespace goes."""
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for name, xml in parts.items():
+            z.writestr(
+                name, xml.replace("W", 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"', 1)
+            )
+    return buf.getvalue()
+
+
+def test_a_word_file_markitdown_cannot_read_is_read_from_its_xml():
+    # POI's deep-table-cell.docx nests a table 15,000 deep: markitdown hit its recursion limit, and 15,000 words
+    # failed "unreadable .docx file". Its text runs are read straight from the XML instead.
+    depth = 3000
+    nested = "".join("<w:tbl><w:tr><w:tc>" for _ in range(depth))
+    nested += "<w:p><w:r><w:t>the innermost cell</w:t></w:r></w:p>"
+    nested += "".join("</w:tc></w:tr></w:tbl>" for _ in range(depth))
+    body = f"<w:document W><w:body><w:p><w:r><w:t>Deep tables</w:t></w:r></w:p>{nested}</w:body></w:document>"
+    text = media._convert_office(_docx({"word/document.xml": body}), ".docx")
+    assert "Deep tables" in text and "the innermost cell" in text
+
+
+def test_a_word_file_whose_text_is_all_in_its_header_is_read():
+    # markitdown reads a Word body only: POI's Headers.docx came out empty and failed "nothing to search".
+    data = _docx(
+        {
+            "word/document.xml": "<w:document W><w:body><w:p/></w:body></w:document>",
+            "word/header1.xml": "<w:hdr W><w:p><w:r><w:t>Quarterly results</w:t></w:r></w:p></w:hdr>",
+        }
+    )
+    assert "Quarterly results" in media._convert_office(data, ".docx")
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="the worker's address-space cap is Linux only")
+def test_a_worker_that_wants_more_memory_than_a_file_may_use_fails_alone(monkeypatch):
+    # POI's 51535.xls (42 KB, 65,536 x 256 cells) grew a converter until the container ran out of memory, and on
+    # Kubernetes that kills the server with it. The worker's address space is capped: it fails, the server stays.
+    monkeypatch.setattr(media, "_worker_address_space", lambda: 2 << 30)
+    with media._PDF_POOL_LOCK:
+        if media._PDF_POOL is not None:
+            media._kill(media._PDF_POOL)
+        media._PDF_POOL = None  # a worker of the new cap
+    with pytest.raises(MemoryError):
+        media._in_pdf_worker(bytearray, 2 << 30)
+    assert [d.page for d in media.split_pdf(_pdf((255, 0, 0)), page_pixels=128, max_pages=10)] == [1]
+
+
+def test_the_worker_memory_cap_follows_the_machine_unless_set(monkeypatch):
+    import types
+
+    monkeypatch.setattr(media, "_memory_limit", lambda: 8 << 30)
+    monkeypatch.setattr("hindsight_api.config.get_config", lambda: types.SimpleNamespace(kb_worker_memory_mb=0))
+    assert media._worker_address_space() == 5 << 30  # half of 8 GB, plus a worker's own 1 GB at rest
+    monkeypatch.setattr("hindsight_api.config.get_config", lambda: types.SimpleNamespace(kb_worker_memory_mb=3000))
+    assert media._worker_address_space() == 3000 << 20
+
+
+def test_an_office_file_queued_behind_one_that_kills_the_converter_still_converts():
+    # The cluster sweep's 51535.xls ran the container out of memory and the kernel killed the converter: a 9 KB
+    # spreadsheet waiting behind it failed too. A call the dead worker broke is retried alone.
+    import os
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    data = _docx({"word/document.xml": "<w:document W><w:body><w:p><w:r><w:t>Queued text</w:t></w:r></w:p></w:body></w:document>"})  # fmt: skip
+    assert "Queued text" in media._office_text(data, ".docx")  # the shared worker is up
+    pool = media._OFFICE_POOL
+    assert pool is not None
+    pool.submit(time.sleep, 1)  # holds the worker while the next two queue
+    pool.submit(os.abort)  # the worker dies before it reaches the file queued behind
+    with ThreadPoolExecutor(1) as threads:
+        queued = threads.submit(media._office_text, data, ".docx")
+        assert "Queued text" in queued.result(timeout=120)
+
+
+def test_the_memory_guard_kills_the_biggest_worker_only_past_its_share(monkeypatch):
+    # On Kubernetes a container out of memory has every process killed, the server too (memory.oom.group):
+    # the server kills its own biggest worker first.
+    killed: list[int] = []
+    monkeypatch.setattr(media.os, "kill", lambda pid, sig: killed.append(pid))
+    monkeypatch.setattr(media, "_worker_rss", lambda: {101: 1 << 30, 202: 4 << 30, 303: 2 << 30})
+    monkeypatch.setattr(media, "_container_used", lambda: 6 << 30)
+    assert media._guard_once(8 << 30) is None and killed == []  # 75% of 8 GB: under the share
+    monkeypatch.setattr(media, "_container_used", lambda: 7 << 30)
+    assert media._guard_once(8 << 30) == 202 and killed == [202]  # 87.5%: the biggest goes
+    monkeypatch.setattr(media, "_worker_rss", dict)
+    assert media._guard_once(8 << 30) is None  # nothing of ours to kill: the guard leaves the rest alone
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="the guard reads /proc")
+def test_the_memory_guard_finds_the_workers_and_only_them():
+    import os
+    import time
+
+    media._in_pdf_worker(time.sleep, 0)  # a PDF worker is up
+    workers = media._worker_rss()
+    assert workers and all(rss > 10 << 20 for rss in workers.values())
+    assert os.getpid() not in workers
+
+
+def test_office_files_convert_one_at_a_time(monkeypatch):
+    # Two big spreadsheets side by side do not fit where one does: the memory guard killed both (000032.xls and
+    # the runaway 51535.xls). Conversions, retries included, take turns.
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    running, most = 0, 0
+    guard = threading.Lock()
+
+    def convert(data, ext):
+        nonlocal running, most
+        with guard:
+            running += 1
+            most = max(most, running)
+        time.sleep(0.05)
+        with guard:
+            running -= 1
+        return "text"
+
+    monkeypatch.setattr(media, "_office_text_now", convert)
+    with ThreadPoolExecutor(4) as threads:
+        assert list(threads.map(lambda _: media._office_text(b"", ".docx"), range(4))) == ["text"] * 4
+    assert most == 1
+
+
+def test_a_worker_converts_every_office_file_with_one_converter():
+    # One MarkItDown per file grew the worker by 90 MB a file (its own file-type model each time), until every
+    # conversion past the memory cap failed: 71 of the cluster sweep's Office files.
+    data = _docx({"word/document.xml": "<w:document W><w:body><w:p><w:r><w:t>Same converter</w:t></w:r></w:p></w:body></w:document>"})  # fmt: skip
+    assert media._markitdown() is media._markitdown()
+    assert all("Same converter" in media._convert_office(data, ".docx") for _ in range(3))
+
+
+class _FakeSheet:
+    """A legacy .xls sheet as xlrd gives it: its declared size, and its rows."""
+
+    def __init__(self, name: str, rows: list[list[object]], nrows: int, ncols: int) -> None:
+        self.name, self._rows, self.nrows, self.ncols = name, rows, nrows, ncols
+
+    def row_values(self, row: int) -> list[object]:
+        return self._rows[row] if row < len(self._rows) else [""] * self.ncols
+
+
+def test_a_spreadsheet_declaring_millions_of_cells_is_read_cell_by_cell(monkeypatch):
+    # POI's 42 KB 51535.xls declares 65,536 x 256 cells and holds two: markitdown built a table of all 16.7M and ran
+    # a worker out of 5 GB. Past _MARKITDOWN_MAX_CELLS the non-empty cells are read row by row instead.
+    sheet = _FakeSheet("Sheet1", [["Top Left Cell", "", "Top Right Cell"]], nrows=65_536, ncols=256)
+    monkeypatch.setattr(media, "_xls_sheets", lambda data: iter([sheet]))
+    monkeypatch.setattr(media, "_markitdown", lambda: pytest.fail("markitdown read a sheet of 16.7M cells"))
+    assert media._convert_office(b"", ".xls") == "## Sheet1\n| Top Left Cell | Top Right Cell |"
+
+
+def test_a_small_spreadsheet_keeps_markitdowns_table_and_falls_back_when_it_fails(monkeypatch):
+    import types
+
+    sheet = _FakeSheet("Budget", [["Rent", 1200.0]], nrows=1, ncols=2)
+    monkeypatch.setattr(media, "_xls_sheets", lambda data: iter([sheet]))
+    table = types.SimpleNamespace(convert_stream=lambda *a, **k: types.SimpleNamespace(text_content="| Rent | 1200 |"))
+    monkeypatch.setattr(media, "_markitdown", lambda: table)
+    assert media._convert_office(b"", ".xls") == "| Rent | 1200 |"  # under the limit: as markitdown writes it
+
+    def fails(*a, **k):
+        raise MemoryError
+
+    monkeypatch.setattr(media, "_markitdown", lambda: types.SimpleNamespace(convert_stream=fails))
+    assert media._convert_office(b"", ".xls") == "## Budget\n| Rent | 1200.0 |"
+
+
+def test_a_cut_off_video_is_not_refused_for_the_length_its_header_claims():
+    # FATE's 1242-small.mkv is 100 KB of a file whose header declares 22 minutes of 1280x718, and it cannot seek.
+    # Counted as decoded from its start for every window, it was refused as 7.2 h of work; its few real frames
+    # take a second. Before decoding, each window counts its own span; the meter counts what is really decoded.
+    cut_off = media.MediaInfo(duration=22 * 60, has_video=True, has_audio=True, width=1280, height=718, fps=24, seekable=False)  # fmt: skip
+    media._check_video_work(cut_off, media.windows(cut_off.duration, 30, 5), 7200)
+    # Long enough on its own spans, it is still refused, with the advice for a file without an index.
+    long = replace(cut_off, duration=4 * 3600, width=3840, height=2160, fps=60)
+    with pytest.raises(media.MediaWorkError, match="no seek index"):
+        media._check_video_work(long, media.windows(long.duration, 30, 5), 7200)
+
+
+def test_a_video_whose_codec_pyav_does_not_know_is_probed(monkeypatch):
+    # FATE's uncv-rgb24.mp4: no codec context. Reading its width raised an AttributeError, which the worker took
+    # for a transient error and retried for three minutes; the file now fails at once, "no decodable video".
+    import contextlib
+    import types
+
+    stream = types.SimpleNamespace(codec_context=None, average_rate=None, guessed_rate=None)
+    container = types.SimpleNamespace(
+        duration=3_000_000,
+        streams=types.SimpleNamespace(video=[stream], audio=[], __iter__=None),
+        seek=lambda *a, **k: None,
+        demux=lambda **k: iter(()),
+    )
+    monkeypatch.setattr(media, "_open", lambda data: contextlib.nullcontext(container))
+    info = media.probe(b"")
+    assert (info.width, info.height, info.fps, info.has_video) == (0, 0, 0.0, True)

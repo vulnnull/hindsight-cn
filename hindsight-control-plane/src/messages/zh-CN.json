@@ -457,6 +457,9 @@
     "securityPrivacyFailedToSave": "Failed to save security & privacy settings",
     "restrictToolsLabel": "限制工具",
     "restrictToolsDescription": "关闭时，所有工具均可用。开启时，此库只能调用所选工具。",
+    "mcpServerInstructionsLabel": "MCP 服务器指令",
+    "mcpServerInstructionsDescription": "当 AI 工具连接到此库的 MCP URL 时发送给它们，让它们知道如何使用此库：例如先读取哪个文档，或用哪些标签保存新事实。最多 4,000 个字符。",
+    "mcpServerInstructionsPlaceholder": "请先阅读文档“house-rules”。保存新事实时使用标签“inbox”。",
     "modelsTitle": "模型",
     "modelsDescription": "特定提供商的模型设置",
     "geminiFailedToSave": "无法保存 Gemini 设置",
@@ -2895,7 +2898,7 @@
         },
         "media_overlap_seconds": {
           "label": "重叠（秒）",
-          "description": "每个段落与下一段共享的秒数，避免在切分处丢失内容；必须短于两种时长。"
+          "description": "每个段落与下一段共享的秒数，避免在切分处丢失内容；最多为两种时长的一半。"
         },
         "max_media_seconds": {
           "label": "最长文件（秒）",
@@ -2911,6 +2914,8 @@
       "arm_extra_vectors_help": "PDF 页的条带、文本和文本单元，以同样方式搜索。",
       "arm_keyword": "关键词",
       "arm_keyword_help": "查询中较稀有词的全文匹配（所有文档和语言）。",
+      "arm_document": "整篇文档",
+      "arm_document_help": "上方搜索排名最高的 3 篇文档的每个文本段落，措辞与查询不同的部分也会被评分。",
       "armScore": "本次搜索中的分数",
       "meaningTitle": "语义分数",
       "meaningHelp": "{count} 个候选逐一用全部向量评分，再与所在文档最佳段落取平均。",

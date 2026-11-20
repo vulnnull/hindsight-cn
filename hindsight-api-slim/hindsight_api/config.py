@@ -841,6 +841,7 @@ ENV_MCP_ENABLED = "HINDSIGHT_API_MCP_ENABLED"
 ENV_MCP_ENABLED_TOOLS = "HINDSIGHT_API_MCP_ENABLED_TOOLS"
 ENV_MCP_STATELESS = "HINDSIGHT_API_MCP_STATELESS"
 ENV_MCP_INSTRUCTIONS = "HINDSIGHT_API_MCP_INSTRUCTIONS"
+ENV_MCP_SERVER_INSTRUCTIONS = "HINDSIGHT_API_MCP_SERVER_INSTRUCTIONS"
 ENV_MCP_AUTH_TOKEN = "HINDSIGHT_API_MCP_AUTH_TOKEN"
 ENV_ENABLE_BANK_CONFIG_API = "HINDSIGHT_API_ENABLE_BANK_CONFIG_API"
 ENV_ENABLE_BANK_LLM_HEALTH = "HINDSIGHT_API_ENABLE_BANK_LLM_HEALTH"
@@ -1025,7 +1026,9 @@ ENV_KB_IMAGE_TOKENS = "HINDSIGHT_API_KB_IMAGE_TOKENS"
 ENV_KB_MAX_FILE_MB = "HINDSIGHT_API_KB_MAX_FILE_MB"
 ENV_KB_MAX_FILE_MB_BY_MEDIA_TYPE = "HINDSIGHT_API_KB_MAX_FILE_MB_BY_MEDIA_TYPE"
 ENV_KB_MAX_IMAGE_MEGAPIXELS = "HINDSIGHT_API_KB_MAX_IMAGE_MEGAPIXELS"
+ENV_KB_WORKER_MEMORY_MB = "HINDSIGHT_API_KB_WORKER_MEMORY_MB"
 ENV_KB_MAX_MEDIA_SECONDS = "HINDSIGHT_API_KB_MAX_MEDIA_SECONDS"
+ENV_KB_MAX_VIDEO_WORK_SECONDS = "HINDSIGHT_API_KB_MAX_VIDEO_WORK_SECONDS"
 ENV_KB_MAX_PDF_PAGES = "HINDSIGHT_API_KB_MAX_PDF_PAGES"
 ENV_KB_AUDIO_WINDOW_SECONDS = "HINDSIGHT_API_KB_AUDIO_WINDOW_SECONDS"
 ENV_KB_VIDEO_WINDOW_SECONDS = "HINDSIGHT_API_KB_VIDEO_WINDOW_SECONDS"
@@ -1908,6 +1911,12 @@ DEFAULT_MCP_ENABLED = True
 DEFAULT_MCP_ENABLED_TOOLS: list[str] | None = None  # None = all tools enabled
 DEFAULT_MCP_STATELESS = False  # False = stateful (supports SSE/GET); True = stateless (POST-only)
 DEFAULT_MCP_INSTRUCTIONS = None
+# Text sent to MCP clients as the server instructions of the initialize response, so a
+# connecting agent learns how to use the bank without a hand-pasted prompt. Per bank.
+DEFAULT_MCP_SERVER_INSTRUCTIONS = None
+# Upper bound on mcp_server_instructions. Clients place the text in the model's context on
+# every connection, so it is kept to a size a system prompt can carry.
+MCP_SERVER_INSTRUCTIONS_MAX_CHARS = 4000
 DEFAULT_ENABLE_BANK_CONFIG_API = True
 # Dry-run extraction is a preview tool that makes a real LLM call but stores nothing. Enabled by
 # default; set HINDSIGHT_API_ENABLE_DRY_RUN_EXTRACT=false to remove the endpoint (e.g. to cap
@@ -2117,7 +2126,15 @@ DEFAULT_KB_MAX_FILE_MB = 500
 # Pillow's own refusal threshold (2 x its 89 MP decompression-bomb warning): a 5 MB PNG can be 30000 x 30000
 # pixels, and decoding it is memory by pixels (3-4 bytes each, twice over while converting), not by file size.
 DEFAULT_KB_MAX_IMAGE_MEGAPIXELS = 178
+# The most memory (address space) one worker process converting an Office file or rendering a PDF may take;
+# 0 sizes it from the machine: half the container's memory limit (or of the RAM) plus 1 GB, a worker's own
+# footprint at rest. A 42 KB .xls that declares 16.7M cells grew a worker until the container ran out.
+DEFAULT_KB_WORKER_MEMORY_MB = 0
 DEFAULT_KB_MAX_MEDIA_SECONDS = 7200  # 2h of audio/video per file
+# Cutting a video costs CPU by its frames and their pixels, not by its length or size: a 500 MB file can hold
+# two hours of 4K at 60 fps, eight times the work of two hours of 1080p at 30. The limit is the work of
+# this many seconds of 1080p 30 fps video (media.py); 0 turns it off.
+DEFAULT_KB_MAX_VIDEO_WORK_SECONDS = 7200
 DEFAULT_KB_MAX_PDF_PAGES = 2000
 DEFAULT_KB_AUDIO_WINDOW_SECONDS = 60
 DEFAULT_KB_VIDEO_WINDOW_SECONDS = 30
@@ -2134,8 +2151,11 @@ DEFAULT_KB_KEYWORD_WEIGHT = 0.2
 # Structure-aware passages. 128 was best on LegalBench-RAG at a fixed budget of returned text (CHUNKING.md);
 # 256 beat it on every benchmark launch uses (EmbeddingGemma 2): SciFact 83.7 -> 84.2 nDCG@10,
 # EnterpriseRAG search 66.1 -> 67.6 (recall@10 77.1 -> 81.5), with half the passages. 512 led on
-# SciFact alone (85.6) and lost 3 points on EnterpriseRAG's per-category mean.
-DEFAULT_KB_TEXT_PASSAGE_TOKENS = 256
+# SciFact alone (85.6) and lost 3 points on EnterpriseRAG's per-category mean. 512 again with each text
+# titled by its opening and its best documents scored whole: LegalBench-RAG recall@5 80.9 -> 86.1 on its
+# first 50 questions per set (mergers 46.4 -> 60.7: a clause is no longer cut in two). EnterpriseRAG and
+# SciFact not yet rerun at 512 with these.
+DEFAULT_KB_TEXT_PASSAGE_TOKENS = 512
 # An async knowledge ingest is split into child operations of about this many bytes of stored files,
 # each its own worker task, so one big upload spreads across every free slot. Bytes, because the
 # passage count is only known once a file is split; a file over the budget is a child on its own.
@@ -4434,7 +4454,9 @@ class HindsightConfig:
     #: Per media type, in place of kb_max_file_mb (server-only, like it: a bank cannot raise either).
     kb_max_file_mb_by_media_type: dict[str, int] = field(default_factory=dict)
     kb_max_image_megapixels: int = DEFAULT_KB_MAX_IMAGE_MEGAPIXELS
+    kb_worker_memory_mb: int = DEFAULT_KB_WORKER_MEMORY_MB
     kb_max_media_seconds: int = DEFAULT_KB_MAX_MEDIA_SECONDS
+    kb_max_video_work_seconds: int = DEFAULT_KB_MAX_VIDEO_WORK_SECONDS
     kb_max_pdf_pages: int = DEFAULT_KB_MAX_PDF_PAGES
     kb_audio_window_seconds: int = DEFAULT_KB_AUDIO_WINDOW_SECONDS
     kb_video_window_seconds: int = DEFAULT_KB_VIDEO_WINDOW_SECONDS
@@ -4458,6 +4480,8 @@ class HindsightConfig:
     reflect_kb_search_images: bool = DEFAULT_REFLECT_KB_SEARCH_IMAGES
     reflect_kb_search_max_images: int = DEFAULT_REFLECT_KB_SEARCH_MAX_IMAGES
     reflect_kb_search_budget: str = DEFAULT_REFLECT_KB_SEARCH_BUDGET
+    # Per bank: the instructions an MCP client receives in the initialize response (None = none)
+    mcp_server_instructions: str | None = DEFAULT_MCP_SERVER_INSTRUCTIONS
 
     # Class-level sets for configuration categorization
 
@@ -4551,6 +4575,8 @@ class HindsightConfig:
     _CONFIGURABLE_FIELDS = {
         # MCP tool access control
         "mcp_enabled_tools",
+        # Instructions sent to MCP clients when they connect to the bank
+        "mcp_server_instructions",
         # Audit logging on/off, per bank. The actions allowlist and retention
         # window remain server-level and are deliberately not configurable.
         "audit_log_enabled",
@@ -5955,7 +5981,11 @@ class HindsightConfig:
             kb_max_file_mb=int(os.getenv(ENV_KB_MAX_FILE_MB, str(DEFAULT_KB_MAX_FILE_MB))),
             kb_max_file_mb_by_media_type=_parse_kb_size_limits(os.getenv(ENV_KB_MAX_FILE_MB_BY_MEDIA_TYPE)),
             kb_max_image_megapixels=int(os.getenv(ENV_KB_MAX_IMAGE_MEGAPIXELS, str(DEFAULT_KB_MAX_IMAGE_MEGAPIXELS))),
+            kb_worker_memory_mb=int(os.getenv(ENV_KB_WORKER_MEMORY_MB, str(DEFAULT_KB_WORKER_MEMORY_MB))),
             kb_max_media_seconds=int(os.getenv(ENV_KB_MAX_MEDIA_SECONDS, str(DEFAULT_KB_MAX_MEDIA_SECONDS))),
+            kb_max_video_work_seconds=int(
+                os.getenv(ENV_KB_MAX_VIDEO_WORK_SECONDS, str(DEFAULT_KB_MAX_VIDEO_WORK_SECONDS))
+            ),
             kb_max_pdf_pages=int(os.getenv(ENV_KB_MAX_PDF_PAGES, str(DEFAULT_KB_MAX_PDF_PAGES))),
             kb_audio_window_seconds=int(os.getenv(ENV_KB_AUDIO_WINDOW_SECONDS, str(DEFAULT_KB_AUDIO_WINDOW_SECONDS))),
             kb_video_window_seconds=int(os.getenv(ENV_KB_VIDEO_WINDOW_SECONDS, str(DEFAULT_KB_VIDEO_WINDOW_SECONDS))),
@@ -5984,6 +6014,7 @@ class HindsightConfig:
             ).lower()
             == "true",
             reflect_kb_search_budget=_parse_reflect_kb_search_budget(os.getenv(ENV_REFLECT_KB_SEARCH_BUDGET)),
+            mcp_server_instructions=os.getenv(ENV_MCP_SERVER_INSTRUCTIONS) or DEFAULT_MCP_SERVER_INSTRUCTIONS,
             reflect_kb_search_max_images=int(
                 os.getenv(ENV_REFLECT_KB_SEARCH_MAX_IMAGES, str(DEFAULT_REFLECT_KB_SEARCH_MAX_IMAGES))
             ),

@@ -14,23 +14,30 @@ the Docker image, a CI step); PyAV keeps the work in-process and needs nothing o
 
 from __future__ import annotations
 
-import collections
 import contextlib
+import functools
 import io
+import logging
 import math
 import multiprocessing
+import os
 import re
 import tempfile
 import threading
+import time
 from collections import Counter
-from collections.abc import Iterator
-from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
+from collections.abc import Callable, Iterator
+from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 import numpy as np
+
+_logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
 
 PCM_RATE = 16000  # EmbeddingGemma 2 takes mono 16 kHz audio
 
@@ -71,6 +78,10 @@ def _bytes(source: Source) -> bytes:
 
 class MediaError(ValueError):
     """A file that cannot be split: unsupported type, unreadable, or over a limit."""
+
+
+class MediaWorkError(MediaError):
+    """A video that took more work to cut than its limit allows: the whole file fails, not one window."""
 
 
 @dataclass(frozen=True)
@@ -263,10 +274,6 @@ PDF_TEXT_UNIT_TOKENS = 128
 _PDF_BANDS = ((0.0, 0.5), (0.25, 0.75), (0.5, 1.0))
 
 
-_PDF_LOOKAHEAD = 4
-_PNG_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="kb-png")
-
-
 def _page_png(sharp: Any, page_pixels: int, bands: bool) -> bytes:
     image = sharp.copy() if bands else sharp  # with bands the full-size render is still being cropped
     image.thumbnail((page_pixels, page_pixels))
@@ -279,65 +286,153 @@ def _band_pngs(sharp: Any) -> tuple[bytes, ...]:
     )
 
 
-def split_pdf(data: Source, *, page_pixels: int, max_pages: int, bands: bool = False) -> Iterator[PassageDraft]:
-    """One PNG per page, the longest side rendered at ``page_pixels``."""
+@dataclass(frozen=True)
+class _PdfText:
+    page_count: int
+    #: Each page's own text layer, or None (a scan, or a page that cannot load).
+    texts: list[str | None]
+
+
+@dataclass(frozen=True)
+class _RenderedPage:
+    number: int
+    png: bytes
+    bands: tuple[bytes, ...]
+
+
+#: Pages rendered per call to a PDF worker: few enough to hold, enough to keep the call overhead small.
+_PDF_CHUNK = 8
+#: Processes rendering PDFs at once. Each is single-threaded (pdfium is not thread-safe), so PDFs of
+#: different ingests render in parallel instead of page by page under one process-wide lock.
+_PDF_WORKERS = 2
+_PDF_POOL: ProcessPoolExecutor | None = None
+_PDF_POOL_LOCK = threading.Lock()
+
+
+#: The longest one call to a PDF worker may take (a PDF's page text, or 8 of its pages rendered). pdf.js's
+#: tiling-pattern-tiny-steps*.pdf kept both workers at 100% CPU for over 10 minutes, and every PDF of every
+#: ingest waited behind them.
+_PDF_CALL_TIMEOUT = 180.0
+
+
+def _kill(pool: ProcessPoolExecutor) -> None:
+    """Stop ``pool`` now, its running calls too: ProcessPoolExecutor has no way to cancel a call that has
+    started, so its processes are killed (``_processes``, which it keeps privately)."""
+    for process in list((getattr(pool, "_processes", None) or {}).values()):
+        process.kill()
+    pool.shutdown(wait=False, cancel_futures=True)
+
+
+def _in_pdf_worker(fn: Callable[..., _T], *args: Any) -> _T:
+    """``fn(*args)`` in a PDF worker process. pdfium aborts the process on some files (a JPEG 2000 image in
+    pdf.js's jpx_numcomps.pdf: SIGTRAP), and in the server that took the API down for everyone; in a worker
+    it fails that file, and the next one gets a fresh worker. A call past ``_PDF_CALL_TIMEOUT`` fails its
+    file too, and its worker is killed."""
+    global _PDF_POOL
+    with _PDF_POOL_LOCK:
+        if _PDF_POOL is None:
+            _PDF_POOL = _worker_pool(_PDF_WORKERS)
+        pool = _PDF_POOL
+    try:
+        return pool.submit(fn, *args).result(timeout=_PDF_CALL_TIMEOUT)
+    except TimeoutError:
+        with _PDF_POOL_LOCK:
+            if _PDF_POOL is pool:
+                _PDF_POOL = None
+        _kill(pool)  # the calls beside it break and are retried alone, below
+        raise MediaError(f"rendering this PDF took over {_PDF_CALL_TIMEOUT:.0f}s") from None
+    except BrokenProcessPool:
+        with _PDF_POOL_LOCK:
+            if _PDF_POOL is pool:
+                _PDF_POOL = None
+    # A crash (or a kill) breaks every call in flight on the pool, not only the file's own: once again, alone
+    # in a worker of its own, so only the file that crashes it fails (a PDF rendering beside jpx_numcomps.pdf
+    # failed with it).
+    try:
+        return _alone(fn, *args, timeout=_PDF_CALL_TIMEOUT)
+    except TimeoutError:
+        raise MediaError(f"rendering this PDF took over {_PDF_CALL_TIMEOUT:.0f}s") from None
+    except BrokenProcessPool as exc:
+        raise MediaError("the PDF renderer crashed on this file") from exc
+
+
+def _alone(fn: Callable[..., _T], *args: Any, timeout: float | None = None) -> _T:
+    """``fn(*args)`` once more, in a worker process of its own, killed after: the retry of a call whose
+    shared worker died, so a crash fails the file that caused it and not the files queued beside it.
+    Raises ``BrokenProcessPool`` if it dies again, ``TimeoutError`` past ``timeout``."""
+    alone = _worker_pool(1)
+    try:
+        return alone.submit(fn, *args).result(timeout=timeout)
+    finally:
+        _kill(alone)
+
+
+def _pdf_text(data: Source, max_pages: int) -> _PdfText:
+    """In a worker: the page count and every page's text layer."""
     import pypdfium2 as pdfium
 
-    with _PDFIUM_LOCK:
-        try:
-            pdf = pdfium.PdfDocument(data)
-        except Exception as exc:
-            raise MediaError(f"unreadable PDF: {exc}") from exc
-        page_count = len(pdf)
     try:
+        pdf = pdfium.PdfDocument(data)
+    except Exception as exc:
+        raise MediaError(f"unreadable PDF: {exc}") from None  # pdfium's exceptions carry ctypes state
+    try:
+        page_count = len(pdf)
         if page_count > max_pages:
             raise MediaError(f"PDF has {page_count} pages; the limit is {max_pages}")
-        # The pages' own text layers, when they have one (not OCR: a scan has none). A page is
-        # scored on it too (whole page and 128-token units), and it is what a reader gets back.
-        texts = [_page_text(pdf, number) for number in range(page_count)]
-        embed_texts = strip_repeated_lines(texts)
-        # Rendering goes through pdfium, one page at a time under its lock; encoding the PNGs does not
-        # (Pillow lets go of the GIL), so it runs on a few threads while the next pages render. Page by
-        # page in order it was half of a PDF's ingest; up to _PDF_LOOKAHEAD pages are held at once.
-        pending: collections.deque[tuple[int, Future[bytes], Future[tuple[bytes, ...]] | None]] = collections.deque()
-        number, rendered = 0, 0
-        while number < page_count or pending:
-            while number < page_count and len(pending) < _PDF_LOOKAHEAD:
-                with _PDFIUM_LOCK:
-                    try:
-                        page = pdf[number]
-                        width, height = page.get_size()
-                        scale = (max(page_pixels, PDF_BAND_PIXELS) if bands else page_pixels) / max(width, height, 1)
-                        sharp = page.render(scale=scale).to_pil().convert("RGB")
-                        page.close()
-                    except Exception:  # noqa: BLE001 - see below
-                        # A damaged page (a broken page tree: "Failed to load page") is skipped, so the rest
-                        # of the PDF stays searchable; raised, it was retried three times and lost them all.
-                        number += 1
-                        continue
-                # Bands only when asked: they used to be cut and encoded for every page and then dropped,
-                # three PNGs per page for nothing (half of a PDF's ingest time with bands off).
-                crops = _PNG_POOL.submit(_band_pngs, sharp) if bands else None
-                pending.append((number, _PNG_POOL.submit(_page_png, sharp, page_pixels, bands), crops))
-                number += 1
-            if not pending:
-                break
-            done, page_png, crops = pending.popleft()
+        return _PdfText(page_count, [_page_text(pdf, number) for number in range(page_count)])
+    finally:
+        pdf.close()
+
+
+def _pdf_render(data: Source, numbers: list[int], page_pixels: int, bands: bool) -> list[_RenderedPage]:
+    """In a worker: pages ``numbers`` rendered and encoded. A damaged page (a broken page tree: "Failed to
+    load page") is left out, so the rest of the PDF stays searchable; raised, it was retried three times and
+    lost them all."""
+    import pypdfium2 as pdfium
+
+    pdf = pdfium.PdfDocument(data)
+    try:
+        out = []
+        for number in numbers:
+            try:
+                page = pdf[number]
+                width, height = page.get_size()
+                scale = (max(page_pixels, PDF_BAND_PIXELS) if bands else page_pixels) / max(width, height, 1)
+                sharp = page.render(scale=scale).to_pil().convert("RGB")
+                page.close()
+            except Exception:  # noqa: BLE001 - see the docstring
+                continue
+            # Bands only when asked: they used to be cut and encoded for every page and then dropped,
+            # three PNGs per page for nothing (half of a PDF's ingest time with bands off).
+            out.append(_RenderedPage(number, _page_png(sharp, page_pixels, bands), _band_pngs(sharp) if bands else ()))
+        return out
+    finally:
+        pdf.close()
+
+
+def split_pdf(data: Source, *, page_pixels: int, max_pages: int, bands: bool = False) -> Iterator[PassageDraft]:
+    """One PNG per page, the longest side rendered at ``page_pixels``. pdfium runs in worker processes
+    (``_in_pdf_worker``), a few pages per call."""
+    info = _in_pdf_worker(_pdf_text, data, max_pages)
+    # The pages' own text layers, when they have one (not OCR: a scan has none). A page is scored on it
+    # too (whole page and 128-token units), and it is what a reader gets back.
+    embed_texts = strip_repeated_lines(info.texts)
+    rendered = 0
+    for start in range(0, info.page_count, _PDF_CHUNK):
+        numbers = list(range(start, min(start + _PDF_CHUNK, info.page_count)))
+        for page in _in_pdf_worker(_pdf_render, data, numbers, page_pixels, bands):
             rendered += 1
             yield PassageDraft(
                 modality="image",
-                text=texts[done],
-                data=page_png.result(),
+                text=info.texts[page.number],
+                data=page.png,
                 mime="image/png",
-                page=done + 1,
-                bands=crops.result() if crops is not None else (),
-                embed_text=embed_texts[done],
+                page=page.number + 1,
+                bands=page.bands,
+                embed_text=embed_texts[page.number],
             )
-        if not rendered:
-            raise MediaError("no page of the PDF could be rendered")
-    finally:
-        with _PDFIUM_LOCK:
-            pdf.close()
+    if not rendered:
+        raise MediaError("no page of the PDF could be rendered")
 
 
 def _page_text(pdf: Any, number: int) -> str | None:
@@ -384,39 +479,306 @@ _OFFICE_POOL: ProcessPoolExecutor | None = None
 _OFFICE_POOL_LOCK = threading.Lock()
 
 
-def _first_to_kill() -> None:
-    """In the worker: when memory runs out, the kernel kills this process, not the server it works for (in a
-    6 GB container it once killed the server while a spreadsheet converted). Linux only; elsewhere a no-op."""
+def _container_limit() -> int:
+    """The container's memory limit (cgroup v2, then v1); 0 when it has none."""
+    for path in ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes"):
+        with contextlib.suppress(OSError, ValueError):
+            limit = int(Path(path).read_text().strip())  # "max": no limit, a ValueError
+            if limit < 1 << 50:  # cgroup v1 writes "no limit" as a huge number
+                return limit
+    return 0
+
+
+def _memory_limit() -> int:
+    """The container's memory limit, else the machine's RAM; 0 if unknown."""
+    if limit := _container_limit():
+        return limit
+    with contextlib.suppress(OSError, ValueError, AttributeError):
+        return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    return 0
+
+
+def _worker_pool(workers: int) -> ProcessPoolExecutor:
+    """A pool of worker processes for files (PDF rendering, Office conversion), memory-capped and guarded."""
+    _start_memory_guard()
+    # spawn, not fork: the server has threads, and a forked child inherits their locks held.
+    return ProcessPoolExecutor(
+        max_workers=workers,
+        mp_context=multiprocessing.get_context("spawn"),
+        initializer=_first_to_kill,
+        initargs=(_worker_address_space(),),
+    )
+
+
+# --- the memory guard ------------------------------------------------------------------------
+# Each worker's own cap is not enough: on Kubernetes (cgroup v2, memory.oom.group = 1) a container that runs
+# out of memory has every process killed together, the server and its database too, and the caps of
+# several workers add up past the container next to a 2 GB server. On the cluster sweep, 51535.xls (16.7M
+# declared cells) grew its converter to its 5 GB cap beside a 3 GB server, and the whole pod restarted.
+# So the server watches the container itself, and kills its biggest worker before the kernel kills them
+# all; the call it was running is retried alone (_alone), and a file that grows that far again fails.
+
+#: The share of the container's memory in use past which the biggest worker is killed.
+_GUARD_SHARE = 0.85
+#: How often the guard looks: a runaway conversion grew 14 MB a second, so 0.25 s is 4 MB.
+_GUARD_INTERVAL = 0.25
+_GUARD_STARTED = False
+_GUARD_LOCK = threading.Lock()
+
+
+def _container_used() -> int:
+    """The memory the container holds that the kernel cannot drop: anonymous, shared and kernel memory
+    (cgroup v2's memory.stat). Page cache is left out, as it is reclaimed before anything is killed."""
+    try:
+        stat = Path("/sys/fs/cgroup/memory.stat").read_text()
+    except OSError:
+        return 0
+    fields = dict(line.split(" ", 1) for line in stat.splitlines() if " " in line)
+    return sum(int(fields.get(k, 0)) for k in ("anon", "shmem", "kernel"))
+
+
+def _worker_rss() -> dict[int, int]:
+    """Each of this process's worker children (multiprocessing's spawned processes, not its resource
+    tracker) by its resident memory in bytes."""
+    out: dict[int, int] = {}
+    me = os.getpid()
+    page = os.sysconf("SC_PAGE_SIZE")
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        with contextlib.suppress(OSError, ValueError, IndexError):
+            # The parent pid is the 2nd field after the parenthesised command name, which may hold spaces.
+            if int((entry / "stat").read_text().rsplit(")", 1)[1].split()[1]) != me:
+                continue
+            cmdline = (entry / "cmdline").read_bytes()
+            if b"multiprocessing.spawn" not in cmdline or b"resource_tracker" in cmdline:
+                continue
+            out[int(entry.name)] = int((entry / "statm").read_text().split()[1]) * page
+    return out
+
+
+def _guard_once(limit: int) -> int | None:
+    """Kill the biggest worker if the container is past ``_GUARD_SHARE`` of ``limit``; the pid killed."""
+    used = _container_used()
+    if used <= _GUARD_SHARE * limit:
+        return None
+    workers = _worker_rss()
+    if not workers:
+        return None
+    pid = max(workers, key=workers.__getitem__)
+    with contextlib.suppress(OSError):
+        os.kill(pid, 9)
+        _logger.warning(
+            f"Knowledge worker {pid} killed: the container holds {used >> 20} MB of {limit >> 20} MB, "
+            f"and the worker {workers[pid] >> 20} MB"
+        )
+        return pid
+    return None
+
+
+def _start_memory_guard() -> None:
+    """Start the guard thread once, in a container with a memory limit (Linux); elsewhere nothing."""
+    global _GUARD_STARTED
+    with _GUARD_LOCK:
+        if _GUARD_STARTED or not (limit := _container_limit()) or not Path("/proc/self/stat").exists():
+            return
+        _GUARD_STARTED = True
+
+    def watch() -> None:
+        while True:
+            with contextlib.suppress(Exception):  # the guard must never stop: a read that fails is skipped
+                _guard_once(limit)
+            time.sleep(_GUARD_INTERVAL)
+
+    threading.Thread(target=watch, name="kb-memory-guard", daemon=True).start()
+
+
+def _worker_address_space() -> int:
+    """The most address space a worker process (Office conversion, PDF rendering) may take, 0 for no cap
+    (``HINDSIGHT_API_KB_WORKER_MEMORY_MB``; by default half the container's memory plus 1 GB, a worker's
+    own 0.9 GB at rest). POI's 51535.xls, 42 KB, declares 65,536 rows of 256 columns, and markitdown grew by
+    14 MB a second turning them into a table until the 8 GB container ran out; on Kubernetes (cgroup v2) the
+    kernel then kills every process of the container, the server too, whatever their oom_score_adj. Past
+    the cap the worker gets a MemoryError and that file fails alone. A flat 2 GB was tried first: it also
+    failed real spreadsheets (Govdocs1's 28 MB 000032.xls peaks at 3.3 GB), so the cap follows the machine."""
+    from ..config import get_config
+
+    if (mb := get_config().kb_worker_memory_mb) > 0:
+        return mb << 20
+    total = _memory_limit()
+    return total // 2 + (1 << 30) if total else 0
+
+
+def _first_to_kill(address_space: int) -> None:
+    """In the worker: its address space is capped (``_worker_address_space``), and when memory runs out
+    anyway the kernel kills this process, not the server it works for. Linux only; elsewhere a no-op."""
+    import resource
+
+    if address_space > 0:
+        with contextlib.suppress(OSError, ValueError):
+            resource.setrlimit(resource.RLIMIT_AS, (address_space, address_space))
     with contextlib.suppress(OSError):
         Path("/proc/self/oom_score_adj").write_text("1000")
 
 
-def _convert_office(data: bytes, ext: str) -> str:
+#: The parts of an Office file that hold its text, read when markitdown cannot: the body with its headers,
+#: footers and notes (docx), the slides (pptx), the cell strings (xlsx). Any case, either separator: POI's
+#: 49609.xlsx names them "xl\\sharedstrings.xml".
+_OOXML_TEXT_PARTS = {
+    ".docx": re.compile(r"word/(document|header\d*|footer\d*|footnotes|endnotes)\.xml", re.IGNORECASE),
+    ".pptx": re.compile(r"ppt/slides/slide\d+\.xml", re.IGNORECASE),
+    ".xlsx": re.compile(r"xl/sharedStrings\.xml|xl/worksheets/sheet\d+\.xml", re.IGNORECASE),
+}
+
+
+def _ooxml_text(data: bytes, ext: str) -> str:
+    """An Office file's text runs, read from its XML a paragraph per line, without markitdown. A streaming
+    parse, so a table nested 15,000 deep (POI's deep-table-cell.docx: RecursionError in markitdown) is read
+    like any other; entities stay unresolved (the standard parser fetches nothing)."""
+    import xml.etree.ElementTree as ET
+    import zipfile
+
+    parts = _OOXML_TEXT_PARTS.get(ext)
+    if parts is None:
+        return ""
+    lines: list[str] = []
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        names = sorted(
+            (n for n in z.namelist() if parts.fullmatch(n.replace("\\", "/"))),
+            key=lambda n: [int(d) for d in re.findall(r"\d+", n)],
+        )
+        for name in names:
+            line: list[str] = []
+            with z.open(name) as part:
+                for _event, element in ET.iterparse(part):
+                    tag = element.tag.rsplit("}", 1)[-1]
+                    if tag == "t" and element.text:
+                        line.append(element.text)
+                    elif tag in ("p", "si", "row") and line:
+                        lines.append("".join(line))
+                        line = []
+                    element.clear()
+            if line:
+                lines.append("".join(line))
+    return "\n".join(lines)
+
+
+@functools.cache
+def _markitdown() -> Any:
+    """The worker's one converter. Each MarkItDown loads its own file-type model (magika, on ONNX Runtime) and
+    never gives it back: one per file grew a worker's address space by 90 MB a file, and after ~55 files
+    every conversion past the worker's memory cap failed ("ONNXRuntimeError ... std::bad_alloc", or "failed to
+    create a thread"): 71 of the cluster sweep's Office files. Reused, the worker stays at 0.77 GB."""
     from markitdown import MarkItDown
 
+    return MarkItDown(enable_plugins=False)
+
+
+#: A legacy .xls declaring more cells than this is read cell by cell (``_xls_text``), not by markitdown: it
+#: builds a table of every declared cell, empty ones too, at about 1.7 KB each (Govdocs1's 000032.xls, 1.9M
+#: cells, peaked at 3.3 GB). A sheet with whole columns formatted declares 65,536 rows of them: POI's 31 KB
+#: SharedFormulaTest.xls (4.3M cells) and 42 KB 51535.xls (16.7M) ran a worker out of 5 GB, and read cell by
+#: cell they take 0.1 s and 0.5 s, under 200 MB. Below it, markitdown's tables are kept as they were.
+_MARKITDOWN_MAX_CELLS = 2_000_000
+
+
+def _xls_sheets(data: bytes) -> Iterator[Any]:
+    """Each sheet of a legacy .xls, loaded one at a time."""
+    import xlrd
+
+    book = xlrd.open_workbook(file_contents=data, on_demand=True)
     try:
-        return MarkItDown(enable_plugins=False).convert_stream(io.BytesIO(data), file_extension=ext).text_content
+        for index in range(book.nsheets):
+            yield book.sheet_by_index(index)
+            book.unload_sheet(index)
+    finally:
+        book.release_resources()
+
+
+def _xls_text(data: bytes) -> str:
+    """A legacy .xls's non-empty cells, a row per line as a table row (``| a | b |``, as markitdown writes
+    them, so the passage splitter cuts them the same way), a heading per sheet."""
+    lines: list[str] = []
+    for sheet in _xls_sheets(data):
+        lines.append(f"## {sheet.name}")
+        for row in range(sheet.nrows):
+            values = [str(v).strip() for v in sheet.row_values(row)]
+            if any(values):
+                lines.append("| " + " | ".join(v for v in values if v) + " |")
+    return "\n".join(lines)
+
+
+def _xls_cells(data: bytes) -> int:
+    """How many cells a legacy .xls declares, every sheet's rows times columns; 0 if xlrd cannot open it."""
+    try:
+        return sum(sheet.nrows * sheet.ncols for sheet in _xls_sheets(data))
+    except Exception:  # noqa: BLE001 - unreadable here is markitdown's to report
+        return 0
+
+
+def _fallback_text(data: bytes, ext: str) -> str:
+    """The text of an Office file read without markitdown, when it fails or comes back empty."""
+    return _xls_text(data) if ext == ".xls" else _ooxml_text(data, ext)
+
+
+def _convert_office(data: bytes, ext: str) -> str:
+    if ext == ".xls" and _xls_cells(data) > _MARKITDOWN_MAX_CELLS:
+        return _xls_text(data)
+    try:
+        text = _markitdown().convert_stream(io.BytesIO(data), file_extension=ext).text_content
     except Exception as exc:
+        # markitdown fails on files Office opens: a KeyError on a field it did not expect (POI's 60329.docx),
+        # recursion on deep tables, 974 words of slides (2411-Performance_Up.pptx). Their text is still read.
+        try:
+            if text := _fallback_text(data, ext):
+                return text
+        except Exception:
+            pass
         # Back to the server as text: markitdown's exceptions carry tracebacks, which do not pickle, and the
         # reason reached the document as "cannot pickle 'traceback' object".
         raise ValueError(str(exc)) from None
+    if text.strip():
+        return text
+    # markitdown reads a Word body only: a document whose text is all in its header (POI's Headers.docx)
+    # came out empty and failed "nothing to search".
+    try:
+        return _fallback_text(data, ext)
+    except Exception:
+        return text
+
+
+#: One Office conversion at a time in the server, its retry included. A big spreadsheet's conversion holds
+#: memory by the 100x its size (Govdocs1's 28 MB 000032.xls peaks at 3.3 GB), so two side by side do not
+#: fit where one does: on the cluster, the retries of two broken calls ran at once, 000032.xls beside the
+#: runaway 51535.xls, and the memory guard had to kill both. Waiting here, a file is never queued on the
+#: worker either, so a worker's death breaks only the file it was converting.
+_OFFICE_CALL_LOCK = threading.Lock()
 
 
 def _office_text(data: bytes, ext: str) -> str:
+    with _OFFICE_CALL_LOCK:
+        return _office_text_now(data, ext)
+
+
+def _office_text_now(data: bytes, ext: str) -> str:
     global _OFFICE_POOL
     with _OFFICE_POOL_LOCK:
         if _OFFICE_POOL is None:
-            # spawn, not fork: the server has threads, and a forked child inherits their locks held.
-            _OFFICE_POOL = ProcessPoolExecutor(
-                max_workers=1, mp_context=multiprocessing.get_context("spawn"), initializer=_first_to_kill
-            )
+            _OFFICE_POOL = _worker_pool(1)
         pool = _OFFICE_POOL
     try:
         return pool.submit(_convert_office, data, ext).result()
-    except BrokenProcessPool as exc:
+    except BrokenProcessPool:
         with _OFFICE_POOL_LOCK:
             if _OFFICE_POOL is pool:
                 _OFFICE_POOL = None  # the next file gets a fresh worker
+    # Once again in a fresh worker: the memory guard kills the biggest worker when the container runs low,
+    # which can be this one for memory the PDF workers hold. A file that kills it twice fails. (Files used
+    # to queue on the worker, and a 9 KB spreadsheet behind the runaway 51535.xls failed with it; they now
+    # wait on _OFFICE_CALL_LOCK instead.)
+    try:
+        return _alone(_convert_office, data, ext)
+    except BrokenProcessPool as exc:
         raise MediaError(f"the {ext} converter died on this file (out of memory?)") from exc
 
 
@@ -427,10 +789,44 @@ def read_text(source: Source, filename: str | None) -> str:
     ext = Path(filename or "").suffix.lower()
     if ext in _OFFICE_EXTENSIONS:
         try:
-            return _office_text(data, ext)
+            text = _office_text(data, ext)
         except Exception as exc:
             raise MediaError(f"unreadable {ext} file: {exc}") from exc
+        # markitdown converts the first <body> only: a Govdocs1 export opens <body> twice, the first time
+        # still inside <head> and empty, so a page of 1,500 words came out empty and failed "nothing to
+        # search". Only then is its text read without markup.
+        if ext in (".html", ".htm") and not text.strip():
+            return _html_text(data.decode("utf-8", errors="replace"))
+        return text
     return data.decode("utf-8", errors="replace")
+
+
+def _html_text(html: str) -> str:
+    """The visible text of an HTML page, without scripts and styles (the stdlib parser: no tree to misplace)."""
+    from html.parser import HTMLParser
+
+    class _Text(HTMLParser):
+        def __init__(self) -> None:
+            super().__init__()
+            self.chunks: list[str] = []
+            self._skip = 0
+
+        def handle_starttag(self, tag: str, attrs: Any) -> None:
+            if tag in ("script", "style"):
+                self._skip += 1
+
+        def handle_endtag(self, tag: str) -> None:
+            if tag in ("script", "style") and self._skip:
+                self._skip -= 1
+
+        def handle_data(self, data: str) -> None:
+            if not self._skip and data.strip():
+                self.chunks.append(data.strip())
+
+    parser = _Text()
+    parser.feed(html)
+    parser.close()
+    return "\n".join(parser.chunks)
 
 
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9(\u201c\"])")
@@ -454,7 +850,33 @@ def sentences(text: str) -> list[str]:
             out[-1] = f"{out[-1]} {current}"
         else:
             out.append(current)
-    return out
+    # A page with no sentence ends (pdf.js's perf_text_labels.pdf: thousands of labels) was one "sentence"
+    # of 14k tokens, which the embedder refused (EmbeddingGemma 2 reads 8,192): cut at words.
+    return [piece for sentence in out for piece in _cut_words(sentence, _MAX_SENTENCE_TOKENS)]
+
+
+#: The longest a sentence is embedded as: past it, it is cut at words. A real sentence is far shorter.
+_MAX_SENTENCE_TOKENS = 256
+
+
+def _cut_words(text: str, tokens: int) -> list[str]:
+    """``text`` as pieces of whole words of about ``tokens`` at most, counting each word once (linear: a
+    piece re-counted per word was quadratic on a 14k-token line)."""
+    from ..engine.token_encoding import count_tokens
+
+    if count_tokens(text) <= tokens:
+        return [text]
+    pieces, current, size = [], [], 0
+    for word in text.split():
+        n = count_tokens(" " + word)
+        if current and size + n > tokens:
+            pieces.append(" ".join(current))
+            current, size = [], 0
+        current.append(word)
+        size += n
+    if current:
+        pieces.append(" ".join(current))
+    return pieces
 
 
 def pack_lines(text: str, *, tokens: int) -> list[str]:
@@ -546,6 +968,12 @@ class MediaInfo:
     duration: float
     has_video: bool
     has_audio: bool
+    #: The first video track's frame size and rate as its header declares them (0 when unknown or no video).
+    width: int = 0
+    height: int = 0
+    fps: float = 0.0
+    #: False for a file without a seek index: each window is then decoded from the start of the file.
+    seekable: bool = True
 
 
 @dataclass(frozen=True)
@@ -555,7 +983,9 @@ class Window:
 
 
 def probe(data: Source) -> MediaInfo:
-    """Duration and tracks of a media file."""
+    """Duration, tracks and (for video) frame size, rate and seekability of a media file, from its header."""
+    import av
+
     with _open(data) as container:
         duration = container.duration / 1_000_000 if container.duration else 0.0
         if not duration:
@@ -563,9 +993,114 @@ def probe(data: Source) -> MediaInfo:
                 (float(s.duration * s.time_base) for s in container.streams if s.duration and s.time_base),
                 default=0.0,
             )
+        width = height = 0
+        fps = 0.0
+        if container.streams.video:
+            v = container.streams.video[0]
+            # No codec context for a codec PyAV does not know (FATE's uncv-rgb24.mp4): reading its width raised
+            # an AttributeError, which the worker retried for three minutes before the file failed anyway.
+            ctx = v.codec_context
+            width, height = (ctx.width or 0, ctx.height or 0) if ctx is not None else (0, 0)
+            rate = v.average_rate or v.guessed_rate
+            fps = float(rate) if rate else 0.0
+        seekable = True
+        if duration > 0 and container.streams.video:
+            # A file without an index refuses the seek (EPERM), or takes it and goes back to its start (an
+            # AVI with no idx1): either way each window is then decoded from the start. The keyframe a seek
+            # lands on can be well before the target, but not before half of it.
+            target = duration / 2
+            try:
+                container.seek(int(target * 1_000_000), any_frame=False)
+                landed = next(
+                    (p.pts * p.time_base for p in container.demux(video=0) if p.pts is not None and p.time_base),
+                    None,
+                )
+                seekable = landed is not None and float(landed) >= target / 2
+            except av.FFmpegError:
+                seekable = False
         return MediaInfo(
-            duration=duration, has_video=bool(container.streams.video), has_audio=bool(container.streams.audio)
+            duration=duration,
+            has_video=bool(container.streams.video),
+            has_audio=bool(container.streams.audio),
+            width=width,
+            height=height,
+            fps=fps,
+            seekable=seekable,
         )
+
+
+# --- the work of cutting a video ---------------------------------------------------------------
+# Cutting costs CPU by frames and their pixels: each frame is decoded at its own size, then scaled and
+# re-encoded at 480p. Measured with the cut below (one core, libx264 veryfast): 1080p at 30 fps took
+# 13 CPU-seconds per minute of video, 4K at 60 fps 40, so a frame costs a fixed part (the re-encode)
+# plus a part by its pixels (the decode), the fixed part as much as decoding ~9.5 megapixels. Neither
+# length nor file size says which: a 500 MB file holds two hours of 4K at 60 fps as easily as of 1080p.
+
+#: The per-frame part of the work, in megapixels decoded.
+_FRAME_WORK_MEGAPIXELS = 9.5
+#: The unit a limit is given in: one second of 1080p at 30 fps.
+REFERENCE_SECOND_WORK = 30 * (1 + 1920 * 1080 / 1e6 / _FRAME_WORK_MEGAPIXELS)
+#: How far decoding may run past the estimate before the cut stops: a seek lands on the keyframe before a
+#: window, and the frames from there to the window's start are decoded too.
+_WORK_HEADROOM = 1.5
+
+
+def _span(seconds: float) -> str:
+    if seconds < 90:
+        return f"{seconds:.0f} s"
+    return f"{seconds / 60:.0f} min" if seconds < 5400 else f"{seconds / 3600:.1f} h"
+
+
+def _frame_work(width: int, height: int) -> float:
+    return 1 + width * height / 1e6 / _FRAME_WORK_MEGAPIXELS
+
+
+def video_work(info: MediaInfo, spans: list[Window]) -> float:
+    """The work of cutting ``spans`` of a video, in seconds of 1080p 30 fps video. Each window decodes its
+    own span, or everything from the start of the file when the file cannot seek, and overlapping
+    windows decode their overlap twice."""
+    fps = info.fps or 30.0  # A header without a rate: the decode below counts what is really there.
+    decoded = sum(w.end - (w.start if info.seekable else 0.0) for w in spans)
+    return decoded * fps * _frame_work(info.width, info.height) / REFERENCE_SECOND_WORK
+
+
+class _WorkMeter:
+    """Counts the frames a cut really decodes, so a header that understates the size or rate cannot
+    take more than the limit allows."""
+
+    def __init__(self, limit_seconds: float) -> None:
+        self.limit_seconds = limit_seconds
+        self._left = limit_seconds * REFERENCE_SECOND_WORK * _WORK_HEADROOM
+
+    def spend(self, width: int, height: int) -> None:
+        self._left -= _frame_work(width, height)
+        if self._left < 0:
+            raise MediaWorkError(
+                "the video took more work to cut than its header showed (more frames than it declares, or a "
+                f"file that does not seek), past the limit of "
+                f"{_span(self.limit_seconds)} of 1080p 30 fps video (HINDSIGHT_API_KB_MAX_VIDEO_WORK_SECONDS)"
+            )
+
+
+def _check_video_work(info: MediaInfo, spans: list[Window], limit_seconds: float) -> None:
+    # Before decoding, each window counts its own span, even in a file that does not seek. A header can claim
+    # far more than the file holds: a cut-off upload (FATE's 1242-small.mkv, 100 KB) declares 22 minutes, and
+    # counted as decoded from its start for every window it was refused as 7.2 h of work, where its few real
+    # frames take a second. The meter (_WorkMeter) counts what is really decoded, from the start too, so a
+    # long file without an index is still stopped at the limit.
+    work = video_work(replace(info, seekable=True), spans)
+    if work <= limit_seconds:
+        return
+    shape = f"{info.width}x{info.height} at {info.fps or 30:.0f} fps for {_span(info.duration)}"
+    if not info.seekable:
+        hint = "the file has no seek index, so every window is decoded from its start; saving it again as MP4 adds one"
+    else:
+        fits = info.duration * limit_seconds / work
+        hint = f"at this size and frame rate about {_span(fits)} fits; a lower resolution or frame rate fits more"
+    raise MediaWorkError(
+        f"video is {shape}: cutting it is the work of {_span(work)} of 1080p 30 fps video, and the limit "
+        f"is {_span(limit_seconds)} (HINDSIGHT_API_KB_MAX_VIDEO_WORK_SECONDS); {hint}"
+    )
 
 
 def windows(duration: float, window: float, overlap: float) -> list[Window]:
@@ -591,8 +1126,12 @@ def split_media(
     window_seconds: int,
     overlap_seconds: int,
     max_seconds: int,
+    max_video_work_seconds: float = 0,
 ) -> Iterator[PassageDraft]:
-    """Cut audio into m4a windows and video into mp4 windows (480p, with sound)."""
+    """Cut audio into m4a windows and video into mp4 windows (480p, with sound).
+
+    ``max_video_work_seconds`` bounds the work of cutting a video (``video_work``), checked from the header
+    before anything is decoded and counted again while decoding; 0 leaves it unbounded."""
     info = probe(data)
     if info.duration <= 0:
         raise MediaError("could not read the media duration")
@@ -608,9 +1147,18 @@ def split_media(
     # one the codec refuses, is skipped. Only a file with no window left fails, and for good (a
     # MediaError): an ffmpeg error escaping here was retried as if it were transient, three times.
     cut_any, last_error = False, None
-    for w in windows(info.duration, window_seconds, min(overlap_seconds, window_seconds - 1)):
+    # At most half a window of overlap, so a moment of the file is cut at most twice: with a one-second
+    # step, a 1800 s window over two hours of media was cut 5,401 times, 2,700 hours of video.
+    spans = windows(info.duration, window_seconds, min(overlap_seconds, window_seconds // 2))
+    meter = None
+    if kind == "video" and max_video_work_seconds > 0:
+        _check_video_work(info, spans, max_video_work_seconds)
+        meter = _WorkMeter(max_video_work_seconds)
+    for w in spans:
         try:
-            clip = _cut(data, w, video=kind == "video", audio=info.has_audio)
+            clip = _cut(data, w, video=kind == "video", audio=info.has_audio, meter=meter)
+        except MediaWorkError:
+            raise
         except av.FFmpegError as exc:
             clip, last_error = None, exc
         except Exception as exc:  # noqa: BLE001 - a codec PyAV only half supports (MPEG-H audio, uncompressed
@@ -631,12 +1179,12 @@ def split_media(
         raise MediaError(f"no decodable {kind} in the file" + (f": {last_error}" if last_error else ""))
 
 
-def _cut(data: Source, w: Window, *, video: bool, audio: bool) -> bytes | None:
+def _cut(data: Source, w: Window, *, video: bool, audio: bool, meter: _WorkMeter | None = None) -> bytes | None:
     """One window re-encoded as mp4: H.264 at most 480p high, and/or mono 64 kb/s AAC; None if it is empty."""
     # A temp file, not a buffer: "+faststart" moves the index to the front by re-reading the file by name.
     with tempfile.TemporaryDirectory(prefix="hs-kb-") as tmp:
         out = str(Path(tmp) / "clip.mp4")
-        if not _encode_window(data, w, out, video=video, audio=audio):
+        if not _encode_window(data, w, out, video=video, audio=audio, meter=meter):
             return None
         return Path(out).read_bytes()
 
@@ -679,7 +1227,9 @@ def _seeked(data: Source, start: float) -> Iterator[Any]:
         src.close()
 
 
-def _encode_window(data: Source, w: Window, out: str, *, video: bool, audio: bool) -> int:
+def _encode_window(
+    data: Source, w: Window, out: str, *, video: bool, audio: bool, meter: _WorkMeter | None = None
+) -> int:
     """Encode window ``w`` of ``data`` into ``out``; how many frames it wrote (0: nothing decoded there)."""
     from fractions import Fraction
 
@@ -716,6 +1266,8 @@ def _encode_window(data: Source, w: Window, out: str, *, video: bool, audio: boo
         )
         audio_samples, video_frames, finished = 0, 0, set()
         for frame in _decoded(src, streams):
+            if meter is not None and isinstance(frame, av.VideoFrame):
+                meter.spend(frame.width, frame.height)  # every frame decoded, before the window too
             t = frame.time
             if t is None or t < w.start:
                 continue

@@ -13,8 +13,9 @@ Two ways in, one code path:
 
       uv run python -m hindsight_system_evals.kb_edge_cases harvest ~/corpus/pdfjs --out pdfjs.jsonl
 
-* the eval (``evals/knowledge``) runs the committed sample: one file per issue found that way,
-  listed in ``fixtures/kb-edge-cases/manifest.json`` with what the server must do with it.
+* the eval (``evals/knowledge``) runs the sample: one file per issue found that way, with what the
+  server must do with it, kept in vectorize-io/hindsight-datasets (``broken-media/``) and downloaded
+  at a pinned commit (``sample_dir``).
 
 Each file is ingested alone and the server's process tree is sampled meanwhile (peak memory,
 CPU seconds), so a file that costs too much shows up as a number, not a guess.
@@ -24,7 +25,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
+import os
 import sys
 import threading
 import time
@@ -32,11 +35,15 @@ import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
 KB = "/v1/default/knowledge-banks"
-FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "kb-edge-cases"
+#: The sample's files and manifest: ``broken-media/`` of vectorize-io/hindsight-datasets at this commit.
+#: They used to be committed here (``fixtures/kb-edge-cases``); binaries live in the datasets repo now.
+BROKEN_MEDIA_REV = "b0cb5a34edc763de1150bac2d6f9dd587e9d9f43"
+_BROKEN_MEDIA_URL = "https://raw.githubusercontent.com/vectorize-io/hindsight-datasets/{rev}/broken-media/{path}"
 
 #: The extensions a knowledge bank takes (``knowledge/media.py``). Others are rejected with a 415,
 #: which is correct and so not worth a harvest's time.
@@ -64,8 +71,17 @@ class Usage:
 
 
 #: Where the server runs: its process id (one this run started), the name of the docker container it
-#: runs in (``--container``: memory capped, so a runaway kills the container, not the machine), or None.
+#: runs in (``--container``: memory capped, so a runaway kills the container, not the machine), a pod
+#: container as ``k8s:<namespace>/<pod>/<container>`` (same, on a cluster), or None.
 Server = int | str | None
+
+
+def _exec(server: str) -> list[str]:
+    """The command prefix that runs something inside ``server`` (a docker container or a pod's container)."""
+    if server.startswith("k8s:"):
+        namespace, pod, container = server.removeprefix("k8s:").split("/")
+        return ["kubectl", "exec", "-n", namespace, pod, "-c", container, "--"]
+    return ["docker", "exec", server]
 
 
 @dataclass(frozen=True)
@@ -82,9 +98,7 @@ def _container_rss_cpu(name: str) -> _Sample:
     try:
         out = subprocess.run(
             [
-                "docker",
-                "exec",
-                name,
+                *_exec(name),
                 "sh",
                 "-c",
                 "grep '^anon ' /sys/fs/cgroup/memory.stat; grep usage_usec /sys/fs/cgroup/cpu.stat",
@@ -200,7 +214,7 @@ class _DocStatus:
 
 @dataclass(frozen=True)
 class EdgeCase:
-    """One committed sample file and what the server must do with it (``fixtures/kb-edge-cases/manifest.json``)."""
+    """One sample file and what the server must do with it (``broken-media/manifest.json``, ``sample_dir``)."""
 
     id: str
     category: str
@@ -215,10 +229,42 @@ class EdgeCase:
     text_contains: str | None = None
     #: A refused one's reason must hold this text.
     error_contains: str | None = None
+    #: The file's, checked when it is downloaded (``sample_dir``).
+    sha256: str = ""
+
+
+def sample_dir() -> Path:
+    """The sample, downloaded once per ``BROKEN_MEDIA_REV`` into ``~/.cache/hindsight-evals/broken-media``,
+    each file checked against its manifest's sha256. ``HINDSIGHT_EVAL_BROKEN_MEDIA`` names a local copy
+    of ``broken-media/`` instead (a checkout of hindsight-datasets, to try a new case before it lands)."""
+    if local := os.getenv("HINDSIGHT_EVAL_BROKEN_MEDIA"):
+        return Path(local)
+    root = Path.home() / ".cache" / "hindsight-evals" / "broken-media" / BROKEN_MEDIA_REV
+    manifest = root / "manifest.json"
+    with httpx.Client(timeout=60, follow_redirects=True) as http:
+
+        def fetch(path: str) -> bytes:
+            r = http.get(_BROKEN_MEDIA_URL.format(rev=BROKEN_MEDIA_REV, path=path))
+            r.raise_for_status()
+            return r.content
+
+        if not manifest.exists():
+            root.mkdir(parents=True, exist_ok=True)
+            manifest.write_bytes(fetch("manifest.json"))
+        for case in json.loads(manifest.read_text())["cases"]:
+            path = root / case["file"]
+            if path.exists() and hashlib.sha256(path.read_bytes()).hexdigest() == case["sha256"]:
+                continue
+            data = fetch(case["file"])
+            if hashlib.sha256(data).hexdigest() != case["sha256"]:
+                raise ValueError(f"broken-media/{case['file']} at {BROKEN_MEDIA_REV} does not match its sha256")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+    return root
 
 
 def load_manifest() -> list[EdgeCase]:
-    return [EdgeCase(**case) for case in json.loads((FIXTURES / "manifest.json").read_text())["cases"]]
+    return [EdgeCase(**case) for case in json.loads((sample_dir() / "manifest.json").read_text())["cases"]]
 
 
 async def create_bank(http: httpx.AsyncClient, bank_id: str | None = None) -> str:
@@ -244,11 +290,20 @@ async def ingest_file(
         doc = _DocStatus()
         if r.status_code < 400:
             deadline = time.monotonic() + timeout
+            checked = time.monotonic()
             while True:
-                d = await http.get(f"{KB}/{bank_id}/documents/{document_id}")
+                d = await http.get(
+                    f"{KB}/{bank_id}/documents/{quote(document_id, safe='')}"
+                )  # an id from a file name may hold "#"
                 doc = _DocStatus.of(d.json()) if d.status_code == 200 else _DocStatus()
                 if doc.status in ("ready", "failed") or time.monotonic() > deadline:
                     break
+                # A server that died and came back has lost the document (and, on a pod, its database): a
+                # sweep once polled it for an hour. Checked every 10 s, so its death is noticed meanwhile.
+                if time.monotonic() - checked > 10:
+                    checked = time.monotonic()
+                    if not server_alive(pid):
+                        break
                 await asyncio.sleep(0.25)
     if r.status_code >= 500:
         status, error = "error", r.text[:500]
@@ -284,7 +339,9 @@ async def _upload(
                     f"{KB}/{bank_id}/files/ingest",
                     files={"files": (path.name, upload)},
                     data={"request": json.dumps({"files": [{"document_id": document_id}]})},
-                    timeout=timeout,
+                    # Only the upload and its queueing, never the processing: given the whole file's timeout,
+                    # a request in flight when the server died waited the hour out.
+                    timeout=httpx.Timeout(min(timeout, 600), connect=30),
                 )
             except (httpx.ReadError, httpx.RemoteProtocolError):
                 if attempt == 2:
@@ -313,6 +370,8 @@ async def rank_of(http: httpx.AsyncClient, bank_id: str, query: str, document_id
 def server_alive(pid: Server) -> bool:
     if pid is None:
         return True
+    if isinstance(pid, str) and pid.startswith("k8s:"):
+        return _pod_container_alive(pid)
     if isinstance(pid, str):
         import subprocess
 
@@ -323,6 +382,30 @@ def server_alive(pid: Server) -> bool:
     import psutil
 
     return psutil.pid_exists(pid) and psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
+
+
+#: Each pod container's restart count when first seen: a restart (OOMKilled, a crash) since is a death,
+#: even though the container is running again by the time anyone looks.
+_FIRST_RESTARTS: dict[str, int] = {}
+
+
+def _pod_container_alive(server: str) -> bool:
+    import subprocess
+
+    namespace, pod, container = server.removeprefix("k8s:").split("/")
+    jsonpath = f'{{.status.containerStatuses[?(@.name=="{container}")].restartCount}}'
+    out = subprocess.run(
+        ["kubectl", "get", "pod", "-n", namespace, pod, "-o", f"jsonpath={jsonpath}"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if out.returncode != 0 or not out.stdout.strip().isdigit():
+        # kubectl cannot tell (expired cluster credentials made every file of a sweep "died"): unknown is not
+        # dead. A pod that is really gone stops answering, and the requests' own retry waits for it.
+        return True
+    restarts = int(out.stdout.strip())
+    return restarts == _FIRST_RESTARTS.setdefault(server, restarts)
 
 
 # --- heavy files: common, just big -------------------------------------------------------------
@@ -442,6 +525,19 @@ def _files(roots: list[Path], limit: int | None) -> list[Path]:
     return found[:limit] if limit else found
 
 
+async def _reachable(http: httpx.AsyncClient, wait: float = 900.0) -> bool:
+    """Whether the server answers ``/health`` again within ``wait`` seconds."""
+    deadline = time.monotonic() + wait
+    while time.monotonic() < deadline:
+        try:
+            if (await http.get("/health", timeout=10)).status_code == 200:
+                return True
+        except httpx.HTTPError:
+            pass
+        await asyncio.sleep(5)
+    return False
+
+
 async def _harvest(
     files: list[Path], out: Path, url: str, pid: Server, timeout: float, concurrency: int, bank_config: dict
 ) -> int:
@@ -468,12 +564,25 @@ async def _harvest(
                     if not server_alive(pid):
                         return
                     in_flight[path] = doc_id
-                    try:
-                        outcome = await ingest_file(http, bank_id, path, document_id=doc_id, pid=pid, timeout=timeout)
-                    except httpx.HTTPError as exc:
-                        outcome = FileOutcome(
-                            path.name, doc_id, path.stat().st_size, "error", 0, repr(exc), 0, None, 0, None
-                        )
+                    for attempt in range(3):
+                        try:
+                            outcome = await ingest_file(
+                                http, bank_id, path, document_id=doc_id, pid=pid, timeout=timeout
+                            )
+                            break
+                        except (httpx.TransportError, httpx.RemoteProtocolError) as exc:
+                            # The way to the server broke (a port-forward to a pod lost its connection: ~300
+                            # files were "errors" in seconds once), not the file: wait for it, then again.
+                            outcome = FileOutcome(
+                                path.name, doc_id, path.stat().st_size, "error", 0, repr(exc), 0, None, 0, None
+                            )
+                            if not server_alive(pid) or not await _reachable(http) or attempt == 2:
+                                break
+                        except httpx.HTTPError as exc:
+                            outcome = FileOutcome(
+                                path.name, doc_id, path.stat().st_size, "error", 0, repr(exc), 0, None, 0, None
+                            )
+                            break
                     if not server_alive(pid):
                         return  # still in flight: recorded below, with the others when it died
                     in_flight.pop(path, None)
@@ -521,7 +630,11 @@ def main(argv: list[str] | None = None) -> int:
         default={},
         help="the sweep bank's own settings, e.g. '{\"image_tokens\": 70}': cheaper pictures on a CPU embedder",
     )
-    h.add_argument("--container", default=None, help="with --api-url: the docker container it runs in, to measure")
+    h.add_argument(
+        "--container",
+        default=None,
+        help="with --api-url: the docker container it runs in, or k8s:<namespace>/<pod>/<container>, to measure",
+    )
     args = parser.parse_args(argv)
 
     from hindsight_system_evals.target import eval_target
