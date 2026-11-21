@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import re
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
@@ -21,6 +21,7 @@ from typing import Any, Literal, cast
 
 from ..engine.db.ops_postgresql import create_index_without_queueing
 from ..engine.db_utils import acquire_with_retry
+from ..engine.retain import timing as _timing
 from ..engine.schema import fq_table
 from ..engine.search.tags import TagGroup, TagsMatch, build_tag_groups_where_clause, build_tags_where_clause
 from ..schema_context import get_current_schema
@@ -157,8 +158,6 @@ class ScoreExplain:
     with_document: float
     #: The BM25-style keyword score (sum of the matched query words' IDF); 0 when no word matched.
     keyword: float
-    #: A page read as a reference list, pushed down by ``REFERENCE_PENALTY``.
-    reference_page: bool
 
 
 @dataclass
@@ -996,6 +995,17 @@ class PostgresKnowledgeStore(KnowledgeStore):
         params.append(max(100, min(top_k * 10, CANDIDATE_POOL_CAP), top_k))
         pool = f"${len(params)}"
         docs, passages = fq_table("kb_documents"), fq_table("kb_passages")
+        # The documents table is joined only for a filter on it (media type, tags). It was joined always,
+        # and the planner then guessed 38 rows out of a bank's 7,267 vectors, so it sorted every vector of
+        # the bank instead of walking the bank's HNSW index below. ViDoRe industrial PDF (27 documents,
+        # 92k vectors), 100 queries: the statement 170-185 ms -> 85-110 ms; nDCG@10 35.08 -> 34.51, the
+        # index being approximate where the sort was exact. Markdown industrial (5,039 documents): 128 ->
+        # 91-116 ms, the same results.
+        join_docs = (
+            f"JOIN {docs} d ON d.bank_id = x.bank_id AND d.document_id = x.document_id"
+            if filters.media_types or plain.sql or groups.sql
+            else ""
+        )
         # The bank's own row: no row back means it is not a knowledge bank (KnowledgeBankNotFound).
         ctes = [f"bank AS (SELECT 1 AS found FROM {fq_table('banks')} WHERE bank_id = $2 AND kind = 'knowledge')"]
         keywords = bool(query_text) and keyword_weight > 0
@@ -1039,7 +1049,7 @@ class PostgresKnowledgeStore(KnowledgeStore):
             return f"""
                 SELECT x.document_id, x.idx, '{arm}' AS arm, 1 - {self._distance("$1", "x")} AS arm_score
                 FROM {fq_table(table)} x
-                JOIN {docs} d ON d.bank_id = x.bank_id AND d.document_id = x.document_id
+                {join_docs}
                 WHERE x.bank_id = $2{where}{roles}
                 ORDER BY {self._distance("$1", "x")} LIMIT {pool}
             """
@@ -1056,7 +1066,7 @@ class PostgresKnowledgeStore(KnowledgeStore):
             arms.append(f"""
                 SELECT x.document_id, x.idx, 'keyword' AS arm,
                        ts_rank_cd(x.search_vector, (SELECT q FROM tq)) AS arm_score FROM {passages} x
-                JOIN {docs} d ON d.bank_id = x.bank_id AND d.document_id = x.document_id
+                {join_docs}
                 WHERE x.bank_id = $2{where} AND x.search_vector @@ (SELECT q FROM tq)
                 ORDER BY ts_rank_cd(x.search_vector, (SELECT q FROM tq)) DESC LIMIT {pool}
             """)
@@ -1106,10 +1116,15 @@ class PostgresKnowledgeStore(KnowledgeStore):
         # One row per candidate, or a single row of NULLs for a knowledge bank with none; nothing at all
         # for a bank that is not one.
         sql = f"WITH {', '.join(ctes)} SELECT {terms_columns}, s.* FROM bank LEFT JOIN scored s ON true"
+        # Each part is timed into the search's `[knowledge_search-timing]` line as store.<part>, a part of
+        # store.search: the candidates statement, the sentence rescore, the context read, and the Python
+        # scoring between them (store.score).
         async with acquire_with_retry(await self._pool()) as conn:
-            rows = await conn.fetch(sql, *params)
+            async with _timing.timed("store.candidates_sql"):
+                rows = await conn.fetch(sql, *params)
             if not rows:
                 raise KnowledgeBankNotFound(bank_id)
+            score_started = time.perf_counter()
             terms = dict(zip(rows[0]["term_words"] or [], rows[0]["term_idfs"] or [], strict=True))
             rows = [r for r in rows if r["document_id"] is not None]
             found_by = {(r["document_id"], r["idx"]): [f.partition(":") for f in r["found"]] for r in rows}
@@ -1124,42 +1139,39 @@ class PostgresKnowledgeStore(KnowledgeStore):
             if not rows:
                 return StoreSearchResult([])
             roles = [_role_scores(r["extra"]) for r in rows]
-            first = [
-                page_score(float(r["score"]), ro, page_text_weight(r["text"], text_weight))
-                for r, ro in zip(rows, roles, strict=True)
-            ]
+            first = [page_score(float(r["score"]), ro, text_weight) for r, ro in zip(rows, roles, strict=True)]
             # Stage 3: the best pages so far gain their sentence vectors. Scoring every candidate with
             # ~30 sentence vectors each cost a ViDoRe hr search 1.8x; the top RESCORE_POOL hold the gold.
             top = sorted(range(len(rows)), key=lambda i: first[i], reverse=True)[: max(top_k, RESCORE_POOL)]
             top = [i for i in top if rows[i]["page"] is not None]
             if top:
-                found = await conn.fetch(
-                    f"""
-                    SELECT v.document_id, v.idx, max(1 - {self._distance("$1", "v")}) AS best
-                    FROM {fq_table("kb_passage_vectors")} v
-                    JOIN unnest($3::text[], $4::int[]) AS c(document_id, idx)
-                      ON v.document_id = c.document_id AND v.idx = c.idx
-                    WHERE v.bank_id = $2 AND v.role IN ({", ".join(f"'{r}'" for r in RESCORE_ONLY_ROLES)})
-                    GROUP BY v.document_id, v.idx
-                    """,
-                    str(vector),
-                    bank_id,
-                    [rows[i]["document_id"] for i in top],
-                    [rows[i]["idx"] for i in top],
-                )
+                _timing.record("store.score", time.perf_counter() - score_started)
+                async with _timing.timed("store.sentences_sql"):
+                    found = await conn.fetch(
+                        f"""
+                        SELECT v.document_id, v.idx, max(1 - {self._distance("$1", "v")}) AS best
+                        FROM {fq_table("kb_passage_vectors")} v
+                        JOIN unnest($3::text[], $4::int[]) AS c(document_id, idx)
+                          ON v.document_id = c.document_id AND v.idx = c.idx
+                        WHERE v.bank_id = $2 AND v.role IN ({", ".join(f"'{r}'" for r in RESCORE_ONLY_ROLES)})
+                        GROUP BY v.document_id, v.idx
+                        """,
+                        str(vector),
+                        bank_id,
+                        [rows[i]["document_id"] for i in top],
+                        [rows[i]["idx"] for i in top],
+                    )
+                score_started = time.perf_counter()
                 best = {(f["document_id"], f["idx"]): float(f["best"]) for f in found}
                 for i in top:
                     sentence = best.get((rows[i]["document_id"], rows[i]["idx"]))
                     if sentence is not None:
                         roles[i]["sentence"] = [sentence]
-                        first[i] = page_score(
-                            float(rows[i]["score"]), roles[i], page_text_weight(rows[i]["text"], text_weight)
-                        )
+                        first[i] = page_score(float(rows[i]["score"]), roles[i], text_weight)
             dense = with_document_prior([r["document_id"] for r in rows], first)
             keyword_scores = [float(r["keyword"] or 0.0) for r in rows]
-            reference = [r["page"] is not None and is_reference_page(r["text"]) for r in rows]
             has_text = [bool((r["text"] or "").strip()) for r in rows]
-            scores = final_scores(dense, keyword_scores, keyword_weight, reference=reference, has_text=has_text)
+            scores = fuse_keyword(dense, keyword_scores, keyword_weight, has_text)
             hits = [
                 SearchHit(
                     passage=_passage(r),
@@ -1172,7 +1184,6 @@ class PostgresKnowledgeStore(KnowledgeStore):
                         passage_score=first[i],
                         with_document=dense[i],
                         keyword=keyword_scores[i],
-                        reference_page=reference[i],
                     ),
                 )
                 for i, r in enumerate(rows)
@@ -1188,9 +1199,12 @@ class PostgresKnowledgeStore(KnowledgeStore):
                 for h in hits
                 if h.passage.modality == "text"
             ]
+            _timing.record("store.score", time.perf_counter() - score_started)
             nearby: dict[tuple[str, int], KnowledgePassage] = {}
             if around > 0 and spans:
-                for r in await _fetch_ranges(conn, bank_id, _merged_ranges(spans)):
+                async with _timing.timed("store.context_sql"):
+                    ranges = await _fetch_ranges(conn, bank_id, _merged_ranges(spans))
+                for r in ranges:
                     nearby[(r["range_document_id"], r["idx"])] = _passage(r)
         return StoreSearchResult(hits, nearby)
 
@@ -1318,9 +1332,6 @@ def page_score(primary: float, roles: dict[str, list[float]], text_weight: float
     return (1 - text_weight) * image + text_weight * max(texts)
 
 
-#: A PDF page whose text layer is mostly not words (equations, tables, figure labels) leans on its image.
-_POOR_TEXT_QUALITY = 0.5
-_POOR_TEXT_WEIGHT = 0.3
 #: Each passage gains this share of its document's best candidate score: the right PDF first, then the
 #: page. +0.4 nDCG@10 over 8 ViDoRe V3 tasks, +1.0 on physics (PDF_GEMMA.md round 7; flat for 0.5-0.7).
 #: 0.75 with sentence vectors: +0.1 on ViDoRe hr and computer_science over 0.5 (Gemini Embedding 2). 1.0, the
@@ -1329,37 +1340,13 @@ _POOR_TEXT_WEIGHT = 0.3
 DOCUMENT_PRIOR = 1.0
 
 
-def text_quality(text: str | None) -> float:
-    """Share of a page's characters inside real words (3+ letters); 0 below 200 characters."""
-    chars = len(re.sub(r"\s", "", text or ""))
-    if chars < 200:
-        return 0.0
-    return sum(len(w) for w in re.findall(r"[^\W\d_]{3,}", text or "")) / chars
-
-
-_CITATION = re.compile(r"\((19|20)\d\d[a-z]?\)|\bvol\.|\bpp\.|\bdoi\b|https?://|\bet al\b|\bISBN\b|\bISSN\b", re.I)
-#: A page this share of whose lines are citations is a reference list: on ViDoRe hr 5% of the candidates
-#: and 0.1% of the gold pages. Its titles match every query on their topic, and it answers none.
-_REFERENCE_LINES = 0.3
-REFERENCE_PENALTY = 1.0
-
-
-def is_reference_page(text: str | None) -> bool:
-    lines = [line for line in (text or "").splitlines() if line.strip()]
-    return len(lines) >= 5 and sum(bool(_CITATION.search(line)) for line in lines) / len(lines) > _REFERENCE_LINES
-
-
-def page_text_weight(text: str | None, text_weight: float) -> float:
-    """The text side's weight for one page: lower when its text layer is junk (round 7: +0.3 nDCG@10)."""
-    return page_text_weight_for_quality(text_quality(text), text_weight)
-
-
-def page_text_weight_for_quality(quality: float, text_weight: float) -> float:
-    """``page_text_weight`` from a page's ``text_quality``, for a store that works it out once, when the
-    page is written, rather than with a regex over every candidate's text at search time. An extension
-    point: this repo's Postgres store scores at search time and reaches it through ``page_text_weight``;
-    a store loaded as an extension (``load_knowledge_store``) can call it directly."""
-    return _POOR_TEXT_WEIGHT if quality < _POOR_TEXT_QUALITY else text_weight
+# A page's text side used to weigh less when its text layer was "junk" (under 200 characters, or mostly not
+# words), and a page read as a reference list (citation-shaped lines) was pushed to the bottom. Both ran a
+# regex over every candidate's text on every search and were tuned on ViDoRe V3 alone (+0.3 nDCG@10; a
+# reference list was 5% of ViDoRe hr's candidates); the citation patterns were English and academic. A
+# rule the search cannot explain beyond one benchmark is not kept: they were dropped, at a measured cost
+# (ViDoRe V3 PDF pharmaceuticals, slide decks with reference slides: 72.2 -> 71.3 nDCG@10). An exact-text
+# bonus (`pattern`) and a grep-only search were dropped before them; no benchmark used either.
 
 
 def with_document_prior(document_ids: list[str], scores: list[float]) -> list[float]:
@@ -1381,19 +1368,6 @@ EXPAND_DOCUMENTS = 3
 EXPAND_PASSAGES_CAP = 3000
 #: Where a query word's document frequency stops being counted (see the IDF in ``search``).
 _DF_CAP = 50_000
-
-
-def final_scores(
-    dense: list[float], keyword: list[float], weight: float, *, reference: list[bool], has_text: list[bool]
-) -> list[float]:
-    """Dense fused with keywords, then the reference-list demotion. The demotion comes after the fusion:
-    inside it, a page at -1 stretched the min-max range of the dense scores, so keywords alone ordered
-    the rest (ViDoRe hr English: 58.8 nDCG@10 instead of 67.2). An exact-text bonus (`pattern`) and a
-    grep-only search lived here too; no benchmark used them and they were dropped."""
-    return [
-        score - (REFERENCE_PENALTY if ref else 0.0)
-        for score, ref in zip(fuse_keyword(dense, keyword, weight, has_text), reference, strict=True)
-    ]
 
 
 def fuse_keyword(dense: list[float], keyword: list[float], weight: float, has_text: list[bool]) -> list[float]:
