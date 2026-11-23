@@ -9,6 +9,7 @@ These tests verify:
 """
 
 import asyncio
+import dataclasses
 import json
 import logging
 from unittest.mock import AsyncMock, MagicMock
@@ -16,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from hindsight_api.cancellation import OperationCancelledError
+from hindsight_api.config import HindsightConfig
 from hindsight_api.engine.llm_interface import LLM_TOOL_CHOICE_REQUIRED, LLMToolChoice
 from hindsight_api.engine.reflect.agent import (
     ReflectNoAnswerError,
@@ -986,6 +988,41 @@ class TestReflectAgentMocked:
         assert mock_llm.call_with_tools.await_count == 3  # recall, the free turn's done, the closing done
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("strict", [True, False])
+    async def test_every_tool_turn_follows_the_reflect_strict_schema_flag(
+        self, mock_llm, mock_functions, monkeypatch, strict
+    ):
+        """HINDSIGHT_API_LLM_STRICT_SCHEMA_REFLECT reaches the loop turns and the closing done (#6673)."""
+        config = dataclasses.replace(HindsightConfig.from_env(), llm_strict_schema_reflect_tool_turns=strict)
+        monkeypatch.setattr("hindsight_api.engine.reflect.agent.get_config", lambda: config)
+        mock_llm.call_with_tools.side_effect = closing_echo(
+            [
+                LLMToolCallResult(
+                    tool_calls=[LLMToolCall(id="1", name="recall", arguments={"reason": "facts", "query": "ABC-123"})],
+                    finish_reason="tool_calls",
+                ),
+                LLMToolCallResult(
+                    tool_calls=[LLMToolCall(id="2", name="done", arguments={"answer": "Open.", "memory_ids": []})],
+                    finish_reason="tool_calls",
+                ),
+            ]
+        )
+
+        await run_reflect_agent(
+            llm_config=mock_llm,
+            bank_id="test-bank",
+            query="where are we on ABC-123",
+            bank_profile={"name": "Test", "mission": "Testing"},
+            budget="low",
+            max_iterations=5,
+            **mock_functions,
+        )
+
+        calls = mock_llm.call_with_tools.await_args_list
+        assert [c.kwargs["scope"] for c in calls] == ["reflect_tool_call", "reflect_tool_call", "reflect"]
+        assert [c.kwargs["strict_schema"] for c in calls] == [strict, strict, strict]
+
+    @pytest.mark.asyncio
     async def test_stale_mental_model_keeps_forced_retrieval(self, mock_llm, mock_functions):
         """A stale mental model must not short-circuit; the full forced path continues."""
         mock_functions["search_mental_models_fn"].return_value = {
@@ -1449,6 +1486,28 @@ class TestReflectAgentMocked:
         # The retry asks for the step that failed, not the next one (#4564).
         choices = [c.kwargs["tool_choice"] for c in mock_llm.call_with_tools.call_args_list]
         assert choices[0] == choices[1] == LLMToolChoice.named("search_observations")
+
+    @pytest.mark.asyncio
+    async def test_a_failed_turn_does_not_use_up_an_iteration(self, mock_llm, mock_functions):
+        """#6674: a turn that failed and was retried counted as one of the run's
+        iterations, so a rate-limited run ended one search short with nothing to say so."""
+        search = LLMToolCallResult(
+            tool_calls=[LLMToolCall(id="1", name="recall", arguments={"query": "test"})],
+            finish_reason="tool_calls",
+        )
+        mock_llm.call_with_tools.side_effect = closing_echo([RuntimeError("429"), search, search])
+
+        await run_reflect_agent(
+            llm_config=mock_llm,
+            bank_id="test-bank",
+            query="test query",
+            bank_profile={"name": "Test", "mission": "Testing"},
+            max_iterations=3,
+            **mock_functions,
+        )
+
+        # Two searches, then the closing step: the failed call took no iteration.
+        assert mock_functions["recall_fn"].await_count == 2
 
     @pytest.mark.asyncio
     async def test_cancellation_from_a_tool_is_not_wrapped(self, mock_llm, mock_functions):

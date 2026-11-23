@@ -15,7 +15,7 @@ import logging
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, tzinfo
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Protocol
 
 from ...cancellation import OperationCancelledError
@@ -586,6 +586,7 @@ async def _run_reflect_agent_inner(
     prune_evidence_fn: Callable[[str, list[str]], Awaitable[list[bool]]] | None = None,
     *,
     reflect_id: str,
+    tz: tzinfo = timezone.utc,
 ) -> ReflectAgentResult:
     """
     Execute the reflect agent loop.
@@ -699,6 +700,7 @@ async def _run_reflect_agent_inner(
         answer_as_document=answer_as_document,
         llm_output_language=llm_output_language,
         answer_ready=closing_step_answers,
+        tz=tz,
     )
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": system_prompt},
@@ -706,7 +708,7 @@ async def _run_reflect_agent_inner(
     ]
     # What the model reads of each tool result, and the alias table that maps the
     # short ids it writes back to real ones — see presentation.py.
-    presenter = ToolResultPresenter()
+    presenter = ToolResultPresenter(tz)
     # A UUID the caller wrote (in the question, a directive, the mission) is one
     # the answer may repeat.
     for message in messages:
@@ -931,6 +933,7 @@ async def _run_reflect_agent_inner(
                 scope="reflect",
                 tool_choice=LLMToolChoice.named("done"),
                 temperature=get_config().llm_temperature_reflect,
+                strict_schema=get_config().llm_strict_schema_reflect_tool_turns,
                 max_completion_tokens=synthesis_max_completion_tokens,
             )
         except OperationCancelledError:
@@ -1038,7 +1041,7 @@ async def _run_reflect_agent_inner(
         hundreds of citations the synthesis model never saw (#3122).
         """
         nonlocal total_input_tokens, total_output_tokens, total_cached_tokens, total_thoughts_tokens
-        final_system = build_final_system_prompt(bank_profile.get("mission"), llm_output_language, directives)
+        final_system = build_final_system_prompt(bank_profile.get("mission"), llm_output_language, directives, tz)
         chunks = split_context_history(context_history, max_context_tokens)
         # Every call below uses the transport-level cap, never the caller's
         # max_tokens: that is a visible-length target carried as a prompt
@@ -1192,7 +1195,7 @@ async def _run_reflect_agent_inner(
         # prefer ("decisions, never the current implementation"), and pruning on the short query
         # kept the later commit that undid a decision as readily as the decision (sde-bench
         # dedupe-history), so the answer reported the decision as superseded.
-        pruned = await _prune_round(query, tool_results, prune_evidence_fn, reflect_id)
+        pruned = await _prune_round(query, tool_results, prune_evidence_fn, reflect_id, tz)
         _record_llm({"scope": "decision_prune", "duration_ms": int((time.perf_counter() - prune_start) * 1000)})
         return pruned
 
@@ -1234,7 +1237,6 @@ async def _run_reflect_agent_inner(
             finish_reason="tool_calls",
         )
 
-    consecutive_errors = 0
     # When a forced ``search_mental_models`` returns fresh, usable models on a
     # low/mid-budget call, we stop forcing the lower retrieval layers for the
     # rest of the run and let the agent answer (or retrieve deeper itself)
@@ -1406,81 +1408,90 @@ async def _run_reflect_agent_inner(
             parallel_round = True
             forced_steps_done = len(forced_sequence) - 1  # the increment below completes the sequence
         else:
-            # Time spent waiting on LLM concurrency permits is collected separately so a
-            # long `agent_N` entry can be read as "the provider was slow" and nothing
-            # else -- see llm_trace.set_queue_wait_sink (#3881).
-            queue_wait = LLMQueueWait()
-            queue_token = set_queue_wait_sink(queue_wait)
-            try:
-                ct_kwargs: dict[str, Any] = dict(
-                    messages=messages,
-                    tools=loop_tools,
-                    declared_tools=tools,
-                    scope="reflect_tool_call",
-                    tool_choice=iter_tool_choice,
-                    temperature=get_config().llm_temperature_reflect,
-                    # The uncapped-by-default ceiling the synthesis calls use, since a free
-                    # turn's done can carry the answer: left unset this fell through to the
-                    # provider's own default, which on Anthropic truncated long ``done``
-                    # payloads before the answer field was written (#4437). With none
-                    # configured and a closing step, 1024 (see its definition).
-                    max_completion_tokens=loop_turn_max_completion_tokens,
-                )
-                result = await llm_config.call_with_tools(**ct_kwargs)
-                llm_duration = int((time.perf_counter() - llm_start) * 1000)
-                queued_ms = int(queue_wait.seconds * 1000)
-                consecutive_errors = 0
-                total_input_tokens += result.input_tokens
-                total_output_tokens += result.output_tokens
-                total_cached_tokens += getattr(result, "cached_tokens", 0) or 0
-                total_thoughts_tokens += getattr(result, "thoughts_tokens", 0) or 0
-                _record_llm(
-                    {
-                        "scope": f"agent_{iteration + 1}",
-                        "duration_ms": llm_duration,
-                        "queued_ms": queued_ms,
-                        "input_tokens": result.input_tokens,
-                        "output_tokens": result.output_tokens,
-                    }
-                )
-
-            except OperationCancelledError:
-                # A cancellation is not a provider failure: never retried, never
-                # synthesized around, and it must reach the HTTP layer as itself so a
-                # client disconnect stays a 499 (issue #2122).
-                raise
-            except Exception as e:
-                err_duration = int((time.perf_counter() - llm_start) * 1000)
-                queued_ms = int(queue_wait.seconds * 1000)
-                consecutive_errors += 1
-                logger.warning(
-                    f"[REFLECT {reflect_id}] LLM error on iteration {iteration + 1}: {describe_llm_error(e)} "
-                    f"({err_duration}ms, {queued_ms}ms queued)"
-                )
-                _record_llm(
-                    {"scope": f"agent_{iteration + 1}_err", "duration_ms": err_duration, "queued_ms": queued_ms}
-                )
-                # Context overflow errors must never be retried — retrying would only make them worse.
-                # Skip straight to final synthesis with whatever evidence we have: the
-                # prompt was too big for the model, which is a budgeting problem, not a
-                # broken dependency, and the evidence gathered so far is intact.
-                if _is_context_overflow_error(e):
-                    logger.warning(
-                        f"[REFLECT {reflect_id}] Context window exceeded on iteration {iteration + 1}, "
-                        "forcing final synthesis from gathered evidence."
+            # The turn is retried in place, so a failed call does not use up one of the
+            # run's iterations: under a rate limit, moving on to the next iteration left
+            # the run one search short with nothing to say so (#6674).
+            consecutive_errors = 0
+            while True:
+                if consecutive_errors:
+                    llm_start = time.perf_counter()
+                # Time spent waiting on LLM concurrency permits is collected separately so a
+                # long `agent_N` entry can be read as "the provider was slow" and nothing
+                # else -- see llm_trace.set_queue_wait_sink (#3881).
+                queue_wait = LLMQueueWait()
+                queue_token = set_queue_wait_sink(queue_wait)
+                try:
+                    ct_kwargs: dict[str, Any] = dict(
+                        messages=messages,
+                        tools=loop_tools,
+                        declared_tools=tools,
+                        scope="reflect_tool_call",
+                        tool_choice=iter_tool_choice,
+                        temperature=get_config().llm_temperature_reflect,
+                        strict_schema=get_config().llm_strict_schema_reflect_tool_turns,
+                        # The uncapped-by-default ceiling the synthesis calls use, since a free
+                        # turn's done can carry the answer: left unset this fell through to the
+                        # provider's own default, which on Anthropic truncated long ``done``
+                        # payloads before the answer field was written (#4437). With none
+                        # configured and a closing step, 1024 (see its definition).
+                        max_completion_tokens=loop_turn_max_completion_tokens,
                     )
-                    return await _forced_final_synthesis(iteration + 1)
-                # Any other error: retry (capped, so a persistently failing provider does
-                # not hang the run), then give up. Synthesizing an answer here instead
-                # would be built on an evidence set the failed turn never finished
-                # gathering, and callers cannot tell that from a complete one (#2894).
-                # The provider's own retries (429/5xx) already ran inside the call.
-                if iteration < max_iterations - 1 and consecutive_errors < 2:
-                    continue
-                raise
+                    result = await llm_config.call_with_tools(**ct_kwargs)
+                    llm_duration = int((time.perf_counter() - llm_start) * 1000)
+                    queued_ms = int(queue_wait.seconds * 1000)
+                    total_input_tokens += result.input_tokens
+                    total_output_tokens += result.output_tokens
+                    total_cached_tokens += getattr(result, "cached_tokens", 0) or 0
+                    total_thoughts_tokens += getattr(result, "thoughts_tokens", 0) or 0
+                    _record_llm(
+                        {
+                            "scope": f"agent_{iteration + 1}",
+                            "duration_ms": llm_duration,
+                            "queued_ms": queued_ms,
+                            "input_tokens": result.input_tokens,
+                            "output_tokens": result.output_tokens,
+                        }
+                    )
+                    break
 
-            finally:
-                reset_queue_wait_sink(queue_token)
+                except OperationCancelledError:
+                    # A cancellation is not a provider failure: never retried, never
+                    # synthesized around, and it must reach the HTTP layer as itself so a
+                    # client disconnect stays a 499 (issue #2122).
+                    raise
+                except Exception as e:
+                    err_duration = int((time.perf_counter() - llm_start) * 1000)
+                    queued_ms = int(queue_wait.seconds * 1000)
+                    consecutive_errors += 1
+                    logger.warning(
+                        f"[REFLECT {reflect_id}] LLM error on iteration {iteration + 1}: {describe_llm_error(e)} "
+                        f"({err_duration}ms, {queued_ms}ms queued)"
+                    )
+                    _record_llm(
+                        {"scope": f"agent_{iteration + 1}_err", "duration_ms": err_duration, "queued_ms": queued_ms}
+                    )
+                    # Context overflow errors must never be retried — retrying would only make them worse.
+                    # Skip straight to final synthesis with whatever evidence we have: the
+                    # prompt was too big for the model, which is a budgeting problem, not a
+                    # broken dependency, and the evidence gathered so far is intact.
+                    if _is_context_overflow_error(e):
+                        logger.warning(
+                            f"[REFLECT {reflect_id}] Context window exceeded on iteration {iteration + 1}, "
+                            "forcing final synthesis from gathered evidence."
+                        )
+                        return await _forced_final_synthesis(iteration + 1)
+                    # Any other error: retry once, then give up. Synthesizing an answer here
+                    # instead would be built on an evidence set the failed turn never finished
+                    # gathering, and callers cannot tell that from a complete one (#2894).
+                    # The provider's own retries (429/5xx) already ran inside the call.
+                    if consecutive_errors < 2:
+                        if cancel_check is not None:
+                            cancel_check()
+                        continue
+                    raise
+
+                finally:
+                    reset_queue_wait_sink(queue_token)
 
         # No tool calls this turn.
         if not result.tool_calls:
@@ -2002,8 +2013,10 @@ def _hide_lower_layers(tool_calls: list["LLMToolCall"], tool_results: list[Any])
     ]
 
 
-def _short_date(value: Any) -> str | None:
-    """A date as the decision model reads it: the day, plus ``HH:MM`` UTC unless the time is a day's edge.
+def _short_date(value: Any, tz: tzinfo = timezone.utc) -> str | None:
+    """A date as the decision model reads it: the day, plus ``HH:MM`` unless the time is a day's edge.
+
+    In the bank's zone, like everything else reflect shows (#6441).
 
     A full ISO timestamp costs ~19 tokens; when the rank's finals cut every candidate to a few
     dozen, a dated fact kept little but its dates and lost to undated ones (#6659).
@@ -2015,19 +2028,19 @@ def _short_date(value: Any) -> str | None:
     except ValueError:
         return str(value)
     if moment.tzinfo is not None:
-        moment = moment.astimezone(timezone.utc)
+        moment = moment.astimezone(tz)
     day = moment.date().isoformat()
     edge = (moment.hour, moment.minute) in ((0, 0), (23, 59))
     return day if edge else f"{day} {moment:%H:%M}"
 
 
-def _evidence_line(item: dict[str, Any]) -> str:
+def _evidence_line(item: dict[str, Any], tz: tzinfo = timezone.utc) -> str:
     """One fact, observation or chunk as the decision model reads it: its dates, then its text.
 
     Both kinds of date: when it happened and when it was said. "Yesterday" in a chunk is
     read against the second, and a question about an event against the first.
     """
-    start, end, said = (_short_date(item.get(key)) for key in ("occurred_start", "occurred_end", "mentioned_at"))
+    start, end, said = (_short_date(item.get(key), tz) for key in ("occurred_start", "occurred_end", "mentioned_at"))
     dates: list[str] = []
     if start:
         dates.append(f"occurred {start}" + (f" to {end}" if end and end != start else ""))
@@ -2042,6 +2055,7 @@ async def _prune_round(
     tool_results: list[Any],
     prune_evidence_fn: Callable[[str, list[str]], Awaitable[list[bool]]],
     reflect_id: str,
+    tz: tzinfo = timezone.utc,
 ) -> list[Any]:
     """Drop the observations, facts and chunks the decision model judges irrelevant.
 
@@ -2063,11 +2077,11 @@ async def _prune_round(
             for item in data.get(key) or []:
                 if isinstance(item, dict) and "id" in item:
                     slots.append((i, key, str(item["id"])))
-                    texts.append(_evidence_line(item))
+                    texts.append(_evidence_line(item, tz))
         for chunk_id, chunk in (data.get("chunks") or {}).items():
             slots.append((i, "chunks", str(chunk_id)))
             texts.append(
-                _evidence_line({**chunk, "text": chunk.get("chunk_text", "")})
+                _evidence_line({**chunk, "text": chunk.get("chunk_text", "")}, tz)
                 if isinstance(chunk, dict)
                 else str(chunk)
             )

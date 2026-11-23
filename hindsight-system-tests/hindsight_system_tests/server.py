@@ -9,6 +9,7 @@ environment variables that any deployment could set.
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import logging
 import os
 import signal
@@ -37,6 +38,12 @@ PG0_INSTANCE = "hindsight-systest"
 PG0_PORT = 15499
 
 SERVER_STARTUP_TIMEOUT = 180.0
+
+#: How long a run waits for another run to release the database before giving up.
+DATABASE_LOCK_TIMEOUT = 1800.0
+
+#: Held from this process's first server start until it exits (see `_hold_database_lock`).
+_database_lock: object | None = None
 
 #: How often the server's worker looks for queued work. Stories that assert on what
 #: the worker has *not* claimed wait a multiple of this.
@@ -153,6 +160,9 @@ def stub_environment(stub_url: str) -> dict[str, str]:
         "HINDSIGHT_API_RERANKER_SILICONFLOW_API_KEY": "stub-key",
         "HINDSIGHT_API_RERANKER_SILICONFLOW_BASE_URL": stub_url,
         "HINDSIGHT_API_RERANKER_SILICONFLOW_MODEL": "stub-reranker",
+        # Stories check recall scores against the default recency weight; a value
+        # exported in the developer's shell must not change them.
+        "HINDSIGHT_API_RECENCY_ALPHA": "0.2",
         # Consolidation's decision model (triage), for consolidation only: set up globally it
         # would also rank recall. Triage is on by default wherever one is set up; it is off
         # here so no other story's consolidation changes, and test_22 turns it on per bank.
@@ -197,11 +207,8 @@ def stub_environment(stub_url: str) -> dict[str, str]:
         # private still fails, which is what keeps the guard under test.
         "HINDSIGHT_API_WEBHOOK_ALLOWED_HOSTS": "127.0.0.1",
         "HINDSIGHT_API_CONSOLIDATION_RECONCILE_INTERVAL_SECONDS": "5",
-        # Knowledge banks are hidden and off by default; the knowledge stories need them on. Their
-        # embedder reuses the memory banks' (the stub's lexical embeddings), so it embeds text only:
-        # texts, and PDFs through their text layer. Nothing else changes for the other stories: the
-        # flag only adds routes, and the knowledge service starts on first use.
-        "HINDSIGHT_API_ENABLE_KB": "true",
+        # The knowledge banks' embedder reuses the memory banks' (the stub's lexical embeddings), so it
+        # embeds text only: texts, and PDFs through their text layer.
         "HINDSIGHT_API_KB_EMBEDDINGS_PROVIDER": "text",
     }
 
@@ -257,7 +264,39 @@ def run_hindsight_admin(
     return output
 
 
+def _hold_database_lock() -> None:
+    """Make this run the only one on the pg0 instance until the process exits.
+
+    Every run, in every checkout, uses the one instance and port above. Two runs at once
+    share the queue: one run's worker claims the other's consolidation and asks its *own*
+    stub, which has no rule for it, so the operation ends with no observations and the
+    first run's `settled` returns over an empty bank (issue #6432). Its session-start sweep
+    also deletes the other run's banks. So a second run waits here instead. The OS drops
+    the lock when the process dies, so a killed run never leaves it held.
+    """
+    global _database_lock
+    if _database_lock is not None:
+        return
+    # Beside pg0's own instances, not in a temp dir: TMPDIR differs between shells.
+    lock_path = Path.home() / ".pg0" / f"{PG0_INSTANCE}.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock = lock_path.open("w")
+    deadline = time.monotonic() + DATABASE_LOCK_TIMEOUT
+    while True:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            if time.monotonic() > deadline:
+                raise RuntimeError(
+                    f"another system-test run held pg0 instance {PG0_INSTANCE} for {DATABASE_LOCK_TIMEOUT}s"
+                ) from None
+            time.sleep(1)
+    _database_lock = lock
+
+
 def _server_env(stub_url: str, extra_env: dict[str, str] | None) -> dict[str, str]:
+    _hold_database_lock()
     env = os.environ.copy()
     # The repo .env is for the developer's own server; a system test must depend
     # only on what it sets here, or it passes on one machine and fails on another.

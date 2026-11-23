@@ -784,6 +784,23 @@ an API key from the [Anthropic Console](https://console.anthropic.com/).
    in the server's config (and can be set per operation or per bank like any other LLM key).
    With no key set, the CLI's own login is used.
 
+   **`apiKeyHelper` login (optional):** Hindsight starts the CLI isolated from your
+   `~/.claude/settings.json`, so an `apiKeyHelper` set there is never seen. If your Claude Code
+   logs in through one (for example behind a gateway), put it in its own settings file and point
+   Hindsight at it. Keep only the helper (and its `env`) in that file: hooks or plugins in it would
+   run inside Hindsight's own LLM calls.
+   ```bash
+   cat > /etc/hindsight/claude-settings.json <<'JSON'
+   { "apiKeyHelper": "/usr/local/bin/get-claude-key" }
+   JSON
+   export HINDSIGHT_API_LLM_CLAUDE_CODE_SETTINGS=/etc/hindsight/claude-settings.json
+   ```
+
+   **Reasoning effort:** `HINDSIGHT_API_LLM_REASONING_EFFORT` and the per-operation
+   `HINDSIGHT_API_<OP>_LLM_REASONING_EFFORT` (`low`, `medium`, `high`, `xhigh`, `max`) are passed to
+   each operation's CLI, so consolidation can run at `medium` while mental model refresh stays at
+   `high`.
+
 5. **Start Hindsight:**
    ```bash
    hindsight-api
@@ -869,6 +886,68 @@ which makes Cursor a *client* of Hindsight. Here Cursor is the model backend Hin
 - Usage counts against your Cursor subscription.
 - Reasoning effort is not supported — the CLI has no such flag, and Hindsight warns once
   at startup if `HINDSIGHT_API_LLM_REASONING_EFFORT` is set.
+- Embeddings and reranking continue to use Hindsight's separately configured providers.
+
+</ProviderSetup>
+
+### Google Antigravity Setup (Google AI subscription)
+
+Serve Hindsight's extraction, consolidation and reflection calls from a **Google AI
+subscription that includes Antigravity**, by driving Google's official `agy` CLI
+headlessly. No API key and no per-token billing. Hindsight only launches the `agy`
+binary; it never reads or stores your Google credentials.
+
+<ProviderSetup>
+
+This is the opposite direction from the Antigravity coding-agent integration, which makes
+Antigravity a *client* of Hindsight. Here Antigravity is the model backend Hindsight calls.
+
+**Prerequisites:**
+- A Google AI subscription with Antigravity access
+- The `agy` CLI installed and signed in under the same OS user that runs Hindsight
+
+**Setup Steps:**
+
+1. **Install the CLI** from [antigravity.google](https://antigravity.google), then run `agy`
+   once and sign in with your Google account.
+
+2. **Verify:**
+   ```bash
+   agy models
+   ```
+
+3. **Configure Hindsight:**
+   ```bash
+   export HINDSIGHT_API_LLM_PROVIDER=antigravity
+   export HINDSIGHT_API_LLM_MODEL=gemini-3.8-flash-low   # any id from `agy models`
+   export HINDSIGHT_API_LLM_TIMEOUT=300
+   export HINDSIGHT_API_REFLECT_LLM_TIMEOUT=180
+   ```
+
+**Important notes:**
+
+- **Terms of Service.** Google has not said clearly whether running `agy` unattended
+  in the background under a personal subscription is allowed. Check your plan's terms
+  before you rely on it.
+- **Structured output is enforced by the CLI** (`--json-schema`), not just asked for in
+  the prompt.
+- **Each call is a full agent turn.** `agy` adds its own system prompt, about 10K input
+  tokens per call, and that counts against your subscription quota. A simple call takes
+  about 3-8 seconds.
+- **The agent's tools are turned off.** Each run gets per-session settings that deny every
+  permission (file read/write, shell, web, MCP), and runs in an empty scratch directory.
+  Your `settings.json` is not changed. This matters because retain prompts are built from
+  whatever text you store in Hindsight.
+- **Your `agy` hooks still load.** `agy` runs `hooks.json` even in headless mode. Hindsight
+  sets `HINDSIGHT_DISABLE_HOOKS=1`, so the Hindsight coding-agent hooks skip themselves
+  and do not save Hindsight's own calls back into memory. Other hooks you installed
+  still run.
+- Each call is saved in `agy`'s own conversation history.
+- **If `agy` is signed out**, it opens a Google login page on the machine running Hindsight
+  and waits 60 seconds. The call then fails once, with no retries, and the error tells you
+  to run `agy` and sign in again.
+- Reasoning effort is not supported. Pick it through the model id instead
+  (`-low`, `-medium`, `-high`).
 - Embeddings and reranking continue to use Hindsight's separately configured providers.
 
 </ProviderSetup>

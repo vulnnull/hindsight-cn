@@ -33,7 +33,7 @@ from ..llm_wrapper import (
 from ..operation_metadata import RetainExtractionErrors
 from ..remote_retry import status_code_of
 from ..response_models import BATCH_TERMINAL_FAILURE_STATUSES, BatchRequest, BatchResult, LLMCallResult, TokenUsage
-from ..stored_dates import is_placeholder_date
+from ..stored_dates import bank_timezone, is_placeholder_date
 from ..structured_output import provider_json_schema, strict_json_schema
 from . import attachment_content
 
@@ -150,7 +150,9 @@ def _coerce_entity_strings(v: Any) -> Any:
     prompt; the object form is still unwrapped here for models that learned it
     and for in-flight batch jobs.
 
-    Returns non-list input untouched so pydantic reports the type error itself.
+    Bare numbers become strings and other non-string items are dropped, so one
+    malformed entity can't fail the whole chunk. Returns non-list input
+    untouched so pydantic reports the type error itself.
     """
     if v is None:
         return []
@@ -162,8 +164,12 @@ def _coerce_entity_strings(v: Any) -> Any:
             text = item.get("text")
             if isinstance(text, str):
                 coerced.append(text)
-        else:
+        elif isinstance(item, str):
             coerced.append(item)
+        elif isinstance(item, (int, float)) and not isinstance(item, bool):
+            # Some models emit bare numbers ("2026", a port). Keep them as text;
+            # passing the int on crashed the whole chunk on `.lower()` (#6443).
+            coerced.append(str(item))
     return coerced
 
 
@@ -3802,8 +3808,6 @@ def _content_timezone(content: RetainContent, config: Any) -> tzinfo:
 
     The content's own Event Date offset when it has one, else the bank's default zone.
     """
-    from .orchestrator import bank_timezone
-
     event_date = content.event_date
     if isinstance(event_date, datetime) and event_date.tzinfo is not None:
         return event_date.tzinfo

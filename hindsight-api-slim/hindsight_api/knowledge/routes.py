@@ -6,6 +6,7 @@ import base64
 import binascii
 import json
 import mimetypes
+import uuid
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Literal
@@ -16,6 +17,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..api.admission import admit_for
 from ..api.content_disposition import content_disposition
 from ..config import get_config
 from ..engine.aiohttp_session import UpstreamHTTPError
@@ -232,8 +234,9 @@ class KnowledgeSearchRequest(BaseModel):
     )
     enable_reranking: bool | None = Field(
         default=None,
-        description="false keeps the search's own order. Unset (or true) reranks the best hits when the server "
-        "has a knowledge reranker (HINDSIGHT_API_KB_RERANKER_URL); without one, true does nothing.",
+        description="false keeps the search's own order; true reranks the best hits when the server has a "
+        "knowledge reranker (HINDSIGHT_API_KB_RERANKER_URL); without one, true does nothing. Unset follows the "
+        "server's HINDSIGHT_API_KB_ENABLE_RERANKING (default true).",
     )
     trace: bool = Field(
         default=False,
@@ -276,7 +279,7 @@ class KnowledgeSearchTraceHit(BaseModel):
     document_id: str
     filename: str | None
     index: int
-    media_type: str
+    media_type: Literal["document", "image", "audio", "video", "text"] = Field(title="Knowledge Media Type")
     page: int | None = None
     start_ms: int | None = None
     end_ms: int | None = None
@@ -334,9 +337,11 @@ class KnowledgeSearchTrace(BaseModel):
     keyword_weight: float = Field(description="The keyword score's share of the final score")
     keyword_terms: dict[str, float] = Field(
         description="Each query word the keyword search used, with its IDF; a word less than half as rare (IDF) "
-        "as the query's rarest word is left out"
+        "as the query's rarest word is left out, unless its IDF reaches 2 (in under ~13% of the bank's passages)"
     )
-    timings_ms: dict[str, float] = Field(description="Each phase's time: open_bank, embed, store.search, context")
+    timings_ms: dict[str, float] = Field(
+        description="Each phase's time: open_bank, embed, store.search (and its store.* parts), rerank, context"
+    )
     candidate_searches: list[KnowledgeTraceArm] = Field(description="Step 1: each candidate search's own list")
     hits: list[KnowledgeSearchTraceHit] = Field(description="Steps 2-3: every candidate scored, best first")
     budget_steps: list[KnowledgeTraceBudgetStep] = Field(description="Step 4: how max_tokens was filled, in order")
@@ -562,13 +567,10 @@ def _require_config_writes() -> None:
 
 
 def build_router(get_request_context: Callable[..., RequestContext]) -> APIRouter:
-    # Out of the OpenAPI spec while knowledge banks are a hidden feature: no generated client,
-    # CLI command or API reference page names them. Back in the spec at launch.
     router = APIRouter(
         prefix=PREFIX,
         tags=["Knowledge Banks"],
         dependencies=[Depends(_require_enabled)],
-        include_in_schema=False,
     )
 
     def service(request: Request) -> KnowledgeService:
@@ -724,7 +726,8 @@ def build_router(get_request_context: Callable[..., RequestContext]) -> APIRoute
         status_code=202,
         summary="Ingest files (PDF, images, audio, video, text, Office)",
         description="Each file becomes one document, chunked into passages (or pre-processed first by the "
-        "extension its ingestion strategy maps its type to) and embedded in the background. Poll the operation, or the document's status, to "
+        "extension its ingestion strategy maps its type to) and embedded in the background. Poll the operation "
+        "(GET /v1/default/knowledge-banks/{bank_id}/operations/{operation_id}), or the document's status, to "
         "know when it is searchable.",
         operation_id="ingest_knowledge_files",
     )
@@ -861,6 +864,126 @@ def build_router(get_request_context: Callable[..., RequestContext]) -> APIRoute
             raise _http_error(exc) from exc
         return KnowledgeDeletedResponse()
 
+    # --- background jobs: a knowledge bank's own, since /v1/default/banks/{bank_id}/operations is
+    # memory banks only. Same job table, engine code and response shapes as the memory routes.
+    from ..api.http import (
+        CancelOperationResponse,
+        DeleteOperationResponse,
+        OperationResponse,
+        OperationsListResponse,
+        OperationStatusResponse,
+        RetryOperationResponse,
+    )
+
+    def _operation_uuid(operation_id: str) -> None:
+        try:
+            uuid.UUID(operation_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid operation_id format: {operation_id}") from None
+
+    @router.get(
+        "/{bank_id}/operations",
+        response_model=OperationsListResponse,
+        summary="List a knowledge bank's background operations, most recent first",
+        operation_id="list_knowledge_bank_operations",
+    )
+    async def list_operations(
+        bank_id: str,
+        request: Request,
+        status: str | None = Query(
+            default=None, description="Filter by status: pending, processing, completed, failed, or cancelled"
+        ),
+        type: str | None = Query(default=None, description="Filter by operation type"),
+        limit: int = Query(default=20, ge=1, le=100),
+        offset: int = Query(default=0, ge=0),
+        exclude_parents: bool = Query(default=False, description="Exclude parent batch operations from results"),
+        rc: RequestContext = Depends(get_request_context),
+    ) -> OperationsListResponse:
+        try:
+            result = await service(request).list_operations(
+                bank_id,
+                rc,
+                status=status,
+                task_type=type,
+                limit=limit,
+                offset=offset,
+                exclude_parents=exclude_parents,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return OperationsListResponse(
+            bank_id=bank_id,
+            total=result["total"],
+            limit=limit,
+            offset=offset,
+            operations=[OperationResponse(**op) for op in result["operations"]],
+        )
+
+    @router.get(
+        "/{bank_id}/operations/{operation_id}",
+        response_model=OperationStatusResponse,
+        summary="Get a knowledge bank operation's status",
+        operation_id="get_knowledge_bank_operation",
+    )
+    async def get_operation(
+        bank_id: str,
+        operation_id: str,
+        request: Request,
+        include_payload: bool = Query(default=False, description="Include the raw task payload in the response."),
+        rc: RequestContext = Depends(get_request_context),
+    ) -> OperationStatusResponse:
+        _operation_uuid(operation_id)
+        try:
+            result = await service(request).get_operation(bank_id, operation_id, rc, include_payload=include_payload)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return OperationStatusResponse(**result)
+
+    @router.delete(
+        "/{bank_id}/operations/{operation_id}",
+        response_model=CancelOperationResponse,
+        summary="Cancel a pending or in-flight knowledge bank operation",
+        operation_id="cancel_knowledge_bank_operation",
+    )
+    async def cancel_operation(
+        bank_id: str, operation_id: str, request: Request, rc: RequestContext = Depends(get_request_context)
+    ) -> CancelOperationResponse:
+        _operation_uuid(operation_id)
+        try:
+            return CancelOperationResponse(**await service(request).cancel_operation(bank_id, operation_id, rc))
+        except Exception as exc:
+            raise _http_error(exc) from exc
+
+    @router.post(
+        "/{bank_id}/operations/{operation_id}/retry",
+        response_model=RetryOperationResponse,
+        summary="Retry a failed or cancelled knowledge bank operation",
+        operation_id="retry_knowledge_bank_operation",
+    )
+    async def retry_operation(
+        bank_id: str, operation_id: str, request: Request, rc: RequestContext = Depends(get_request_context)
+    ) -> RetryOperationResponse:
+        _operation_uuid(operation_id)
+        try:
+            return RetryOperationResponse(**await service(request).retry_operation(bank_id, operation_id, rc))
+        except Exception as exc:
+            raise _http_error(exc) from exc
+
+    @router.delete(
+        "/{bank_id}/operations/{operation_id}/delete",
+        response_model=DeleteOperationResponse,
+        summary="Delete a finished knowledge bank operation's record",
+        operation_id="delete_knowledge_bank_operation",
+    )
+    async def delete_operation(
+        bank_id: str, operation_id: str, request: Request, rc: RequestContext = Depends(get_request_context)
+    ) -> DeleteOperationResponse:
+        _operation_uuid(operation_id)
+        try:
+            return DeleteOperationResponse(**await service(request).delete_operation(bank_id, operation_id, rc))
+        except Exception as exc:
+            raise _http_error(exc) from exc
+
     @router.get(
         "/{bank_id}/tags",
         response_model=KnowledgeTagsResponse,
@@ -930,7 +1053,11 @@ def build_router(get_request_context: Callable[..., RequestContext]) -> APIRoute
         operation_id="search_knowledge_bank",
     )
     async def search(
-        bank_id: str, body: KnowledgeSearchRequest, request: Request, rc: RequestContext = Depends(get_request_context)
+        bank_id: str,
+        body: KnowledgeSearchRequest,
+        request: Request,
+        rc: RequestContext = Depends(get_request_context),
+        _admit: None = Depends(admit_for("kb_search")),
     ) -> KnowledgeSearchResponse:
         try:
             image = base64.b64decode(body.query_image, validate=True) if body.query_image else None
@@ -948,21 +1075,32 @@ def build_router(get_request_context: Callable[..., RequestContext]) -> APIRoute
             media_types=list(body.media_types) if body.media_types else None,
         )
         trace = SearchTrace() if body.trace else None
+        # Imported here for the reason `_http_error` gives.
+        from ..api.http import run_task_cancellable_on_disconnect
+
         try:
-            hits = await service(request).search(
-                bank_id,
-                SearchRequest(
-                    query=body.query,
-                    query_image=image,
-                    query_video=video,
-                    filters=filters,
-                    max_tokens=body.max_tokens,
-                    budget=body.budget,
-                    enable_reranking=body.enable_reranking,
+            # A caller who hangs up stops the search (499) instead of leaving it to run.
+            hits = await run_task_cancellable_on_disconnect(
+                request,
+                service(request).search(
+                    bank_id,
+                    SearchRequest(
+                        query=body.query,
+                        query_image=image,
+                        query_video=video,
+                        filters=filters,
+                        max_tokens=body.max_tokens,
+                        budget=body.budget,
+                        enable_reranking=body.enable_reranking,
+                    ),
+                    rc,
+                    trace,
                 ),
-                rc,
-                trace,
+                operation="kb_search",
+                bank_id=bank_id,
             )
+        except HTTPException:
+            raise
         except Exception as exc:
             raise _http_error(exc) from exc
         return KnowledgeSearchResponse(

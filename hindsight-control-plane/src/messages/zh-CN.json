@@ -574,7 +574,8 @@
         "retain_extraction_mode": "提取规则",
         "retain_mission": "Mission",
         "retain_structured_chunk_size": "结构化分块大小",
-        "retain_optional_fact_dimensions": "可选事实字段"
+        "retain_optional_fact_dimensions": "可选事实字段",
+        "default_timezone": "时区"
       },
       "section": {
         "bank_identity": "记忆库标识",
@@ -1583,7 +1584,11 @@
     "actionCreatePageFolder": "创建页面文件夹",
     "actionCreatePage": "创建页面",
     "actionUpdatePageNode": "更新页面节点",
-    "actionDeletePageNode": "删除页面节点"
+    "actionDeletePageNode": "删除页面节点",
+    "actionCreateKnowledgeBank": "创建知识库",
+    "actionDeleteKnowledgeBank": "删除知识库",
+    "actionIngestKnowledgeText": "导入知识文本",
+    "actionDeleteKnowledgeDocument": "删除知识文档"
   },
   "llmRequestsView": {
     "callVolume": "调用量",

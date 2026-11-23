@@ -11,7 +11,9 @@ from datetime import datetime, timezone
 
 import numpy as np
 
+from ...config import DEFAULT_RECENCY_ALPHA
 from ..cross_encoder import RerankTimeoutError, _served_provider
+from ..decision_model import DecisionEngineFor, decision_engine
 from .decision_reranker import PROVIDER_NAME as DECISION_MODEL_RERANKER
 from .decision_reranker import DecisionModelReranker, DecisionRerankOptions, rerank_options, rerank_shared_context
 from .types import MergedCandidate, ScoredResult
@@ -37,7 +39,7 @@ UTC = timezone.utc
 # Multiplicative boost alphas for recency and temporal proximity.
 # Each signal contributes at most ±(alpha/2) relative adjustment to the base CE score,
 # so the max combined boost is (1 + alpha/2)^2 ≈ +21% and min is (1 - alpha/2)^2 ≈ -19%.
-_RECENCY_ALPHA: float = 0.2
+_RECENCY_ALPHA: float = DEFAULT_RECENCY_ALPHA  # HINDSIGHT_API_RECENCY_ALPHA overrides it per server
 _TEMPORAL_ALPHA: float = 0.2
 _PROOF_COUNT_ALPHA: float = 0.1  # Conservative: max ±5% for evidence strength
 
@@ -303,6 +305,7 @@ def apply_combined_scoring(
         sr.rrf_normalized = 0.0
 
         recency_boost = 1.0 + recency_alpha * (sr.recency - 0.5)
+        sr.recency_boost = recency_boost
         temporal_boost = 1.0 + temporal_alpha * (sr.temporal - 0.5)
         proof_count_boost = 1.0 + proof_count_alpha * (proof_norm - 0.5)
         sr.combined_score = sr.cross_encoder_score_normalized * recency_boost * temporal_boost * proof_count_boost
@@ -317,7 +320,12 @@ class CrossEncoderReranker:
     Default local model is hindsight-ai/hs-rerank-1.
     """
 
-    def __init__(self, cross_encoder=None, fallback: "CrossEncoderReranker | None" = None):
+    def __init__(
+        self,
+        cross_encoder=None,
+        fallback: "CrossEncoderReranker | None" = None,
+        decision_engine_for: DecisionEngineFor | None = None,
+    ):
         """
         Initialize cross-encoder reranker.
 
@@ -327,6 +335,9 @@ class CrossEncoderReranker:
             fallback: Ranks a recall this one fails to. Built from the environment when
                 cross_encoder is None: the configured reranker chain behind a decision model,
                 with HINDSIGHT_API_RECALL_DECISION_MODEL_FALLBACK on.
+            decision_engine_for: Which decision model an operation asks. Defaults to
+                decision_model.decision_engine. Used only when cross_encoder is omitted, so an
+                explicit encoder is unchanged. MemoryEngine passes the callable it was given.
         """
         if cross_encoder is None:
             from hindsight_api.config import get_config
@@ -334,13 +345,13 @@ class CrossEncoderReranker:
 
             # A decision model set up for recall replaces the configured reranker, which then
             # only ranks the recalls the decision model fails, and only when asked to.
-            config = get_config()
-            decision_model = config.decision_model_config("recall")
-            if decision_model is None:
+            # Omitted means the shared engine, the same call as before anything was injected.
+            engine = (decision_engine_for or decision_engine)("recall")
+            if engine is None:
                 cross_encoder = create_cross_encoder_from_env()
             else:
-                cross_encoder = DecisionModelReranker.from_config(decision_model)
-                if config.recall_decision_model_fallback:
+                cross_encoder = DecisionModelReranker(engine)
+                if get_config().recall_decision_model_fallback:
                     fallback = CrossEncoderReranker(create_cross_encoder_from_env())
         self.cross_encoder = cross_encoder
         self.fallback = fallback

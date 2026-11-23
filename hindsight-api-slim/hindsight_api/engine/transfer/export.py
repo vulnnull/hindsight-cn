@@ -24,6 +24,7 @@ import pydantic_core
 
 from ..db_utils import as_connection, iter_keyset_pages
 from ..metadata_utils import as_string_metadata
+from ..retain.bank_utils import bank_exists_on_conn
 from ..schema import fq_table
 from .schema import (
     ATTACHMENT_TABLES,
@@ -525,6 +526,10 @@ async def _iter_history_row_pages(conn_or_backend: Any, table: str, bank_id: str
         yield [{k: v for k, v in row.items() if k != "id"} for row in rows]
 
 
+class BankNotFoundError(LookupError):
+    """The bank to export has no row: a typo'd id or the wrong instance, not an empty bank."""
+
+
 async def stream_export_bank(
     conn_or_backend: Any,
     bank_id: str,
@@ -558,7 +563,15 @@ async def stream_export_bank(
     read. The clone takes the same reads: it once read under one transaction
     instead, which on a large bank stayed open until a pooler cut it (#6666) and,
     at READ COMMITTED, never gave a single snapshot anyway.
+
+    Raises :class:`BankNotFoundError` before the first chunk when the bank has no
+    row, so a caller writing the stream to a file never gets an archive for it.
     """
+    # A missing bank would otherwise export as a well-formed, empty archive that an
+    # operator only finds out is useless at restore time (#6776).
+    async with as_connection(conn_or_backend) as conn:
+        if not await bank_exists_on_conn(conn, bank_id):
+            raise BankNotFoundError(f"Bank '{bank_id}' not found")
     scope = scope or TransferScope()
     memories = _resolve_memories(memories)
     streamer = ZipStreamer()
@@ -590,7 +603,8 @@ async def stream_export_bank(
                 row_counts[entry] = row_counts.get(entry, 0) + len(rows)
             yield b"]"
 
-        async for chunk in streamer.write_file_chunks(entry, encoded()):
+        # Row tables grow without bound (history/llm_requests passes 4 GB on busy banks, #6745).
+        async for chunk in streamer.write_file_chunks(entry, encoded(), zip64=True):
             yield chunk
 
     if scope.data:
@@ -742,13 +756,6 @@ async def _stream_attachments(
             f"their bytes cannot be carried."
         )
     for index, row in enumerate(rows):
-        # Checked before any byte is written: the ZIP entry's 32-bit sizes can't be
-        # patched afterwards, so an entry over 4 GB would corrupt the archive.
-        if row["byte_size"] is not None and row["byte_size"] >= 0xFFFFFFFF:
-            raise OverflowError(
-                f"Attachment '{row['short_id']}' ({row['filename'] or row['storage_key']}) "
-                f"exceeds the 4 GB single-entry limit ({row['byte_size']} bytes)."
-            )
         blob = file_storage.retrieve_stream(row["storage_key"])
         # Pull the first piece before the entry is opened: a missing blob surfaces
         # here as FileNotFoundError, and once the entry header is written there is
@@ -776,7 +783,10 @@ async def _stream_attachments(
         # DEFLATE at level 0: attachments are images/PDFs that are already
         # compressed, but a deflate stream (unlike STORED) is self-terminating,
         # which sequential ZIP readers need when sizes only follow the data.
-        async for chunk in streamer.write_file_chunks(entry, rest(), compression_level=0):
+        # Zip64 is announced in the entry header, before any byte is streamed, so it is
+        # decided from the recorded size. Attachments over 4 GB used to fail the export.
+        zip64 = row["byte_size"] >= 0xFFFFFFFF
+        async for chunk in streamer.write_file_chunks(entry, rest(), compression_level=0, zip64=zip64):
             yield chunk
         exported.append(
             TransferAttachment(

@@ -24,6 +24,7 @@ def mock_memory():
     # Alias resolution runs on every tool call; the identity mock keeps these
     # tests about routing rather than about aliases.
     memory.resolve_bank_alias = AsyncMock(side_effect=lambda bank_id, **_: bank_id)
+    memory.refuse_knowledge_bank = AsyncMock(return_value=None)
     return memory
 
 
@@ -373,14 +374,17 @@ def test_registered_tool_sets_match_the_allowlists(mock_memory):
     over the whole sets rather than spot-checking tool names.
     """
     from hindsight_api.api.mcp import create_mcp_server
-    from hindsight_api.mcp_tools import _ALL_TOOLS
+    from hindsight_api.mcp_tools import _ALL_TOOLS, _KNOWLEDGE_TOOLS
 
     multi = set(_tools(create_mcp_server(mock_memory, multi_bank=True)))
     single = set(_tools(create_mcp_server(mock_memory, multi_bank=False)))
 
     assert multi == set(_ALL_TOOLS)
-    # Single-bank mode drops exactly the tools that operate across banks.
-    assert multi - single == {"list_banks", "create_bank", "get_bank_stats"}
+    # Single-bank mode drops exactly the tools that operate across banks, and the knowledge-bank
+    # tools, which a knowledge bank's own endpoint serves.
+    assert multi - single == {"list_banks", "create_bank", "get_bank_stats"} | _KNOWLEDGE_TOOLS
+    knowledge = set(_tools(create_mcp_server(mock_memory, multi_bank=False, knowledge_bank=True)))
+    assert knowledge == _KNOWLEDGE_TOOLS - {"list_knowledge_banks", "create_knowledge_bank"}
 
 
 def test_global_mcp_enabled_tools_filter_restricts_registered_tools(mock_memory):
@@ -498,3 +502,21 @@ async def test_routing_logic_from_url_path():
 
         assert bank_id_from_path == expected_bank_from_path, f"Failed for: {description} (path={path})"
         assert bank_id == expected_bank_id, f"Failed bank_id for: {description} (path={path}, got={bank_id})"
+
+
+@pytest.mark.parametrize("multi_bank", [True, False])
+def test_global_mcp_enabled_tools_with_no_built_in_registers_no_built_in(mock_memory, multi_bank, caplog):
+    """An allowlist naming only extension tools must not fall back to every built-in tool."""
+    from unittest.mock import MagicMock, patch
+
+    from hindsight_api.api.mcp import create_mcp_server
+    from hindsight_api.mcp_tools import _ALL_TOOLS
+
+    mock_cfg = MagicMock()
+    mock_cfg.mcp_enabled_tools = ["my_extension_tool"]
+
+    with patch("hindsight_api.api.mcp._get_raw_config", return_value=mock_cfg):
+        mcp_server = create_mcp_server(mock_memory, multi_bank=multi_bank)
+
+    assert set(_tools(mcp_server)) & set(_ALL_TOOLS) == set()
+    assert "matches no built-in tool" in caplog.text

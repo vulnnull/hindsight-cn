@@ -72,9 +72,7 @@ async def test_a_sync_ingest_returns_once_every_document_is_searchable(kb, knowl
     assert (bank["document_count"], bank["ready_count"], bank["failed_count"]) == (3, 3, 0)
 
 
-async def test_an_async_ingest_is_one_operation_the_worker_finishes_even_split_into_children(
-    client, kb, knowledge_bank
-):
+async def test_an_async_ingest_is_one_operation_the_worker_finishes_even_split_into_children(kb, knowledge_bank):
     # Over a child's byte budget (1 MiB by default): the notes fill one child and the manual, bigger than
     # the budget on its own, is a second, so the worker runs the upload as two children. The one operation
     # the caller holds completes only once both have. (A request carries at most 100 items, under the
@@ -92,12 +90,12 @@ async def test_an_async_ingest_is_one_operation_the_worker_finishes_even_split_i
     assert page["total"] == 31
     assert (await _hits(kb, knowledge_bank, query="note 7", first=1)) == ["note-7"]
     # The children are only visible as the bank's operations: the parent plus two of them.
-    ops = (await client.operations.list_operations(knowledge_bank, limit=100)).operations
-    ingests = [op for op in ops if op.task_type == "knowledge_ingest"]
-    assert len(ingests) == 3 and parent_id in {op.id for op in ingests}, ingests
+    ops = (await kb.operations(knowledge_bank, limit=100)).body["operations"]
+    ingests = [op for op in ops if op["task_type"] == "knowledge_ingest"]
+    assert len(ingests) == 3 and parent_id in {op["id"] for op in ingests}, ingests
     deadline = asyncio.get_running_loop().time() + 30
-    while (status := await client.operations.get_operation_status(knowledge_bank, parent_id)).status != "completed":
-        assert status.status in ("pending", "processing") and asyncio.get_running_loop().time() < deadline, status
+    while (status := (await kb.operation(knowledge_bank, parent_id)).body)["status"] != "completed":
+        assert status["status"] in ("pending", "processing") and asyncio.get_running_loop().time() < deadline, status
         await asyncio.sleep(0.2)
 
 
@@ -106,14 +104,22 @@ async def test_a_text_hit_comes_back_with_the_passages_around_it_as_the_budget_a
     sections[3] = "# Step 3\n\nOpen the valve slowly until the gauge reads green."
     await kb.ingest(knowledge_bank, [{"document_id": "manual", "text": "\n\n".join(sections)}])
 
-    r = await kb.search(knowledge_bank, query="open the valve until the gauge reads green")
+    # Traced, so a failure says which searches found what: this once came back without Step 0 (#6792)
+    # and never again in ~900 runs, so the next one must explain itself.
+    r = await kb.search(knowledge_bank, query="open the valve until the gauge reads green", trace=True)
+    trace = r.body["trace"]
+    why = {
+        "searches": {s["name"]: [h["index"] for h in s["results"]] for s in trace["candidate_searches"]},
+        "hits": [(h["index"], h["score"], h["outcome"]) for h in trace["hits"]],
+        "budget": trace["budget_steps"],
+    }
     hit = r.body["results"][0]
-    assert hit["document_id"] == "manual" and "Open the valve slowly" in hit["text"]
+    assert hit["document_id"] == "manual" and "Open the valve slowly" in hit["text"], why
     # The hit comes with a passage on each side; the rest of the manual comes back as results of their
     # own, each step once (a result no longer grows to take the whole document in).
-    assert "Step 2" in hit["text"] and "Step 4" in hit["text"] and "context" not in hit
+    assert "Step 2" in hit["text"] and "Step 4" in hit["text"] and "context" not in hit, why
     texts = [h["text"] for h in r.body["results"] if h["document_id"] == "manual"]
-    assert sorted(n for n in range(6) for t in texts if f"# Step {n}" in t) == list(range(6))
+    assert sorted(n for n in range(6) for t in texts if f"# Step {n}" in t) == list(range(6)), why
 
 
 async def test_a_traced_search_explains_its_words_its_candidates_and_how_the_budget_filled(kb, knowledge_bank):

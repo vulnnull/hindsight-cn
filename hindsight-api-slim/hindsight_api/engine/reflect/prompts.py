@@ -10,7 +10,7 @@ The reflect agent uses hierarchical retrieval:
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, tzinfo
 from typing import Any
 
 from ..prompt_utils import default_language_section, escape_for_prompt, output_language_directive
@@ -32,18 +32,28 @@ _DEFAULT_ROLE = "You are a reflection agent that answers questions by reasoning 
 _DEFAULT_FINAL_ROLE = "You are a thoughtful assistant that synthesizes answers from retrieved memories."
 
 
-def _current_utc_datetime() -> str:
-    """Return the current UTC date and time for time-relative reflect reasoning.
+def _current_datetime(tz: tzinfo = timezone.utc) -> str:
+    """Return the current date and time in the bank's zone, named, for time-relative reasoning.
+
+    The tool results show times in the same zone (see ``presentation``), so "now" and every
+    memory read alike, and a date or time of day in the answer is local (#6441).
 
     Minute precision (not seconds) so requests within the same minute share an
     identical prompt string — the finest granularity that still keeps prompt
     caching viable for bursty traffic.
     """
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    now = datetime.now(tz)
+    if not now.utcoffset() and str(tz) == "UTC":
+        return now.strftime("%Y-%m-%d %H:%M UTC")
+    offset = now.strftime("%z")
+    return f"{now:%Y-%m-%d %H:%M} {tz} (UTC{offset[:3]}:{offset[3:]})"
 
 
-def _current_datetime_section() -> str:
-    return f"## Current Date and Time\nThe current date and time is {_current_utc_datetime()}."
+def _current_datetime_section(tz: tzinfo = timezone.utc) -> str:
+    return (
+        f"## Current Date and Time\nThe current date and time is {_current_datetime(tz)}. "
+        "Every time in the tool results is in this zone."
+    )
 
 
 def _extract_directive_rules(directives: list[dict[str, Any]]) -> list[str]:
@@ -210,6 +220,7 @@ def build_system_prompt_for_tools(
     answer_as_document: bool = False,
     llm_output_language: str | None = None,
     answer_ready: bool = False,
+    tz: tzinfo = timezone.utc,
 ) -> str:
     """
     Build the system prompt for tool-calling reflect agent.
@@ -603,7 +614,7 @@ def build_system_prompt_for_tools(
     # across banks and requests, so it stays a cacheable prefix; only this
     # timestamp and the custom tail below fall outside the cache.
     parts.append("")
-    parts.append(_current_datetime_section())
+    parts.append(_current_datetime_section(tz))
 
     parts.append("")
     parts.append(bank_name_line(bank_profile))
@@ -1161,6 +1172,7 @@ def build_final_system_prompt(
     mission: str | None = None,
     llm_output_language: str | None = None,
     directives: list[dict[str, Any]] | None = None,
+    tz: tzinfo = timezone.utc,
 ) -> str:
     """Build the final synthesis system prompt, using mission as role when set.
 
@@ -1193,7 +1205,7 @@ def build_final_system_prompt(
     parts.append(build_directives_reminder(directives) if directives else "")
     # Volatile "now" reference last, so the static/per-bank instructions above
     # remain a cacheable prefix and only this timestamp falls outside the cache.
-    parts.append(_current_datetime_section())
+    parts.append(_current_datetime_section(tz))
 
     return "\n\n".join(p.strip() for p in parts if p.strip())
 
@@ -1333,7 +1345,7 @@ ALLOWED OPERATIONS (each line shows the JSON shape)
 - ``{"op": "insert_block", "section_id": "...", "after_block_id": "...", "text": "..."}``
 - ``{"op": "replace_block", "section_id": "...", "block_id": "...", "text": "..."}``
 - ``{"op": "remove_block", "section_id": "...", "block_id": "..."}``
-- ``{"op": "add_section", "heading": "...", "level": 2, "blocks": ["...", "..."], "after_section_id": "..."}``
+- ``{"op": "add_section", "heading": "...", "level": 2, "blocks": ["...", "..."], "after_section_id": "...", "new_id": null}``
 - ``{"op": "remove_section", "section_id": "..."}``
 - ``{"op": "replace_section_blocks", "section_id": "...", "blocks": ["...", "..."]}``
 - ``{"op": "rename_section", "section_id": "...", "new_heading": "..."}``
@@ -1346,8 +1358,9 @@ ALLOWED OPERATIONS (each line shows the JSON shape)
   ✅ ``{"op": "append_block", "section_id": "members", "text": "- Carol"}``
   ❌ ``{"op": "replace_section_blocks", "section_id": "members", "blocks": ["- Carol"], "blocks_note": "merged"}``
   ✅ ``{"op": "replace_section_blocks", "section_id": "members", "blocks": ["- Carol"]}``
-- ``after_section_id`` is the id of a section in CURRENT DOCUMENT (omit it to add at
-  the end). A section this reply adds has no id yet: to place a new section after
+- ``after_section_id`` is the id of a section in CURRENT DOCUMENT (``null`` to add
+  at the end). ``new_id`` is always ``null``: the new section's id is made from its
+  heading. A section this reply adds has no id yet: to place a new section after
   it, use its heading exactly as you wrote it, never an id you made up from it.
   ❌ ``"after_section_id": "q3-goals"`` for a "Q3 Goals" section this reply adds
   ✅ ``"after_section_id": "Q3 Goals"``
