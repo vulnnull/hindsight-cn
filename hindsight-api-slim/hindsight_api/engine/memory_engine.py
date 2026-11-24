@@ -766,6 +766,7 @@ from .reflect.models import StructuredOutputResult
 from .reflect.retractions import (
     RetractedGrounding,
     based_on_fact_ids,
+    drop_inline_citations,
     partition_retracted,
     prune_based_on,
 )
@@ -2477,8 +2478,8 @@ def _delta_failure_reason(fallback: ModeFallbackReason | None) -> RefreshFailure
     """Narrow a delta run's fallback reason to the failure vocabulary.
 
     Only the three reasons a delta can hit *after* it has been chosen are
-    reachable here — ``no_baseline_content`` and ``source_query_changed`` turn
-    delta off before it runs, so a refresh carrying them is a legitimate full
+    reachable here — ``no_baseline_content``, ``source_query_changed`` and
+    ``grounding_gone`` turn delta off before it runs, so a refresh carrying them is a legitimate full
     regeneration, not a failure. Anything else degrades to the generic value
     rather than widening the failure enum with values it can never mean.
     """
@@ -18875,6 +18876,75 @@ class MemoryEngine(MemoryEngineInterface):
                 else:
                     stored_structured_content = raw_struct
 
+        # Retracted grounding: facts the stored document still cites that no longer
+        # exist. Derived here rather than passed in by whatever removed them, because
+        # ``submit_async_refresh_mental_model`` guarantees that refreshes carry no
+        # per-request options — that is what makes its pending-dedupe safe (#3487), and
+        # a payload of ids would break it by making one queued refresh no longer cover
+        # the next caller's intent. Deriving also makes the pass idempotent (a failed
+        # run recomputes the same set) and covers invalidation, every delete path, and
+        # the observation sweep without instrumenting any of them.
+        #
+        # Only delta needs this. A full refresh regenerates the document from live
+        # facts and rebuilds ``based_on`` wholesale, so a retracted fact cannot survive
+        # either surface. It is read before reflect runs because it can turn delta off.
+        retracted = RetractedGrounding()
+        retraction_deferred_reason: str | None = None
+        # Set once the unsay pass has run to completion, which is what licenses
+        # pruning the retracted ids out of based_on below.
+        retraction_handled = False
+        retraction_operations: MentalModelDeltaOperations | None = None
+        if use_delta:
+            stored_based_on = (mental_model.get("reflect_response") or {}).get("based_on")
+            cited_ids = based_on_fact_ids(stored_based_on)
+            if cited_ids:
+                from .memories import get_memories
+
+                store = get_memories()
+                # Resolved before taking the read connection: the resolver can need a
+                # connection of its own, and holding one while it waits for another can
+                # exhaust a small pool.
+                bank_config = await self._config_resolver.resolve_full_config(bank_id, request_context)
+                async with self._store_read_conn(bank_id) as conn:
+                    live_ids = await store.live_memory_ids(
+                        conn=conn, fq_table=fq_table, bank_id=bank_id, unit_ids=cited_ids
+                    )
+                    retracted = partition_retracted(stored_based_on, live_ids)
+                    if retracted:
+                        # Re-ingesting a document deletes its facts and re-extracts them
+                        # under fresh ids, so the old ones read exactly like a retraction.
+                        # The replacements are not observations yet — those are minted by a
+                        # consolidation run that happens *after* retain commits — so waiting
+                        # for the commit is not enough. Unsaying in that gap deletes prose
+                        # whose replacement does not exist, and because the ids leave
+                        # ``based_on`` with it, nothing would ever notice again. Wait for the
+                        # bank to be caught up instead; staleness re-offers this every round.
+                        #
+                        # Only a bank that makes observations has anything to wait for. With
+                        # observations off nothing is ever consolidated, so ``pending`` never
+                        # drains and the wait deferred the pass forever: a deleted memory's
+                        # claims stayed on the page for good (#6855). There, the replacement
+                        # facts exist as soon as their retain commits.
+                        freshness = await store.consolidation_freshness(conn=conn, fq_table=fq_table, bank_id=bank_id)
+                        if bank_config.enable_observations and freshness.get("pending"):
+                            retraction_deferred_reason = (
+                                f"{freshness['pending']} fact(s) are still pending consolidation"
+                            )
+
+        # Nothing the page cites exists any more: its whole source was deleted, or
+        # re-ingested under new ids. Unsaying every claim at once is not an edit, so
+        # rebuild the page from what the bank holds now instead. A deleted source then
+        # leaves nothing to say, a re-ingested one writes the page again under its new
+        # ids, and no stale citation survives in either the text or ``based_on``.
+        # Still deferred while consolidation is pending: right after a re-ingest the
+        # replacements are not there yet, and a rebuild then would empty the page.
+        gone_citations = 0
+        if retracted.unresolvable and retraction_deferred_reason is None:
+            use_delta = False
+            mode_fallback_reason = "grounding_gone"
+            gone_citations = retracted.cited_count
+            retracted = RetractedGrounding()
+
         tag_filtering = _resolve_refresh_tag_filtering(model_tags, trigger_data)
         exclude_ids = sorted({*stored_exclude_ids, mental_model_id})
         scope = MentalModelRefreshScope(
@@ -19077,51 +19147,6 @@ class MemoryEngine(MemoryEngineInterface):
         for _facts in based_on_serialized_payload.values():
             delta_supporting_facts.extend(_facts)
 
-        # Retracted grounding: facts the stored document still cites that no longer
-        # exist. Derived here rather than passed in by whatever removed them, because
-        # ``submit_async_refresh_mental_model`` guarantees that refreshes carry no
-        # per-request options — that is what makes its pending-dedupe safe (#3487), and
-        # a payload of ids would break it by making one queued refresh no longer cover
-        # the next caller's intent. Deriving also makes the pass idempotent (a failed
-        # run recomputes the same set) and covers invalidation, every delete path, and
-        # the observation sweep without instrumenting any of them.
-        #
-        # Only delta needs this. A full refresh regenerates the document from live
-        # facts and rebuilds ``based_on`` wholesale, so a retracted fact cannot survive
-        # either surface.
-        retracted = RetractedGrounding()
-        retraction_deferred_reason: str | None = None
-        # Set once the unsay pass has run to completion, which is what licenses
-        # pruning the retracted ids out of based_on below.
-        retraction_handled = False
-        retraction_operations: MentalModelDeltaOperations | None = None
-        if use_delta:
-            stored_based_on = (mental_model.get("reflect_response") or {}).get("based_on")
-            cited_ids = based_on_fact_ids(stored_based_on)
-            if cited_ids:
-                from .memories import get_memories
-
-                store = get_memories()
-                async with self._store_read_conn(bank_id) as conn:
-                    live_ids = await store.live_memory_ids(
-                        conn=conn, fq_table=fq_table, bank_id=bank_id, unit_ids=cited_ids
-                    )
-                    retracted = partition_retracted(stored_based_on, live_ids)
-                    if retracted:
-                        # Re-ingesting a document deletes its facts and re-extracts them
-                        # under fresh ids, so the old ones read exactly like a retraction.
-                        # The replacements are not observations yet — those are minted by a
-                        # consolidation run that happens *after* retain commits — so waiting
-                        # for the commit is not enough. Unsaying in that gap deletes prose
-                        # whose replacement does not exist, and because the ids leave
-                        # ``based_on`` with it, nothing would ever notice again. Wait for the
-                        # bank to be caught up instead; staleness re-offers this every round.
-                        freshness = await store.consolidation_freshness(conn=conn, fq_table=fq_table, bank_id=bank_id)
-                        if freshness.get("pending"):
-                            retraction_deferred_reason = (
-                                f"{freshness['pending']} fact(s) are still pending consolidation"
-                            )
-
         # In delta mode, based_on must accumulate: the mental model is
         # grounded on ALL facts ever used, not just the latest delta's new
         # ones. Merge previous based_on with current, deduplicating by id.
@@ -19155,13 +19180,21 @@ class MemoryEngine(MemoryEngineInterface):
         warnings: list[str] = []
         retrieved_total = sum(facts.retrieved.values())
         used_total = sum(facts.used.values())
-        if not has_sources:
+        if gone_citations:
             warnings.append(
-                "Nothing in this document's scope was readable, so the reflect loop was skipped and the "
-                "document left as it is. Check the resolved scope — tags, tag_groups and fact_types all "
-                "narrow it — and, in delta mode, the time window: only memories changed after the last "
-                "refresh are in range."
+                f"None of the {gone_citations} fact(s) this document cited exist any more, so it is rebuilt "
+                "from what the bank holds now"
+                + (", which is nothing in its scope: the document is emptied." if not has_sources else ".")
             )
+        if not has_sources:
+            # A rebuild with nothing to read already said so above, and empties the page.
+            if not gone_citations:
+                warnings.append(
+                    "Nothing in this document's scope was readable, so the reflect loop was skipped and the "
+                    "document left as it is. Check the resolved scope — tags, tag_groups and fact_types all "
+                    "narrow it — and, in delta mode, the time window: only memories changed after the last "
+                    "refresh are in range."
+                )
         elif retrieved_total == 0:
             warnings.append(
                 "Retrieval returned no facts at all. Check the resolved scope and the time window — "
@@ -19226,7 +19259,6 @@ class MemoryEngine(MemoryEngineInterface):
         # drift is structurally impossible. Falls back to the full candidate
         # markdown if either the structuring or the LLM op call fails.
         from .reflect.delta_ops import (
-            DeltaOperationList,
             apply_operations,
             request_delta_operations,
         )
@@ -19245,6 +19277,11 @@ class MemoryEngine(MemoryEngineInterface):
         final_content = reflect_result.text
         final_structured: StructuredDocument | None = None
         delta_applied = False
+        # The unsay pass has its own flag, apart from ``delta_applied``: when new facts
+        # follow, the unsay edits only stand if the new-facts delta lands too. Sharing
+        # one flag let a failed new-facts delta write the unsay-only document and move
+        # the watermark past the facts it never added (#6447).
+        unsay_applied = False
         delta_operations: MentalModelDeltaOperations | None = None
         # Both op calls share one LLM handle, built on first use so a refresh that
         # neither retracts nor has new facts still pays no config resolution.
@@ -19287,20 +19324,7 @@ class MemoryEngine(MemoryEngineInterface):
                 # because a retraction is a reason to edit the document all by itself —
                 # gating it on new facts arriving is exactly the coupling that let a
                 # retired claim survive indefinitely on a quiet bank.
-                if retracted.unresolvable:
-                    # None of the grounding resolves, so this is a broken provenance
-                    # link rather than a retraction — see RetractedGrounding.unresolvable.
-                    # Drop the dangling citations (nothing should report a fact that is
-                    # not there) but leave the prose exactly as it is.
-                    retraction_handled = True
-                    warnings.append(
-                        f"None of the {retracted.cited_count} fact(s) this document cites could be "
-                        "resolved in this bank, which is a broken provenance link rather than a "
-                        "retraction — a restored or copied bank carries its documents but re-creates "
-                        "its memories under new ids. The citations were dropped; the content was left "
-                        "untouched and will be re-grounded by future refreshes."
-                    )
-                elif retracted and retraction_deferred_reason is None:
+                if retracted and retraction_deferred_reason is None:
                     try:
                         doc_max_tokens = stored_max_tokens or 2048
                         unsay_prompt = build_structured_retraction_prompt(
@@ -19328,11 +19352,13 @@ class MemoryEngine(MemoryEngineInterface):
                         # facts — and still counts as handled, so the citations are pruned
                         # and the same call is not repaid on every future refresh.
                         retraction_handled = True
-                        if unsay_outcome.applied:
-                            current_doc = unsay_outcome.document
-                            final_structured = unsay_outcome.document
-                            final_content = render_document(unsay_outcome.document)
-                            delta_applied = True
+                        # The model is shown the retracted facts without their ids, so a
+                        # sentence it keeps still carries the old ``[id]`` — and once the
+                        # id leaves ``based_on`` below, nothing would ever notice it again.
+                        cleaned_doc = drop_inline_citations(unsay_outcome.document, retracted.ids)
+                        if unsay_outcome.applied or cleaned_doc != unsay_outcome.document:
+                            current_doc = cleaned_doc
+                            unsay_applied = True
                         logger.info(
                             f"[MENTAL_MODELS] Retraction pass for {mental_model_id}: "
                             f"{len(retracted.facts)} retracted fact(s), applied "
@@ -19363,11 +19389,11 @@ class MemoryEngine(MemoryEngineInterface):
                 # already removed still stands: the document changed, so this is a
                 # write, not a preserved no-op.
                 if not supporting_facts:
-                    reflect_response_payload["delta_applied"] = delta_applied
+                    reflect_response_payload["delta_applied"] = unsay_applied
                     if retraction_operations is not None:
                         reflect_response_payload["delta_operations_applied"] = retraction_operations.applied
                         reflect_response_payload["delta_operations_skipped"] = retraction_operations.skipped
-                    if not delta_applied:
+                    if not unsay_applied:
                         reflect_response_payload["delta_skipped_reason"] = "no_new_facts"
                     if retraction_handled:
                         reflect_response_payload["based_on"] = prune_based_on(
@@ -19376,10 +19402,10 @@ class MemoryEngine(MemoryEngineInterface):
                     return _finish(
                         effective_mode="delta",
                         mode_fallback_reason=None,
-                        final_content=final_content if delta_applied else current_content,
-                        final_structured=final_structured,
+                        final_content=render_document(current_doc) if unsay_applied else current_content,
+                        final_structured=current_doc if unsay_applied else None,
                         delta_operations=retraction_operations,
-                        outcome="content_written" if delta_applied else "content_preserved_no_new_facts",
+                        outcome="content_written" if unsay_applied else "content_preserved_no_new_facts",
                     )
 
                 # Op JSON is denser than the rendered markdown — each op
@@ -19417,9 +19443,11 @@ class MemoryEngine(MemoryEngineInterface):
                 delta_llm = await _op_llm()
                 try:
                     # Structured-output call, following the retain extraction path:
-                    # the schema is sent, ``strict_schema`` is resolved from reflect's
-                    # own flag, and ``skip_validation`` keeps the raw JSON so the
-                    # op-by-op parser sees it. A reply that misses the schema is
+                    # ``request_delta_operations`` sends the schema, resolves
+                    # ``strict_schema`` from reflect's own flag, and sets
+                    # ``skip_validation`` so the op-by-op parser sees the raw JSON —
+                    # for this call and the retraction pass alike (the retraction pass
+                    # once ran without a schema, #6569). A reply that misses the schema is
                     # refused whole and asked for again with the errors attached —
                     # ``request_delta_operations`` owns that, for this call and the
                     # retraction pass alike. It also samples once more a reply that
@@ -19450,9 +19478,6 @@ class MemoryEngine(MemoryEngineInterface):
                         user_prompt=user_prompt,
                         scope="mental_model_delta_ops",
                         document=current_doc,
-                        response_format=DeltaOperationList,
-                        strict_schema=get_config().llm_strict_schema_reflect,
-                        skip_validation=True,  # Get raw JSON; the parser validates op-by-op
                         max_completion_tokens=get_config().reflect_max_completion_tokens,
                         temperature=get_config().llm_temperature_mental_model_refresh,
                     )
@@ -19523,8 +19548,10 @@ class MemoryEngine(MemoryEngineInterface):
             # citing a memory that no longer exists. Only for a pass that actually ran:
             # a deferred or failed one must keep its ids, because they are the sole
             # remaining evidence that the prose is unsupported — pruning them would
-            # leave the stale claim in place with nothing left to notice it.
-            if retraction_handled:
+            # leave the stale claim in place with nothing left to notice it. The same
+            # holds when the new-facts delta failed: the refresh is refused, the unsay
+            # edits are not written, so the next refresh must see the retraction again.
+            if retraction_handled and delta_applied:
                 reflect_response_payload["based_on"] = prune_based_on(
                     reflect_response_payload["based_on"], retracted.ids
                 )
@@ -19560,7 +19587,14 @@ class MemoryEngine(MemoryEngineInterface):
         #
         # Reached by a full refresh, and by a delta refresh whose baseline could not be
         # read (a delta with a baseline has already returned via the no-new-facts leg).
-        if not has_sources and not delta_applied:
+        #
+        # Not for a page whose whole grounding is gone and that has nothing left to read:
+        # there, empty is the answer — its source was deleted — and keeping the document
+        # would keep stating it. Both guards let that one page be written empty. With
+        # sources in scope an empty candidate still means the reflect failed, so the
+        # empty-candidate guard below keeps refusing it.
+        write_empty = gone_citations > 0 and not has_sources
+        if not has_sources and not delta_applied and not write_empty:
             return _finish(
                 effective_mode=effective_mode,
                 mode_fallback_reason=mode_fallback_reason,
@@ -19580,7 +19614,7 @@ class MemoryEngine(MemoryEngineInterface):
         # existing content and raises, rather than persisting the empty render.
         # A gated delta has no reflect candidate at all, so its empty text says nothing
         # about the LLM: a failed edit there is reported by the delta guard below.
-        if not final_content.strip() and gate is None:
+        if not final_content.strip() and gate is None and not write_empty:
             warnings.append(
                 "The refresh produced empty content, which usually means an upstream LLM failure. "
                 "A real refresh would preserve the existing content and fail."
@@ -19814,6 +19848,7 @@ class MemoryEngine(MemoryEngineInterface):
             # of the extra call and the fail-loud behaviour.
             response_schema = (mental_model.get("trigger") or {}).get("response_schema")
             prev_structured_output = (mental_model.get("reflect_response") or {}).get("structured_output")
+            prev_based_on = (mental_model.get("reflect_response") or {}).get("based_on")
 
             async def _structured_output_for(content_text: str) -> StructuredOutputResult:
                 if not response_schema or not content_text.strip():
@@ -19872,6 +19907,12 @@ class MemoryEngine(MemoryEngineInterface):
                 # The content stays, so its structured view must stay too (#6499).
                 if prev_structured_output is not None:
                     reflect_response_payload["structured_output"] = prev_structured_output
+                # ...and so must the facts it cites. A rebuild's based_on is only what
+                # its own (failed) reflect read; storing that would drop the dead ids
+                # that made this a rebuild, and no later refresh would notice the
+                # page's source is gone (#6764).
+                # A page that never stored one cites nothing yet, not what this run read.
+                reflect_response_payload["based_on"] = prev_based_on if prev_based_on is not None else {}
                 await self.update_mental_model(
                     bank_id,
                     mental_model_id,
@@ -21949,6 +21990,7 @@ class MemoryEngine(MemoryEngineInterface):
         if self._llm_config.provider == "none":
             return 0
         try:
+            bank_config = await self._config_resolver.resolve_full_config(bank_id, request_context)
             backend = await self._get_backend()
             async with acquire_with_retry(backend) as conn:
                 # Someone else is already going to notice. Consolidation is pending, and
@@ -21958,7 +22000,11 @@ class MemoryEngine(MemoryEngineInterface):
                 # (A bank with auto-consolidation off never reaches that hook; its
                 # cron-refreshed pages are still covered by the scheduled loop, and its
                 # manually refreshed ones were never this function's business.)
-                if await get_memories().has_pending_consolidation(conn=conn, fq_table=fq_table, bank_id=bank_id):
+                # A bank without observations never consolidates, so its facts read as
+                # pending forever and nothing would ever schedule this refresh (#6855).
+                if bank_config.enable_observations and await get_memories().has_pending_consolidation(
+                    conn=conn, fq_table=fq_table, bank_id=bank_id
+                ):
                     return 0
                 rows = await conn.fetch(
                     f"""
@@ -22539,21 +22585,33 @@ class MemoryEngine(MemoryEngineInterface):
         self._refuse_unwritable(tags, await self._write_tag_scope(bank_id, request_context), "a directive")
         backend = await self._get_backend()
 
-        async with acquire_with_retry(backend) as conn:
-            row = await conn.fetchrow(
-                f"""
-                INSERT INTO {fq_table("directives")}
-                (bank_id, name, content, priority, is_active, tags)
-                VALUES ($1, $2, $3, $4, $5, $6)
-                RETURNING id, bank_id, name, content, priority, is_active, tags, created_at, updated_at
-                """,
-                bank_id,
-                name,
-                content,
-                priority,
-                is_active,
-                tags or [],
-            )
+        # A first write to a new bank creates it, like retain and pinned mental models do (#6853).
+        # Same transaction as the insert, retried whole: see create_mental_model for why (#5830).
+        created = False
+
+        async def _write() -> Any:
+            nonlocal created
+            async with acquire_with_retry(backend) as conn:
+                async with conn.transaction():
+                    created = await self._ensure_bank_exists(bank_id, request_context, conn=conn)
+                    return await conn.fetchrow(
+                        f"""
+                        INSERT INTO {fq_table("directives")}
+                        (bank_id, name, content, priority, is_active, tags)
+                        VALUES ($1, $2, $3, $4, $5, $6)
+                        RETURNING id, bank_id, name, content, priority, is_active, tags, created_at, updated_at
+                        """,
+                        bank_id,
+                        name,
+                        content,
+                        priority,
+                        is_active,
+                        tags or [],
+                    )
+
+        row = await retry_with_backoff(_write)
+        if created:
+            await self._apply_default_bank_template(bank_id, request_context)
 
         logger.info(f"[DIRECTIVES] Created directive '{name}' for bank {bank_id}")
         return self._row_to_directive(row)

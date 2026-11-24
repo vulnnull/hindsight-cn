@@ -25,9 +25,11 @@ from hindsight_api.engine.schema import fq_store_table
 from hindsight_api.engine.reflect.retractions import (
     MEMORY_BACKED_FACT_TYPES,
     based_on_fact_ids,
+    drop_inline_citations,
     partition_retracted,
     prune_based_on,
 )
+from hindsight_api.engine.reflect.structured_doc import render_document, split_markdown
 
 # ---------------------------------------------------------------------------
 # Pure helpers — no DB, no LLM
@@ -95,6 +97,64 @@ def test_prune_based_on_drops_named_ids_and_keeps_the_rest():
     pruned = prune_based_on(based_on, {"drop"})
     assert [f["id"] for f in pruned["observation"]] == ["keep"]
     assert [f["id"] for f in pruned["mental-models"]] == ["mm1"]
+
+
+_A = "11111111-1111-4111-8111-111111111111"
+_B = "22222222-2222-4222-8222-222222222222"
+_C = "33333333-3333-4333-8333-333333333333"
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (f"Opens at 09:00. [{_A}]", "Opens at 09:00."),
+        (f"Opens at 09:00. [{_A}, {_B}]", f"Opens at 09:00. [{_B}]"),
+        (f"Opens at 09:00. [{_B}, {_A}, {_C}]", f"Opens at 09:00. [{_B}, {_C}]"),
+        (f"Opens at 09:00. [{_A}][{_B}]", f"Opens at 09:00. [{_B}]"),
+        (f"- Opens at 09:00 [{_A}]\n- Closes at 17:00 [{_B}]", f"- Opens at 09:00\n- Closes at 17:00 [{_B}]"),
+        # Resolved handles land as bare UUIDs, so an id is not always bracketed.
+        (f"Opens at 09:00 ({_A}).", "Opens at 09:00."),
+        (f"Opens at 09:00 {_A}.", "Opens at 09:00."),
+        (f"Opens at 09:00 [[{_A}]].", "Opens at 09:00."),
+        (f"See [{_A}](/memories/{_A}).", "See."),
+        (f"See [the notes](/memories/{_A}).", "See the notes."),
+        (f"{_A}, {_B} and more.", f"{_B} and more."),
+        (f"[{_A}] Opens at 09:00.", "Opens at 09:00."),
+        (f"Opens at 09:00 [{_A}; {_B}].", f"Opens at 09:00 [{_B}]."),
+        (f"Opens at 09:00 (`{_A}`).", "Opens at 09:00."),
+        (f"- {_A}\n- Closes at 17:00", "- Closes at 17:00"),
+        (f"- Closes at 17:00\n- {_A}", "- Closes at 17:00"),
+        (f"- [{_A}] Opens at 09:00", "- Opens at 09:00"),
+        (f"1. {_A}\n2. Closes at 17:00", "2. Closes at 17:00"),
+        (f"> Opens at 09:00\n> {_A}", "> Opens at 09:00"),
+        (f"Note:\n{_A}\nEnd", "Note:\nEnd"),
+        (f"Opened in\n2024. {_A}", "Opened in\n2024."),
+        (f"Steps:\n1. Open the door\n2. {_A}", "Steps:\n1. Open the door"),
+        (f"1. Open the door\n2. {_A}\n3. Close it", "1. Open the door\n3. Close it"),
+        # Case does not hide an id, and a group of only dropped ids leaves no ``[]``.
+        (f"Opens at 09:00 [{_A.upper()}, {_A}, {_B}].", f"Opens at 09:00 [{_B}]."),
+        # A UUID that is not being dropped, and brackets that never held one, stay.
+        (f"Ticket {_C} [{_C}] calls foo() and [].", f"Ticket {_C} [{_C}] calls foo() and []."),
+        (f"Build {_A}1 is not the id.", f"Build {_A}1 is not the id."),
+    ],
+)
+def test_drop_inline_citations_removes_only_the_dropped_ids(text: str, expected: str):
+    doc = split_markdown(f"## Hours\n\n{text}\n")
+    cleaned = drop_inline_citations(doc, {_A})
+    assert cleaned.sections[0].blocks[0].text == expected
+    assert cleaned.sections[0].blocks[0].id == doc.sections[0].blocks[0].id
+
+
+def test_drop_inline_citations_drops_a_block_that_was_only_the_id():
+    doc = split_markdown(f"## Hours\n\nOpens at 09:00.\n\n- {_A}\n")
+    cleaned = drop_inline_citations(doc, {_A})
+    assert [block.text for block in cleaned.sections[0].blocks] == ["Opens at 09:00."]
+
+
+def test_drop_inline_citations_without_ids_is_a_no_op():
+    doc = split_markdown(f"## Hours\n\nOpens at 09:00. [{_A}]\n")
+    assert drop_inline_citations(doc, set()) == doc
+    assert render_document(drop_inline_citations(doc, {_B})) == render_document(doc)
 
 
 # ---------------------------------------------------------------------------
@@ -439,6 +499,43 @@ async def test_sweep_defers_to_consolidation_when_facts_are_pending(
     await memory.delete_bank(bank_id, request_context=request_context)
 
 
+@pytest.mark.asyncio
+async def test_sweep_schedules_on_a_bank_without_observations_despite_pending_facts(
+    memory: MemoryEngine, request_context: RequestContext
+):
+    """#6855: with observations off nothing is ever consolidated, so "pending" never drains.
+
+    Waiting on it would mean never scheduling the refresh that removes the deleted claim.
+    """
+    bank_id = f"test-retract-noobs-sweep-{uuid.uuid4().hex[:8]}"
+    await _ensure_bank(memory, bank_id, request_context)
+    await memory.update_bank_config(bank_id, {"enable_observations": False}, request_context=request_context)
+    pool = await memory._get_pool()
+    async with pool.acquire() as conn:
+        live = await _insert_memory(memory, conn, bank_id, "Autocommit is disabled.")
+        await _create_page(
+            memory, conn, bank_id, request_context, based_on={"world": [_fact(str(live), "autocommit disabled")]}
+        )
+        # Deleted in SQL, as the sibling sweep tests do: the delete APIs run the sweep
+        # themselves, and this test calls it directly to assert on its answer.
+        await conn.execute(
+            f"DELETE FROM {fq_store_table('memory_units')} WHERE bank_id = $1 AND id = $2", bank_id, live
+        )
+        pending = await _insert_memory(memory, conn, bank_id, "Autocommit is enabled again.")
+        # Forced in SQL: no public call leaves a fact pending, and that state is the subject.
+        await conn.execute(
+            f"UPDATE {fq_store_table('memory_units')} SET consolidated_at = NULL WHERE bank_id = $1 AND id = $2",
+            bank_id,
+            pending,
+        )
+
+    submit = AsyncMock(return_value={"operation_id": "op-1"})
+    with patch.object(memory, "submit_async_refresh_mental_model", new=submit):
+        assert await memory._submit_refreshes_for_retracted_grounding(bank_id, request_context=request_context) == 1
+    submit.assert_awaited_once()
+    await memory.delete_bank(bank_id, request_context=request_context)
+
+
 # ---------------------------------------------------------------------------
 # The unsay pass: a delta refresh removing what a retracted fact supported
 # ---------------------------------------------------------------------------
@@ -708,6 +805,61 @@ async def test_unsay_is_deferred_while_facts_are_pending_consolidation(
 
 
 @pytest.mark.asyncio
+async def test_unsay_runs_on_a_bank_without_observations_despite_pending_facts(
+    memory: MemoryEngine, request_context: RequestContext, monkeypatch, patch_reflect
+):
+    """#6855: the consolidation wait has nothing to wait for when observations are off.
+
+    Such a bank never consolidates, so every fact stays pending and the deferral above
+    used to hold the deleted claim on the page forever.
+    """
+    bank_id = f"test-retract-noobs-{uuid.uuid4().hex[:8]}"
+    await _ensure_bank(memory, bank_id, request_context)
+    await memory.update_bank_config(bank_id, {"enable_observations": False}, request_context=request_context)
+    gone_id = str(uuid.uuid4())
+
+    pool = await memory._get_pool()
+    async with pool.acquire() as conn:
+        live = await _insert_memory(memory, conn, bank_id, "Tests run on every push.")
+        mm_id = await _create_page(
+            memory,
+            conn,
+            bank_id,
+            request_context,
+            based_on={
+                "world": [_fact(gone_id, "Retired.", "world"), _fact(str(live), "Tests run on every push.", "world")]
+            },
+        )
+        pending = await _insert_memory(memory, conn, bank_id, "Autocommit is enabled again.")
+        # Forced in SQL: no public call leaves a fact pending, and that state is the subject.
+        await conn.execute(
+            f"UPDATE {fq_store_table('memory_units')} SET consolidated_at = NULL WHERE bank_id = $1 AND id = $2",
+            bank_id,
+            pending,
+        )
+
+    patch_reflect(memory, text="No new information.")
+    calls = _patch_op_calls(
+        monkeypatch,
+        memory,
+        retraction_ops=[_remove_first_block_of("conventions")],
+        delta_ops=[],
+    )
+
+    refreshed = await memory.refresh_mental_model(
+        bank_id=bank_id, mental_model_id=mm_id, request_context=request_context
+    )
+
+    assert refreshed is not None
+    assert [call for call in calls if call["kind"] == "retraction"], "the unsay must run"
+    assert "Autocommit is disabled" not in refreshed["content"]
+    stored = await memory.get_mental_model(bank_id, mm_id, detail="full", request_context=request_context)
+    assert gone_id not in based_on_fact_ids(stored["reflect_response"]["based_on"])
+
+    await memory.delete_bank(bank_id, request_context=request_context)
+
+
+@pytest.mark.asyncio
 async def test_failed_unsay_keeps_the_citation_so_the_next_refresh_retries(
     memory: MemoryEngine, request_context: RequestContext, monkeypatch, patch_reflect
 ):
@@ -742,6 +894,124 @@ async def test_failed_unsay_keeps_the_citation_so_the_next_refresh_retries(
     assert refreshed is not None
     stored = await memory.get_mental_model(bank_id, mm_id, detail="full", request_context=request_context)
     assert gone_id in based_on_fact_ids(stored["reflect_response"]["based_on"])
+    await memory.delete_bank(bank_id, request_context=request_context)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("new_facts_failure", ["all_ops_skipped", "call_raises"])
+async def test_failed_new_facts_delta_fails_the_refresh_even_after_an_unsay_edit(
+    memory: MemoryEngine, request_context: RequestContext, monkeypatch, patch_reflect, new_facts_failure
+):
+    """#6447: the unsay pass edited the page, then the new-facts delta failed.
+
+    Writing the unsay-only document would move the watermark past the new facts, so
+    no later delta would ever show them to the page. The refresh must fail instead,
+    leaving content, citations and watermark as they were, so the next one retries both.
+    """
+    from hindsight_api.engine.memory_engine import MentalModelRefreshError
+
+    bank_id = f"test-retract-newfail-{uuid.uuid4().hex[:8]}"
+    await _ensure_bank(memory, bank_id, request_context)
+    gone_id = str(uuid.uuid4())
+
+    pool = await memory._get_pool()
+    async with pool.acquire() as conn:
+        live = await _insert_memory(memory, conn, bank_id, "Tests run on every push.")
+        mm_id = await _create_page(
+            memory,
+            conn,
+            bank_id,
+            request_context,
+            based_on={
+                "world": [_fact(gone_id, "Retired.", "world"), _fact(str(live), "Tests run on every push.", "world")]
+            },
+        )
+        # Written after the watermark, so the next delta window contains it.
+        new = await _insert_memory(memory, conn, bank_id, "Releases are cut on Fridays.")
+        before = await _staleness_row(conn, bank_id, mm_id)
+
+    # A new fact arrived, so the new-facts delta runs after the unsay pass.
+    patch_reflect(memory, text="Releases are cut on Fridays.", facts=[_fact(str(new), "Releases are cut on Fridays.")])
+    calls = _patch_op_calls(
+        monkeypatch,
+        memory,
+        retraction_ops=[_remove_first_block_of("conventions")],
+        delta_ops=[{"op": "append_block", "section_id": "no-such-section", "text": "x"}],
+    )
+    if new_facts_failure == "call_raises":
+        routed = memory._mental_model_refresh_llm_config.call
+
+        async def failing_delta(*, messages, **kwargs):
+            from hindsight_api.engine.reflect.prompts import STRUCTURED_RETRACTION_SYSTEM_PROMPT
+
+            if messages[0]["content"] != STRUCTURED_RETRACTION_SYSTEM_PROMPT:
+                raise ValueError("model returned garbage")
+            return await routed(messages=messages, **kwargs)
+
+        monkeypatch.setattr(memory._mental_model_refresh_llm_config, "call", failing_delta)
+
+    with pytest.raises(MentalModelRefreshError) as failed:
+        await memory.refresh_mental_model(bank_id=bank_id, mental_model_id=mm_id, request_context=request_context)
+    expected_reason = "delta_ops_all_skipped" if new_facts_failure == "all_ops_skipped" else "delta_ops_failed"
+    assert failed.value.reason == expected_reason
+
+    assert any(call["kind"] == "retraction" for call in calls), "the unsay pass must have run"
+    stored = await memory.get_mental_model(bank_id, mm_id, detail="full", request_context=request_context)
+    assert stored["content"] == _PAGE_CONTENT, "the unsay-only document must not be written"
+    assert gone_id in based_on_fact_ids(stored["reflect_response"]["based_on"]), "the retraction must be retried"
+    async with pool.acquire() as conn:
+        after = await _staleness_row(conn, bank_id, mm_id)
+    assert after["last_memory_seen_at"] == before["last_memory_seen_at"], "the watermark must not move"
+
+    await memory.delete_bank(bank_id, request_context=request_context)
+
+
+@pytest.mark.asyncio
+async def test_unsay_and_new_facts_both_land_in_one_refresh(
+    memory: MemoryEngine, request_context: RequestContext, monkeypatch, patch_reflect
+):
+    """The new-facts delta edits the document the unsay pass left, and both are written."""
+    bank_id = f"test-retract-both-{uuid.uuid4().hex[:8]}"
+    await _ensure_bank(memory, bank_id, request_context)
+    gone_id = str(uuid.uuid4())
+
+    pool = await memory._get_pool()
+    async with pool.acquire() as conn:
+        live = await _insert_memory(memory, conn, bank_id, "Tests run on every push.")
+        mm_id = await _create_page(
+            memory,
+            conn,
+            bank_id,
+            request_context,
+            based_on={
+                "world": [_fact(gone_id, "Retired.", "world"), _fact(str(live), "Tests run on every push.", "world")]
+            },
+        )
+        before = await _staleness_row(conn, bank_id, mm_id)
+        new = await _insert_memory(memory, conn, bank_id, "Releases are cut on Fridays.")
+
+    patch_reflect(memory, text="Releases are cut on Fridays.", facts=[_fact(str(new), "Releases are cut on Fridays.")])
+    _patch_op_calls(
+        monkeypatch,
+        memory,
+        retraction_ops=[_remove_first_block_of("conventions")],
+        delta_ops=[{"op": "append_block", "section_id": "conventions", "text": "Releases are cut on Fridays."}],
+    )
+
+    refreshed = await memory.refresh_mental_model(
+        bank_id=bank_id, mental_model_id=mm_id, request_context=request_context
+    )
+
+    assert refreshed is not None
+    assert "Autocommit is disabled" not in refreshed["content"], "the unsay edit must survive the new-facts pass"
+    assert "Releases are cut on Fridays." in refreshed["content"]
+    assert "Tests run on every push" in refreshed["content"]
+    stored = await memory.get_mental_model(bank_id, mm_id, detail="full", request_context=request_context)
+    assert gone_id not in based_on_fact_ids(stored["reflect_response"]["based_on"])
+    async with pool.acquire() as conn:
+        after = await _staleness_row(conn, bank_id, mm_id)
+    assert after["last_memory_seen_at"] > before["last_memory_seen_at"]
+
     await memory.delete_bank(bank_id, request_context=request_context)
 
 
@@ -788,14 +1058,8 @@ async def test_full_mode_needs_no_unsay_pass(
     await memory.delete_bank(bank_id, request_context=request_context)
 
 
-def test_grounding_that_resolves_to_nothing_is_a_broken_link_not_a_retraction():
-    """All citations missing is the signature of a restored bank, not of a retraction.
-
-    Whole-bank transfer carries ``mental_models`` rows verbatim while re-creating the
-    memories under fresh ids, so every id a restored page cites is absent on arrival.
-    Reading that as a retraction would ask the unsay pass to delete everything the
-    page says — irreversibly, on a page that is perfectly correct.
-    """
+def test_grounding_that_resolves_to_nothing_is_unresolvable():
+    """Every cited fact missing: the page's whole source is gone, so it is rebuilt."""
     based_on = {"observation": [_fact("a"), _fact("b"), _fact("c")]}
     retracted = partition_retracted(based_on, live_ids=set())
     assert retracted.unresolvable is True
@@ -815,12 +1079,18 @@ def test_intact_grounding_is_never_unresolvable():
 
 
 @pytest.mark.asyncio
-async def test_restored_page_keeps_its_content_and_drops_its_dangling_citations(
+async def test_page_whose_whole_source_was_deleted_is_emptied(
     memory: MemoryEngine, request_context: RequestContext, monkeypatch, patch_reflect
 ):
-    """End to end: a page whose whole grounding is unresolvable must not be gutted."""
-    bank_id = f"test-retract-restored-{uuid.uuid4().hex[:8]}"
+    """Every cited fact is gone and nothing replaced them: the page has nothing left to say.
+
+    It used to keep its prose (and its inline citations) forever, on the theory that
+    all-missing meant a restored bank — but import rewrites the ids now (#3833), so
+    all-missing means the source was deleted (#6764).
+    """
+    bank_id = f"test-retract-gone-{uuid.uuid4().hex[:8]}"
     await _ensure_bank(memory, bank_id, request_context)
+    gone_id = str(uuid.uuid4())
 
     pool = await memory._get_pool()
     async with pool.acquire() as conn:
@@ -829,29 +1099,216 @@ async def test_restored_page_keeps_its_content_and_drops_its_dangling_citations(
             conn,
             bank_id,
             request_context,
-            based_on={"world": [_fact(str(uuid.uuid4()), "carried over from the source bank", "world")]},
+            based_on={"world": [_fact(gone_id, "Autocommit is disabled.", "world")]},
+            content=f"## Conventions\n\nAutocommit is disabled. [{gone_id}]\n",
         )
 
-    patch_reflect(memory, text="No new information.")
-    calls = _patch_op_calls(
-        monkeypatch,
-        memory,
-        retraction_ops=[{"op": "remove_section", "section_id": "conventions"}],
-        delta_ops=[],
-    )
+    patch_reflect(memory, text="")
+    calls = _patch_op_calls(monkeypatch, memory, retraction_ops=[], delta_ops=[])
+
+    preview = await memory.dry_run_refresh_mental_model(bank_id, mm_id, request_context=request_context)
+    assert preview is not None
+    assert preview.effective_mode == "full"
+    assert preview.mode_fallback_reason == "grounding_gone"
+    # Said as what happened: the page is emptied, not "left as it is".
+    assert any("emptied" in warning for warning in preview.warnings), preview.warnings
 
     refreshed = await memory.refresh_mental_model(
         bank_id=bank_id, mental_model_id=mm_id, request_context=request_context
     )
 
     assert refreshed is not None
-    assert calls == [], "no unsay pass may run against unresolvable grounding"
-    assert "Autocommit is disabled" in refreshed["content"]
-    assert "Tests run on every push" in refreshed["content"]
-
-    # The dangling citations do go: nothing should report a fact that is not there.
+    assert calls == [], "a rebuild makes no op calls"
+    assert refreshed["content"].strip() == ""
     stored = await memory.get_mental_model(bank_id, mm_id, detail="full", request_context=request_context)
     assert based_on_fact_ids(stored["reflect_response"]["based_on"]) == []
+
+    await memory.delete_bank(bank_id, request_context=request_context)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_rebuild_with_sources_in_scope_keeps_the_page(
+    memory: MemoryEngine, request_context: RequestContext, monkeypatch, patch_reflect
+):
+    """Empty is only the answer when nothing is left to read.
+
+    With other facts in scope the rebuild runs reflect, and an empty candidate there
+    means reflect failed — small models, exhausted retries, a provider error. Writing
+    it would wipe the page; the refresh fails instead and the page stays.
+    """
+    from hindsight_api.engine.memory_engine import MentalModelRefreshError
+
+    bank_id = f"test-retract-gone-failed-{uuid.uuid4().hex[:8]}"
+    await _ensure_bank(memory, bank_id, request_context)
+    gone_id = str(uuid.uuid4())
+
+    pool = await memory._get_pool()
+    async with pool.acquire() as conn:
+        await _insert_memory(memory, conn, bank_id, "Tests run on every push.")
+        mm_id = await _create_page(
+            memory,
+            conn,
+            bank_id,
+            request_context,
+            based_on={"world": [_fact(gone_id, "Autocommit is disabled.", "world")]},
+        )
+
+    patch_reflect(memory, text="")
+    _patch_op_calls(monkeypatch, memory, retraction_ops=[], delta_ops=[])
+
+    with pytest.raises(MentalModelRefreshError):
+        await memory.refresh_mental_model(bank_id=bank_id, mental_model_id=mm_id, request_context=request_context)
+
+    stored = await memory.get_mental_model(bank_id, mm_id, detail="full", request_context=request_context)
+    assert stored["content"] == _PAGE_CONTENT
+    # The dead citation stays too: it is what makes the next refresh rebuild again.
+    assert gone_id in based_on_fact_ids(stored["reflect_response"]["based_on"])
+
+    # And it does: once reflect works, the page is rebuilt from what is in scope.
+    patch_reflect(memory, text="## Conventions\n\nTests run on every push.\n")
+    refreshed = await memory.refresh_mental_model(
+        bank_id=bank_id, mental_model_id=mm_id, request_context=request_context
+    )
+    assert refreshed is not None
+    assert "Autocommit is disabled" not in refreshed["content"]
+    assert "Tests run on every push." in refreshed["content"]
+
+    await memory.delete_bank(bank_id, request_context=request_context)
+
+
+@pytest.mark.asyncio
+async def test_page_whose_source_was_reingested_is_rebuilt_without_stale_ids(
+    memory: MemoryEngine, request_context: RequestContext, monkeypatch, patch_reflect
+):
+    """The #6764 scenario: the same fact came back under a new id.
+
+    The rebuild writes the page from the replacement, so neither the text nor
+    ``based_on`` keeps pointing at the old id.
+    """
+    bank_id = f"test-retract-reingest-{uuid.uuid4().hex[:8]}"
+    await _ensure_bank(memory, bank_id, request_context)
+    old_id = str(uuid.uuid4())
+
+    pool = await memory._get_pool()
+    async with pool.acquire() as conn:
+        new_id = await _insert_memory(memory, conn, bank_id, "The office opens at 09:00.")
+        mm_id = await _create_page(
+            memory,
+            conn,
+            bank_id,
+            request_context,
+            based_on={"world": [_fact(old_id, "The office opens at 09:00.", "world")]},
+            content=f"## Office hours\n\nThe office opens at 09:00. [{old_id}]\n",
+        )
+
+    patch_reflect(
+        memory,
+        text="## Office hours\n\nThe office opens at 09:00.\n",
+        facts=[{"id": str(new_id), "text": "The office opens at 09:00.", "type": "observation", "context": None}],
+    )
+    calls = _patch_op_calls(monkeypatch, memory, retraction_ops=[], delta_ops=[])
+
+    refreshed = await memory.refresh_mental_model(
+        bank_id=bank_id, mental_model_id=mm_id, request_context=request_context
+    )
+
+    assert refreshed is not None
+    assert calls == [], "a rebuild makes no op calls"
+    assert "The office opens at 09:00." in refreshed["content"]
+    assert old_id not in refreshed["content"]
+    stored = await memory.get_mental_model(bank_id, mm_id, detail="full", request_context=request_context)
+    cited = based_on_fact_ids(stored["reflect_response"]["based_on"])
+    assert old_id not in cited
+    assert str(new_id) in cited
+
+    await memory.delete_bank(bank_id, request_context=request_context)
+
+
+@pytest.mark.asyncio
+async def test_page_whose_whole_source_is_gone_waits_for_pending_consolidation(
+    memory: MemoryEngine, request_context: RequestContext, monkeypatch, patch_reflect
+):
+    """Right after a re-ingest the replacements are not consolidated yet: no rebuild."""
+    bank_id = f"test-retract-gone-defer-{uuid.uuid4().hex[:8]}"
+    await _ensure_bank(memory, bank_id, request_context)
+    gone_id = str(uuid.uuid4())
+
+    pool = await memory._get_pool()
+    async with pool.acquire() as conn:
+        mm_id = await _create_page(
+            memory,
+            conn,
+            bank_id,
+            request_context,
+            based_on={"world": [_fact(gone_id, "Autocommit is disabled.", "world")]},
+        )
+        pending = await _insert_memory(memory, conn, bank_id, "Autocommit is disabled.")
+        await conn.execute(
+            f"UPDATE {fq_store_table('memory_units')} SET consolidated_at = NULL WHERE bank_id = $1 AND id = $2",
+            bank_id,
+            pending,
+        )
+
+    patch_reflect(memory, text="No new information.")
+    calls = _patch_op_calls(monkeypatch, memory, retraction_ops=[], delta_ops=[])
+
+    refreshed = await memory.refresh_mental_model(
+        bank_id=bank_id, mental_model_id=mm_id, request_context=request_context
+    )
+
+    assert refreshed is not None
+    assert not [call for call in calls if call["kind"] == "retraction"]
+    assert "Autocommit is disabled" in refreshed["content"], "content must be preserved while deferred"
+    stored = await memory.get_mental_model(bank_id, mm_id, detail="full", request_context=request_context)
+    assert gone_id in based_on_fact_ids(stored["reflect_response"]["based_on"])
+
+    await memory.delete_bank(bank_id, request_context=request_context)
+
+
+@pytest.mark.asyncio
+async def test_unsay_drops_the_retracted_inline_citations_from_kept_text(
+    memory: MemoryEngine, request_context: RequestContext, monkeypatch, patch_reflect
+):
+    """The unsay model never sees ids, so a sentence it keeps still cites the dead fact.
+
+    Pruning ``based_on`` alone left that ``[id]`` in the page with nothing to notice it
+    again (#6764); the text loses exactly the ids ``based_on`` loses.
+    """
+    bank_id = f"test-retract-inline-{uuid.uuid4().hex[:8]}"
+    await _ensure_bank(memory, bank_id, request_context)
+    gone_id = str(uuid.uuid4())
+
+    pool = await memory._get_pool()
+    async with pool.acquire() as conn:
+        live = await _insert_memory(memory, conn, bank_id, "Tests run on every push.")
+        mm_id = await _create_page(
+            memory,
+            conn,
+            bank_id,
+            request_context,
+            based_on={
+                "world": [_fact(gone_id, "Retired.", "world"), _fact(str(live), "Tests run on every push.", "world")]
+            },
+            content=(
+                f"## Conventions\n\nAutocommit is disabled. [{gone_id}]\n\n"
+                f"Tests run on every push. [{gone_id}, {live}]\n"
+            ),
+        )
+
+    patch_reflect(memory, text="No new information.")
+    _patch_op_calls(monkeypatch, memory, retraction_ops=[], delta_ops=[])
+
+    refreshed = await memory.refresh_mental_model(
+        bank_id=bank_id, mental_model_id=mm_id, request_context=request_context
+    )
+
+    assert refreshed is not None
+    assert gone_id not in refreshed["content"]
+    assert "Autocommit is disabled." in refreshed["content"], "the model kept it; only the citation goes"
+    assert f"Tests run on every push. [{live}]" in refreshed["content"]
+    stored = await memory.get_mental_model(bank_id, mm_id, detail="full", request_context=request_context)
+    assert gone_id not in based_on_fact_ids(stored["reflect_response"]["based_on"])
+    assert gone_id not in json.dumps(stored.get("structured_content") or {})
 
     await memory.delete_bank(bank_id, request_context=request_context)
 

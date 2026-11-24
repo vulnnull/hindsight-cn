@@ -39,6 +39,7 @@ from hindsight_api.engine.search.tags import TagGroup, TagsMatch
 from hindsight_api.engine.stored_dates import is_placeholder_date
 from hindsight_api.extensions import OperationValidationError
 from hindsight_api.models import RequestContext
+from hindsight_api.pagination import TRIM_TO_PAGE, trim_to
 
 if TYPE_CHECKING:
     from hindsight_api.knowledge.service import KnowledgeService
@@ -46,11 +47,12 @@ if TYPE_CHECKING:
 _TAG_GROUP_LIST_ADAPTER = TypeAdapter(list[TagGroup])
 
 # Paging bounds for the list tools. They match the HTTP endpoints' Query bounds
-# so a limit rejected over HTTP is rejected over MCP too (#4859).
+# so a limit rejected over HTTP is rejected over MCP too (#4859), and a limit over
+# the cap is trimmed to it on both.
 _Offset = Annotated[int, Field(ge=0)]
-_Limit = Annotated[int, Field(ge=0)]
-_Limit1000 = Annotated[int, Field(ge=1, le=1000)]
-_OperationsLimit = Annotated[int, Field(ge=1, le=100)]
+_Limit = Annotated[int, Field(ge=0), TRIM_TO_PAGE]
+_PositiveLimit = Annotated[int, Field(ge=1), TRIM_TO_PAGE]
+_OperationsLimit = Annotated[int, Field(ge=1), trim_to(100)]
 
 # All tools available in the system (explicit list — no wildcards).
 # Defined here (shared module) to avoid circular imports with api/mcp.py.
@@ -1937,7 +1939,7 @@ def _register_list_mental_models(mcp: FastMCP, memory: MemoryEngine, config: MCP
         @mcp.tool(annotations=_tool_annotations("list_mental_models"), output_schema=None)
         async def list_mental_models(
             tags: list[str] | None = None,
-            limit: _Limit1000 = 100,
+            limit: _PositiveLimit = 100,
             offset: _Offset = 0,
             bank_id: str | None = None,
         ) -> str:
@@ -1971,7 +1973,7 @@ def _register_list_mental_models(mcp: FastMCP, memory: MemoryEngine, config: MCP
         @mcp.tool(annotations=_tool_annotations("list_mental_models"))
         async def list_mental_models(
             tags: list[str] | None = None,
-            limit: _Limit1000 = 100,
+            limit: _PositiveLimit = 100,
             offset: _Offset = 0,
         ) -> dict:
             """
@@ -3418,7 +3420,7 @@ def _register_list_directives(mcp: FastMCP, memory: MemoryEngine, config: MCPToo
         async def list_directives(
             tags: list[str] | None = None,
             active_only: bool = True,
-            limit: _Limit1000 = 100,
+            limit: _PositiveLimit = 100,
             offset: _Offset = 0,
             bank_id: str | None = None,
         ) -> str:
@@ -3450,7 +3452,7 @@ def _register_list_directives(mcp: FastMCP, memory: MemoryEngine, config: MCPToo
         async def list_directives(
             tags: list[str] | None = None,
             active_only: bool = True,
-            limit: _Limit1000 = 100,
+            limit: _PositiveLimit = 100,
             offset: _Offset = 0,
         ) -> dict:
             """
@@ -4984,7 +4986,6 @@ def _register_delete_knowledge_bank(mcp: FastMCP, memory: MemoryEngine, config: 
             )
 
 
-_KnowledgeTagLimit = Annotated[int, Field(ge=0, le=1000)]
 _KnowledgeMediaType = Literal["document", "image", "audio", "video", "text"]
 
 
@@ -5003,6 +5004,7 @@ def _register_search_knowledge_bank(mcp: FastMCP, memory: MemoryEngine, config: 
         tag_groups: list[dict] | None,
         document_ids: list[str] | None,
         media_types: list[_KnowledgeMediaType] | None,
+        enable_reranking: bool | None,
     ) -> Any:
         filters = SearchFilters(
             tags=tags,
@@ -5015,7 +5017,12 @@ def _register_search_knowledge_bank(mcp: FastMCP, memory: MemoryEngine, config: 
             _knowledge_service(memory).search(
                 target_bank,
                 SearchRequest(
-                    query=query, query_image=None, filters=filters, max_tokens=max_tokens, budget=budget.value
+                    query=query,
+                    query_image=None,
+                    filters=filters,
+                    max_tokens=max_tokens,
+                    budget=budget.value,
+                    enable_reranking=enable_reranking,
                 ),
                 _get_request_context(config),
                 None,
@@ -5035,6 +5042,7 @@ def _register_search_knowledge_bank(mcp: FastMCP, memory: MemoryEngine, config: 
             tag_groups: list[dict] | None = None,
             document_ids: list[str] | None = None,
             media_types: list[_KnowledgeMediaType] | None = None,
+            enable_reranking: bool | None = None,
             bank_id: str | None = None,
         ) -> str:
             """
@@ -5051,6 +5059,8 @@ def _register_search_knowledge_bank(mcp: FastMCP, memory: MemoryEngine, config: 
                     or {"and": [...]}, {"or": [...]}, {"not": {...}}.
                 document_ids: Only these documents.
                 media_types: Only passages of these media types: document, image, audio, video, text.
+                enable_reranking: true reranks the best hits when the server has a knowledge reranker; false
+                    keeps the search's own order. Unset follows the server's default.
                 bank_id: Optional knowledge bank (defaults to the session bank).
             """
             return await _run_tool(
@@ -5060,7 +5070,16 @@ def _register_search_knowledge_bank(mcp: FastMCP, memory: MemoryEngine, config: 
                 action="searching knowledge bank",
                 knowledge=True,
                 run=lambda target_bank: _run(
-                    target_bank, query, max_tokens, budget, tags, tags_match, tag_groups, document_ids, media_types
+                    target_bank,
+                    query,
+                    max_tokens,
+                    budget,
+                    tags,
+                    tags_match,
+                    tag_groups,
+                    document_ids,
+                    media_types,
+                    enable_reranking,
                 ),
                 error_extra={"results": []},
                 value_error="rejection",
@@ -5078,6 +5097,7 @@ def _register_search_knowledge_bank(mcp: FastMCP, memory: MemoryEngine, config: 
             tag_groups: list[dict] | None = None,
             document_ids: list[str] | None = None,
             media_types: list[_KnowledgeMediaType] | None = None,
+            enable_reranking: bool | None = None,
         ) -> dict:
             """
             Search this knowledge bank's documents by meaning. Returns the best passages first, each
@@ -5093,6 +5113,8 @@ def _register_search_knowledge_bank(mcp: FastMCP, memory: MemoryEngine, config: 
                     or {"and": [...]}, {"or": [...]}, {"not": {...}}.
                 document_ids: Only these documents.
                 media_types: Only passages of these media types: document, image, audio, video, text.
+                enable_reranking: true reranks the best hits when the server has a knowledge reranker; false
+                    keeps the search's own order. Unset follows the server's default.
             """
             return await _run_tool(
                 config,
@@ -5101,7 +5123,16 @@ def _register_search_knowledge_bank(mcp: FastMCP, memory: MemoryEngine, config: 
                 action="searching knowledge bank",
                 knowledge=True,
                 run=lambda target_bank: _run(
-                    target_bank, query, max_tokens, budget, tags, tags_match, tag_groups, document_ids, media_types
+                    target_bank,
+                    query,
+                    max_tokens,
+                    budget,
+                    tags,
+                    tags_match,
+                    tag_groups,
+                    document_ids,
+                    media_types,
+                    enable_reranking,
                 ),
                 error_extra={"results": []},
                 value_error="rejection",
@@ -5236,7 +5267,7 @@ def _register_list_knowledge_documents(mcp: FastMCP, memory: MemoryEngine, confi
             status: Literal["pending", "processing", "ready", "failed"] | None = None,
             media_type: _KnowledgeMediaType | None = None,
             tags: list[str] | None = None,
-            limit: Annotated[int, Field(ge=1, le=500)] = 50,
+            limit: Annotated[int, Field(ge=1), trim_to(500)] = 50,
             offset: _Offset = 0,
             bank_id: str | None = None,
         ) -> str:
@@ -5270,7 +5301,7 @@ def _register_list_knowledge_documents(mcp: FastMCP, memory: MemoryEngine, confi
             status: Literal["pending", "processing", "ready", "failed"] | None = None,
             media_type: _KnowledgeMediaType | None = None,
             tags: list[str] | None = None,
-            limit: Annotated[int, Field(ge=1, le=500)] = 50,
+            limit: Annotated[int, Field(ge=1), trim_to(500)] = 50,
             offset: _Offset = 0,
         ) -> dict:
             """
@@ -5415,7 +5446,7 @@ def _register_list_knowledge_tags(mcp: FastMCP, memory: MemoryEngine, config: MC
         @mcp.tool(annotations=_tool_annotations("list_knowledge_tags"), output_schema=None)
         async def list_knowledge_tags(
             q: str | None = None,
-            limit: _KnowledgeTagLimit = 100,
+            limit: _Limit = 100,
             offset: _Offset = 0,
             bank_id: str | None = None,
         ) -> str:
@@ -5443,7 +5474,7 @@ def _register_list_knowledge_tags(mcp: FastMCP, memory: MemoryEngine, config: MC
         @mcp.tool(annotations=_tool_annotations("list_knowledge_tags"))
         async def list_knowledge_tags(
             q: str | None = None,
-            limit: _KnowledgeTagLimit = 100,
+            limit: _Limit = 100,
             offset: _Offset = 0,
         ) -> dict:
             """
