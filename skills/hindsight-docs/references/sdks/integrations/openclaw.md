@@ -12,8 +12,10 @@ This plugin integrates [hindsight-embed](https://vectorize.io/hindsight/cli), a 
 **Step 1: Install the plugin**
 
 ```bash
-openclaw plugins install @vectorize-io/hindsight-openclaw
+openclaw plugins install npm:@vectorize-io/hindsight-openclaw --force
 ```
+
+The `npm:` prefix matters on OpenClaw 2026.11+, where a bare name is looked up on ClawHub: the official plugin is not there, and the `hindsight` packages ClawHub does list are third-party. OpenClaw asks for `--force` because npm packages skip ClawHub's review. On older OpenClaw, use `openclaw plugins install @vectorize-io/hindsight-openclaw`.
 
 **Step 2: Run the setup wizard**
 
@@ -30,6 +32,8 @@ The wizard walks you through picking one of three install modes:
 - **Cloud** — managed Hindsight at `https://api.hindsight.vectorize.io`. Paste your cloud API token when prompted (masked input). No local setup needed.
 - **External API** — your own running Hindsight deployment. Prompts for the URL and, optionally, the token value (masked).
 - **Embedded daemon** — spawns a local `hindsight-embed` daemon on this machine. Prompts for the LLM provider (OpenAI / Anthropic / Gemini / Groq / Claude Code / OpenAI Codex / Ollama) and the API key (masked).
+
+The wizard also gives Hindsight OpenClaw's memory slot (`plugins.slots.memory`). OpenClaw keeps a memory plugin disabled until it holds that slot, so if you configure the plugin by hand, set it too: `openclaw config set plugins.slots.memory hindsight-openclaw`.
 
 The interactive wizard stores credentials **inline** in `openclaw.json` for simplicity. For CI / production you can store credentials as a [`SecretRef`](#llm-configuration) (resolved from an env var, file, or exec source at startup, never saved on disk) by either passing `--token-env` / `--api-key-env` to the non-interactive wizard or switching an existing field afterwards via `openclaw config set ... --ref-source env|file|exec`.
 
@@ -139,6 +143,7 @@ Optional settings in `~/.openclaw/openclaw.json`:
 - `recallTopK` - Max number of memories to inject per turn (default: unlimited).
 - `recallTypes` - Memory types to recall (default: `["observation"]`). Options: `world`, `experience`, `observation`. Defaults to observations — the consolidated, deduplicated view — to avoid surfacing the same answer multiple times when many raw memories say the same thing. Facts that are not consolidated yet (a fresh import or backfill, or a bank with `enableObservations: false`) stay invisible until you add `world` and `experience`.
 - `preferObservations` - When `true`, recall drops raw facts already consolidated into an observation while keeping unconsolidated ones (default: `false`). Pair it with a `recallTypes` that includes raw types (e.g. `["observation", "world", "experience"]`) to surface just-retained facts before consolidation catches up — for example after a `/reset` followed by "what did I just say?" — without duplicating already-consolidated content.
+- `recallIncludeChunks` - When `true`, `hindsight_recall` also returns the original text each memory was extracted from, with its document id, so the agent can check a memory against its source (default: `false`). Auto-recall is unaffected.
 - `recallMinScores` - Optional score floors for auto-recall, keyed by stage (for example `{"reranker": 0.3}`). Missing fields impose no floor; memories with missing or `null` scores pass. Reranker scores are query-local, so use this as a garbage gate rather than a calibrated relevance dial.
 - `recallContextTurns` - Number of prior user turns to include in the recall query (default: `1`).
 - `recallMaxQueryChars` - Max characters for the composed recall query (default: `800`).
@@ -176,7 +181,7 @@ In this example, memories are isolated per provider + user, meaning the same use
 Available isolation fields:
 
 - `agent` - The agent/bot identity
-- `channel` - The channel or conversation ID
+- `channel` - The channel or conversation ID. All Control UI (dashboard) tabs share one channel, `dashboard`; before plugin 1.2.2 each tab got its own bank.
 - `user` - The user interacting with the agent
 - `provider` - The message provider (e.g. Slack, Discord)
 
@@ -472,8 +477,12 @@ it is fixed in 0.12.0 — retry the install with the new version.
 openclaw plugins list | grep hindsight
 # Should show: ✓ enabled │ Hindsight Memory │ ...
 
+# Hindsight must hold the memory slot, or OpenClaw keeps it disabled
+# ("plugin disabled (memory slot set to "memory-core")"). The setup wizard sets it.
+openclaw config set plugins.slots.memory hindsight-openclaw
+
 # Reinstall if needed
-openclaw plugins install @vectorize-io/hindsight-openclaw
+openclaw plugins install npm:@vectorize-io/hindsight-openclaw --force
 ```
 
 ### Daemon not starting
@@ -529,7 +538,7 @@ If you used `--ref-source env`, double-check that the referenced env var
 The plugin gives the agent the same three memory tools the Hermes integration does:
 
 - `hindsight_retain` stores something the agent wants remembered (`content`, plus optional `context`, `tags` and `occurred_at`). Configured `retainTags` are added to its tags.
-- `hindsight_recall` searches memory with the same settings as auto-recall (`recallBudget`, `recallMaxTokens`, `recallTypes`, `preferObservations`, `recallMinScores`).
+- `hindsight_recall` searches memory with the same settings as auto-recall (`recallBudget`, `recallMaxTokens`, `recallTypes`, `preferObservations`, `recallMinScores`). With `recallIncludeChunks`, each memory is followed by the text it came from.
 - `hindsight_reflect` answers a question by reasoning over the memories.
 
 It also gives the agent Hindsight's page tools, the same ones Hindsight's MCP server offers:

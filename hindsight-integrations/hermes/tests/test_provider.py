@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 import hindsight_hermes as plugin
-from conftest import FakeClient, FakeRecallResponse
+from conftest import FakeClient, FakeRecallResponse, FakeResult
 from hindsight_client_api.exceptions import NotFoundException
 
 
@@ -37,6 +37,77 @@ def test_sync_turn_retains_the_turn(provider):
     assert item["update_mode"] == "append"
     assert "hermes" in item["tags"] and "session:session-1" in item["tags"]
     assert _messages_of(fake) == ["User: what is my name?", "Assistant: Ada."]
+
+
+def test_a_turn_written_by_another_agent_is_labelled_with_that_agent(provider):
+    """#5374: Hermes says a bot wrote the user side; it must not be saved as the User's words."""
+    instance, fake = provider({"retain_every_n_turns": 3})
+    instance.sync_turn("deploy is done", "Thanks.", turn_author={"id": "b1", "name": "CI Agent", "is_bot": True})
+    instance.sync_turn("ping", "pong", turn_author={"id": "b2", "name": "", "is_bot": True})
+    instance.sync_turn("hi", "Hello.", turn_author={"id": "u1", "name": "Ada", "is_bot": False})
+    instance.shutdown()
+
+    roles = [m["role"] for m in json.loads(_retain_item(fake)["content"])]
+    assert roles == ["CI Agent", "assistant", "Bot", "assistant", "user", "assistant"]
+    assert _messages_of(fake) == [
+        "CI Agent: deploy is done",
+        "Assistant: Thanks.",
+        "Bot: ping",
+        "Assistant: pong",
+        "User: hi",
+        "Assistant: Hello.",
+    ]
+
+
+def test_a_turns_tool_calls_are_retained_by_name_and_arguments_not_output(provider):
+    """#6818: a reply relaying a fetched video in its creator's first person was stored as the
+    agent's own experiment. The tool message says what was fetched; its output is never sent."""
+    instance, fake = provider({"retain_context": "my notes"})
+    transcript = [
+        {"role": "user", "content": "earlier question"},
+        {"role": "assistant", "tool_calls": [{"function": {"name": "old_tool", "arguments": "{}"}}]},
+        {"role": "user", "content": "summarise this video"},
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {"function": {"name": "youtube_transcript", "arguments": json.dumps({"url": "https://yt/abc"})}},
+                {"function": {"name": "write_file", "arguments": json.dumps({"path": "a.md", "body": "x" * 500})}},
+            ],
+        },
+        {"role": "tool", "content": "I tested 65% hydration... (the whole transcript)"},
+        {"role": "assistant", "content": "I tested 65% hydration."},
+    ]
+    instance.sync_turn("summarise this video", "I tested 65% hydration.", messages=transcript)
+    instance.sync_turn("thanks", "Welcome.")  # Hermes without `messages`: no tool message
+    instance.shutdown()
+
+    retained = [json.loads(_retain_item(fake, i)["content"]) for i in range(2)]
+    assert [m["role"] for m in retained[0]] == ["user", "tool", "assistant"]
+    assert retained[0][1]["content"] == (
+        "Tool call: youtube_transcript(url=https://yt/abc)\nTool call: write_file(path=a.md, body=" + "x" * 120 + ")"
+    )
+    assert [m["role"] for m in retained[1]] == ["user", "assistant"]
+    context = _retain_item(fake)["context"]
+    assert context.startswith("my notes. ") and plugin._RELAYED_CONTENT_NOTE in context  # custom context kept
+
+
+def test_tool_calls_beyond_the_cap_are_counted_not_listed():
+    calls = [{"function": {"name": f"t{i}", "arguments": "not json"}} for i in range(25)]
+    lines = plugin._tool_call_lines([{"role": "user"}, {"role": "assistant", "tool_calls": calls}])
+    assert len(lines) == 21 and lines[0] == "Tool call: t0(not json)" and lines[-1] == "... and 5 more tool calls"
+
+
+def test_a_malformed_transcript_row_is_skipped_not_fatal():
+    """A row of an unknown shape must never cost the turn its retain."""
+    messages = [
+        "not a message",
+        {"role": "user", "content": "go"},
+        {"role": "assistant", "tool_calls": [{"function": {"name": None}}]},
+        {"role": "assistant", "tool_calls": None},
+        {"role": "assistant", "tool_calls": [{"function": {"name": "search", "arguments": {"query": "x"}}}]},
+    ]
+    assert plugin._tool_call_lines(messages) == ["Tool call: search(query=x)"]
+    assert plugin._tool_call_lines(None) == []
 
 
 def test_retain_every_n_turns_buffers_then_ships_the_batch(provider):
@@ -211,6 +282,16 @@ def test_builtin_memory_adds_and_replaces_are_retained(provider):
     assert second["tags"] == ["base", "builtin-memory", "builtin-target:user", "builtin-action:replace"]
 
 
+def test_mirror_builtin_memory_off_keeps_builtin_writes_out_of_the_bank(provider):
+    """#6725: a curated bank must not get MEMORY.md/USER.md notes; the retain tool still writes."""
+    instance, fake = provider({"mirror_builtin_memory": False})
+    instance.on_memory_write("add", "memory", "Deploys go through Fly.io")
+    instance.on_memory_write("replace", "user", "Ada prefers tea")
+    instance.handle_tool_call("hindsight_retain", {"content": "Ada likes tea"})
+    instance.shutdown()
+    assert [_retain_item(fake, i)["content"] for i in range(len(fake.retains))] == ["Ada likes tea"]
+
+
 def test_tool_call_errors_are_reported_not_raised(provider):
     instance, _ = provider({})
     assert instance.handle_tool_call("hindsight_recall", {}).startswith("ERROR:")
@@ -243,11 +324,16 @@ def test_prefetch_injects_recalled_memories(provider):
     instance.shutdown()
 
 
-def test_read_only_tool_names_is_recall_only(provider):
+def test_read_only_tool_names_are_recall_and_page_reads(provider):
     """#6601: Hermes gives a delegated child only the tools a provider declares read-only."""
     instance, _ = provider({"memory_mode": "tools"})
     names = {schema["name"] for schema in instance.get_tool_schemas()}
-    assert instance.read_only_tool_names() == ["hindsight_recall"]
+    assert instance.read_only_tool_names() == [
+        "hindsight_recall",
+        "hindsight_search_pages",
+        "hindsight_read_page",
+        "hindsight_list_pages",
+    ]
     assert set(instance.read_only_tool_names()) <= names
     instance.shutdown()
 
@@ -262,6 +348,9 @@ def test_context_mode_hides_tools_tools_mode_skips_recall(provider):
         "hindsight_retain",
         "hindsight_recall",
         "hindsight_reflect",
+        "hindsight_search_pages",
+        "hindsight_read_page",
+        "hindsight_list_pages",
     ]
     assert tools_only.prefetch("anything") == ""
     assert fake.recalls == []
@@ -716,6 +805,37 @@ def test_a_slow_prefetch_never_overwrites_a_newer_one(provider):
     instance.shutdown()
 
 
+def test_recall_exclude_tags_send_a_not_group_and_keep_untagged_memories(provider):
+    """#5375: excluded tags go out as a strict NOT group, on both recall paths."""
+    instance, fake = provider({"recall_exclude_tags": "source:bot, cron"})
+    instance.handle_tool_call("hindsight_recall", {"query": "q"})
+    instance._do_recall("q")
+    assert len(fake.recalls) == 2
+    for call in fake.recalls:
+        assert call["tag_groups"] == [{"not": {"tags": ["source:bot", "cron"], "match": "any_strict"}}]
+        assert "tags" not in call and "tags_match" not in call
+
+
+def test_recall_exclude_tags_combine_with_recall_tags(provider):
+    """tags and tag_groups are exclusive on the wire, so the include filter joins the groups."""
+    instance, fake = provider(
+        {"recall_tags": ["team"], "recall_tags_match": "all", "recall_exclude_tags": ["source:bot"]}
+    )
+    instance.handle_tool_call("hindsight_recall", {"query": "q"})
+    assert fake.recalls[0]["tag_groups"] == [
+        {"tags": ["team"], "match": "all"},
+        {"not": {"tags": ["source:bot"], "match": "any_strict"}},
+    ]
+    assert "tags" not in fake.recalls[0]
+
+
+def test_empty_recall_exclude_tags_leave_the_request_unchanged(provider):
+    instance, fake = provider({"recall_tags": "team", "recall_exclude_tags": ""})
+    instance.handle_tool_call("hindsight_recall", {"query": "q"})
+    assert fake.recalls[0]["tags"] == ["team"]
+    assert "tag_groups" not in fake.recalls[0]
+
+
 def test_recall_tags_accept_the_documented_comma_separated_form(provider):
     """#4662: the string went to the client as-is and the API rejected it (422)."""
     instance, fake = provider({"recall_tags": "team, project-x"})
@@ -746,6 +866,13 @@ def test_prompt_does_not_promise_injected_memories_when_auto_recall_is_off(provi
     assert plugin._CONTEXT_NOTE in on.system_prompt_block()
     assert plugin._CONTEXT_NOTE not in off.system_prompt_block()
     assert plugin._TOOL_GUIDANCE in off.system_prompt_block()
+
+
+@pytest.mark.parametrize("config", [{}, {"auto_recall": False}, {"memory_mode": "tools"}])
+def test_prompt_tells_the_model_to_store_corrections(provider, config):
+    """#5373: the model was never told what to do when a memory is wrong, so it rarely stored a fix."""
+    instance, _ = provider(config)
+    assert "store the correction with hindsight_retain" in instance.system_prompt_block()
 
 
 def test_reconnect_closes_the_client_it_replaces(provider, monkeypatch):
@@ -1114,3 +1241,130 @@ def test_retain_kanban_never_lets_sub_agents_write_automatically(provider):
     child.sync_turn("delegated", "done")
     child.shutdown()
     assert fake.retains == []
+
+
+# -- recalled memory dates (#4697) --------------------------------------------
+
+
+def test_format_memory_shows_mentioned_and_occurred_in_the_given_timezone():
+    from datetime import timedelta, timezone
+
+    utc8 = timezone(timedelta(hours=8))
+    r = SimpleNamespace(
+        text="Quota depends on the plan",
+        mentioned_at="2026-10-18T18:30:00Z",  # already the 19th in UTC+8
+        occurred_start="2026-09-01T00:00:00+00:00",
+        occurred_end="2026-09-03T00:00:00+00:00",
+    )
+    assert plugin._format_memory(r, utc8) == (
+        "Quota depends on the plan (mentioned: 2026-10-19) [occurred: 2026-09-01 → 2026-09-03]"
+    )
+
+
+def test_format_memory_handles_missing_partial_and_malformed_dates():
+    ns = SimpleNamespace
+    utc = __import__("datetime").timezone.utc
+    assert plugin._format_memory(ns(text="t"), utc) == "t"
+    assert plugin._format_memory(ns(text="t", mentioned_at="not a date", occurred_start=1700000000), utc) == "t"
+    assert (
+        plugin._format_memory(ns(text="t", occurred_start="2026-09-01T00:00:00"), utc)
+        == "t [occurred from: 2026-09-01]"
+    )
+    assert (
+        plugin._format_memory(ns(text="t", occurred_end="2026-09-01T00:00:00Z"), utc)
+        == "t [occurred until: 2026-09-01]"
+    )
+    same = ns(text="t", occurred_start="2026-09-01T10:00:00Z", occurred_end="2026-09-01T12:00:00Z")
+    assert plugin._format_memory(same, utc) == "t [occurred: 2026-09-01]"
+
+
+class _DatedClient(FakeClient):
+    async def arecall(self, **kwargs):
+        self.recalls.append(kwargs)
+        r = FakeResult("Alice drives a Subaru")
+        r.mentioned_at, r.occurred_start, r.occurred_end = "2026-10-18T10:00:00Z", None, None
+        return SimpleNamespace(results=[r])
+
+
+def test_auto_recall_and_recall_tool_both_show_dates(provider):
+    instance, _ = provider(client=_DatedClient())
+    text, count = instance._do_recall("what car")
+    assert count == 1 and text == "- Alice drives a Subaru (mentioned: 2026-10-18)"
+    assert instance._tool_recall({"query": "what car"}) == "1. Alice drives a Subaru (mentioned: 2026-10-18)"
+
+
+# -- recall_query_strip_patterns (#5639) --------------------------------------
+
+
+def test_strip_patterns_remove_boilerplate_before_the_input_cut(provider):
+    instance, fake = provider({"recall_query_strip_patterns": "^NONCE: \\w+\n[invalid", "recall_max_input_chars": 20})
+    instance._do_recall("NONCE: abc123 issued by orchestrator\nfix the lease renewal script please")
+    assert fake.recalls[-1]["query"] == "fix the lease renewa"
+
+
+def test_strip_patterns_unset_or_matching_everything_keep_the_query(provider):
+    instance, fake = provider({"recall_query_strip_patterns": [".*"]})
+    instance._do_recall("only boilerplate")
+    assert fake.recalls[-1]["query"] == "only boilerplate"
+    instance, fake = provider()
+    instance._do_recall("NONCE: x\nbody")
+    assert fake.recalls[-1]["query"] == "NONCE: x\nbody"
+
+
+# -- session_context (#5285) --------------------------------------------------
+
+
+class _ContextClient(FakeClient):
+    def __init__(self):
+        super().__init__()
+        self.reads: list[str] = []
+
+    async def aget_mental_model(self, *, bank_id, mental_model_id, detail):
+        self.reads.append(f"mm:{mental_model_id}")
+        if mental_model_id == "missing":
+            raise RuntimeError("404 not found")
+        return SimpleNamespace(name=f"Model {mental_model_id}", content=f"content of {mental_model_id}")
+
+    async def aget_page(self, *, bank_id, page_id):
+        self.reads.append(f"page:{page_id}")
+        return SimpleNamespace(name="Profile", body="page body")
+
+
+def test_session_context_injects_models_and_pages_in_order_once(provider):
+    client = _ContextClient()
+    instance, _ = provider({"session_context": "page:p1, missing, mental_model:m2"}, client=client)
+    first = instance.system_prompt_block()
+    assert first == instance.system_prompt_block()  # byte-stable: read once per session
+    assert client.reads == ["page:p1", "mm:missing", "mm:m2"]
+    assert first.index("## Profile\npage body") < first.index("## Model m2\ncontent of m2")
+    assert "missing" not in first
+
+
+def test_session_context_unset_makes_no_request(provider):
+    client = _ContextClient()
+    instance, _ = provider(client=client)
+    assert "Session Context" not in instance.system_prompt_block()
+    assert client.reads == []
+
+
+def test_session_context_rejects_unknown_kinds():
+    refs = plugin._parse_session_context(["page:a", "bogus:b", "plain", "page:"])
+    assert [(r.kind, r.ref) for r in refs] == [("page", "a"), ("mental_model", "plain")]
+
+
+def test_session_context_is_read_again_after_a_session_switch(provider):
+    client = _ContextClient()
+    instance, _ = provider({"session_context": "m1"}, client=client)
+    instance.system_prompt_block()
+    instance.on_session_switch("session-2")
+    instance.system_prompt_block()
+    assert client.reads == ["mm:m1", "mm:m1"]
+
+
+def test_session_context_skipped_while_the_embedded_daemon_is_down(provider, monkeypatch):
+    client = _ContextClient()
+    instance, _ = provider({"session_context": "m1"}, client=client)
+    monkeypatch.setattr(instance, "_mode", "local_embedded")
+    monkeypatch.setattr(plugin, "_daemon_is_running", lambda profile: False)
+    assert "Session Context" not in instance.system_prompt_block()
+    assert client.reads == []

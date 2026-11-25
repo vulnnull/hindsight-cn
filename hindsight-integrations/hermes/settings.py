@@ -10,6 +10,7 @@ import re
 import string
 import tomllib
 from dataclasses import dataclass
+from datetime import datetime, timezone, tzinfo
 from pathlib import Path
 from typing import Any, List
 
@@ -108,6 +109,101 @@ def _normalize_string_list(value: Any) -> List[str]:
     return normalized
 
 
+def _local_date(value: Any, tz: tzinfo | None) -> str:
+    """A server timestamp (UTC ISO 8601, or a datetime) as ``YYYY-MM-DD`` in *tz*, else ``""``.
+
+    Converted before cutting the day off: an 18:30 UTC fact is already the next day in UTC+8.
+    A naive value is UTC (the server's zone). Anything that does not parse renders nothing, so a
+    malformed field never becomes a fake date in the prompt."""
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str) and value.strip():
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return ""
+    else:
+        return ""
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(tz).date().isoformat()
+
+
+def _format_memory(result: Any, tz: tzinfo | None = None) -> str:
+    """One recalled memory with its dates, so the model can tell an old fact from a fresh one (#4697).
+
+    ``mentioned`` is when the fact was stated; ``occurred`` is when the event itself happened, which
+    is what dates the claim (a fact new to the bank can describe an old state). Same shape as the
+    OpenClaw plugin's ``formatMemories``; each bound can be missing, so each case reads plainly."""
+    text = getattr(result, "text", "") or ""
+    mentioned = _local_date(getattr(result, "mentioned_at", None), tz)
+    start = _local_date(getattr(result, "occurred_start", None), tz)
+    end = _local_date(getattr(result, "occurred_end", None), tz)
+    if start and end:
+        occurred = f" [occurred: {start}]" if start == end else f" [occurred: {start} → {end}]"
+    elif start:
+        occurred = f" [occurred from: {start}]"
+    elif end:
+        occurred = f" [occurred until: {end}]"
+    else:
+        occurred = ""
+    return f"{text}{f' (mentioned: {mentioned})' if mentioned else ''}{occurred}"
+
+
+def _compile_line_patterns(value: Any) -> list[re.Pattern[str]]:
+    """``recall_query_strip_patterns`` -> compiled regexes. A list, a JSON list or one pattern per
+    line (commas are regex syntax, so they do not split). An invalid pattern is skipped with a warning."""
+    if isinstance(value, str):
+        text = value.strip()
+        parsed = None
+        if text.startswith("["):
+            with contextlib.suppress(ValueError):
+                parsed = json.loads(text)
+        value = parsed if isinstance(parsed, list) else text.splitlines()
+    patterns: list[re.Pattern[str]] = []
+    for raw in value or []:
+        if not str(raw).strip():
+            continue
+        try:
+            patterns.append(re.compile(str(raw)))
+        except re.error as exc:
+            logger.warning("Ignoring invalid recall_query_strip_patterns entry %r: %s", raw, exc)
+    return patterns
+
+
+def _strip_query_lines(query: str, patterns: list[re.Pattern[str]]) -> str:
+    """Drop the query lines any pattern matches (#5639). If nothing would be left, keep the query
+    as it was: a too-broad pattern then degrades to the old behaviour instead of disabling recall."""
+    if not patterns:
+        return query
+    kept = "\n".join(line for line in query.splitlines() if not any(p.search(line) for p in patterns)).strip()
+    return kept or query
+
+
+@dataclass(frozen=True)
+class SessionContextRef:
+    """One ``session_context`` entry: a mental model or a page, by id."""
+
+    kind: str  # "mental_model" | "page"
+    ref: str
+
+
+def _parse_session_context(value: Any) -> list[SessionContextRef]:
+    """``session_context`` -> the entries in the configured order (#5285).
+
+    Each entry is ``mental_model:<id>`` or ``page:<id>``; a bare id is a mental model. Unknown
+    kinds are dropped with a warning."""
+    entries: list[SessionContextRef] = []
+    for item in _normalize_string_list(value):
+        kind, sep, ref = item.partition(":")
+        kind, ref = (kind.strip(), ref.strip()) if sep else ("mental_model", item)
+        if kind not in ("mental_model", "page") or not ref:
+            logger.warning("Ignoring session_context entry %r: expected mental_model:<id> or page:<id>", item)
+            continue
+        entries.append(SessionContextRef(kind, ref))
+    return entries
+
+
 def _normalize_min_scores(value: Any) -> dict[str, float] | None:
     """Normalize ``recall_min_scores`` to ``{score_name: floor}``, or ``None`` for no floor.
 
@@ -188,7 +284,7 @@ def _sanitize_bank_segment(value: str) -> str:
 
 
 def _resolve_bank_id_template(template: str, fallback: str, **placeholders: str) -> str:
-    """Render a bank_id template ({profile}, {workspace}, {project}, {platform}, {user}, {session}),
+    """Render a bank_id template ({profile}, {workspace}, {project}, {platform}, {user}, {session}, {chat}, {thread}),
     sanitizing each placeholder; the ``-``/``_`` runs empty placeholders leave are
     collapsed (``hermes-{user}`` -> ``hermes``). Empty/invalid template -> *fallback*."""
     if not template:
@@ -201,6 +297,111 @@ def _resolve_bank_id_template(template: str, fallback: str, **placeholders: str)
         logger.warning("Invalid bank_id_template %r: %s — using fallback %r", template, exc, fallback)
         return fallback
     return re.sub(r"([-_])\1+", r"\1", rendered).strip("-_") or fallback
+
+
+# Settings read under more than one name. A ``chats`` entry that sets one name replaces every name in
+# its group, so an override can't lose to an alias the top level used (``[]`` must clear the list).
+_CONFIG_ALIASES = (
+    ("api_key", "apiKey"),
+    ("llm_api_key", "llmApiKey"),
+    ("recall_additional_banks", "recallAdditionalBanks"),
+    ("recall_budget", "budget"),
+    ("recall_prefetch_method", "prefetch_method"),
+)
+
+
+@dataclass(frozen=True)
+class ChatScope:
+    """Where a session is talking, as Hermes reports it: ``platform``, ``chat_id``, ``thread_id``."""
+
+    platform: str
+    chat_id: str = ""
+    thread_id: str = ""
+
+    @property
+    def key(self) -> str:
+        """``platform/chat_id/thread_id`` without the empty parts, e.g. ``telegram/-100123/42``."""
+        return "/".join(part for part in (self.platform, self.chat_id, self.thread_id) if part)
+
+    def candidates(self) -> list[str]:
+        """``chats`` keys that can match this scope, most specific first. Built from the parts, not
+        by splitting :attr:`key`, so an id that itself contains ``/`` never matches a shorter key."""
+        parts = [part for part in (self.platform, self.chat_id, self.thread_id) if part]
+        return ["/".join(parts[:n]) for n in range(len(parts), 0, -1)]
+
+
+@dataclass(frozen=True)
+class ResolvedConfig:
+    """The config one session runs with: the file's top level with its ``chats`` entry laid over it.
+
+    ``values`` is the only config the provider reads after ``initialize``; ``chats`` is resolved
+    here, before any setting is read, so every setting (including ones added later) can be set
+    per chat without being listed anywhere."""
+
+    values: dict[str, Any]
+    chat_key: str
+    matched: str | None = None
+    overrides: dict[str, Any] | None = None
+    # The entry's non-empty ``bank_id``: it pins this chat's bank over the env, repository and template.
+    chat_bank_id: str = ""
+
+
+def resolve_chat_config(raw: dict, scope: ChatScope) -> ResolvedConfig:
+    """Lay the most specific matching ``chats`` entry over the top-level config.
+
+    Only one entry applies (they don't stack). A key the entry sets replaces the top-level value
+    and its aliases. An entry's ``bank_id`` pins the bank, so without its own ``bank_id_template``
+    it also clears a top-level template. A malformed ``chats`` map or entry is ignored with a warning."""
+    chats = raw.get("chats")
+    base = {k: v for k, v in raw.items() if k != "chats"}
+    if chats is None:
+        return ResolvedConfig(base, scope.key)
+    if not isinstance(chats, dict):
+        logger.warning("Ignoring Hindsight chats: expected an object keyed by platform/chat/thread, got %r", chats)
+        return ResolvedConfig(base, scope.key)
+    matched = next((key for key in scope.candidates() if key in chats), None)
+    if matched is None:
+        return ResolvedConfig(base, scope.key)
+    entry = chats[matched]
+    if not isinstance(entry, dict):
+        logger.warning("Ignoring Hindsight chats[%r]: expected an object of settings, got %r", matched, entry)
+        return ResolvedConfig(base, scope.key)
+    if "chats" in entry:
+        logger.warning("Ignoring chats inside Hindsight chats[%r]: entries don't nest", matched)
+    overrides = {k: v for k, v in entry.items() if k != "chats"}
+    for group in _CONFIG_ALIASES:
+        if any(name in overrides for name in group):
+            for name in group:
+                if name not in overrides:
+                    base.pop(name, None)
+    chat_bank_id = str(overrides.get("bank_id") or "").strip()
+    if chat_bank_id and "bank_id_template" not in overrides:
+        base.pop("bank_id_template", None)
+    return ResolvedConfig({**base, **overrides}, scope.key, matched, overrides, chat_bank_id)
+
+
+def _fill_tag_templates(tags: List[str], **placeholders: str) -> List[str]:
+    """Fill ``{chat}``-style placeholders in tag settings (``{session}`` is not one: sessions rotate,
+    and every retain already carries its ``session:`` tag). A tag whose placeholder is empty is dropped
+    (``topic:{thread}`` outside a thread adds no tag); one naming an unknown placeholder, or not a
+    valid template, is kept as written."""
+    filled: list[str] = []
+    for tag in tags:
+        fields = _template_fields(tag)
+        if not fields:
+            filled.append(tag)
+            continue
+        if not fields <= placeholders.keys():
+            logger.warning("Hindsight tag %r names an unknown placeholder; kept as written", tag)
+            filled.append(tag)
+            continue
+        if not all(placeholders[name] for name in fields):
+            continue
+        try:
+            filled.append(tag.format(**placeholders))
+        except (ValueError, IndexError, KeyError, AttributeError):
+            filled.append(tag)
+    return list(dict.fromkeys(filled))
 
 
 def _repository_root(start_dir: str) -> Path | None:

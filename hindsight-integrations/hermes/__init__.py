@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import queue
+import re
 import sys
 import threading
 import time
@@ -32,6 +33,7 @@ from agent.secret_scope import UnscopedSecretError, get_secret
 from hermes_cli.config import cfg_get
 from hermes_constants import get_hermes_home
 from hermes_time import now as _hermes_now
+from pydantic import BaseModel, ValidationError, field_validator
 from tools.registry import tool_error
 from utils import read_json_or_empty
 
@@ -66,18 +68,26 @@ from .settings import (
     _MIN_VERSION_FOR_UPDATE_MODE_APPEND,
     _PROVIDER_DEFAULT_MODELS,
     _VALID_BUDGETS,
+    ChatScope,
+    ResolvedConfig,
     _clears_min_scores,
+    _compile_line_patterns,
     _daemon_llm_provider,
     _discover_cwd_bank_id,
+    _fill_tag_templates,
+    _format_memory,
     _normalize_min_scores,
     _normalize_observation_scopes,
     _normalize_string_list,
     _parse_float_setting,
     _parse_int_setting,
+    _parse_session_context,
     _project_name,
     _repository_root,
     _resolve_bank_id_template,
+    _strip_query_lines,
     _template_fields,
+    resolve_chat_config,
 )
 
 logger = logging.getLogger(__name__)
@@ -90,6 +100,87 @@ _EXTRA_BANK_TIMEOUT_SHARE = 0.8
 # unreachable bank costs one timeout per cooldown instead of one on every turn.
 _EXTRA_BANK_COOLDOWN = 300.0
 _RETAIN_CONTEXT_DEFAULT = "conversation between Hermes Agent and the User"
+# Added after every retain context, a custom one included. Without it, a reply that repeats a
+# fetched article or video in its author's first person ("I tested...") is stored as the
+# agent's or the User's own experience (#6818). The tool message only names what was fetched:
+# the model needs this sentence to read the reply as relayed.
+_RELAYED_CONTENT_NOTE = (
+    "Tool messages show what the assistant fetched (pages, videos, files), written by other people; "
+    "when the Assistant repeats or summarises them, their claims and first person belong to that source, "
+    "not to the User or the Assistant."
+)
+# A turn's tool calls are sent as one line each, never their output (too costly to retain).
+_MAX_TOOL_CALLS_PER_TURN = 20
+_MAX_TOOL_ARG_CHARS = 120
+
+
+def _with_relayed_note(context: str | None) -> str:
+    context = (context or "").strip().rstrip(".")
+    return f"{context}. {_RELAYED_CONTENT_NOTE}" if context else _RELAYED_CONTENT_NOTE
+
+
+class _ToolFunction(BaseModel):
+    name: str = "unknown"
+    arguments: Any = None  # a JSON string in OpenAI's shape; some providers send the object
+
+
+class _ToolCall(BaseModel):
+    function: _ToolFunction = _ToolFunction()
+
+
+class _TranscriptMessage(BaseModel):
+    """One row of the OpenAI-style transcript Hermes passes to ``sync_turn``; other keys ignored."""
+
+    role: str = ""
+    tool_calls: List[_ToolCall] = []
+
+    @field_validator("tool_calls", mode="before")
+    @classmethod
+    def _none_is_empty(cls, v: Any) -> Any:
+        return v or []
+
+
+def _parse_transcript(messages: List[Any]) -> List[_TranscriptMessage]:
+    """A row that is not a message (or a tool call of an unknown shape) is skipped, not fatal:
+    a malformed transcript must never cost the turn its retain."""
+    parsed = []
+    for message in messages:
+        try:
+            parsed.append(_TranscriptMessage.model_validate(message))
+        except ValidationError:
+            continue
+    return parsed
+
+
+def _format_arguments(arguments: Any) -> str:
+    try:
+        args = json.loads(arguments) if isinstance(arguments, str) else arguments
+    except ValueError:
+        args = arguments
+    if isinstance(args, dict):
+        return ", ".join(f"{k}={str(v)[:_MAX_TOOL_ARG_CHARS]}" for k, v in args.items())
+    return str(args or "")[:_MAX_TOOL_ARG_CHARS]
+
+
+def _tool_call_lines(messages: List[Any] | None) -> List[str]:
+    """One "Tool call: name(arg=value, ...)" line per tool call the agent made this turn, i.e.
+    after the last user message of Hermes' transcript. Arguments are cut short; outputs dropped."""
+    transcript = _parse_transcript(messages or [])
+    last_user = max((i for i, m in enumerate(transcript) if m.role == "user"), default=-1)
+    calls = [call.function for m in transcript[last_user + 1 :] if m.role == "assistant" for call in m.tool_calls]
+    lines = [f"Tool call: {fn.name}({_format_arguments(fn.arguments)})" for fn in calls[:_MAX_TOOL_CALLS_PER_TURN]]
+    if len(calls) > _MAX_TOOL_CALLS_PER_TURN:
+        lines.append(f"... and {len(calls) - _MAX_TOOL_CALLS_PER_TURN} more tool calls")
+    return lines
+
+
+def _bot_label(turn_author: Dict[str, Any] | None) -> str | None:
+    """The label for a turn another agent wrote, from Hermes' ``turn_author`` ({"id", "name",
+    "is_bot"}); None when a human wrote it or Hermes sent nothing. "Bot" when it has no name."""
+    if not (isinstance(turn_author, dict) and turn_author.get("is_bot")):
+        return None
+    return str(turn_author.get("name") or "").strip() or "Bot"
+
 
 # Injected instead of nothing when recall raises, so the agent can tell "memory is down" from
 # "nothing found" (#6482). Fixed text, never the exception: errors can carry hosts and URLs. It is
@@ -416,6 +507,93 @@ REFLECT_SCHEMA = {
 }
 
 
+SEARCH_PAGES_SCHEMA = {
+    "name": "hindsight_search_pages",
+    "description": (
+        "Search the user's pages: documents Hindsight writes from memory and keeps up to date, "
+        "each answering one question (a project, a person, a long-running topic). Use it when "
+        "the user asks where something stands or what was decided. Returns one line per page: "
+        "name, id and its opening text. Read a page in full with hindsight_read_page."
+    ),
+    "parameters": {
+        "type": "object",
+        "required": ["query"],
+        "properties": {
+            "query": {"type": "string", "description": "What to look for."},
+            "limit": {"type": "integer", "description": "How many pages to return (1-20, default 5)."},
+        },
+    },
+}
+
+READ_PAGE_SCHEMA = {
+    "name": "hindsight_read_page",
+    "description": "Read one page in full, as markdown. Pass an id returned by hindsight_search_pages or hindsight_list_pages.",
+    "parameters": {
+        "type": "object",
+        "required": ["page_id"],
+        "properties": {"page_id": {"type": "string", "description": "The page id."}},
+    },
+}
+
+LIST_PAGES_SCHEMA = {
+    "name": "hindsight_list_pages",
+    "description": (
+        "List every page and folder by name and id, without their text. Prefer "
+        "hindsight_search_pages to find pages about a topic; use this when the user asks what pages exist."
+    ),
+    "parameters": {"type": "object", "properties": {}},
+}
+
+CREATE_PAGE_SCHEMA = {
+    "name": "hindsight_create_page",
+    "description": (
+        "Create a page that Hindsight writes from memory and keeps up to date on its own. Every "
+        "page costs model calls each time it refreshes, so create one ONLY when the user explicitly "
+        'asks for a page ("keep a page on X"), never on your own initiative. The page is built in '
+        "the background, so it is empty for a short while."
+    ),
+    "parameters": {
+        "type": "object",
+        "required": ["name", "question"],
+        "properties": {
+            "name": {"type": "string", "description": "Short page title, e.g. 'House renovation'."},
+            "question": {
+                "type": "string",
+                "description": (
+                    "The question the page answers, re-asked on every refresh, e.g. "
+                    "'What is the current state of the house renovation, and what is still open?'"
+                ),
+            },
+        },
+    },
+}
+
+_PAGE_GUIDANCE = (
+    " Use hindsight_search_pages for where something stands or what was decided: pages are "
+    "organized, kept-current summaries."
+)
+_PAGE_SNIPPET_CHARS = 200
+_PAGE_LIST_MAX_LINES = 100
+
+
+def _pages_method(client: Any, name: str, legacy: str) -> Callable[..., Any]:
+    """The client's page method, or its pre-1.2.1 "knowledge" name (the client floor is 0.10.1)."""
+    return getattr(client, name, None) or getattr(client, legacy)
+
+
+def _api_error_detail(exc: Exception) -> str:
+    """The server's ``detail`` message for a failed API call; the client exception's own text
+    carries the HTTP response headers, which is noise in a tool result."""
+    with contextlib.suppress(Exception):
+        detail = json.loads(getattr(exc, "body", None) or "").get("detail")
+        if isinstance(detail, list):  # a 422 lists one entry per invalid field
+            detail = "; ".join(str(d.get("msg", d)) if isinstance(d, dict) else str(d) for d in detail)
+        if isinstance(detail, str) and detail:
+            return detail
+    status = getattr(exc, "status", None)
+    return f"HTTP {status}" if status else (str(exc) or type(exc).__name__)
+
+
 def _bank_not_written_yet(exc: Exception) -> bool:
     """Hindsight answers 404 for a bank nothing has been retained to yet. Read off the status rather
     than importing the client's exception class here: that import, run from the prefetch thread while
@@ -479,6 +657,9 @@ def _mint_document_id(session_id: str) -> str:
     return f"{session_id}-{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
 
 
+# Settings the local_embedded daemon's profile env is built from (embedded._build_embedded_profile_env).
+_DAEMON_ENV_SETTINGS = ("llm_provider", "llm_api_key", "llmApiKey", "llm_model", "llm_base_url", "idle_timeout")
+
 # initialize() kwargs copied verbatim (str, stripped) onto ``self._<name>``.
 _SESSION_KWARGS = (
     "platform",
@@ -517,15 +698,25 @@ _TOOL_GUIDANCE = (
     "deduplicated, high-density observations across sessions. "
     "Use hindsight_reflect for cross-session pattern synthesis. "
     "Use session_search only when you need verbatim transcripts or "
-    "exact wording from a specific conversation. "
-    "Use hindsight_retain to store facts."
+    "exact wording from a specific conversation."
+)
+# A wrong memory left alone is served again next session; a stated correction outranks it.
+_RETAIN_GUIDANCE = (
+    " Use hindsight_retain to store facts."
+    " When the user says a memory is wrong or out of date, or you find it is, store the correction"
+    " with hindsight_retain: what memory said, what is true now, and why (e.g. 'User moved from"
+    " Porto to Lisbon; Porto is no longer their city')."
 )
 _CONTEXT_NOTE = "Relevant memories are automatically injected into context."
 _SYSTEM_PROMPT_TAILS = {
     "context": _CONTEXT_NOTE,
-    "tools": _TOOL_GUIDANCE,
-    "hybrid": f"{_CONTEXT_NOTE} {_TOOL_GUIDANCE}",
+    "tools": _TOOL_GUIDANCE + _RETAIN_GUIDANCE,
+    "hybrid": f"{_CONTEXT_NOTE} {_TOOL_GUIDANCE}{_RETAIN_GUIDANCE}",
 }
+
+
+# A session_context read runs before the first prompt is built, so it gets its own short bound.
+_SESSION_CONTEXT_TIMEOUT = 5.0
 
 
 class HindsightMemoryProvider(MemoryProvider):
@@ -551,6 +742,7 @@ class HindsightMemoryProvider(MemoryProvider):
         self._mirror_to_own_bank = False
         self._static_bank_id = "hermes"
         self._project, self._bank_source = "", "bank_id"
+        self._chat_route = ResolvedConfig({}, "")
         self._extra_bank_down_until: dict[tuple[str, str], float] = {}
         self._additional_bank_ids: list[str] = []
         self._recall_additional_bank_ids: list[str] = []
@@ -830,6 +1022,11 @@ class HindsightMemoryProvider(MemoryProvider):
                 "choices": ["any", "all", "any_strict", "all_strict"],
             },
             {
+                "key": "recall_exclude_tags",
+                "description": "Tags to keep out of recall (comma-separated or a list): a memory carrying any of them is skipped by auto-recall and the hindsight_recall tool but stays in the bank; untagged memories are unaffected",
+                "default": "",
+            },
+            {
                 "key": "reflect_tags",
                 "description": "Tags to filter what reflect reasons over (comma-separated or a list); unset searches the whole bank",
                 "default": "",
@@ -878,6 +1075,11 @@ class HindsightMemoryProvider(MemoryProvider):
                 "default": False,
             },
             {
+                "key": "mirror_builtin_memory",
+                "description": "Copy built-in memory writes (MEMORY.md, USER.md adds and replaces) into the bank; turn off to keep those notes out of a curated bank",
+                "default": True,
+            },
+            {
                 "key": "recall_cron",
                 "description": "Also auto-recall in scheduled (cron) runs; off by default because the query would be Hermes' fixed cron notice, not the job",
                 "default": False,
@@ -915,7 +1117,27 @@ class HindsightMemoryProvider(MemoryProvider):
                 "description": "Maximum input query length for auto-recall",
                 "default": 800,
             },
+            {
+                "key": "recall_query_strip_patterns",
+                "description": "Regexes, one per line: matching lines are removed from the auto-recall query before recall_max_input_chars is applied (the message the model sees is unchanged)",
+                "default": "",
+            },
             {"key": "recall_prompt_preamble", "description": "Custom preamble for recalled memories in context"},
+            {
+                "key": "session_context",
+                "description": "Mental models and pages to put in the system prompt at session start, in order (comma-separated mental_model:<id> or page:<id>; a bare id is a mental model)",
+                "default": "",
+            },
+            {
+                "key": "page_tools",
+                "description": "Give the agent tools to search, read and list pages (pages Hindsight writes from memory)",
+                "default": True,
+            },
+            {
+                "key": "page_create_tool",
+                "description": "Also let the agent create pages when the user asks; off by default because every page costs model calls on each refresh",
+                "default": False,
+            },
             {"key": "timeout", "description": "API request timeout in seconds", "default": _DEFAULT_TIMEOUT},
             {
                 "key": "idle_timeout",
@@ -1346,14 +1568,18 @@ class HindsightMemoryProvider(MemoryProvider):
             self._status_callback = kwargs["status_callback"]
         # Gated presentation for automatic startup warnings (agent._emit_warning on CLI).
         self._warning_callback = kwargs.get("warning_callback") if callable(kwargs.get("warning_callback")) else None
-        self._platform = str(kwargs.get("platform") or "cli")
         # session_id stays in tags so processes for one session remain filterable together.
         self._document_id = _mint_document_id(self._session_id)
         _warn_if_client_outdated()
 
-        self._config = cfg = _load_config()
         for name in _SESSION_KWARGS:
             setattr(self, f"_{name}", str(kwargs.get(name) or "").strip())
+        self._platform = self._platform or "cli"  # after the loop, which would blank it again
+        # The one config every setting below reads: the file with this chat's ``chats`` entry over it.
+        self._chat_route = resolve_chat_config(
+            _load_config(), ChatScope(self._platform, self._chat_id, self._thread_id)
+        )
+        self._config = cfg = self._chat_route.values
         self._turn_index = self._last_retained_turn_count = 0
         self._session_turns = []
         self._mode = cfg.get("mode", "cloud")
@@ -1383,10 +1609,14 @@ class HindsightMemoryProvider(MemoryProvider):
 
             client_version = pkg_version("hindsight-client")
         logger.info(
-            "Hindsight initialized: mode=%s, api_url=%s, bank=%s, budget=%s, memory_mode=%s, prefetch_method=%s, client=%s",
+            "Hindsight initialized: chat=%s (%s), mode=%s, api_url=%s, bank=%s (from %s), budget=%s, memory_mode=%s, "
+            "prefetch_method=%s, client=%s",
+            self._chat_route.chat_key,
+            f"chats[{self._chat_route.matched!r}]" if self._chat_route.matched else "no chats entry",
             self._mode,
             self._api_url,
             self._bank_id,
+            self._bank_source,
             self._budget,
             self._memory_mode,
             self._prefetch_method,
@@ -1420,6 +1650,15 @@ class HindsightMemoryProvider(MemoryProvider):
         )
 
         if self._mode == "local_embedded":
+            overrides = self._chat_route.overrides or {}
+            if "profile" not in overrides and any(key in overrides for key in _DAEMON_ENV_SETTINGS):
+                # Each chat would rewrite the shared daemon's env back and forth, restarting it every time.
+                logger.warning(
+                    "Hindsight chats[%r] changes daemon settings without its own profile: the %r daemon "
+                    "restarts whenever sessions switch between chats. Give the entry a profile.",
+                    self._chat_route.matched,
+                    cfg.get("profile", "hermes"),
+                )
             self._start_embedded_daemon()
 
     def _build_write_bank_ids(self) -> list[str]:
@@ -1503,6 +1742,21 @@ class HindsightMemoryProvider(MemoryProvider):
             platform=self._platform,
             user=self._user_id,
             session=self._session_id,
+            chat=self._chat_id,
+            thread=self._thread_id,
+        )
+
+    def _tag_setting(self, value: Any) -> List[str]:
+        """A tag list setting (retain, recall, recall-exclude and reflect tags) with its placeholders filled in."""
+        return _fill_tag_templates(
+            _normalize_string_list(value),
+            profile=self._agent_identity,
+            workspace=self._agent_workspace,
+            project=self._project,
+            platform=self._platform,
+            user=self._user_id,
+            chat=self._chat_id,
+            thread=self._thread_id,
         )
 
     def _apply_connection_settings(self, cfg: dict) -> None:
@@ -1516,13 +1770,21 @@ class HindsightMemoryProvider(MemoryProvider):
         # The static bank: the template's fallback and the mirror target, from one place.
         # A non-empty HINDSIGHT_BANK_ID wins over config.json's bank, as documented (#5171); without
         # config.json, _load_config already builds the bank from it.
+        # A chats entry's bank_id is this chat's bank: it beats HINDSIGHT_BANK_ID and repository config.
+        chat_bank = self._chat_route.chat_bank_id
         self._static_bank_id = (
-            get_secret("HINDSIGHT_BANK_ID", "") or cfg.get("bank_id") or banks.get("bankId") or "hermes"
+            chat_bank or get_secret("HINDSIGHT_BANK_ID", "") or cfg.get("bank_id") or banks.get("bankId") or "hermes"
         )
-        # Precedence: closest .hindsight/config.toml in a trusted repository → template → static bank_id.
+        # Precedence: chats entry bank_id → closest .hindsight/config.toml in a trusted repository →
+        # template → static bank_id.
         # The repository is only looked up when something needs it, and only once.
         trusted_dirs = _normalize_string_list(cfg.get("trusted_project_dirs"))
-        uses_project = "project" in _template_fields(self._bank_id_template)
+        # {project} may also appear in a tag setting, which is filled from self._project too.
+        tag_settings = [cfg.get(key) for key in ("recall_tags", "recall_exclude_tags", "reflect_tags", "retain_tags")]
+        tag_settings.append(_scoped_setting("HINDSIGHT_RETAIN_TAGS", ""))
+        uses_project = "project" in _template_fields(self._bank_id_template) or any(
+            "project" in _template_fields(tag) for value in tag_settings for tag in _normalize_string_list(value)
+        )
         root, cwd_bank, self._project = None, None, ""
         if self._cwd and (trusted_dirs or uses_project):
             try:
@@ -1536,7 +1798,9 @@ class HindsightMemoryProvider(MemoryProvider):
                 self._project = _project_name(root)
             except Exception as exc:
                 logger.warning("hindsight: cannot name the project at %s: %r — {project} is empty", root, exc)
-        if cwd_bank:
+        if chat_bank and not self._bank_id_template:
+            self._bank_id, self._bank_source = chat_bank, f"chats[{self._chat_route.matched!r}]"
+        elif cwd_bank:
             self._bank_id, self._bank_source = cwd_bank, "repository config"
         else:
             self._bank_id = self._resolve_template_bank()
@@ -1570,7 +1834,7 @@ class HindsightMemoryProvider(MemoryProvider):
             # a raw read here handed a multiplexed secondary the DEFAULT profile's retain shaping back.
             return cfg.get(key) or _scoped_setting(env_var, default)
 
-        self._retain_tags = _normalize_string_list(_cfg_or_env("retain_tags", "HINDSIGHT_RETAIN_TAGS"))
+        self._retain_tags = self._tag_setting(_cfg_or_env("retain_tags", "HINDSIGHT_RETAIN_TAGS"))
         self._tags = self._retain_tags or None
         self._observation_scopes = _normalize_observation_scopes(
             _cfg_or_env("observation_scopes", "HINDSIGHT_RETAIN_OBSERVATION_SCOPES", _DEFAULT_OBSERVATION_SCOPES)
@@ -1606,6 +1870,8 @@ class HindsightMemoryProvider(MemoryProvider):
         # retain tool and the built-in memory mirror write task chatter into it, mostly duplicate reports
         # the parent already retains (#6124). Unless retain_kanban opts it in (#6419), it writes nothing.
         self._writes_disabled = context == "kanban" and not retain_kanban
+        # A curated bank may not want MEMORY.md/USER.md notes copied in, in any context (#6725).
+        self._mirror_builtin_memory = bool(cfg.get("mirror_builtin_memory", True))
         self._retain_every_n_turns = max(1, _parse_int_setting(cfg.get("retain_every_n_turns"), 1))
         self._retain_context = cfg.get("retain_context", _RETAIN_CONTEXT_DEFAULT)
         self._retain_async = cfg.get("retain_async", True)
@@ -1621,11 +1887,12 @@ class HindsightMemoryProvider(MemoryProvider):
     def _apply_recall_settings(self, cfg: dict) -> None:
         """Recall knobs are pure config too (``{}`` yields the defaults)."""
         # Documented as comma-separated; the client wants a list (a raw string is a 422).
-        self._recall_tags = _normalize_string_list(cfg.get("recall_tags")) or None
+        self._recall_tags = self._tag_setting(cfg.get("recall_tags")) or None
         self._recall_tags_match = cfg.get("recall_tags_match", "any")
+        self._recall_exclude_tags = self._tag_setting(cfg.get("recall_exclude_tags")) or None
         # Reflect's own scope, opt-in: reflect searched the whole bank before recall_tags existed,
         # so inheriting them would quietly narrow it for every install that sets them (#5170).
-        self._reflect_tags = _normalize_string_list(cfg.get("reflect_tags")) or None
+        self._reflect_tags = self._tag_setting(cfg.get("reflect_tags")) or None
         self._reflect_tags_match = cfg.get("reflect_tags_match", "any")
         # A cron prompt opens with Hermes' fixed ~1.1k-char cron notice, so the first
         # recall_max_input_chars of every cron query were that notice, not the job: each fire injected
@@ -1636,6 +1903,13 @@ class HindsightMemoryProvider(MemoryProvider):
         self._recall_max_tokens = _parse_int_setting(cfg.get("recall_max_tokens"), 4096)
         self._recall_split_tokens = cfg.get("recall_max_tokens_mode") == "split"
         self._recall_max_input_chars = _parse_int_setting(cfg.get("recall_max_input_chars"), 800)
+        self._recall_query_strip_patterns = _compile_line_patterns(cfg.get("recall_query_strip_patterns"))
+        self._session_context_refs = _parse_session_context(cfg.get("session_context"))
+        self._page_tools = bool(cfg.get("page_tools", True))
+        # Off by default: each page costs model calls on every refresh, so an agent that creates pages
+        # on its own initiative runs up the user's bill.
+        self._page_create_tool = bool(cfg.get("page_create_tool", False))
+        self._session_context_block: str | None = None  # read once, on the first system prompt
         # None -> observation-only (Hindsight's consolidated, deduplicated layer; raw
         # world/experience facts re-ship the evidence they summarize and burn the
         # recall_max_tokens budget); a comma-separated string is accepted for parity
@@ -1730,10 +2004,58 @@ class HindsightMemoryProvider(MemoryProvider):
         mode = self._memory_mode if self._memory_mode in _SYSTEM_PROMPT_TAILS else "hybrid"
         label = "" if mode == "hybrid" else f" ({mode} mode)"
         # With auto_recall off nothing is injected, so hybrid must not promise injected context.
-        tail = _TOOL_GUIDANCE if mode == "hybrid" and not self._auto_recall else _SYSTEM_PROMPT_TAILS[mode]
+        tail = (
+            _TOOL_GUIDANCE + _RETAIN_GUIDANCE
+            if mode == "hybrid" and not self._auto_recall
+            else _SYSTEM_PROMPT_TAILS[mode]
+        )
+        if mode != "context" and self._page_tools:
+            tail += _PAGE_GUIDANCE
         if self._writes_disabled:  # the retain tool is not offered to a read-only kanban worker
-            tail = tail.replace(" Use hindsight_retain to store facts.", "")
-        return f"# Hindsight Memory\nActive{label}. Bank: {self._bank_id}, budget: {self._budget}.\n{tail}"
+            tail = tail.replace(_RETAIN_GUIDANCE, "")
+        block = f"# Hindsight Memory\nActive{label}. Bank: {self._bank_id}, budget: {self._budget}.\n{tail}"
+        if self._session_context_block is None:
+            self._session_context_block = self._load_session_context()
+        return f"{block}\n\n{self._session_context_block}" if self._session_context_block else block
+
+    def _load_session_context(self) -> str:
+        """The configured mental models and pages, in order, read once per session (#5285).
+
+        Read once and kept, so the system prompt stays byte-identical for the whole session and
+        prompt caching keeps working; a refreshed model shows up in the next session. Each read is
+        a stored-document read (no LLM call), bounded to a few seconds; one that fails is skipped
+        with a warning. In local_embedded mode a daemon that is not up yet is not started for this:
+        the session goes without and the next one picks it up."""
+        if not self._session_context_refs:
+            return ""
+        if self._mode == "local_embedded" and not _daemon_is_running(self._config.get("profile", "hermes")):
+            logger.info("Hindsight session_context skipped: the local daemon is not running yet")
+            return ""
+        sections = []
+        for entry in self._session_context_refs:
+            try:
+                client = self._get_client()
+                if entry.kind == "page":
+                    get_page = _pages_method(client, "aget_page", "aget_knowledge_page")
+                    doc = _run_sync(get_page(bank_id=self._bank_id, page_id=entry.ref), _SESSION_CONTEXT_TIMEOUT)
+                    content = getattr(doc, "body", None)
+                else:
+                    doc = _run_sync(
+                        client.aget_mental_model(bank_id=self._bank_id, mental_model_id=entry.ref, detail="content"),
+                        _SESSION_CONTEXT_TIMEOUT,
+                    )
+                    content = getattr(doc, "content", None)
+            except Exception as exc:
+                logger.warning("Hindsight session_context: could not read %s %s: %s", entry.kind, entry.ref, exc)
+                continue
+            if not (content or "").strip():
+                logger.warning("Hindsight session_context: %s %s has no content yet", entry.kind, entry.ref)
+                continue
+            name = getattr(doc, "name", None) or entry.ref
+            sections.append(f"## {name}\n{content.strip()}")
+        if not sections:
+            return ""
+        return "# Hindsight Session Context\nBackground from memory, read at session start.\n\n" + "\n\n".join(sections)
 
     # -- recall ------------------------------------------------------------------
 
@@ -1774,7 +2096,15 @@ class HindsightMemoryProvider(MemoryProvider):
         if self._recall_split_tokens:
             max_tokens = max(1, max_tokens // len(bank_ids))
         kwargs: dict = {"query": query, "budget": self._budget, "max_tokens": max_tokens}
-        if self._recall_tags:
+        if self._recall_exclude_tags:
+            # The server takes tags or tag_groups, not both, and ANDs top-level groups: the include
+            # filter moves into the groups. any_strict in the NOT skips only memories that carry an
+            # excluded tag, so untagged history stays recallable (#5375).
+            groups: list = [{"not": {"tags": self._recall_exclude_tags, "match": "any_strict"}}]
+            if self._recall_tags:
+                groups.insert(0, {"tags": self._recall_tags, "match": self._recall_tags_match})
+            kwargs["tag_groups"] = groups
+        elif self._recall_tags:
             kwargs.update(tags=self._recall_tags, tags_match=self._recall_tags_match)
         if self._recall_types:
             kwargs["types"] = self._recall_types
@@ -1838,6 +2168,9 @@ class HindsightMemoryProvider(MemoryProvider):
         """One recall/reflect for *query* (background prefetch and ``recall_sync`` paths)
         -> (text, memory count); the count is 0 for reflect (synthesis) and on error, where the text
         is ``_RECALL_FAILED_NOTE``."""
+        # Boilerplate lines (a provenance header on every message) go first, or they fill the
+        # recall_max_input_chars window and recall finds nothing (#5639).
+        query = _strip_query_lines(query, self._recall_query_strip_patterns)
         if self._recall_max_input_chars:
             query = query[: self._recall_max_input_chars]
         try:
@@ -1849,7 +2182,8 @@ class HindsightMemoryProvider(MemoryProvider):
             )
             results = self._recall(query)
             logger.debug("Recall: returned %d results", len(results))
-            return "\n".join(f"- {r.text}" for r in results if r.text), len(results)
+            tz = _hermes_now().tzinfo
+            return "\n".join(f"- {_format_memory(r, tz)}" for r in results if r.text), len(results)
         except Exception as e:
             logger.warning("Hindsight recall failed: %s", e, exc_info=True)
             return _RECALL_FAILED_NOTE, 0
@@ -1925,15 +2259,26 @@ class HindsightMemoryProvider(MemoryProvider):
 
     # -- retain ------------------------------------------------------------------
 
-    def _build_turn_messages(self, user_content: str, assistant_content: str) -> List[Dict[str, str]]:
-        now = _event_timestamp()  # one turn -> both messages share the event timestamp
-        return [
-            {"role": role, "content": f"{prefix}: {content}", "timestamp": now}
-            for role, prefix, content in (
-                ("user", self._retain_user_prefix, user_content),
-                ("assistant", self._retain_assistant_prefix, assistant_content),
-            )
-        ]
+    def _build_turn_messages(
+        self,
+        user_content: str,
+        assistant_content: str,
+        bot_label: str | None = None,
+        tool_calls: List[str] | None = None,
+    ) -> List[Dict[str, str]]:
+        """*bot_label* names the agent that wrote the user side (None: a human did). It becomes
+        that message's role and label, so extraction doesn't read a bot's words as the User's
+        (#5374). The server reads role as plain text, so any name is accepted. *tool_calls*
+        (see ``_tool_call_lines``) go between the two as one ``tool`` message (#6818)."""
+        now = _event_timestamp()  # one turn -> every message shares the event timestamp
+        user_role, user_label = ("user", self._retain_user_prefix) if bot_label is None else (bot_label, bot_label)
+        messages = [{"role": user_role, "content": f"{user_label}: {user_content}", "timestamp": now}]
+        if tool_calls:
+            messages.append({"role": "tool", "content": "\n".join(tool_calls), "timestamp": now})
+        messages.append(
+            {"role": "assistant", "content": f"{self._retain_assistant_prefix}: {assistant_content}", "timestamp": now}
+        )
+        return messages
 
     def _build_metadata(self, *, message_count: int, turn_index: int) -> Dict[str, str]:
         metadata: Dict[str, str] = {
@@ -2006,8 +2351,9 @@ class HindsightMemoryProvider(MemoryProvider):
         writer runs after later sync_turn() calls mutate _session_turns/_turn_index/_session_id."""
         # One flat message array: the server only chunks by turn (and merges appends)
         # when the document is a list of messages, not a list of per-turn lists.
-        content = json.dumps([message for turn in turns for message in json.loads(turn)], ensure_ascii=False)
-        metadata = self._build_metadata(message_count=len(turns) * 2, turn_index=self._turn_index)
+        messages = [message for turn in turns for message in json.loads(turn)]
+        content = json.dumps(messages, ensure_ascii=False)
+        metadata = self._build_metadata(message_count=len(messages), turn_index=self._turn_index)
         if update_mode == "append":
             # An append sets the document's metadata on every memory the session already has, so a
             # value that changes per call would rewrite all of them on each turn (#6241).
@@ -2019,7 +2365,7 @@ class HindsightMemoryProvider(MemoryProvider):
         lineage = (("session", self._session_id), ("parent", parent))
         tags = [f"{kind}:{sid}" for kind, sid in lineage if sid] or None
         bank_ids = list(self._write_bank_ids)
-        retain_async, retain_context = self._retain_async, self._retain_context
+        retain_async, retain_context = self._retain_async, _with_relayed_note(self._retain_context)
         # Fixed per job and bank, so a resend after a failure the server did receive is a
         # replay, not a second copy (#5218). One id can't serve two banks: the server answers 409.
         operation_ids = {bank_id: str(uuid.uuid4()) for bank_id in bank_ids}
@@ -2084,9 +2430,20 @@ class HindsightMemoryProvider(MemoryProvider):
 
         return _job
 
-    def sync_turn(self, user_content: str, assistant_content: str, *, session_id: str = "") -> None:
+    def sync_turn(
+        self,
+        user_content: str,
+        assistant_content: str,
+        *,
+        session_id: str = "",
+        turn_author: Dict[str, Any] | None = None,
+        messages: List[Any] | None = None,
+    ) -> None:
         """Enqueue a retain for the current turn (non-blocking; writer thread). Dropped
-        once shutdown() fired so post-exit retains never reach aiohttp during teardown."""
+        once shutdown() fired so post-exit retains never reach aiohttp during teardown.
+        *turn_author* (``{"id", "name", "is_bot"}``) is who wrote the user side; *messages* is
+        Hermes' transcript so far, read only for this turn's tool calls. Hermes sends each only
+        to a signature that names it."""
         why = (
             "auto_retain disabled"
             if not self._auto_retain
@@ -2101,7 +2458,12 @@ class HindsightMemoryProvider(MemoryProvider):
             self._session_id = str(session_id).strip()
 
         self._session_turns.append(
-            json.dumps(self._build_turn_messages(user_content, assistant_content), ensure_ascii=False)
+            json.dumps(
+                self._build_turn_messages(
+                    user_content, assistant_content, _bot_label(turn_author), _tool_call_lines(messages)
+                ),
+                ensure_ascii=False,
+            )
         )
         self._turn_counter = self._turn_index = self._turn_counter + 1
         if remainder := self._turn_counter % self._retain_every_n_turns:
@@ -2155,7 +2517,13 @@ class HindsightMemoryProvider(MemoryProvider):
         """Retain built-in memory adds and replaces (``target``: memory | user) on the writer
         thread, so an entry the agent later prunes from the size-capped file stays in the bank.
         Removals are not retained."""
-        if action not in ("add", "replace") or not content or self._shutting_down.is_set() or self._writes_disabled:
+        if (
+            action not in ("add", "replace")
+            or not content
+            or self._shutting_down.is_set()
+            or self._writes_disabled
+            or not self._mirror_builtin_memory
+        ):
             return
         item = self._build_retain_kwargs(
             content,
@@ -2197,16 +2565,22 @@ class HindsightMemoryProvider(MemoryProvider):
     def get_tool_schemas(self) -> List[Dict[str, Any]]:
         if self._memory_mode == "context":
             return []
-        return (
+        schemas = (
             [RECALL_SCHEMA, REFLECT_SCHEMA] if self._writes_disabled else [RETAIN_SCHEMA, RECALL_SCHEMA, REFLECT_SCHEMA]
         )
+        if self._page_tools:
+            schemas += [SEARCH_PAGES_SCHEMA, READ_PAGE_SCHEMA, LIST_PAGES_SCHEMA]
+        if self._page_create_tool and not self._writes_disabled:
+            schemas.append(CREATE_PAGE_SCHEMA)
+        return schemas
 
     def read_only_tool_names(self) -> List[str]:
         """Tools a read-only delegated child may use (Hermes ``delegation.memory_read``, #6601).
 
-        Only recall: retain writes to the bank, and reflect may consolidate server-side. Hermes
-        intersects this with :meth:`get_tool_schemas`, so ``context`` mode exposes none."""
-        return ["hindsight_recall"]
+        Recall and the page reads: retain and page creation write to the bank, and reflect may
+        consolidate server-side. Hermes intersects this with :meth:`get_tool_schemas`, so ``context``
+        mode exposes none."""
+        return ["hindsight_recall", "hindsight_search_pages", "hindsight_read_page", "hindsight_list_pages"]
 
     def _tool_retain(self, args: dict) -> str:
         if self._writes_disabled:
@@ -2237,7 +2611,11 @@ class HindsightMemoryProvider(MemoryProvider):
         logger.debug("Tool hindsight_recall: bank=%s, query_len=%d, budget=%s", self._bank_id, len(query), self._budget)
         results = self._recall(query)
         logger.debug("Tool hindsight_recall: %d results", len(results))
-        return "\n".join(f"{i}. {r.text}" for i, r in enumerate(results, 1)) or "No relevant memories found."
+        tz = _hermes_now().tzinfo
+        return (
+            "\n".join(f"{i}. {_format_memory(r, tz)}" for i, r in enumerate(results, 1))
+            or "No relevant memories found."
+        )
 
     def _tool_reflect(self, args: dict) -> str:
         query = args["query"]
@@ -2248,25 +2626,91 @@ class HindsightMemoryProvider(MemoryProvider):
         logger.debug("Tool hindsight_reflect: response_len=%d", len(text))
         return text or "No relevant memories found."
 
-    # tool name -> (required arg, handler, user-facing failure prefix)
+    def _tool_search_pages(self, args: dict) -> str:
+        try:
+            limit = min(max(int(args.get("limit") or 5), 1), 20)
+        except (TypeError, ValueError):
+            limit = 5
+        resp = self._run_hindsight_operation(
+            lambda c: _pages_method(c, "asearch_pages", "asearch_knowledge_base")(
+                bank_id=self._bank_id, q=args["query"], limit=limit
+            )
+        )
+        lines = []
+        for hit in resp.results or []:
+            # The snippet is the page's opening markdown; heading marks are noise on one line.
+            snippet = " ".join(re.sub(r"(?m)^\s*#+\s*", "", hit.snippet or "").split())
+            if len(snippet) > _PAGE_SNIPPET_CHARS:
+                snippet = snippet[:_PAGE_SNIPPET_CHARS].rstrip() + "…"
+            lines.append(f"- {hit.name} ({hit.id}){f': {snippet}' if snippet else ''}")
+        return "\n".join(lines) or "No pages match."
+
+    def _tool_read_page(self, args: dict) -> str:
+        page = self._run_hindsight_operation(
+            lambda c: _pages_method(c, "aget_page", "aget_knowledge_page")(
+                bank_id=self._bank_id, page_id=args["page_id"]
+            )
+        )
+        # The body opens with its own title, so it goes out as-is (a "# name" line doubled it).
+        return (page.body or "").strip() or f"Page {page.name} is not built yet."
+
+    def _tool_list_pages(self, args: dict) -> str:
+        # The pre-1.2.1 tree method takes no tag filters, so pass the bank only.
+        tree = self._run_hindsight_operation(
+            lambda c: _pages_method(c, "aget_page_tree", "aget_knowledge_base_tree")(bank_id=self._bank_id)
+        )
+        lines: list[str] = []
+
+        def _walk(nodes: list, depth: int) -> None:
+            for node in nodes or []:
+                label = f"{node.name}/" if node.kind == "folder" else f"{node.name} ({node.id})"
+                lines.append(f"{'  ' * depth}- {label}")
+                _walk(getattr(node, "children", None), depth + 1)
+
+        _walk(tree.roots, 0)
+        if not lines:
+            return "No pages yet."
+        if len(lines) > _PAGE_LIST_MAX_LINES:
+            more = len(lines) - _PAGE_LIST_MAX_LINES
+            lines = [*lines[:_PAGE_LIST_MAX_LINES], f"… {more} more; use hindsight_search_pages to find one."]
+        return "\n".join(lines)
+
+    def _tool_create_page(self, args: dict) -> str:
+        if not self._page_create_tool or self._writes_disabled:
+            return "hindsight_create_page is disabled; set page_create_tool to allow it."
+        name = args["name"]
+        resp = self._run_hindsight_operation(
+            lambda c: _pages_method(c, "acreate_page", "acreate_knowledge_page")(
+                bank_id=self._bank_id, name=name, source_query=args["question"]
+            ),
+            repeatable=False,  # a retried create would make a second page
+        )
+        return f"Created page {name} ({resp.page_id}). Hindsight builds it in the background and keeps it up to date."
+
+    # tool name -> (required args, handler, user-facing failure prefix)
     _TOOL_HANDLERS = {
-        "hindsight_retain": ("content", _tool_retain, "Failed to store memory"),
-        "hindsight_recall": ("query", _tool_recall, "Failed to search memory"),
-        "hindsight_reflect": ("query", _tool_reflect, "Failed to reflect"),
+        "hindsight_retain": (("content",), _tool_retain, "Failed to store memory"),
+        "hindsight_recall": (("query",), _tool_recall, "Failed to search memory"),
+        "hindsight_reflect": (("query",), _tool_reflect, "Failed to reflect"),
+        "hindsight_search_pages": (("query",), _tool_search_pages, "Failed to search pages"),
+        "hindsight_read_page": (("page_id",), _tool_read_page, "Failed to read page"),
+        "hindsight_list_pages": ((), _tool_list_pages, "Failed to list pages"),
+        "hindsight_create_page": (("name", "question"), _tool_create_page, "Failed to create page"),
     }
 
     def handle_tool_call(self, tool_name: str, args: dict, **kwargs) -> str:
         if tool_name not in self._TOOL_HANDLERS:
             return tool_error(f"Unknown tool: {tool_name}")
         required, handler, failure = self._TOOL_HANDLERS[tool_name]
-        if not args.get(required, ""):
-            return tool_error(f"Missing required parameter: {required}")
+        for name in required:
+            if not args.get(name, ""):
+                return tool_error(f"Missing required parameter: {name}")
         try:
             # ensure_ascii=False: escaped CJK costs ~3x the tokens in the tool result (#6561).
             return json.dumps({"result": handler(self, args)}, ensure_ascii=False)
         except Exception as e:
             logger.warning("%s failed: %s", tool_name, e, exc_info=True)
-            return tool_error(f"{failure}: {str(e) or type(e).__name__}")
+            return tool_error(f"{failure}: {_api_error_detail(e)}")
 
     # -- session lifecycle -------------------------------------------------------
 
@@ -2326,6 +2770,9 @@ class HindsightMemoryProvider(MemoryProvider):
             self._write_bank_ids = self._build_write_bank_ids()
         self._session_turns = []
         self._turn_counter = self._turn_index = self._last_retained_turn_count = 0
+        # The new session reads session_context afresh: the bank may have changed above, and a
+        # mental model refreshed since the last session is picked up here, as the docs promise.
+        self._session_context_block = None
         logger.debug(
             "Hindsight on_session_switch: new_session=%s parent=%s reset=%s doc=%s",
             self._session_id,
@@ -2333,6 +2780,37 @@ class HindsightMemoryProvider(MemoryProvider):
             reset,
             self._document_id,
         )
+
+    # Hermes pre-compress checkpoint API v2: with compression.checkpoint_required on, Hermes
+    # compacts only after on_pre_compress returns, and keeps the full transcript if it raises.
+    pre_compress_checkpoint_api_version = 2
+
+    def on_pre_compress(
+        self, messages: list[dict[str, Any]], *, require_checkpoint: bool = False, **kwargs: Any
+    ) -> str:
+        """Best effort: nothing to do, sync_turn already retained these turns. Required: store the
+        messages about to be compacted, synchronously, before Hermes drops them; raise on failure."""
+        if not require_checkpoint:
+            return ""
+        if self._writes_disabled:
+            raise RuntimeError("Hindsight cannot write from this run, so it cannot checkpoint")
+        # default=str: an odd value in a message (a multimodal part object) must not raise here, or
+        # Hermes would refuse every compression of this conversation for a reason no retry can fix.
+        content = json.dumps(messages, ensure_ascii=False, default=str)
+        # Same messages -> same document: a retried compaction overwrites, it doesn't duplicate.
+        document_id = f"{self._session_id}-checkpoint-{uuid.uuid5(uuid.NAMESPACE_OID, content).hex[:16]}"
+        item = self._build_retain_kwargs(
+            content,
+            context=_with_relayed_note(self._retain_context),
+            metadata=self._build_metadata(message_count=len(messages), turn_index=self._turn_index),
+            tags=[f"session:{self._session_id}", "checkpoint:pre-compress"],
+        )
+        # A primary-bank failure raises (Hermes then refuses to compact); extra banks are best effort.
+        self._write_to_banks(
+            list(self._write_bank_ids),
+            lambda bank_id: self._retain_batch(item, bank_id=bank_id, document_id=document_id, retain_async=False),
+        )
+        return ""
 
     def _close_client(self) -> None:
         """Both modes now hold a plain ``hindsight_client.Hindsight``, so one aclose on the

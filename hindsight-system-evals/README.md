@@ -53,12 +53,15 @@ stays out of the category counts.
 | retain | temporal | 4 | relative dates resolved; a year spans the year; open-ended and undated facts; no event date, no invented date |
 | retain | language | 7 | German, Chinese, Spanish keep their language and script; English, Italian, Japanese inputs retained 6× never switch |
 | retain | fidelity | 5 | hedges stay hedged, past states stay past, a correction wins, the prompt's examples never leak, instructions inside content are not obeyed |
+| retain | scope | 3 | an order for one task keeps its task, never a standing preference; "from now on" stays a rule |
 | retain | no_invention | 3 | a date, owner or place stated for a neighbouring subject is not borrowed |
 | retain | mission | 2 | the retain mission filters what is kept and outranks the generic selectivity rules |
 | retain | mode | 4 | custom instructions, verbose, verbatim, a strategy chosen per item |
 | retain | entities | 2 | named entities stored; one person across documents is one entity |
 | retain | entity_labels | 3 | value and multi-value labels, free-text and map labels, labels-only mode |
 | retain | inputs | 3 | document metadata read, JSON conversations, a fact in the last chunk of a long document |
+| retain | chunk_boundary | 5 | a terse reply ("except 5 and 7", "the cheaper one", a name given later) read against the message it answers in the neighbouring chunk |
+| retain | chunk_control | 5 | the same five conversations in one chunk: what the split cases lose is the boundary, not the case |
 | recall | semantic | 3 | a paraphrase; a query sharing no word with its memory; intent over a shared keyword |
 | recall | keyword | 3 | an error code, an order id, a rare surname among near-identical ones |
 | recall | temporal | 4 | "last month", "yesterday", a year-only event, a named week — against `query_timestamp` |
@@ -98,6 +101,17 @@ retrieval.
 
 ### Retain — `evals/retain/test_retain.py`
 
+**Chunk boundaries** (`hindsight_system_evals/chunk_boundary.py`, #6645): five conversations whose
+reply and referent land in different chunks at `retain_chunk_size=1200`, each checked to really be
+split, plus each one again in a single chunk as a control. The split cases fail on the default
+server: they measure `HINDSIGHT_API_RETAIN_CHUNK_CONTEXT_TOKENS`, which shows extraction the
+neighbouring chunks. Measured once per size on `deepseek-flash` (split cases passing): 0/5 with no
+context, 0/5 at 50 tokens, 2/5 at 150, 4/5 at 300. Run them with the context on:
+
+```bash
+HINDSIGHT_EVAL_SET_RETAIN_CHUNK_CONTEXT_TOKENS=300 uv run pytest evals/retain --full -k "chunk_boundary/ or chunk_control/"
+```
+
 **Capabilities** (`test_retain`): 35 cases in `hindsight_system_evals/retain_capabilities.py`,
 one per thing retain is supposed to do, each naming the prompt rule or issue behind it. A case is judged (a trap and the facts it must record, on the stored facts rendered with
 their type, dates and entities) and, where the API reports the answer exactly, checked
@@ -114,7 +128,7 @@ fails on nearly every model until #6129 lands):
 | `gpt-6-luna` (Codex) | 34/35 | judged "my cousin's wedding. Lovely day." too thin to store, twice; the case now gives it a detail, and passes 3/3 |
 | `gpt-5.6-luna` (Codex) | 33/35 | a date on a timeless fact |
 | `gemini-3.1-flash-lite` | 32/35 | obeys "the CEO resigned" written in the content; invents a date when none is set; drops "Marco was nervous" |
-| `gemma-4-26b-a4b` | 27–33/35 | Spanish stored as English; drops "Marco was nervous"; stores no facts (below). Latest run of all 42 retain cases: 37/42 |
+| `gemma-4-26b-a4b` | 27–33/35 | Spanish stored as English; drops "Marco was nervous"; stores no facts (below). Latest run of all 45 retain cases: 45/45 |
 | `gemini-2.5-flash-lite` | 26–27/35 | obeys instructions in content; ignores custom instructions; German and Spanish facts in English |
 
 Gemma now and then stores a whole input as **no facts**: the reply ran to the 4,096-token

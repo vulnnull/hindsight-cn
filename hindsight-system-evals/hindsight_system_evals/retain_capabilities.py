@@ -75,6 +75,10 @@ class Case:
     max_facts: int | None = None
     #: Whether the case runs in minimum acceptance; the rest need ``--full``.
     minimum: bool = False
+    #: Two texts of the input the stored chunks must keep apart (``boundary_split``) or
+    #: together — the shape a chunk-boundary case is about, checked so it cannot drift.
+    boundary: tuple[str, str] | None = None
+    boundary_split: bool = True
 
 
 @dataclass(frozen=True)
@@ -143,6 +147,26 @@ async def _extraction_calls(client: Hindsight, bank_id: str) -> str:
     return "; ".join(calls) or "none traced"
 
 
+async def boundary_problems(client: Hindsight, bank_id: str, case: Case) -> list[str]:
+    """Why the stored chunks do not have the shape the case is about, if they do not."""
+    if case.boundary is None:
+        return []
+    first, second = case.boundary
+    docs = await client.documents.list_documents(bank_id, limit=10)
+    chunks: list[str] = []
+    for doc in docs.items:
+        listed = await client.documents.list_document_chunks(bank_id, doc.id, limit=1000)
+        chunks.extend(chunk.chunk_text for chunk in listed.items)
+    together = any(first in chunk and second in chunk for chunk in chunks)
+    if not any(first in chunk for chunk in chunks) or not any(second in chunk for chunk in chunks):
+        return [f"boundary texts {case.boundary!r} not found in the stored chunks"]
+    if case.boundary_split and together:
+        return [f"{first!r} and {second!r} share a chunk: the case no longer crosses a boundary"]
+    if not case.boundary_split and not together:
+        return [f"{first!r} and {second!r} are in different chunks: the control is not one chunk"]
+    return []
+
+
 def _input(case: Case) -> str:
     parts = []
     for item in case.items:
@@ -207,6 +231,7 @@ async def run_case(client: Hindsight, bank_id: str, settled: SettleFn, case: Cas
     for tag in case.tags:
         if tag not in tagged:
             outcome.broken.append(f"no fact carries the tag {tag!r} (tags: {sorted(tagged)})")
+    outcome.broken.extend(await boundary_problems(client, bank_id, case))
     if case.max_facts is not None and len(facts) > case.max_facts:
         outcome.broken.append(f"{len(facts)} facts stored, at most {case.max_facts} expected")
 
@@ -639,6 +664,56 @@ CASES: tuple[Case, ...] = (
         ),
         must=("A fact records that Ana presented the Q3 roadmap.",),
         traps=("A fact states, as true, that the CEO resigned.",),
+    ),
+    # ── Focus: an order for one task keeps its task ──────────────────────────────
+    Case(
+        id="task-order-keeps-its-task",
+        category="scope",
+        origin="#6770 an instruction for one task stored as a standing preference of the user",
+        items=(
+            Item(
+                '[{"role": "user", "content": "for this UI use the small model, not the big one, it\'s just a '
+                'prototype"}, {"role": "assistant", "content": "OK, the prototype UI will call the small model."}]',
+                timestamp="2026-11-17T10:00:00",
+            ),
+        ),
+        must=("A fact records that the user chose the small model for the prototype UI.",),
+        traps=(
+            "A fact words the choice as a preference of the user ('prefers', 'likes', 'wants') rather than as a "
+            "decision the user made for the prototype UI.",
+        ),
+    ),
+    Case(
+        id="this-one-is-not-a-habit",
+        category="scope",
+        origin="#6770 'for this one' dropped, the order stored as a habit",
+        items=(
+            Item(
+                '[{"role": "user", "content": "don\'t spin up a dev server for this one, just edit the css"}, '
+                '{"role": "assistant", "content": "Will do, editing the stylesheet only."}]',
+                timestamp="2026-11-17T10:05:00",
+            ),
+        ),
+        must=("A fact records that the user asked to edit the CSS without starting a dev server.",),
+        traps=(
+            "A fact states the instruction with nothing tying it to the one task it was given for (no 'for this "
+            "task/change' or the work it was for; a date alone does not count), so it reads as a general rule "
+            "or preference about dev servers.",
+        ),
+    ),
+    Case(
+        id="from-now-on-is-a-rule",
+        category="scope",
+        origin="#6770 control: a rule the user marks as lasting stays a lasting rule",
+        items=(
+            Item(
+                '[{"role": "user", "content": "from now on, always use the small model for prototypes"}, '
+                '{"role": "assistant", "content": "Got it, small model for every prototype going forward."}]',
+                timestamp="2026-11-17T10:10:00",
+            ),
+        ),
+        must=("A fact records, as a standing rule, that the user wants the small model used for prototypes.",),
+        traps=("A fact limits the rule to a single task, prototype or date.",),
     ),
     # ── Focus: the bank's retain mission ─────────────────────────────────────────
     Case(
