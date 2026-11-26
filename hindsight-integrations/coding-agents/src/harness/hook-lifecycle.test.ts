@@ -134,7 +134,7 @@ describe("HOOK_HARNESSES lifecycle contract", () => {
       stop: { event: "Stop", entry: "antigravity-stop-hook.js", timeout: 30 },
     });
     expect(antigravity.prompt.emit("context")).toEqual({
-      injectSteps: [{ ephemeralMessage: "context" }],
+      injectSteps: [{ systemMessage: { systemMessage: "context" } }],
     });
 
     const copilot = HOOK_HARNESSES["copilot-cli"];
@@ -353,6 +353,16 @@ describe("HOOK_HARNESSES lifecycle contract", () => {
       expect(ms, `${harness} stop timeout vs hostTimeoutSec`).toBe(
         spec.retain.hostTimeoutSec * 1000
       );
+    }
+  });
+});
+
+describe("color (#6502)", () => {
+  it("only Claude Code, which paints color codes, gets them", () => {
+    for (const [name, spec] of Object.entries(HOOK_HARNESSES)) {
+      const want = name === "claude-code";
+      expect(spec.prompt.color === true, `${name} prompt`).toBe(want);
+      expect(spec.sessionStart.color === true, `${name} sessionStart`).toBe(want);
     }
   });
 });

@@ -22,11 +22,11 @@ import { DAEMON_WAIT_RETAIN_MS, DAEMON_WAIT_SESSION_START_MS, ensureDaemon } fro
 import { diag } from "./diag";
 import { describeError, log, setLogLevel } from "./log";
 import type { HindsightClient } from "./hindsight";
-import { buildPagesPreamble } from "./page-injection";
+import { buildPagesPreamble, toolGuideOpts } from "./page-injection";
 import { buildPageTools, type ToolSpec } from "./page-tools";
 import { buildPageTrigger } from "./missions";
 import { retainLiveSession, type TransportTurn } from "./chat";
-import { memoryCursorStore } from "./retain-cursor";
+import { fingerprintTurns, memoryCursorStore } from "./retain-cursor";
 import { memoryUsageCursorStore, recordUsage } from "./usage";
 import { buildRetainStamp } from "./retain-stamp";
 import { buildSessionStartContext } from "./session-start";
@@ -39,10 +39,18 @@ const HARNESS = "opencode";
 /** How long `flush` holds a host's exit for in-flight write-backs: room for one retain request. */
 const FLUSH_TIMEOUT_MS = 10_000;
 
+/** What session-idle last wrote for one session, so a repeated idle does not write it again. */
+interface SessionState {
+  startTs: string;
+  retainedTurns: number;
+  /** Fingerprint of the whole transcript idle last retained; undefined until it retains one. */
+  retainedFingerprint?: string;
+}
+
 export class RuntimeCore {
   private readonly injection = new Map<string, string>(); // sessionId -> this turn's injection block
   private readonly turnCount = new Map<string, number>(); // sessionId -> user-turn counter (cadence)
-  private readonly sessionState = new Map<string, { startTs: string; retainedTurns: number }>();
+  private readonly sessionState = new Map<string, SessionState>();
   /** Live write-back cursors. In memory, unlike the hook harnesses': this host outlives the session. */
   private readonly cursors = memoryCursorStore();
   /** Turns already written to the usage log (core/usage.ts), per session. */
@@ -94,6 +102,7 @@ export class RuntimeCore {
       reflectTimeoutMs: this.cfg.reflectToolTimeoutMs,
       reflectBudget: this.cfg.reflectBudget,
       toolGuideExtra: this.cfg.toolGuideExtra,
+      writeTools: this.cfg.writeTools,
       stampFor: () =>
         buildRetainStamp(this.cfg, {
           directory: this.projectDir,
@@ -150,9 +159,9 @@ export class RuntimeCore {
       // on stderr (shows in the plugin log / console) rather than dropping it.
       // Banner: via the host's toast API when available (stderr corrupts the TUI); always logged.
       if (out.systemMessage) {
-        const plain = out.systemMessage.replace(/\x1b\[[0-9;]*m/g, "");
-        log.info(this.harness, plain);
-        this.notify?.("Hindsight", plain.replace(/^Hindsight is /, "Is "));
+        // Plain text: buildSessionStartContext only paints the banner when asked to (#6502).
+        log.info(this.harness, out.systemMessage);
+        this.notify?.("Hindsight", out.systemMessage.replace(/^Hindsight is /, "Is "));
       }
       this.deferInitialReflect = out.deferInitialReflect === true;
     } catch {
@@ -203,23 +212,14 @@ export class RuntimeCore {
     // existed told every later session "No pages yet" while the same turn's memory block
     // listed pages by id (#4607).
     if (turns === 1) {
-      blocks.push(
-        buildPagesPreamble(output.pages, {
-          reflectOnNewGoals: this.cfg.autoInject !== "reflect",
-          extra: this.cfg.toolGuideExtra,
-        })
-      );
+      blocks.push(buildPagesPreamble(output.pages, toolGuideOpts(this.cfg)));
     }
     if (output.context) blocks.push(output.context);
     // OpenCode has no user-message hook channel; use its native toast instead of stderr, which
     // renders inside the TUI input line. The shared output owns when a notice exists.
     if (output.notice) {
-      // The notice is painted for a terminal; a toast shows the escapes as text (#6257).
-      const preview = output.notice
-        .replace(/\x1b\[[0-9;]*m/g, "")
-        .replace(/\s+/g, " ")
-        .trim()
-        .slice(0, 140);
+      // Plain text: buildHookOutput only paints the notice when asked to (#6257, #6502).
+      const preview = output.notice.replace(/\s+/g, " ").trim().slice(0, 140);
       log.info(this.harness, "reflect goal", { preview });
       this.notify?.("Hindsight · recalled past decisions", preview);
     }
@@ -301,10 +301,21 @@ export class RuntimeCore {
     this.recordUsage(sessionId, turns, true); // idle: the reply is in
     if (!this.writeBackEnabled) return; // usage above is local and recorded regardless (#5391)
     const st = this.stateFor(sessionId);
-    // idle can fire more than once for one exchange (and again on a session with no new activity);
-    // only retain when this transcript actually grew past what we last wrote.
-    if (turns.length <= st.retainedTurns) return;
+    // idle can fire more than once for one exchange (and again on a session with no new activity),
+    // so skip a transcript identical to the one idle last wrote. Only IDENTICAL: a growth-only count
+    // stalled write-back for good once a compaction shortened the transcript (#6314) — the count
+    // never climbed back past the old high-water mark. A shorter or rewritten transcript is retained
+    // and planRetain turns it into a replace.
+    const fingerprint = fingerprintTurns(turns, turns.length);
+    if (fingerprint === st.retainedFingerprint) return;
+    if (turns.length < st.retainedTurns)
+      diag(this.harness, "retain_after_shrink", {
+        from: st.retainedTurns,
+        to: turns.length,
+        session: sessionId,
+      });
     st.retainedTurns = turns.length;
+    st.retainedFingerprint = fingerprint;
     this.retain(sessionId, turns, st.startTs, "idle");
   }
 
@@ -323,10 +334,7 @@ export class RuntimeCore {
     });
   }
 
-  private stateFor(sessionId: string): {
-    startTs: string;
-    retainedTurns: number;
-  } {
+  private stateFor(sessionId: string): SessionState {
     let st = this.sessionState.get(sessionId);
     if (!st) {
       st = { startTs: new Date().toISOString(), retainedTurns: 0 };

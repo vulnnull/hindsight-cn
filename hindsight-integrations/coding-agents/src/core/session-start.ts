@@ -33,9 +33,9 @@ import { deriveBankIdOrSkip } from "./bank";
 import { brandWord } from "./brand";
 import { diag, readHookEvent } from "./diag";
 import { setLogLevel } from "./log";
-import { parsePageList, buildPagesPreamble, type PageRef } from "./page-injection";
+import { parsePageList, buildPagesPreamble, toolGuideOpts, type PageRef } from "./page-injection";
 import type { ClientOpts, RetainOpts } from "./hindsight";
-import type { RetainExtractionMode } from "./missions";
+import { buildPageTrigger, type PageTrigger, type RetainExtractionMode } from "./missions";
 import { buildRetainStamp } from "./retain-stamp";
 import { detectLegacyClaudePlugin, legacyClaudePluginWarning } from "./legacy";
 import { HindsightClient } from "./hindsight";
@@ -64,6 +64,12 @@ interface SeedContextClient {
     extractionMode?: RetainExtractionMode;
     defaults?: Record<string, unknown>;
   }): Promise<void>;
+  // Optional: seeds the pages when the deepen engine (which otherwise does it) is not started.
+  seedPages?(
+    pageTrigger?: PageTrigger,
+    pages?: Config["pages"],
+    customPages?: Config["customPages"]
+  ): Promise<void>;
   // Optional: used to write the survey-baseline marker (Option A). HindsightClient has it; the
   // minimal test clients omit it, and the baseline write guards on its presence.
   retain?(
@@ -81,12 +87,17 @@ interface SeedContextClient {
  * server's banner) plus the repo's bank. Shown on EVERY session start; "learning" on a cold
  * repo (first ingest running), "remembering" once the bank is warm.
  */
-export function buildSeedBanner(bankId: string, cold = true, gitNote?: string): string {
+export function buildSeedBanner(
+  bankId: string,
+  cold = true,
+  gitNote?: string,
+  color = false
+): string {
   // Two lines: what Hindsight DOES for this repo (value, not mechanism), then where the memory
   // lives + sync state. The brand word leads line 1 so the host TUI's message prefix lands there.
   const headline = cold
-    ? `${brandWord()} is learning this repo — ingesting its decisions, conventions and history`
-    : `${brandWord()} is tracking the decisions, conventions and history of this repo`;
+    ? `${brandWord(color)} is learning this repo — ingesting its decisions, conventions and history`
+    : `${brandWord(color)} is tracking the decisions, conventions and history of this repo`;
   const details = `  ↳ memory bank “${bankId}”` + (gitNote ? ` · ${gitNote}` : "");
   return `${headline}\n${details}`;
 }
@@ -160,6 +171,8 @@ export interface SessionStartHookSpec {
    *  throw. TraeCode uses this to keep `<repo>/.trae/mcp.json` registering its MCP server and to
    *  nudge when the workspace-MCP gate hides it (core/traecode-mcp.ts). */
   ensureMcpRegistration?: (cwd: string) => string | undefined;
+  /** The host paints terminal color codes in `systemMessage` — see HookSpec.color (#6502). */
+  color?: boolean;
 }
 
 /**
@@ -185,6 +198,8 @@ export async function buildSessionStartContext(args: {
   /** Registry key of the old Claude Code plugin still active for `cwd`; defaults to reading
    *  Claude's plugin files, and only for the claude-code harness. */
   detectLegacyPlugin?: (cwd: string) => string | undefined;
+  /** Paint the banner's brand word — SessionStartHookSpec.color. */
+  color?: boolean;
 }): Promise<SessionStartOutput> {
   const { cwd, bankId, cfg, client, stateDir } = args;
   const t0 = Date.now();
@@ -356,13 +371,25 @@ export async function buildSessionStartContext(args: {
     // The deepen engine is what configures the bank; without it a session write-back would name a
     // `conversation` strategy the bank does not have, and the server would extract it with its
     // generic rules (CL-Bench: "The user is working on Question 11", "The agent ran a query").
-    await client
+    // Best-effort: an unreachable server is retried next session.
+    const configured = await client
       .configureBankSettings?.({
         manage: cfg.manageBankConfig,
         extractionMode: cfg.retainExtractionMode,
         defaults: cfg.defaultBankConfig,
       })
-      .catch(() => {}); // best-effort: an unreachable server is retried next session
+      .then(
+        () => true,
+        () => false
+      );
+    // A directory with no git history gets its pages here too (#5982): they are written from the
+    // bank's memories, not from git, so only `autoSeed: false` (which also stops deepen) skips them.
+    // Only once the settings went through: a server that just timed out on them would otherwise
+    // make the session start wait out a second timeout for nothing.
+    if (configured && cfg.autoSeed !== false) {
+      // Best-effort, like the settings above.
+      await client.seedPages?.(buildPageTrigger(cfg), cfg.pages, cfg.customPages).catch(() => {});
+    }
   }
 
   let pages: PageRef[] = [];
@@ -374,10 +401,7 @@ export async function buildSessionStartContext(args: {
     }
     /* fail-open preamble */
   }
-  const additionalContext = buildPagesPreamble(pages, {
-    reflectOnNewGoals: cfg.autoInject !== "reflect",
-    extra: cfg.toolGuideExtra,
-  });
+  const additionalContext = buildPagesPreamble(pages, toolGuideOpts(cfg));
   // An empty page roster is NOT an empty bank: a bank with memories and no pages still answers a
   // reflect (#5209), so only the confirmed-empty probe above defers it.
   const deferInitialReflect = bankEmpty;
@@ -395,7 +419,7 @@ export async function buildSessionStartContext(args: {
       cold: cold === true,
     }).catch(() => undefined);
   }
-  systemMessage = buildSeedBanner(bankId, cold === true, gitNote);
+  systemMessage = buildSeedBanner(bankId, cold === true, gitNote, args.color === true);
 
   // The old per-agent plugin keeps running next to this one until the user removes it — say so
   // where they will see it. Only Claude Code had that plugin.
@@ -468,7 +492,15 @@ export async function runSessionStartHook(
       observationScopes: cfg.observationScopes,
     });
 
-    const out = await buildSessionStartContext({ cwd, sessionRoot, bankId, cfg, client, harness });
+    const out = await buildSessionStartContext({
+      cwd,
+      sessionRoot,
+      bankId,
+      cfg,
+      client,
+      harness,
+      color: spec.color,
+    });
     // The registration's banner hint (e.g. TraeCode's workspace-MCP gate) rides the same
     // user-facing message as the legacy-plugin warning — the banner is the only visible channel.
     if (mcpHint)

@@ -174,7 +174,11 @@ const antigravityPrompt: HookSpec = {
     cwd: antigravityCwd(ev),
     sessionId: ev.conversationId as string | undefined,
   }),
-  emit: (context) => ({ injectSteps: context ? [{ ephemeralMessage: context }] : [] }),
+  // `systemMessage` stays in the trajectory, so recall survives the turn's tool calls. agy
+  // deprecated `ephemeralMessage`; on agy 1.5.4–1.5.9 it reached only the first model call (#6632).
+  emit: (context) => ({
+    injectSteps: context ? [{ systemMessage: { systemMessage: context } }] : [],
+  }),
 };
 
 const cursorPrompt: HookSpec = {
@@ -294,8 +298,10 @@ export const HOOK_HARNESSES: Record<HookHarnessName, HookHarnessSpec> = {
       prompt: { event: "UserPromptSubmit", entry: "claude-hook.js", timeout: 30 },
       stop: { event: "Stop", entry: "claude-stop-hook.js", timeout: 60 },
     },
-    sessionStart: { ...standardSessionStart("claude-code"), accept: notGrokHosted },
-    prompt: { ...claudePrompt, accept: notGrokHosted },
+    // Claude Code paints color codes in systemMessage; hosts left without `color` get plain text,
+    // since one that does not paint them shows the codes as text (#6502).
+    sessionStart: { ...standardSessionStart("claude-code"), accept: notGrokHosted, color: true },
+    prompt: { ...claudePrompt, accept: notGrokHosted, color: true },
     retain: {
       hostTimeoutSec: 60,
       harness: "claude-code",
