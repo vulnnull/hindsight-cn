@@ -17,10 +17,14 @@ import { join } from "node:path";
 import { DEFAULT_SEED_LIMIT } from "./seed";
 import { isOptedIn, pathSection } from "./bank";
 import { log } from "./log";
+import { parseSessionContext, type SessionContextRef } from "./session-context";
+import { type KeptToolInput, setKeptToolInputs } from "./transcript-util";
 import {
   DEFAULT_OBSERVATION_SCOPES,
   DEFAULT_PAGE_SEARCH_LIMIT,
   type ObservationScopes,
+  TAGS_MATCH_MODES,
+  type TagsMatch,
 } from "./hindsight";
 import {
   type CustomPagesConfig,
@@ -59,6 +63,15 @@ export interface RawConfig {
   serverMode?: "cloud" | "self-hosted" | "daemon";
   apiUrl?: string; // Hindsight API base URL (default https://api.hindsight.vectorize.io — Cloud; set to http://localhost:8888 for a local server)
   apiToken?: string; // bearer token (optional)
+  /** The name the installer registers the MCP server under in every agent (`install --mcp-name`,
+   *  default "hindsight"), so it can sit beside a server of the user's own called "hindsight".
+   *  Letters, digits, "-" and "_", at most 64. Top level only: never read from a layer. */
+  mcpServerName?: string;
+  /** Extra HTTP headers sent with every request to the Hindsight API, e.g. the
+   *  `CF-Access-Client-Id` / `CF-Access-Client-Secret` pair of a Cloudflare Access service token
+   *  for a server behind Access (#6651). Fixed values: the plugin never runs a command to get them.
+   *  `Authorization` stays the plugin's own when `apiToken` is set. File-only, like the other maps. */
+  apiHeaders?: Record<string, string>;
   /** Daemon mode: port the local daemon listens on (default 9077).
    *  NOT 8888 — that is the conventional port for a server you run yourself, and a daemon must
    *  never squat on it. A healthy server already on this port is adopted rather than restarted. */
@@ -98,12 +111,18 @@ export interface RawConfig {
    *  cadence alike. Gates ONLY the transcript — recall, git ingest, seeding and the memory
    *  tools keep working (that is `disabled`'s job). */
   retainSessions?: boolean;
+  /** Codex only: don't write back a session whose rollout says another client started it, e.g.
+   *  ["Claude Code"] for jobs Claude Code's Codex plugin delegates — the parent session already
+   *  holds the brief and the result (#5507). Matched against each rollout's own
+   *  `session_meta.originator`, which a sub-agent thread carries too. Also honoured by the
+   *  conversation import. Recall is unchanged. */
+  skipOriginators?: string[];
   /** Cap on concurrent retain-related requests the client sends to the API (default 10):
    *  drain()'s per-operation polls and deepen's chat/git retain pools. A single request returning
    *  200 while bursts get 429s means the server is rate-limiting concurrency, not total volume —
    *  lower this rather than raising it. */
   maxParallelRetains?: number;
-  /** Automatic session-reflect timeout (default 20000). The default, with the fallback chain after
+  /** Automatic session-reflect timeout (default 15000). The default, with the fallback chain after
    *  it, fits the 30s prompt-hook timeout the installer registers on hook harnesses; going higher
    *  there needs that host timeout raised too, or the host kills the hook mid-reflect. */
   reflectTimeoutMs?: number;
@@ -115,10 +134,16 @@ export interface RawConfig {
    *  server decides when to give up, not an arbitrary client deadline (#3590). Unset, it inherits
    *  an explicitly-raised `reflectTimeoutMs` — a user who raised that meant "let reflect run". */
   reflectToolTimeoutMs?: number;
-  /** Retrieval timeout for autoInject "pages"/"recall" (default 7000), and the shared budget for
-   *  the page-search -> recall fallback after a reflect timeout/5xx. On hook harnesses, the full
+  /** Retrieval timeout for autoInject "pages"/"recall" (default 5000), the shared budget for
+   *  the page-search -> recall fallback after a reflect timeout/5xx, and the limit on the page-list
+   *  fetches in the prompt and SessionStart hooks. On hook harnesses, the full
    *  reflect + fallback must fit the host's prompt-hook timeout (30s by default). */
   injectTimeoutMs?: number;
+  /** Most characters of the prompt that autoInject "pages"/"recall" (and the reflect fallback)
+   *  search with. Unset = no extra cap: page search keeps its 500 characters and recall its
+   *  ~500-token bound. A long question makes a slow reranker on a CPU-only server spend the whole
+   *  `injectTimeoutMs`, so memory never arrives (#5089). */
+  injectQueryMaxChars?: number;
   /** Reflect budget for the `hindsight_reflect` tool: "low" | "mid" | "high" (default "high").
    *  Drop to "mid"/"low" on a large bank where high-budget synthesis exceeds the server's wall
    *  timeout. The automatic session-start reflect is NOT affected — it always uses "low" to fit
@@ -156,11 +181,34 @@ export interface RawConfig {
    *  back empty on it: those set `{"types": ["world", "experience"]}`, or `{"types": null}` for
    *  every type. */
   recallOptions?: Record<string, unknown>;
+  /** Tools whose input is what the agent SAID to the user, kept in full as an assistant turn instead
+   *  of a bare action line: a chat bridge's reply tool, or a command-line tool that delivers the
+   *  reply. Keyed by the tool's name as the transcript records it; the value names the input field
+   *  that holds the text, e.g. {"mcp__plugin_telegram_telegram__reply": "text"}. A rule can be
+   *  {"field": "command", "match": "^send-reply "} to keep only the calls whose field matches the
+   *  regex — for a shell tool that also runs everything else. Kept text is capped at 8000 characters.
+   *  A rule with no field or a bad regex is dropped with a warning. Default: none.
+   *
+   *  Global or per harness, not per bank: the rules apply before a bank is resolved. File-only, like
+   *  `recallOptions` — a nested object does not flatten into an env var. */
+  keepToolInputs?: Record<string, KeptToolInput>;
   /** Your own guidance for how the agent should treat memory, added AFTER the built-in tool guide
    *  (SessionStart and every refresh) and after the crediting note that comes back with
    *  `hindsight_search_pages` results. It adds to the built-in text, never replaces it,
    *  so the plugin's call triggers and crediting rule keep up with releases (#4791). */
   toolGuideExtra?: string;
+  /** Mental models and pages whose content goes into context when a session starts, in order:
+   *  `mental_model:<id>` or `page:<id>` (a bare id is a mental model). Read once per session (#5714). */
+  sessionContext?: string[];
+  /** Replaces the built-in list of moments the tool guide tells the agent to search memory
+   *  first (a bug report, writing a test, about to commit…), which are a code repository's. The
+   *  rest of the guide, crediting rule included, stays. For a bank that is not a code repo (#6526). */
+  toolGuideMoments?: string;
+  /** The sentence appended to every page question that says what the page is about. Unset: the
+   *  built-in one (scope to this repo; or, on a bank several projects share, attribute by project
+   *  and leave out the external tools they use). A string replaces it; "" drops it. Existing
+   *  pages are re-synced to the new wording on the next session (#6526). */
+  pageScope?: string;
   pageRefreshEveryTurns?: number; // page refresh cadence in user turns (default 1; 0 also means 1)
   /** What it COSTS to keep this project's pages current — the trigger stamped on every
    *  page this plugin creates (the seeded taxonomy and each captured initiative):
@@ -235,7 +283,7 @@ export interface RawConfig {
   gitIngest?: "message" | "full" | "none";
   /** Extra tags stamped on every session write-back, e.g. ["project:{gitProject}", "env:work"].
    *  Placeholders: {gitProject} {project} {harness} {bankId} {sessionId} {timestamp} {channel}
-   *  {user} (see core/retain-stamp.ts). Mainly for a SHARED bank, where the bank id no longer says
+   *  {user} {branch} (see core/retain-stamp.ts). Mainly for a SHARED bank, where the bank id no longer says
    *  which repo a memory came from. Built-in tags win on conflict. */
   retainTags?: string[];
   /** Extra metadata stamped on every session write-back, e.g. {"repo": "{gitProject}"}. Same
@@ -245,6 +293,16 @@ export interface RawConfig {
    *  core/chat.ts, which names the user and the agent as the two speakers). Same placeholders as
    *  retainTags. Extraction reads this to decide WHOSE claim a sentence is. */
   retainContext?: string;
+  /** Tags every READ is narrowed to — the automatic recall and reflect injected before a prompt, and the
+   *  `hindsight_reflect` tool — e.g. ["project:{gitProject}"]. Same placeholders as retainTags.
+   *  The other half of a shared bank: retainTags records which repo a memory came from, this keeps
+   *  another repo's memories out of this one's answers (#4226). Unset (the default) reads the
+   *  whole bank. Page search is not narrowed: the server cannot filter pages by tag yet (#6967). */
+  recallTags?: string[];
+  /** How `recallTags` match (default "any": memories with any of the tags, plus untagged ones,
+   *  so knowledge shared across repos still answers). "any_strict"/"all_strict" leave out
+   *  untagged memories; "all" requires every tag. */
+  recallTagsMatch?: TagsMatch;
   /** Let the plugin shape the bank's own configuration — the retain strategies it writes under,
    *  the `knowledge` entity-label group, and (on a bank that has none) the missions (default true).
    *
@@ -315,6 +373,7 @@ export interface Config {
    *  that builds a client keeps working without knowing which mode is active. */
   apiUrl: string;
   apiToken?: string;
+  apiHeaders: Record<string, string>;
   apiPort: number;
   /** Undefined = never told the daemon to auto-exit; see RawConfig above. */
   daemonIdleTimeout?: number;
@@ -331,17 +390,24 @@ export interface Config {
   harness: string;
   disabled: boolean;
   retainSessions: boolean;
+  skipOriginators: string[];
   maxParallelRetains: number;
   reflectTimeoutMs: number;
   reflectToolTimeoutMs: number;
   injectTimeoutMs: number;
+  /** Positive integer, or undefined for no extra cap — see RawConfig.injectQueryMaxChars. */
+  injectQueryMaxChars: number | undefined;
   reflectBudget: "low" | "mid" | "high";
   autoInject: AutoInject;
   autoInjectEveryTurns: number;
   writeTools: boolean;
   pageSearchLimit: number;
   recallOptions: Record<string, unknown>;
+  keepToolInputs: Record<string, KeptToolInput>;
   toolGuideExtra?: string;
+  sessionContext: SessionContextRef[];
+  toolGuideMoments?: string;
+  pageScope?: string;
   pageRefreshEveryTurns: number;
   pageTriggerType: "auto-refresh" | "cron" | "manual";
   pageTriggerCron?: string;
@@ -357,6 +423,8 @@ export interface Config {
   retainTags: string[];
   retainMetadata: Record<string, string>;
   retainContext?: string;
+  recallTags: string[];
+  recallTagsMatch: TagsMatch;
   manageBankConfig: boolean;
   retainExtractionMode: RetainExtractionMode;
   defaultBankConfig: Record<string, unknown>;
@@ -496,11 +564,13 @@ function resolveCustomPages(raw: RawConfig["customPages"]): CustomPagesConfig {
 }
 
 /** Default timeout for the automatic hook reflect — see RawConfig.reflectTimeoutMs. */
-export const DEFAULT_REFLECT_TIMEOUT_MS = 20_000;
+// 15s + the 5s fallback below = 20s, leaving the 30s prompt-hook window room for Node start-up and
+// a slow server's TLS/connect (#6167). The page roster runs alongside, under injectTimeoutMs.
+export const DEFAULT_REFLECT_TIMEOUT_MS = 15_000;
 /** Default timeout for the agent-invoked `hindsight_reflect` tool — see RawConfig.reflectToolTimeoutMs. */
 export const DEFAULT_REFLECT_TOOL_TIMEOUT_MS = 330_000;
 /** Default retrieval budget for automatic injection — see RawConfig.injectTimeoutMs. */
-export const DEFAULT_INJECT_TIMEOUT_MS = 7_000;
+export const DEFAULT_INJECT_TIMEOUT_MS = 5_000;
 
 const REFLECT_BUDGETS = ["low", "mid", "high"] as const;
 
@@ -529,6 +599,15 @@ const OBSERVATION_SCOPE_MODES = [
   "all_combinations",
   "per_source",
 ] as const;
+
+/** Keep only string-valued headers: a number or a nested object would reach `fetch` as
+ *  "[object Object]", and an array would spread into numeric header names. */
+function resolveApiHeaders(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  return Object.fromEntries(
+    Object.entries(raw).filter((e): e is [string, string] => typeof e[1] === "string")
+  );
+}
 
 /**
  * Validate `observationScopes`, falling back to the default on anything unrecognized.
@@ -611,6 +690,7 @@ export function resolveConfig(raw: RawConfig = {}): Config {
     // daemon needs no plumbing through eight separate constructors.
     apiUrl: serverMode === "daemon" ? `http://127.0.0.1:${apiPort}` : (raw.apiUrl ?? CLOUD_URL),
     apiToken: raw.apiToken || undefined,
+    apiHeaders: resolveApiHeaders(raw.apiHeaders),
     apiPort,
     daemonIdleTimeout: raw.daemonIdleTimeout,
     daemonProfile: raw.daemonProfile || DEFAULT_DAEMON_PROFILE,
@@ -643,6 +723,10 @@ export function resolveConfig(raw: RawConfig = {}): Config {
       raw.reflectToolTimeoutMs ||
       Math.max(raw.reflectTimeoutMs || 0, DEFAULT_REFLECT_TOOL_TIMEOUT_MS),
     injectTimeoutMs: raw.injectTimeoutMs || DEFAULT_INJECT_TIMEOUT_MS,
+    injectQueryMaxChars:
+      raw.injectQueryMaxChars && raw.injectQueryMaxChars >= 1
+        ? Math.floor(raw.injectQueryMaxChars)
+        : undefined,
     reflectBudget: resolveReflectBudget(raw),
     autoInject: resolveAutoInject(raw),
     autoInjectEveryTurns: Math.max(0, Math.floor(raw.autoInjectEveryTurns || 0)),
@@ -656,10 +740,18 @@ export function resolveConfig(raw: RawConfig = {}): Config {
       !Array.isArray(raw.recallOptions)
         ? { ...raw.recallOptions }
         : {},
+    keepToolInputs: keptToolRules(raw.keepToolInputs),
     toolGuideExtra:
       typeof raw.toolGuideExtra === "string" && raw.toolGuideExtra.trim()
         ? raw.toolGuideExtra
         : undefined,
+    sessionContext: parseSessionContext(raw.sessionContext),
+    toolGuideMoments:
+      typeof raw.toolGuideMoments === "string" && raw.toolGuideMoments.trim()
+        ? raw.toolGuideMoments
+        : undefined,
+    // "" is a value here, not a miss: it turns the sentence off.
+    pageScope: typeof raw.pageScope === "string" ? raw.pageScope : undefined,
     // Every turn, not every tenth. The guide is what tells the agent WHEN to reach for memory, and
     // at a cadence of 10 a normal session is told once, on turn 1, and never again. Measured over
     // 40 real Claude Code turns, moving this from 10 to 1 took searches from 15% of turns to 32.5%
@@ -679,11 +771,21 @@ export function resolveConfig(raw: RawConfig = {}): Config {
     gitIngest: ["message", "full", "none"].includes(raw.gitIngest as string)
       ? (raw.gitIngest as "message" | "full" | "none")
       : "message",
+    skipOriginators: Array.isArray(raw.skipOriginators)
+      ? raw.skipOriginators
+          .filter((t): t is string => typeof t === "string")
+          .map((t) => t.trim())
+          .filter(Boolean)
+      : [],
     // Hostile input is a config typo, not an attack: keep only string entries so a stray number or
     // nested object cannot reach the API as a tag and fail the whole retain.
     retainTags: Array.isArray(raw.retainTags)
       ? raw.retainTags.filter((t): t is string => typeof t === "string" && t.trim() !== "")
       : [],
+    recallTags: Array.isArray(raw.recallTags)
+      ? raw.recallTags.filter((t): t is string => typeof t === "string" && t.trim() !== "")
+      : [],
+    recallTagsMatch: TAGS_MATCH_MODES.includes(raw.recallTagsMatch!) ? raw.recallTagsMatch! : "any",
     // Undefined, not "", when unset or blank: the retain call distinguishes "not configured" (use
     // the built-in default) from a configured value, and an empty context would strip the default.
     retainContext:
@@ -704,6 +806,17 @@ export function resolveConfig(raw: RawConfig = {}): Config {
       : "info",
     autoUpdate: raw.autoUpdate ?? true,
   };
+}
+
+export const DEFAULT_MCP_SERVER_NAME = "hindsight";
+/** Safe as a bare TOML key, a JSON key, a CLI argument, a `mcp__<name>__` tool prefix and inside
+ *  the SQL literal of Trae's enable switch. */
+export const MCP_SERVER_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+
+/** `mcpServerName` from the top level of the config file; the default when unset or invalid. */
+export function configuredMcpServerName(path: string = CONFIG_PATH): string {
+  const name = readRaw(path).mcpServerName;
+  return typeof name === "string" && MCP_SERVER_NAME_RE.test(name) ? name : DEFAULT_MCP_SERVER_NAME;
 }
 
 function readRaw(path: string): RawConfig {
@@ -759,8 +872,8 @@ function applyLayer(raw: RawConfig, layer: RawConfig, harness?: string): RawConf
  * containers, CI, and secret managers that inject `HINDSIGHT_API_TOKEN` rather than writing a
  * credential to disk.
  *
- * The map-valued settings (mapPathToBank, harnesses, banks, retainMetadata, recallOptions, pages,
- * customPages, defaultBankConfig) are deliberately
+ * The map-valued settings (apiHeaders, mapPathToBank, harnesses, banks, retainMetadata, recallOptions,
+ * pages, customPages, defaultBankConfig, keepToolInputs) are deliberately
  * absent: they are structures whose whole point is per-repo/per-harness/per-key branching, which
  * does not survive flattening into one env var. They stay file-only.
  */
@@ -788,12 +901,16 @@ const ENV_KEYS = {
   reflectTimeoutMs: "HINDSIGHT_REFLECT_TIMEOUT_MS",
   reflectToolTimeoutMs: "HINDSIGHT_REFLECT_TOOL_TIMEOUT_MS",
   injectTimeoutMs: "HINDSIGHT_INJECT_TIMEOUT_MS",
+  injectQueryMaxChars: "HINDSIGHT_INJECT_QUERY_MAX_CHARS",
   reflectBudget: "HINDSIGHT_REFLECT_BUDGET",
   autoInject: "HINDSIGHT_AUTO_INJECT",
   autoInjectEveryTurns: "HINDSIGHT_AUTO_INJECT_EVERY_TURNS",
   writeTools: "HINDSIGHT_WRITE_TOOLS",
   pageSearchLimit: "HINDSIGHT_PAGE_SEARCH_LIMIT",
   toolGuideExtra: "HINDSIGHT_TOOL_GUIDE_EXTRA",
+  sessionContext: "HINDSIGHT_SESSION_CONTEXT",
+  toolGuideMoments: "HINDSIGHT_TOOL_GUIDE_MOMENTS",
+  pageScope: "HINDSIGHT_PAGE_SCOPE",
   autoReflect: "HINDSIGHT_AUTO_REFLECT",
   pageRefreshEveryTurns: "HINDSIGHT_PAGE_REFRESH_EVERY_TURNS",
   pageTriggerType: "HINDSIGHT_PAGE_TRIGGER_TYPE",
@@ -813,6 +930,8 @@ const ENV_KEYS = {
   // Comma-separated, e.g. HINDSIGHT_RETAIN_TAGS="project:{gitProject},env:work". A LIST rather than
   // a map, so it flattens cleanly; its sibling retainMetadata stays file-only for the reason above.
   retainTags: "HINDSIGHT_RETAIN_TAGS",
+  recallTags: "HINDSIGHT_RECALL_TAGS",
+  recallTagsMatch: "HINDSIGHT_RECALL_TAGS_MATCH",
   manageBankConfig: "HINDSIGHT_MANAGE_BANK_CONFIG",
   retainExtractionMode: "HINDSIGHT_RETAIN_EXTRACTION_MODE",
 } as const satisfies Partial<Record<keyof RawConfig, string>>;
@@ -831,7 +950,12 @@ const ENV_BOOLEANS = new Set<keyof RawConfig>([
   "manageBankConfig",
   "writeTools",
 ]);
-const ENV_LISTS = new Set<keyof RawConfig>(["retainTags", "optInPaths"]);
+const ENV_LISTS = new Set<keyof RawConfig>([
+  "retainTags",
+  "recallTags",
+  "optInPaths",
+  "sessionContext",
+]);
 const ENV_NUMBERS = new Set<keyof RawConfig>([
   "apiPort",
   "daemonIdleTimeout",
@@ -839,6 +963,7 @@ const ENV_NUMBERS = new Set<keyof RawConfig>([
   "reflectTimeoutMs",
   "reflectToolTimeoutMs",
   "injectTimeoutMs",
+  "injectQueryMaxChars",
   "pageSearchLimit",
   "pageRefreshEveryTurns",
   "autoInjectEveryTurns",
@@ -887,7 +1012,39 @@ export function loadConfig(opts: LoadOptions | string = {}): Config {
   // "opencode", whose silent default misfiled every other harness's background seed into an
   // `opencode::<project>` bank (#3247). An explicit `harness:` in the config file still wins.
   if (!raw.harness && o.harness) raw.harness = o.harness;
-  return resolveConfig(raw);
+  const cfg = resolveConfig(raw);
+  setKeptToolInputs(cfg.keepToolInputs);
+  return cfg;
+}
+
+/** The valid `keepToolInputs` rules; each bad one is dropped on its own, with a warning. */
+function keptToolRules(value: unknown): Record<string, KeptToolInput> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Record<string, KeptToolInput> = {};
+  for (const [tool, rule] of Object.entries(value)) {
+    if (typeof rule === "string" && rule) {
+      out[tool] = rule;
+      continue;
+    }
+    const r = rule as { field?: unknown; match?: unknown } | null;
+    const field = r && typeof r === "object" && typeof r.field === "string" ? r.field : "";
+    const match = r && typeof r === "object" && typeof r.match === "string" ? r.match : undefined;
+    try {
+      if (match !== undefined) new RegExp(match);
+    } catch {
+      log.warn(
+        "config",
+        `keepToolInputs.${tool}: invalid regex ${JSON.stringify(match)}, rule ignored`
+      );
+      continue;
+    }
+    if (!field) {
+      log.warn("config", `keepToolInputs.${tool}: needs a field name, rule ignored`);
+      continue;
+    }
+    out[tool] = match === undefined ? field : { field, match };
+  }
+  return out;
 }
 
 /** Bank-resolution fields are meaningless inside a `banks.<id>` section (they can't change the id
@@ -903,6 +1060,9 @@ const BANK_OVERRIDE_EXCLUDED = [
   "optInOnly",
   "optInPaths",
   "harness",
+  // Applied once per process, before any bank is resolved (core/transcript-util.ts): a per-bank
+  // rule could never take effect, so strip it rather than let it read as effective.
+  "keepToolInputs",
 ] as const;
 
 /**

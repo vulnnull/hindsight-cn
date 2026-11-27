@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadConfig, applyBankConfig, readEnvConfig, resolveConfig } from "./config";
 import { log } from "./log";
+import { toolTurn } from "./transcript-util";
 
 let root: string;
 let globalCfg: string;
@@ -81,6 +82,37 @@ describe("loadConfig layering", () => {
   });
 });
 
+describe("apiHeaders (#6651)", () => {
+  it("defaults to none and keeps only string values", () => {
+    expect(resolveConfig({}).apiHeaders).toEqual({});
+    const raw = { apiHeaders: { "CF-Access-Client-Id": "id", n: 1, o: {} } };
+    expect(resolveConfig(raw as never).apiHeaders).toEqual({ "CF-Access-Client-Id": "id" });
+    expect(resolveConfig({ apiHeaders: ["x"] } as never).apiHeaders).toEqual({});
+  });
+});
+
+describe("recallTags (#4226)", () => {
+  it("defaults to reading the whole bank, matching loosely once set", () => {
+    expect(resolveConfig({})).toMatchObject({ recallTags: [], recallTagsMatch: "any" });
+    expect(
+      resolveConfig({ recallTags: ["project:{gitProject}", 3, ""] } as never).recallTags
+    ).toEqual(["project:{gitProject}"]);
+    expect(resolveConfig({ recallTagsMatch: "exact" } as never).recallTagsMatch).toBe("any");
+    expect(resolveConfig({ recallTagsMatch: "all_strict" }).recallTagsMatch).toBe("all_strict");
+  });
+
+  it("reads both from the environment", () => {
+    const env = {
+      HINDSIGHT_RECALL_TAGS: "project:a,env:work",
+      HINDSIGHT_RECALL_TAGS_MATCH: "any_strict",
+    };
+    expect(readEnvConfig(env)).toMatchObject({
+      recallTags: ["project:a", "env:work"],
+      recallTagsMatch: "any_strict",
+    });
+  });
+});
+
 describe("maxParallelRetains", () => {
   it("defaults to 10 when unset", () => {
     expect(loadConfig({ harness: "claude-code" }).maxParallelRetains).toBe(10);
@@ -115,11 +147,11 @@ describe("injectTimeoutMs (#4843)", () => {
     vi.unstubAllEnvs();
   });
 
-  it("defaults to 7s independently of the reflect timeouts", () => {
-    expect(resolveConfig({}).injectTimeoutMs).toBe(7000);
+  it("defaults to 5s independently of the reflect timeouts", () => {
+    expect(resolveConfig({}).injectTimeoutMs).toBe(5000);
     expect(
       resolveConfig({ reflectTimeoutMs: 15000, reflectToolTimeoutMs: 90000 }).injectTimeoutMs
-    ).toBe(7000);
+    ).toBe(5000);
   });
 
   it.each([2000, 15000])("honours an explicit %ims budget", (ms) => {
@@ -155,7 +187,7 @@ describe("reflectToolTimeoutMs / reflectBudget", () => {
   it("defaults above the server's reflect wall timeout, leaving the hook window untouched", () => {
     const cfg = resolveConfig({});
     expect(cfg.reflectToolTimeoutMs).toBe(330000);
-    expect(cfg.reflectTimeoutMs).toBe(20000);
+    expect(cfg.reflectTimeoutMs).toBe(15000);
     expect(cfg.reflectBudget).toBe("high");
   });
 
@@ -398,6 +430,36 @@ describe("environment fallback", () => {
     expect(applyBankConfig(base, "other").cfg.autoInject).toBe("pages");
   });
 
+  it("keepToolInputs: loading the file turns the rules on, per harness, never per bank", () => {
+    writeFileSync(
+      globalCfg,
+      JSON.stringify({
+        harnesses: { "claude-code": { keepToolInputs: { reply: "text" } } },
+        banks: { b: { keepToolInputs: { other: "text" } } },
+      })
+    );
+    const cfg = loadConfig({ path: globalCfg, harness: "claude-code" });
+    expect(toolTurn("reply", { text: "hi" })).toEqual({ role: "assistant", content: "hi" });
+    expect(applyBankConfig(cfg, "b").cfg.keepToolInputs).toEqual({ reply: "text" });
+    loadConfig({ path: globalCfg, harness: "codex" }); // a harness with no rules turns them off
+    expect(toolTurn("reply", { text: "hi" }).role).toBe("action");
+  });
+
+  it("keepToolInputs: none by default; each bad rule is dropped on its own", () => {
+    expect(resolveConfig({}).keepToolInputs).toEqual({});
+    expect(
+      resolveConfig({
+        keepToolInputs: {
+          reply: "text",
+          shell: { field: "command", match: "^send " },
+          badRegex: { field: "command", match: "(" },
+          noField: { match: "x" } as never,
+          empty: "",
+        },
+      }).keepToolInputs
+    ).toEqual({ reply: "text", shell: { field: "command", match: "^send " } });
+  });
+
   it("recallOptions: empty by default, passed through verbatim, non-objects rejected", () => {
     // Empty at this layer — the DEFAULTS live on the client, so config states only overrides.
     expect(resolveConfig({}).recallOptions).toEqual({});
@@ -523,7 +585,7 @@ describe("environment fallback", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     process.env.HINDSIGHT_REFLECT_TIMEOUT_MS = "soon";
     // NaN here would silently break the reflect timeout in a way that is very hard to trace.
-    expect(loadConfig({ path: globalCfg }).reflectTimeoutMs).toBe(20000);
+    expect(loadConfig({ path: globalCfg }).reflectTimeoutMs).toBe(15000);
   });
 
   it("an empty env var does not mask the file or the default", () => {
@@ -655,5 +717,21 @@ describe("keyless Hindsight Cloud", () => {
     const cfg = resolveConfig({ banks: { b: { apiToken: "k" } } });
     expect(applyBankConfig(cfg, "b").cfg.disabled).toBe(false);
     expect(applyBankConfig(cfg, "other").cfg.disabled).toBe(true);
+  });
+});
+
+describe("pageScope (#6526)", () => {
+  it('keeps "" (the sentence off) apart from unset (the built-in one)', () => {
+    expect(resolveConfig({}).pageScope).toBeUndefined();
+    expect(resolveConfig({ pageScope: "" }).pageScope).toBe("");
+    expect(resolveConfig({ pageScope: "One project." }).pageScope).toBe("One project.");
+  });
+  it("is set per bank under banks.<id>", () => {
+    const cfg = resolveConfig({ banks: { notes: { pageScope: "", toolGuideMoments: "• y" } } });
+    expect(applyBankConfig(cfg, "notes").cfg).toMatchObject({
+      pageScope: "",
+      toolGuideMoments: "• y",
+    });
+    expect(applyBankConfig(cfg, "other").cfg.pageScope).toBeUndefined();
   });
 });

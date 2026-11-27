@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { getHarness, HARNESS_NAMES, PLUGIN_ENTRYPOINTS } from "./registry";
+import { HOOK_HARNESSES, type HookHarnessName } from "./hook-lifecycle";
 import { ALL_HARNESS_SETUPS } from "../e2e/harnesses";
 
 describe("HARNESS_NAMES", () => {
@@ -178,5 +179,91 @@ describe("every plugin entrypoint reports the harness the registry maps it to", 
     const declaration = readFileSync(join(PKG, entry), "utf8").match(DECLARES_HARNESS);
     expect(declaration, `${entry} names no harness in a form this guard recognises`).not.toBeNull();
     expect(declaration![1] ?? declaration![2]).toBe(harness);
+  });
+});
+
+/**
+ * A compaction counts as a new session start (#6527). Every harness has to make that decision, so
+ * this list names each one: how its compaction reaches us, or why it cannot. A new harness fails
+ * here until someone checks its host for a compaction signal.
+ */
+const COMPACTION_SIGNAL: Record<string, string> = {
+  "claude-code": "SessionStart source compact",
+  codex: "SessionStart source compact",
+  "qwen-code": "SessionStart source compact",
+  "factory-droid": "SessionStart source compact",
+  "cursor-cli": "hook:preCompact",
+  "kimi-code": "hook:PostCompact",
+  opencode: "event session.compacted",
+  kilo: "event session.compacted (opencode fork, same plugin entry)",
+  opencode2: "event session.compaction.ended",
+  pi: "event session_compact",
+  // No documented compaction signal on these hosts. A Claude-style host among them that does send
+  // SessionStart `source: "compact"` is still handled: runSessionStartHook checks it for every host.
+  "copilot-cli": "none: sessionStart sources are startup/resume/new",
+  "antigravity-cli": "none: no SessionStart or compaction hook",
+  "devin-cli": "none documented",
+  "grok-build": "none documented",
+  zcode: "none documented",
+  traecode: "none documented",
+  dcode: "none documented",
+  workbuddy: "none documented",
+  codebuddy: "none documented",
+  "cline-cli": "none: the plugin API has beforeModel/afterRun only",
+  dsh: "none: no compaction event among the Cordis agent events",
+  "prime-agent": "none: no hooks or extensions",
+};
+
+describe("every harness decides how a compaction reaches it (#6527)", () => {
+  it("names every harness", () => {
+    expect(Object.keys(COMPACTION_SIGNAL).sort()).toEqual([...HARNESS_NAMES].sort());
+  });
+
+  it.each(Object.entries(COMPACTION_SIGNAL).filter(([, how]) => how.startsWith("hook:")))(
+    "%s registers its compaction hook on the SessionStart entry",
+    (harness, how) => {
+      const spec = HOOK_HARNESSES[harness as HookHarnessName];
+      expect(spec.additionalHooks).toContainEqual(
+        expect.objectContaining({
+          event: how.slice("hook:".length),
+          entry: spec.install.sessionStart.entry,
+        })
+      );
+    }
+  );
+});
+
+/**
+ * Which persistent-plugin hosts replay a session whose write-back failed before the host exited
+ * (#6559): only the ones whose host can read back a session by id after the process that ran it is
+ * gone. A new host lands here, and has to say which it is.
+ */
+describe("persistent-plugin hosts that replay a failed session after a restart", () => {
+  const PKG = fileURLToPath(new URL("../..", import.meta.url));
+
+  /** harness -> the file that wires its RuntimeCore, and whether it sets a past-session source. */
+  const PAST_SESSION_SOURCE: Record<string, { file: string; replays: boolean }> = {
+    // The host's server keeps every session: GET /session/{id}/message reads any of them.
+    opencode: { file: "src/harness/plugin-entry.ts", replays: true },
+    kilo: { file: "src/harness/plugin-entry.ts", replays: true },
+    // ctx.sessionPersistence.open(id, "read") reads a session no agent holds.
+    dsh: { file: "src/dsh.ts", replays: true },
+    // `session.context` reads the live session's context; not known to reach a session this
+    // process never opened, so it is not trusted to.
+    opencode2: { file: "src/harness/opencode2.ts", replays: false },
+    // The host hands over the transcript in its own events and offers no read by session id.
+    "cline-cli": { file: "src/cline.ts", replays: false },
+    pi: { file: "src/harness/pi-extension.ts", replays: false },
+    // Its transcript source returns the turns of the run it was given, whatever id it is asked
+    // for: as a past-session source it would write that run into another session's document.
+    "prime-agent": { file: "src/prime-agent.ts", replays: false },
+  };
+
+  it("covers every persistent-plugin host", () => {
+    expect(Object.keys(PAST_SESSION_SOURCE).sort()).toEqual(Object.keys(PLUGIN_ENTRYPOINTS).sort());
+  });
+
+  it.each(Object.entries(PAST_SESSION_SOURCE))("%s", (_harness, { file, replays }) => {
+    expect(readFileSync(join(PKG, file), "utf8").includes("setPastSessionSource")).toBe(replays);
   });
 });

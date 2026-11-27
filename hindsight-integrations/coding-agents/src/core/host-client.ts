@@ -17,6 +17,7 @@
 import { applyBankConfig, loadConfig, type Config } from "./config";
 import { bankProjectName, deriveBankIdOrSkip } from "./bank";
 import { HindsightClient } from "./hindsight";
+import { resolveRecallTags } from "./retain-stamp";
 
 /** A host's resolved memory: the config for THIS workspace, the bank it resolved to, and a client
  *  bound to both. */
@@ -64,13 +65,17 @@ export function resolveHostMemory(harness: string, directory: string): HostMemor
     client: new HindsightClient({
       apiUrl: cfg.apiUrl,
       apiToken: cfg.apiToken,
+      headers: cfg.apiHeaders,
       bank: bankId,
       // Names the repo in the initiative pages this host captures, as the seeded pages do.
       project,
+      pageScope: cfg.pageScope,
       maxParallelRetains: cfg.maxParallelRetains,
       observationScopes: cfg.observationScopes,
       pageSearchLimit: cfg.pageSearchLimit,
       recallOptions: cfg.recallOptions,
+      recallTags: resolveRecallTags(cfg.recallTags, { directory, harness, bankId }),
+      recallTagsMatch: cfg.recallTagsMatch,
       // The credential a host STARTED with is not the one it must keep using: enable auth or
       // rotate the key mid-session and the snapshot 401s every call until restart (#3600). Read
       // through the same pipeline the constructor used, so a per-bank `banks.<id>.apiToken` is

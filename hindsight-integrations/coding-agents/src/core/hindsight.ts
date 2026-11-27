@@ -28,6 +28,39 @@ import type { RetainStamp } from "./retain-stamp";
 /** Sent on every request so the server can tell which integration is calling. */
 export const USER_AGENT = `hindsight-coding-agents/${PKG_VERSION}`;
 
+/**
+ * The tree query every read here sends. Nothing in this client reads `is_stale`, and filling it
+ * costs the server a scan of each page's memories — 0.7 s at 100k observations, 7.5 s at 1M
+ * (#6258) — so `detail=basic` skips it. A server older than that parameter ignores it (an unknown
+ * query param is only reported in a response header) and returns the full tree, as before.
+ */
+const TREE = "/tree?detail=basic";
+
+/** What a capture did: made a new initiative page, or recorded an update on an existing one. */
+export interface CaptureInitiativeResult {
+  page_id: string;
+  action: "created" | "updated";
+  /** Set when an update was matched by title rather than by a page id the agent passed. */
+  note?: string;
+}
+
+/** A root folder by name, case-insensitive. */
+function findRootFolder(roots: PageNode[], name: string): PageNode | undefined {
+  const want = name.toLowerCase();
+  return roots.find((n) => n.kind === "folder" && (n.name ?? "").toLowerCase() === want);
+}
+
+/** The id of the first page named `name` (trimmed, case-insensitive) anywhere under `nodes`. */
+function findPageByName(nodes: PageNode[], name: string): string | undefined {
+  const want = name.trim().toLowerCase();
+  for (const n of nodes) {
+    if (n.kind === "page" && n.id && (n.name ?? "").trim().toLowerCase() === want) return n.id;
+    const hit = n.children?.length ? findPageByName(n.children, name) : undefined;
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
 /** One node of GET /pages/tree. Only the fields this client reads. */
 export interface PageNode {
   id: string;
@@ -110,6 +143,9 @@ export interface ClientOpts {
    *  names no project (#4490). Must be a property of the bank and never of the calling session's
    *  cwd: see `bankProjectName` (#4146). */
   project?: string;
+  /** cfg.pageScope: the user's own scope sentence for every page query, "" for none, or undefined
+   *  for the built-in clause `project` picks (#6526). */
+  pageScope?: string;
   log?: (msg: string) => void;
   /** Cap on concurrent retain-related requests (drain op polls, deepen pools). Default 10. */
   maxParallelRetains?: number;
@@ -121,12 +157,19 @@ export interface ClientOpts {
   /** Recall-body overrides, merged key-by-key over `DEFAULT_RECALL_OPTIONS`. Passed through to
    *  the API as given (`types`, `max_tokens`, `budget`, …); `query` is never overridable. */
   recallOptions?: Record<string, unknown>;
+  /** Tags recall and reflect are narrowed to (config `recallTags`, placeholders already resolved).
+   *  Empty or absent reads the whole bank. */
+  recallTags?: string[];
+  recallTagsMatch?: TagsMatch;
   /** Re-read the bearer token from the LIVE config, for hosts that outlive their credential.
    *  `apiToken` alone is a construction-time snapshot: a long-lived host (dsh, Cline, Kilo, the
    *  MCP server, any persistent plugin) kept signing with it forever, so enabling auth or rotating
    *  the key mid-session 401'd every call until the host restarted (#3600). Consulted only on a
    *  401, so the happy path never touches the filesystem. See `core/host-client.ts`. */
   tokenProvider?: () => string | undefined;
+  /** Extra headers sent with every request (config `apiHeaders`, e.g. a Cloudflare Access service
+   *  token, #6651). The plugin's own `Authorization` wins over one set here when a token is set. */
+  headers?: Record<string, string>;
   /** How long one request may spend waiting out rate limits (HTTP 429) before it throws
    *  `RateLimitedError`. Default 0: a hook answers to its host's deadline and must fail fast.
    *  Background work that has nobody waiting on it (deepen) sets this, because a 429 it does not
@@ -134,6 +177,11 @@ export interface ClientOpts {
    *  on, dropping about a third of a repo's chats against a rate-limited Hindsight Cloud. */
   rateLimitPatienceMs?: number;
 }
+
+/** How a tag filter matches, as the recall/reflect API takes it. The `_strict` forms leave out
+ *  memories that carry no tags at all. */
+export const TAGS_MATCH_MODES = ["any", "all", "any_strict", "all_strict"] as const;
+export type TagsMatch = (typeof TAGS_MATCH_MODES)[number];
 
 export interface RetainOpts {
   timestamp?: string; // when the content occurred (temporal ranking)
@@ -228,6 +276,36 @@ function pagesPath(sub: string, legacy = false): string {
   return /^\/(tree|folders|search|export|nodes)\b/.test(sub)
     ? `/knowledge-base${sub}`
     : `/knowledge-base/pages${sub}`;
+}
+
+/** An initiative page's question before its scope clause: what `captureInitiative` writes, and what
+ *  `resyncInitiativeTriggers` recognises as ours to rewrite.
+ *
+ *  It asks for the plan as it stands NOW. It used to ask for "what is being built ... and its
+ *  current state", and a page re-planned mid-work then listed the dropped plan next to the new
+ *  one under its current state, because the creation marker states the opening plan for good
+ *  (#7007). */
+function initiativeQuery(title: string): string {
+  return (
+    `Summarize the "${title}" initiative as it stands now: what is being built or changed and ` +
+    `why, and its current state — drawn from the project's memory. Where the plan changed, ` +
+    `describe only the latest plan; mention an earlier plan only as history, saying what ` +
+    `replaced it.`
+  );
+}
+
+/** The question `initiativeQuery` wrote before #7007, still on pages captured then. Recognised so the
+ *  re-sync rewrites it to the current one instead of treating it as the user's own wording. */
+function legacyInitiativeQuery(title: string): string {
+  return (
+    `Summarize the "${title}" initiative: what is being built or changed and why, ` +
+    `and its current state — drawn from the project's memory.`
+  );
+}
+
+/** Every page under `nodes`, at any depth. */
+function pagesUnder(nodes: PageNode[]): PageNode[] {
+  return nodes.flatMap((n) => [...(n.kind === "page" ? [n] : []), ...pagesUnder(n.children ?? [])]);
 }
 
 const TERMINAL = new Set(["completed", "failed", "cancelled", "error"]);
@@ -346,26 +424,67 @@ function shapePage(page: unknown): unknown {
 /** Undici's cross-version handle on the dispatcher Node's global `fetch` uses. */
 const GLOBAL_DISPATCHER = Symbol.for("undici.globalDispatcher.1");
 
+/** The longest a connection may take to open. A live server, even over a relayed VPN, accepts well
+ *  inside this; past it nothing is listening. undici's own default is 10s. */
+const CONNECT_TIMEOUT_MS = 5_000;
+/** Connect-capped siblings of the global Agent, one per whole second up to CONNECT_TIMEOUT_MS
+ *  (so at most five), rebuilt if the global dispatcher changes. */
+let connectCapped: { base: unknown; bySecond: Map<number, unknown> } | undefined;
+
+/** The server never answered: refused, unreachable, unresolvable, or past our deadline — as
+ *  opposed to an answer that was an error. fetch() reports the transport failure as `TypeError:
+ *  fetch failed`, the reason in `cause.code`. */
+export function isNoAnswerError(e: unknown): boolean {
+  if (!(e instanceof Error)) return false;
+  if (e.name === "TimeoutError" || e.name === "AbortError") return true;
+  const code = (e.cause as { code?: string } | undefined)?.code ?? "";
+  return /^(ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|ENOTFOUND|EAI_AGAIN|UND_ERR_)/.test(
+    code
+  );
+}
+
 /**
  * The global dispatcher with undici's own header/body timeouts switched off, for a request that
  * already carries an AbortSignal deadline — or undefined where there is nothing to wrap.
  *
  * Node's fetch applies a 300s `headersTimeout` below our signal, so a reflect configured above
  * 300s (`reflectToolTimeoutMs` defaults to 330s, past the server's own reflect wall) died with
- * UND_ERR_HEADERS_TIMEOUT before the server could answer (#5504). Composing over the CURRENT
- * global dispatcher, instead of building a new undici `Agent`, needs no `undici` dependency (the
- * bundled one is not importable) and keeps any proxy dispatcher the host installed. Hosts whose
+ * UND_ERR_HEADERS_TIMEOUT before the server could answer (#5504). A plain global `Agent` gets a
+ * sibling from its own class (no `undici` dependency: the bundled one is not importable) that also
+ * caps the connect wait; anything else, such as a proxy dispatcher the host installed, is composed
+ * over and kept. Hosts whose
  * fetch is not undici's have no such dispatcher and ignore the option — which is why this alone left
  * Bun hosts (opencode) cut off at 300s: Bun has its own idle timeout, switched off in
  * `fetchWithAuth` (#6431).
  */
-function signalOnlyDispatcher(): unknown {
+function signalOnlyDispatcher(timeoutMs = CONNECT_TIMEOUT_MS): unknown {
   // Node loads undici — which installs the global dispatcher — lazily. Touching the `Headers`
   // global loads it; touching `fetch` does not (it is a wrapper until first called).
   void globalThis.Headers;
   const d = (globalThis as Record<symbol, unknown>)[GLOBAL_DISPATCHER] as
-    | { compose?: (interceptor: unknown) => unknown }
+    | { compose?: (interceptor: unknown) => unknown; constructor?: unknown }
     | undefined;
+  // A plain Agent (no proxy installed): a sibling built from the same class, which also caps the
+  // CONNECT wait at the request's own deadline. Aborting a fetch does not end the connect attempt
+  // under it, so on a host that drops packets undici's 10s connect timeout kept every hook process
+  // alive long after its own deadline, and its answer, had passed (#6553).
+  // ponytail: a host's own custom Agent loses its options (e.g. a private CA) for our requests;
+  // read them off the instance if one ever needs them.
+  if (typeof d?.constructor === "function" && d.constructor.name === "Agent") {
+    if (connectCapped?.base !== d) connectCapped = { base: d, bySecond: new Map() };
+    const seconds = Math.min(CONNECT_TIMEOUT_MS / 1000, Math.max(1, Math.ceil(timeoutMs / 1000)));
+    let agent = connectCapped.bySecond.get(seconds);
+    if (!agent) {
+      const AgentClass = d.constructor as new (opts: Record<string, unknown>) => unknown;
+      agent = new AgentClass({
+        connect: { timeout: seconds * 1000 },
+        headersTimeout: 0,
+        bodyTimeout: 0,
+      });
+      connectCapped.bySecond.set(seconds, agent);
+    }
+    return agent;
+  }
   if (typeof d?.compose !== "function") return undefined; // Node 18's undici predates compose()
   type Dispatch = (opts: Record<string, unknown>, handler: unknown) => boolean;
   return d.compose(
@@ -380,8 +499,10 @@ export class HindsightClient {
    *  diverge exactly when #3600 bites, which is why `hindsight_diagnose` reports both. */
   private token: string | undefined;
   private readonly tokenProvider?: () => string | undefined;
+  private readonly extraHeaders: Record<string, string>;
   readonly bank: string;
   readonly project?: string;
+  private readonly pageScope?: string;
   readonly opIds: string[] = []; // async operation ids collected by retain(), for drain()
   /** Tri-state capability probe: unknown until the first page request, then cached. */
   pagesSupported: boolean | undefined;
@@ -392,14 +513,18 @@ export class HindsightClient {
   readonly observationScopes: ObservationScopes;
   readonly pageSearchLimit: number;
   readonly recallOptions: Record<string, unknown>;
+  /** The tag filter recall and reflect send: `{}` when no recallTags are configured. */
+  private readonly tagFilter: { tags?: string[]; tags_match?: TagsMatch };
   private readonly rateLimitPatienceMs: number;
 
   constructor(o: ClientOpts) {
     this.apiUrl = o.apiUrl.replace(/\/$/, "");
     this.token = o.apiToken;
     this.tokenProvider = o.tokenProvider;
+    this.extraHeaders = o.headers ?? {};
     this.bank = o.bank;
     this.project = o.project;
+    this.pageScope = o.pageScope;
     this.log = o.log ?? (() => {});
     this.maxParallelRetains = o.maxParallelRetains || DEFAULT_MAX_PARALLEL_RETAINS;
     this.observationScopes = o.observationScopes ?? DEFAULT_OBSERVATION_SCOPES;
@@ -408,6 +533,9 @@ export class HindsightClient {
     // module-level object, and handing every client the same reference makes one caller's
     // mutation everyone's.
     this.recallOptions = { ...DEFAULT_RECALL_OPTIONS, ...o.recallOptions };
+    this.tagFilter = o.recallTags?.length
+      ? { tags: o.recallTags, tags_match: o.recallTagsMatch ?? "any" }
+      : {};
     this.rateLimitPatienceMs = o.rateLimitPatienceMs ?? 0;
   }
 
@@ -423,8 +551,14 @@ export class HindsightClient {
       "Content-Type": "application/json",
       "Accept-Encoding": "identity",
       "User-Agent": USER_AGENT,
+      ...this.extraHeaders,
     };
-    if (this.token) h["Authorization"] = `Bearer ${this.token}`;
+    if (this.token) {
+      // Header names are case-insensitive: a configured `authorization` would otherwise travel
+      // alongside ours and reach the server as one comma-joined value.
+      for (const k of Object.keys(h)) if (k.toLowerCase() === "authorization") delete h[k];
+      h["Authorization"] = `Bearer ${this.token}`;
+    }
     return h;
   }
 
@@ -455,9 +589,13 @@ export class HindsightClient {
    * free even for retain. The retry shares the caller's `signal`, deliberately: one deadline still
    * bounds the whole call.
    */
-  private async fetchWithAuth(url: string, init: RequestInit): Promise<Response> {
+  private async fetchWithAuth(
+    url: string,
+    init: RequestInit,
+    timeoutMs?: number
+  ): Promise<Response> {
     // Only a request with its own deadline drops undici's timeouts; the drain poll has none.
-    const dispatcher = init.signal ? signalOnlyDispatcher() : undefined;
+    const dispatcher = init.signal ? signalOnlyDispatcher(timeoutMs) : undefined;
     // Bun has its own 300s socket-idle timeout below fetch, and ignores the undici dispatcher, so
     // a reflect configured above 300s still died there under opencode (#6431). A request with an
     // AbortSignal already has the caller's deadline, so disable that lower timeout just as the
@@ -502,11 +640,15 @@ export class HindsightClient {
     const payload = body ? JSON.stringify(body) : undefined;
     let r: Response;
     for (let attempt = 0, waited = 0; ; attempt++) {
-      r = await this.fetchWithAuth(url, {
-        method,
-        body: payload,
-        signal: AbortSignal.timeout(timeoutMs),
-      });
+      r = await this.fetchWithAuth(
+        url,
+        {
+          method,
+          body: payload,
+          signal: AbortSignal.timeout(timeoutMs),
+        },
+        timeoutMs
+      );
       if (r.status !== 429 || tolerate.includes(429)) break;
       const asked = retryAfterMs(r.headers.get("retry-after"));
       const backoff = Math.min(RETRY_AFTER_CEILING_MS, RATE_LIMIT_BACKOFF_MS * 2 ** attempt);
@@ -620,13 +762,14 @@ export class HindsightClient {
    */
   async listDocumentIds(
     tag: string,
-    tagsMatch: "all" | "all_strict" = "all"
+    tagsMatch: "all" | "all_strict" = "all",
+    timeoutMs?: number
   ): Promise<Set<string>> {
     const ids = new Set<string>();
     const limit = 500;
     for (let offset = 0; ; offset += limit) {
       const q = `?tags=${encodeURIComponent(tag)}&tags_match=${tagsMatch}&limit=${limit}&offset=${offset}`;
-      const r = await this.req("GET", this.bankUrl(`/documents${q}`));
+      const r = await this.req("GET", this.bankUrl(`/documents${q}`), undefined, [], timeoutMs);
       let items: { id?: string }[] = [];
       let total = 0;
       try {
@@ -847,7 +990,7 @@ export class HindsightClient {
   /**
    * Reflect: synthesized, root-cause answer over the bank. Bounded so a slow server never hangs a
    * caller — but `timeoutMs` is REQUIRED, deliberately: the right deadline differs by an order of
-   * magnitude between the automatic hook (20s, to fit the host's window) and the agent-invoked
+   * magnitude between the automatic hook (15s, to fit the host's window) and the agent-invoked
    * tool (minutes, on a populated bank). This used to default to 120s, which silently overrode the
    * tool's configured window and aborted every high-budget synthesis mid-flight (#3590).
    */
@@ -855,11 +998,15 @@ export class HindsightClient {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs);
     try {
-      const resp = await this.fetchWithAuth(this.bankUrl("/reflect"), {
-        method: "POST",
-        body: JSON.stringify({ query, budget: opts.budget ?? "high" }),
-        signal: ctrl.signal,
-      });
+      const resp = await this.fetchWithAuth(
+        this.bankUrl("/reflect"),
+        {
+          method: "POST",
+          body: JSON.stringify({ query, budget: opts.budget ?? "high", ...this.tagFilter }),
+          signal: ctrl.signal,
+        },
+        opts.timeoutMs
+      );
       // Keep the server's body: a bare "reflect 500" in the diag trail is undebuggable after the fact.
       if (!resp.ok)
         throw new ReflectError(
@@ -884,7 +1031,8 @@ export class HindsightClient {
   /**
    * Raw recall with no LLM in the loop, so it still answers when reflect's synthesis times out or
    * 5xxs. The body is `recallOptions` (consolidated observations by default) — a bank that grows
-   * no observations widens it rather than getting nothing back. Returns the texts in rank order.
+   * no observations widens it rather than getting nothing back. Returns the texts in rank order,
+   * each observation followed by `(sources: N)` when the server sends its count.
    *
    * The name predates `recallOptions` (the observation type used to be hardcoded here) and is
    * kept deliberately: this is the client's published surface, so renaming it would break
@@ -897,13 +1045,22 @@ export class HindsightClient {
       // `query` is applied AFTER the spread: everything else is the caller's to override, but a
       // config that could replace the goal with a fixed string would silently recall for the
       // wrong question on every turn.
-      { ...this.recallOptions, query },
+      // The tag filter wins over a `tags` in recallOptions: recallTags is the setting that also
+      // narrows reflect, and two settings answering differently would be a silent split.
+      { ...this.recallOptions, ...this.tagFilter, query },
       [],
       opts.timeoutMs
     );
     if (r.status === 404) return [];
-    const j = (await r.json()) as { results?: { text?: string }[] };
-    return (j.results ?? []).map((x) => (x.text ?? "").trim()).filter(Boolean);
+    const j = (await r.json()) as { results?: { text?: string; proof_count?: number | null }[] };
+    // How many facts back an observation, so the agent can tell one restated fact from knowledge
+    // merged from many (#5078). Servers before #6966 send no count, and the line stays as it was.
+    return (j.results ?? [])
+      .map((x) => {
+        const text = (x.text ?? "").trim();
+        return text && x.proof_count ? `${text} (sources: ${x.proof_count})` : text;
+      })
+      .filter(Boolean);
   }
 
   /** Set once a server answered on the deprecated `/knowledge-base/...` paths: one from before the
@@ -945,12 +1102,12 @@ export class HindsightClient {
   }
 
   /**
-   * The bank's page tree (folders + pages, nested). The tree carries names, source
-   * queries and staleness but NOT synthesized content, so it is cheap enough to poll.
+   * The bank's page tree (folders + pages, nested). The tree carries names and source
+   * queries but NOT synthesized content or staleness (see `TREE`), so it is cheap enough to poll.
    */
-  async tree(): Promise<PageNode[]> {
+  async tree(timeoutMs?: number): Promise<PageNode[]> {
     if (this.pagesSupported === false) throw new PagesUnavailableError();
-    const r = await this.pagesReq("GET", "/tree");
+    const r = await this.pagesReq("GET", TREE, undefined, [], timeoutMs);
     if (!r) throw new PagesUnavailableError();
     // Bank not created yet: it genuinely has no pages, and the capability stays UNKNOWN so the
     // next call (after the first retain mints the bank) asks again instead of short-circuiting.
@@ -972,7 +1129,7 @@ export class HindsightClient {
    * page read/update in this client goes through the same page ids, so a page id from
    * here, from `searchPages`, or from a `[[page:<id>]]` link all resolve identically.
    */
-  async listPages(): Promise<unknown> {
+  async listPages(opts: { timeoutMs?: number } = {}): Promise<unknown> {
     const items: { id: string; name: string; description?: string; folder?: string }[] = [];
     const walk = (nodes: PageNode[], folder?: string): void => {
       for (const n of nodes) {
@@ -988,7 +1145,7 @@ export class HindsightClient {
         if (n.children?.length) walk(n.children, n.kind === "folder" ? n.name : folder);
       }
     };
-    walk(await this.tree());
+    walk(await this.tree(opts.timeoutMs));
     return { items };
   }
 
@@ -998,12 +1155,32 @@ export class HindsightClient {
    * the page — that is 70-95% of the raw bytes and can blow past an MCP host's per-tool-result
    * token cap.
    */
-  async getPage(pageId: string): Promise<unknown> {
+  async getPage(pageId: string, opts: { timeoutMs?: number } = {}): Promise<unknown> {
     if (this.pagesSupported === false) throw new PagesUnavailableError();
-    const r = await this.pagesReq("GET", `/${encodeURIComponent(pageId)}`);
+    const r = await this.pagesReq(
+      "GET",
+      `/${encodeURIComponent(pageId)}`,
+      undefined,
+      [],
+      opts.timeoutMs
+    );
     if (!r) throw new PagesUnavailableError();
     if (r.status === 404) throw new Error(`page not found: ${pageId}`);
     return shapePage(await r.json());
+  }
+
+  /** Read one mental model's stored content (`{name, content, …}`); no LLM call. */
+  async getMentalModel(id: string, opts: { timeoutMs?: number } = {}): Promise<unknown> {
+    const r = await this.req(
+      "GET",
+      // detail=content: the default "full" also carries the reflect trace that built it.
+      this.bankUrl(`/mental-models/${encodeURIComponent(id)}?detail=content`),
+      undefined,
+      [],
+      opts.timeoutMs
+    );
+    if (r.status === 404) throw new Error(`mental model not found: ${id}`);
+    return r.json();
   }
 
   /** Hybrid (BM25 + vector, RRF-fused) server-side search over the bank's pages.
@@ -1059,7 +1236,7 @@ export class HindsightClient {
   ): Promise<void> {
     // No project = a bank no single repository owns: the shared-bank clause. Pages seeded under the
     // old bank-named clause drift from it and are PATCHed below, which rebuilds them (#4490).
-    const pages = pagesFor(this.project, pagesConfig, customPages);
+    const pages = pagesFor(this.project, pagesConfig, customPages, this.pageScope);
     const existing = new Map<string, PageNode>();
     let roots: PageNode[];
     try {
@@ -1163,11 +1340,13 @@ export class HindsightClient {
    * consolidation under the auto-refresh that used to be the default (#3506).
    *
    * Their `name` and `source_query` are written once, from the initiative's own title, and
-   * re-stating either would rebuild a page whose question never changed. The one exception is
-   * the scope clause: a page captured while the clause named the BANK is scoped to a project no
-   * memory is about and comes out empty (#4490), so exactly that clause is swapped for the current
-   * one — the rest of the query, the user's wording included, is kept. The tree read above is
-   * reused rather than re-fetched.
+   * re-stating either would rebuild a page whose question never changed. Two exceptions. The scope
+   * clause: a page captured while the clause named the BANK is scoped to a project no memory is
+   * about and comes out empty (#4490), so exactly that clause is swapped for the current one — the
+   * rest of the query, the user's wording included, is kept. And the question this plugin wrote
+   * before #7007, which let a re-planned page list the dropped plan as current: it is replaced by
+   * the current one, which rebuilds each such page once, on purpose. Pages in subfolders of
+   * Initiatives are included (#6919). The tree read above is reused rather than re-fetched.
    */
   private async resyncInitiativeTriggers(
     roots: PageNode[],
@@ -1177,11 +1356,18 @@ export class HindsightClient {
       (n) => n.kind === "folder" && (n.name || "").toLowerCase() === "initiatives"
     );
     const bankScope = pageScopeRule(this.bank);
+    const scope = pageScopeRule(this.project, this.pageScope);
     let updated = 0;
-    for (const page of folder?.children ?? []) {
-      if (page.kind !== "page") continue;
+    // Any depth: a page filed into a subfolder of Initiatives is still an initiative page (#6919).
+    for (const page of pagesUnder(folder?.children ?? [])) {
       const patch: { trigger?: PageTrigger; source_query?: string } = {};
-      const query = page.description?.replace(bankScope, pageScopeRule(this.project));
+      // A query this plugin wrote is rebuilt whole, so a changed `pageScope` — custom wording
+      // included, which leaves nothing to match on once it is gone — reaches it (#6526). One
+      // edited by hand keeps its wording; only the old bank-named clause is swapped out of it.
+      const ours = [initiativeQuery(page.name ?? ""), legacyInitiativeQuery(page.name ?? "")];
+      const query = ours.some((q) => page.description?.startsWith(q))
+        ? ours[0] + scope
+        : page.description?.replace(bankScope, scope);
       if (query !== page.description) patch.source_query = query;
       // No trigger reported = policy unknown, not divergent (a server older than #3572).
       if (page.trigger != null) {
@@ -1217,8 +1403,13 @@ export class HindsightClient {
   /**
    * Active-path capture: register a major feature as a per-initiative page + a marker memory.
    * New initiative → creates a page under the Initiatives folder.
-   * Update (relatesToPageId) → no new page; only a marker accruing to the existing page, so an
-   * enhancement or a mid-work plan change lands on the initiative it belongs to.
+   * Update (pageId, or a page under Initiatives with the same title) → no new page; only a marker
+   * accruing to the existing page, so an enhancement or a mid-work plan change lands on the
+   * initiative it belongs to.
+   *
+   * The title match is what stops a second page when the agent lost the id it got back (#6919):
+   * the server's unique name per folder stops catching it once the first page is moved into a
+   * subfolder, so the whole Initiatives subtree is searched, case-insensitively.
    *
    * The marker carries its page id in two places, neither of them a tag (#3641):
    * `metadata.relatedPageId` for provenance (visible on the document, and to a reflect loop that
@@ -1230,19 +1421,26 @@ export class HindsightClient {
   async captureInitiative(args: {
     title: string;
     summary: string;
-    relatesToPageId?: string;
+    pageId?: string;
     stamp?: RetainStamp;
     /** Same refresh policy as the seeded pages — an initiative page is one of them, and used to
      *  carry its own hardcoded copy of this trigger. */
     pageTrigger?: PageTrigger;
-  }): Promise<{ page_id: string }> {
+  }): Promise<CaptureInitiativeResult> {
     // `POST /pages` mints its OWN page id (kp-…); we can't set it. So for a new initiative
     // we create the page first and adopt the server-assigned id — that id is what the return value
     // and the marker must use, or `hindsight_read_page(id)` 404s and the `[[page:<id>]]` link
     // points at nothing.
-    let pageId = args.relatesToPageId;
+    let pageId = args.pageId;
+    let folder: PageNode | undefined;
     if (!pageId) {
-      const folderId = await this.ensureFolder("Initiatives");
+      // Fail-open like `ensureFolder`: no tree means no match, and the create below still runs.
+      folder = findRootFolder(await this.tree().catch(() => []), "Initiatives");
+      pageId = folder && findPageByName(folder.children ?? [], args.title);
+    }
+    const isUpdate = !!pageId;
+    if (!pageId) {
+      const folderId = folder?.id ?? (await this.ensureFolder("Initiatives"));
       // Same subject scoping and budget as the seeded pages: an initiative page synthesizes from
       // the same bank, which also holds facts about the dependencies this repo merely uses, and
       // "the project's memory" alone never said WHICH project (#3476). `max_tokens` is stated for
@@ -1250,10 +1448,7 @@ export class HindsightClient {
       // the server's page default happens to be, which is only coincidentally PAGE_MAX_TOKENS.
       const r = await this.pagesReq("POST", "", {
         name: args.title,
-        source_query:
-          `Summarize the "${args.title}" initiative: what is being built or changed and why, ` +
-          `and its current state — drawn from the project's memory.` +
-          pageScopeRule(this.project),
+        source_query: initiativeQuery(args.title) + pageScopeRule(this.project, this.pageScope),
         parent_id: folderId,
         tags: ["knowledge:feature-work"],
         max_tokens: PAGE_MAX_TOKENS,
@@ -1269,13 +1464,18 @@ export class HindsightClient {
     }
     // "Update", not "Enhancement": a recapture is just as often a plan change (scope/goal/why
     // rewritten) as an addition, and this string is what the page synthesis reads.
-    const verb = args.relatesToPageId ? "Update to an existing initiative" : "New initiative";
-    const content = `${verb}: ${args.title}. ${args.summary}`;
+    // Each marker says where it stands in time, because the creation marker is kept for good and
+    // would otherwise read as the current plan long after a recapture replaced it (#7007).
+    const content = isUpdate
+      ? `Update to an existing initiative: ${args.title}. This is newer than the opening plan and ` +
+        `replaces it where they differ: ${args.summary}`
+      : `New initiative: ${args.title}. Its opening plan, as first approved (a later update ` +
+        `replaces it where they differ): ${args.summary}`;
     // A STABLE id per initiative, so a recapture upserts instead of adding one more document every
     // call (#5076). Keyed on the page, not the title — a recapture may reword it — and two slots:
     // the creation marker keeps what the initiative set out to do, the update marker holds the
     // latest plan change (a newer update supersedes the older one).
-    const markerId = `initiative-marker-${this.slugify(pageId)}${args.relatesToPageId ? "-update" : ""}`;
+    const markerId = `initiative-marker-${this.slugify(pageId)}${isUpdate ? "-update" : ""}`;
     const tags = [...new Set([...(args.stamp?.tags ?? []), "knowledge:feature-work"])];
     // The context rides on every fact extracted from this marker, verbatim (ExtractedFact.context),
     // so the Initiatives overview can link an initiative to its own page from what it retrieved.
@@ -1283,19 +1483,27 @@ export class HindsightClient {
     await this.retain(content, context, markerId, tags, "document", {
       metadata: { ...(args.stamp?.metadata ?? {}), relatedPageId: pageId },
     });
-    return { page_id: pageId };
+    if (!isUpdate) return { page_id: pageId, action: "created" };
+    return {
+      page_id: pageId,
+      action: "updated",
+      // Said only when the agent did not name the page, so it learns the id it lost (#6919).
+      ...(args.pageId
+        ? {}
+        : {
+            note:
+              `An initiative page titled "${args.title}" already existed, so this was recorded ` +
+              `as an update to it. Pass page_id="${pageId}" on later captures of this initiative.`,
+          }),
+    };
   }
 
   /** Find a root folder by name (case-insensitive) or create it; returns its id. Fail-open to undefined. */
   async ensureFolder(name: string): Promise<string | undefined> {
     try {
-      const r = await this.pagesReq("GET", "/tree");
-      const tree = (await r?.json()) as
-        | { roots?: { id?: string; kind?: string; name?: string }[] }
-        | undefined;
-      const hit = (tree?.roots || []).find(
-        (n) => n.kind === "folder" && (n.name || "").toLowerCase() === name.toLowerCase()
-      );
+      const r = await this.pagesReq("GET", TREE);
+      const tree = (await r?.json()) as { roots?: PageNode[] } | undefined;
+      const hit = findRootFolder(tree?.roots ?? [], name);
       if (hit?.id) return hit.id;
     } catch {
       /* fall through to create */

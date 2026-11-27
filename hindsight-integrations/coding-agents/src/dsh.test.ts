@@ -1,8 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { RuntimeCore } from "./core/runtime";
 import {
+  apply,
   createDshHooks,
+  readStoredSession,
   dshSessionEvents,
   ownEvents,
+  readPastSession,
   toDshParameters,
   type Workspace,
 } from "./dsh";
@@ -270,6 +274,28 @@ describe("dshSessionEvents (alpha.4+ transcript source)", () => {
     expect(dshSessionEvents(fork)).toHaveLength(3);
     expect(ownEvents({ snapshotEvents: () => sampleEvents })).toEqual(sampleEvents);
   });
+
+  it("reads a past session's own turns from the host store, and releases the handle (#6559)", async () => {
+    const childTurn = {
+      type: "user/message",
+      data: {
+        role: "user",
+        content: [{ type: "text", text: "after restart" }],
+        source: { kind: "user" },
+      },
+    };
+    const close = vi.fn(async () => {});
+    const open = vi.fn(async () => ({
+      inheritedEventCount: 2,
+      read: async () => ({ events: [...sampleEvents, childTurn] }),
+      close,
+    }));
+    expect(await readPastSession({ open }, "s-old")).toEqual([
+      { role: "user", content: "after restart" },
+    ]);
+    expect(open).toHaveBeenCalledWith("s-old", "read");
+    expect(close).toHaveBeenCalledOnce();
+  });
 });
 
 describe("toDshParameters", () => {
@@ -292,7 +318,7 @@ describe("toDshParameters", () => {
         spec({
           title: z.string(),
           summary: z.string().describe("what and why"),
-          relates_to_page_id: z.string().optional(),
+          page_id: z.string().optional(),
         })
       )
     ).toEqual({
@@ -300,7 +326,7 @@ describe("toDshParameters", () => {
       properties: {
         title: { type: "string" },
         summary: { type: "string", description: "what and why" },
-        relates_to_page_id: { type: "string" },
+        page_id: { type: "string" },
       },
       required: ["title", "summary"],
     });
@@ -318,5 +344,43 @@ describe("toDshParameters", () => {
     expect(() => toDshParameters(spec({ limit: z.number().optional() as never }))).toThrow(
       /string parameters only/
     );
+  });
+});
+
+// A session whose write-back failed before the app quit has no live agent after a restart: a
+// workspace core reads it back through the host's session store, while the host provides one.
+describe("apply: the host's session store (#6559)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("gives every workspace core the injected store, and drops it on dispose", async () => {
+    vi.stubEnv("HINDSIGHT_API_TOKEN", "test-key"); // Cloud without a token counts as disabled
+    const setPast = vi.spyOn(RuntimeCore.prototype, "setPastSessionSource");
+    const turn = {
+      type: "user/message",
+      data: { role: "user", content: [{ type: "text", text: "lost" }], source: { kind: "user" } },
+    };
+    const store = {
+      open: vi.fn(async () => ({ read: async () => ({ events: [turn] }), close: async () => {} })),
+    };
+    let dispose = () => {};
+    apply({
+      on: () => {},
+      inject: (names: string[], callback: (ctx: unknown) => void) =>
+        names[0] === "tools"
+          ? callback({ tools: { register: () => {} } }) // builds the launch directory's core
+          : callback({
+              sessionPersistence: store,
+              on: (_: string, l: () => void) => (dispose = l),
+            }),
+    } as never);
+
+    expect(setPast).toHaveBeenCalledWith(readStoredSession);
+    expect(await readStoredSession("s-old")).toEqual([{ role: "user", content: "lost" }]);
+    expect(store.open).toHaveBeenCalledWith("s-old", "read");
+    dispose();
+    expect(await readStoredSession("s-old")).toEqual([]);
   });
 });

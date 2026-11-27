@@ -113,6 +113,7 @@ function fakeCore(overrides: Partial<Record<string, unknown>> = {}) {
     onPrompt: vi.fn(async () => {}),
     getInjection: vi.fn(() => "<hindsight_memories>remember</hindsight_memories>"),
     onSessionIdle: vi.fn(async () => {}),
+    onCompacted: vi.fn(),
     ...overrides,
   };
   return core as unknown as RuntimeCore & typeof core;
@@ -132,21 +133,25 @@ describe("opencode2 adapter", () => {
     expect(typeof fake.tools[0].input?.parse).toBe("function");
   });
 
-  it("registers the packaged companion skill in the host's registry", async () => {
+  it("registers both packaged companion skills in the host's registry", async () => {
     // opencode2 owns no skills DIRECTORY (core/skill-dirs.ts), so the installer has nowhere to drop
     // a copy: without this registration an opencode2-only user gets the tools and no skill (#4352).
     const fake = fakeContext();
     await wireOpencode2Runtime(fakeCore(), fake.ctx);
-    expect(fake.skills).toHaveLength(1);
-    expect(fake.skills[0].id).toBe("hindsight-coding-agent");
-    expect(fake.skills[0].name).toBe("hindsight-coding-agent");
-    expect(fake.skills[0].path).toMatch(/skill[\\/]SKILL\.md$/);
-    // opencode v2 requires an absolute `path`; a draft without one disables the plugin (#4732).
-    expect(isAbsolute(fake.skills[0].path)).toBe(true);
-    expect(fake.skills[0].description).toContain("Hindsight");
-    expect(fake.skills[0].content).toContain("Hindsight Coding-Agent Memory");
-    // Frontmatter is split out, not handed to the host as part of the body.
-    expect(fake.skills[0].content.startsWith("---")).toBe(false);
+    expect(fake.skills.map((s) => s.id)).toEqual([
+      "hindsight-coding-agent",
+      "hindsight-coding-agent-setup",
+    ]);
+    for (const skill of fake.skills) {
+      expect(skill.name).toBe(skill.id);
+      expect(skill.path).toMatch(new RegExp(`skill[\\\\/]${skill.id}[\\\\/]SKILL\\.md$`));
+      // opencode v2 requires an absolute `path`; a draft without one disables the plugin (#4732).
+      expect(isAbsolute(skill.path)).toBe(true);
+      expect(skill.description).toContain("Hindsight");
+      expect(skill.content).toContain("Hindsight Coding-Agent Memory");
+      // Frontmatter is split out, not handed to the host as part of the body.
+      expect(skill.content.startsWith("---")).toBe(false);
+    }
   });
 
   it("keeps the session wired when the host rejects the skill", async () => {
@@ -231,6 +236,20 @@ describe("opencode2 adapter", () => {
       { type: "session.idle", data: {} } // no session id: skipped, must not throw
     );
     expect(core.onSessionIdle.mock.calls).toEqual([["ses_run"], ["ses_tui"]]);
+  });
+
+  it("resets its own sessions when a compaction ends, and no one else's (#6527)", async () => {
+    const fake = fakeContext();
+    const core = fakeCore();
+    await wireOpencode2Runtime(core, fake.ctx);
+    await fake.prompt()({ sessionID: "ses_mine", prompt: { text: "a" } });
+    await fake.emit(
+      { type: "session.compaction.started", data: { sessionID: "ses_mine" } },
+      { type: "session.compaction.ended", data: { sessionID: "ses_mine" } },
+      { type: "session.compaction.ended", data: { sessionID: "ses_other_project" } }
+    );
+    expect(core.onCompacted.mock.calls).toEqual([["ses_mine"]]);
+    expect(core.onSessionIdle).not.toHaveBeenCalled();
   });
 
   it("never writes back a session another project's plugin instance owns", async () => {

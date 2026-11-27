@@ -12,9 +12,20 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { INSTALLERS, MARKER, nodeCommand, parseJsonc, run, type InstallCtx } from "./installer";
+import {
+  importSkipOriginators,
+  INSTALLERS,
+  MARKER,
+  nodeCommand,
+  parseJsonc,
+  run,
+  type InstallCtx,
+} from "./installer";
+import { deriveBankIdOrSkip } from "./core/bank";
+import { claudeProjectDir } from "./core/history";
+import { resolveConfig } from "./core/config";
 import { TRAECODE_WORKSPACE_ENABLED_KEY } from "./core/traecode-mcp";
-import { SKILL_DIRS } from "./core/skill-dirs";
+import { SKILL_DIRS, SKILL_NAMES } from "./core/skill-dirs";
 import { parse as parseToml } from "smol-toml";
 import { HOOK_HARNESSES } from "./harness/hook-lifecycle";
 
@@ -166,6 +177,12 @@ describe("claude-code installer", () => {
 
   it("removes before adding so an existing registration is REPOINTED, not skipped", () => {
     const ctx = makeCtx();
+    // What `claude mcp add` left in ~/.claude.json from an install at an older package path.
+    writeJsonAt(join(ctx.home, ".claude.json"), {
+      mcpServers: {
+        hindsight: { command: "node", args: ["/old/hindsight-coding-agents/dist/mcp-server.js"] },
+      },
+    });
     run(["install", "claude-code"], ctx);
     const calls = ctx.claudeMcp.mock.calls.map((c) => c[0]);
     const removeAt = calls.findIndex((a) => a[1] === "remove");
@@ -212,6 +229,10 @@ describe("claude-code installer", () => {
     const foreign = { hooks: [{ type: "command", command: "echo other-tool", timeout: 5 }] };
     writeJsonAt(settingsPath(ctx), { hooks: { Stop: [foreign] } });
     run(["install", "claude-code"], ctx);
+    // The registration the real `claude mcp add` would have written.
+    writeJsonAt(join(ctx.home, ".claude.json"), {
+      mcpServers: { hindsight: { command: "node", args: [join(ctx.dist, "mcp-server.js")] } },
+    });
     run(["uninstall", "claude-code"], ctx);
     const settings = readJson(settingsPath(ctx));
     expect(settings.hooks.Stop).toEqual([foreign]);
@@ -243,7 +264,7 @@ describe("kimi-code installer", () => {
     const toml = readFileSync(join(ctx.home, ".kimi-code", "config.toml"), "utf8");
     const ours = toml.slice(toml.indexOf("# HINDSIGHT_CODING_AGENTS_KIMI_START"));
     const entries = hookEntries(ours);
-    expect(entries).toHaveLength(3);
+    expect(entries).toHaveLength(4);
     for (const e of entries) {
       expect(Object.keys(e).sort()).toEqual(["command", "event", "timeout"]);
     }
@@ -257,12 +278,13 @@ describe("kimi-code installer", () => {
     const toml = readFileSync(join(ctx.home, ".kimi-code", "config.toml"), "utf8");
     const ours = toml.slice(toml.indexOf("# HINDSIGHT_CODING_AGENTS_KIMI_START"));
     const got = hookEntries(ours).map((e) => [e.event, e.timeout]);
-    const want = Object.values(HOOK_HARNESSES["kimi-code"].install).map((h) => [
+    const spec = HOOK_HARNESSES["kimi-code"];
+    const want = [...Object.values(spec.install), ...(spec.additionalHooks ?? [])].map((h) => [
       h.event,
       h.timeout,
     ]);
     expect(got).toEqual(want);
-    expect(got.map((g) => g[1])).toEqual([30, 30, 60]);
+    expect(got.map((g) => g[1])).toEqual([30, 30, 60, 30]);
   });
 
   it("preserves a user's own hooks and does not duplicate ours on re-install", () => {
@@ -281,7 +303,8 @@ describe("kimi-code installer", () => {
   it("registers a stdio MCP server that needs no bearer-token env var", () => {
     // A hand-written http entry needs HINDSIGHT_API_KEY exported into Kimi's environment, or it
     // 401s and the tools never appear. Ours is the packaged stdio server, which reads endpoint and
-    // token from ~/.hindsight/coding-agent.json — and it overwrites such an entry.
+    // token from ~/.hindsight/coding-agent.json. A hand-written "hindsight" is the user's, so
+    // install refuses to overwrite it (#6958) and --mcp-name puts ours beside it.
     const ctx = makeCtx();
     const mcpPath = join(ctx.home, ".kimi-code", "mcp.json");
     mkdirSync(dirname(mcpPath), { recursive: true });
@@ -294,13 +317,18 @@ describe("kimi-code installer", () => {
         },
       })
     );
-    expect(run(["install", "kimi-code"], ctx)).toBe(0);
+    const before = readFileSync(mcpPath, "utf8");
+    expect(run(["install", "kimi-code"], ctx)).toBe(1);
+    expect(readFileSync(mcpPath, "utf8")).toBe(before);
+    expect(run(["install", "kimi-code", "--mcp-name", "hindsight-code"], ctx)).toBe(0);
     const mcp = JSON.parse(readFileSync(mcpPath, "utf8"));
     expect(mcp.mcpServers.theirs.url).toBe("http://keep-me");
-    expect(mcp.mcpServers.hindsight.command).toBe("node");
-    expect(mcp.mcpServers.hindsight.env.HINDSIGHT_MCP_HARNESS).toBe("kimi-code");
-    expect(mcp.mcpServers.hindsight.bearerTokenEnvVar).toBeUndefined();
-    expect(mcp.mcpServers.hindsight.url).toBeUndefined();
+    expect(mcp.mcpServers.hindsight.url).toBe("http://old");
+    const ours = mcp.mcpServers["hindsight-code"];
+    expect(ours.command).toBe("node");
+    expect(ours.env.HINDSIGHT_MCP_HARNESS).toBe("kimi-code");
+    expect(ours.bearerTokenEnvVar).toBeUndefined();
+    expect(ours.url).toBeUndefined();
   });
 
   it("honours KIMI_CODE_HOME, where the CLI and the transcript reader both look", () => {
@@ -310,7 +338,7 @@ describe("kimi-code installer", () => {
     process.env.KIMI_CODE_HOME = kimiHome;
     try {
       expect(run(["install", "kimi-code"], ctx)).toBe(0);
-      expect(hookEntries(readFileSync(join(kimiHome, "config.toml"), "utf8"))).toHaveLength(3);
+      expect(hookEntries(readFileSync(join(kimiHome, "config.toml"), "utf8"))).toHaveLength(4);
       expect(existsSync(join(kimiHome, "mcp.json"))).toBe(true);
       expect(existsSync(join(ctx.home, ".kimi-code", "config.toml"))).toBe(false);
     } finally {
@@ -378,9 +406,15 @@ describe("qwen-code installer", () => {
 
   it("registers the MCP server through the qwen CLI, user scope", () => {
     const ctx = makeCtx();
+    // A registration of ours from an older package path: repointed, so removed before the add.
+    writeJsonAt(join(ctx.home, ".qwen", "settings.json"), {
+      mcpServers: {
+        hindsight: { command: "node", args: ["/old/hindsight-coding-agents/dist/mcp-server.js"] },
+      },
+    });
     expect(run(["install", "qwen-code"], ctx)).toBe(0);
     const argv = ctx.qwenMcp.mock.calls.map((c) => c[0].join(" "));
-    expect(argv.some((a) => a.startsWith("mcp remove"))).toBe(true);
+    expect(argv).toContain("mcp remove -s user hindsight");
     expect(
       argv.some((a) => a.includes("mcp add") && a.includes("HINDSIGHT_MCP_HARNESS=qwen-code"))
     ).toBe(true);
@@ -518,8 +552,11 @@ describe("factory-droid installer", () => {
     // in a real temp package root like the skills-sync family test does.
     const pkgRoot = mkdtempSync(join(tmpdir(), "hs-pkg-droidskill-"));
     homes.push(pkgRoot);
-    mkdirSync(join(pkgRoot, "skill"), { recursive: true });
-    writeFileSync(join(pkgRoot, "skill", "SKILL.md"), "packaged skill body");
+    mkdirSync(join(pkgRoot, "skill", "hindsight-coding-agent"), { recursive: true });
+    writeFileSync(
+      join(pkgRoot, "skill", "hindsight-coding-agent", "SKILL.md"),
+      "packaged skill body"
+    );
     const droidCtx: InstallCtx = { ...ctx, pkgRoot, dist: join(pkgRoot, "dist") };
     expect(run(["install", "factory-droid"], droidCtx)).toBe(0);
     const skill = join(
@@ -680,8 +717,11 @@ describe("zcode installer", () => {
   const ctxWithPackagedSkill = (): InstallCtx => {
     const pkgRoot = mkdtempSync(join(tmpdir(), "hs-pkg-zcodeskill-"));
     homes.push(pkgRoot);
-    mkdirSync(join(pkgRoot, "skill"), { recursive: true });
-    writeFileSync(join(pkgRoot, "skill", "SKILL.md"), "packaged skill body");
+    mkdirSync(join(pkgRoot, "skill", "hindsight-coding-agent"), { recursive: true });
+    writeFileSync(
+      join(pkgRoot, "skill", "hindsight-coding-agent", "SKILL.md"),
+      "packaged skill body"
+    );
     return { ...makeCtx(), pkgRoot, dist: join(pkgRoot, "dist") };
   };
 
@@ -1159,8 +1199,11 @@ describe("traecode installer", () => {
   const ctxWithPackagedSkill = (): InstallCtx => {
     const pkgRoot = mkdtempSync(join(tmpdir(), "hs-pkg-traecodeskill-"));
     homes.push(pkgRoot);
-    mkdirSync(join(pkgRoot, "skill"), { recursive: true });
-    writeFileSync(join(pkgRoot, "skill", "SKILL.md"), "packaged skill body");
+    mkdirSync(join(pkgRoot, "skill", "hindsight-coding-agent"), { recursive: true });
+    writeFileSync(
+      join(pkgRoot, "skill", "hindsight-coding-agent", "SKILL.md"),
+      "packaged skill body"
+    );
     return { ...makeCtx(), pkgRoot, dist: join(pkgRoot, "dist") };
   };
 
@@ -2038,9 +2081,9 @@ describe("pi-family companion skill", () => {
     homes.push(home);
     const pkgRoot = mkdtempSync(join(tmpdir(), "hs-pkg-"));
     homes.push(pkgRoot);
-    mkdirSync(join(pkgRoot, "skill"), { recursive: true });
+    mkdirSync(join(pkgRoot, "skill", "hindsight-coding-agent"), { recursive: true });
     writeFileSync(
-      join(pkgRoot, "skill", "SKILL.md"),
+      join(pkgRoot, "skill", "hindsight-coding-agent", "SKILL.md"),
       "---\nname: hindsight-coding-agent\n---\nbody"
     );
     return { home, pkgRoot, dist: join(pkgRoot, "dist"), claudeMcp: vi.fn(() => true) };
@@ -2053,8 +2096,17 @@ describe("pi-family companion skill", () => {
       const base = join(ctx.home, ...dir);
       run(["install", harness], ctx);
       expect(existsSync(join(base, "hindsight-coding-agent", "SKILL.md"))).toBe(true);
+      // What a killed sync leaves behind goes too; a user's own look-alike backup does not.
+      for (const left of ["hindsight-coding-agent.tmp-99999", "hindsight-coding-agent.old-99999"]) {
+        mkdirSync(join(base, left));
+        writeFileSync(join(base, left, "SKILL.md"), "leftover");
+      }
+      mkdirSync(join(base, "hindsight-coding-agent.old-backup"));
       run(["uninstall", harness], ctx);
       expect(existsSync(join(base, "hindsight-coding-agent"))).toBe(false);
+      expect(existsSync(join(base, "hindsight-coding-agent.tmp-99999"))).toBe(false);
+      expect(existsSync(join(base, "hindsight-coding-agent.old-99999"))).toBe(false);
+      expect(existsSync(join(base, "hindsight-coding-agent.old-backup"))).toBe(true);
     }
   );
 
@@ -2136,7 +2188,7 @@ describe("cursor-cli installer", () => {
   const hooksPath = (ctx: InstallCtx) => join(ctx.home, ".cursor", "hooks.json");
   const mcpPath = (ctx: InstallCtx) => join(ctx.home, ".cursor", "mcp.json");
 
-  it("install writes sessionStart, beforeSubmitPrompt, and stop hooks plus the mcp.json server entry", () => {
+  it("install writes sessionStart, beforeSubmitPrompt, stop and preCompact hooks plus the mcp.json server entry", () => {
     const ctx = makeCtx();
     expect(run(["install", "cursor-cli"], ctx)).toBe(0);
     const cfg = readJson(hooksPath(ctx));
@@ -2151,6 +2203,9 @@ describe("cursor-cli installer", () => {
     expect(hooks.stop).toHaveLength(1);
     expect(hooks.stop[0].command).toContain(join(ctx.dist, "cursor-stop-hook.js"));
     expect(hooks.stop[0].timeout).toBe(30);
+    // A compaction resets the session through the SessionStart entry (#6527).
+    expect(hooks.preCompact).toHaveLength(1);
+    expect(hooks.preCompact[0].command).toContain(join(ctx.dist, "cursor-sessionstart-hook.js"));
     const mcp = readJson(mcpPath(ctx));
     expect(mcp.mcpServers.hindsight).toEqual({
       command: "node",
@@ -2275,7 +2330,7 @@ describe("grok-build installer", () => {
   it("replaces an unmarked legacy block instead of duplicating the TOML tables", () => {
     const ctx = makeCtx();
     mkdirSync(dirname(configPath(ctx)), { recursive: true });
-    writeFileSync(configPath(ctx), legacyToml(join("/opt", MARKER, "old-dist")));
+    writeFileSync(configPath(ctx), legacyToml(join("/old", MARKER, "dist")));
     expect(run(["install", "grok-build"], ctx)).toBe(0);
 
     const toml = readFileSync(configPath(ctx), "utf8");
@@ -2284,7 +2339,7 @@ describe("grok-build installer", () => {
     expect(Object.keys(parsed.mcp_servers)).toEqual(["hindsight"]);
     expect(toml.match(/\[mcp_servers\.hindsight\]/g)).toHaveLength(1);
     expect(parsed).not.toHaveProperty("hooks");
-    expect(toml).not.toContain(join("/opt", MARKER, "old-dist"));
+    expect(toml).not.toContain(join("/old", MARKER, "dist"));
     expect(toml).toContain(join(ctx.dist, "mcp-server.js"));
     expect(toml).toContain('[ui]\ntheme = "dark"'); // foreign config preserved
   });
@@ -2294,7 +2349,7 @@ describe("grok-build installer", () => {
     mkdirSync(dirname(configPath(ctx)), { recursive: true });
     writeFileSync(
       configPath(ctx),
-      `${legacyToml(join("/opt", MARKER, "old-dist"))}\n` +
+      `${legacyToml(join("/old", MARKER, "dist"))}\n` +
         `[mcp_servers.other]\ncommand = "other-server"\n\n` +
         `[[hooks.Stop]]\n  [[hooks.Stop.hooks]]\n  type = "command"\n  command = "my-own-script"\n`
     );
@@ -2314,7 +2369,7 @@ describe("grok-build installer", () => {
   it("repairs a config already broken by a duplicated block", () => {
     const ctx = makeCtx();
     mkdirSync(dirname(configPath(ctx)), { recursive: true });
-    const legacy = legacyToml(join("/opt", MARKER, "old-dist"));
+    const legacy = legacyToml(join("/old", MARKER, "dist"));
     writeFileSync(configPath(ctx), legacy);
     run(["install", "grok-build"], ctx);
     // Re-create the pre-fix damage: the marked block appended on top of the untouched legacy one.
@@ -2335,7 +2390,7 @@ describe("grok-build installer", () => {
   it("uninstall removes an unmarked legacy block too", () => {
     const ctx = makeCtx();
     mkdirSync(dirname(configPath(ctx)), { recursive: true });
-    writeFileSync(configPath(ctx), legacyToml(join("/opt", MARKER, "old-dist")));
+    writeFileSync(configPath(ctx), legacyToml(join("/old", MARKER, "dist")));
     run(["uninstall", "grok-build"], ctx);
 
     const toml = readFileSync(configPath(ctx), "utf8");
@@ -2348,7 +2403,7 @@ describe("grok-build installer", () => {
   it("moves the hooks a previous release kept in its marked block", () => {
     const ctx = makeCtx();
     mkdirSync(dirname(configPath(ctx)), { recursive: true });
-    const old = join("/opt", MARKER, "old-dist");
+    const old = join("/old", MARKER, "dist");
     writeFileSync(
       configPath(ctx),
       '[ui]\ntheme = "dark"\n\n# HINDSIGHT_CODING_AGENTS_GROK_START\n' +
@@ -2776,8 +2831,8 @@ describe("runtime staging", () => {
     writeFileSync(join(dist, "installer.js"), "// built");
     writeFileSync(join(dist, "claude-hook.js"), "// built");
     writeFileSync(join(root, "package.json"), JSON.stringify({ name: "x", main: "dist/index.js" }));
-    mkdirSync(join(root, "skill"), { recursive: true });
-    writeFileSync(join(root, "skill", "SKILL.md"), "# skill");
+    mkdirSync(join(root, "skill", "hindsight-coding-agent"), { recursive: true });
+    writeFileSync(join(root, "skill", "hindsight-coding-agent", "SKILL.md"), "# skill");
     return { pkgRoot: root, dist };
   }
 
@@ -2820,7 +2875,7 @@ describe("runtime staging", () => {
     run(["install", "opencode"], ctx);
     const staged = join(ctx.home, ".hindsight", "coding-agents");
     expect(existsSync(join(staged, "package.json"))).toBe(true);
-    expect(existsSync(join(staged, "skill", "SKILL.md"))).toBe(true);
+    expect(existsSync(join(staged, "skill", "hindsight-coding-agent", "SKILL.md"))).toBe(true);
     const cfg = readJson(join(ctx.home, ".config", "opencode", "opencode.json"));
     expect(cfg.plugin).toContain(staged);
   });
@@ -2832,6 +2887,8 @@ describe("runtime staging", () => {
     homes.push(v1, v2);
     fakePackage(v1);
     writeFileSync(join(v1, "dist", "old-only.js"), "// dropped in the next version");
+    // The pre-#6749 flat skill: left staged, dcode (plugin.json "skills": "./skill") would load it.
+    writeFileSync(join(v1, "skill", "SKILL.md"), "# old flat skill");
     fakePackage(v2);
     writeFileSync(join(v2, "dist", "new-only.js"), "// added in the next version");
 
@@ -2844,6 +2901,9 @@ describe("runtime staging", () => {
     expect(existsSync(join(staged, "new-only.js"))).toBe(true);
     // Merging instead of replacing would leave an entry point a host config could still name.
     expect(existsSync(join(staged, "old-only.js"))).toBe(false);
+    const stagedSkill = join(ctx.home, ".hindsight", "coding-agents", "skill");
+    expect(existsSync(join(stagedSkill, "SKILL.md"))).toBe(false);
+    expect(existsSync(join(stagedSkill, "hindsight-coding-agent", "SKILL.md"))).toBe(true);
     const events = readJson(join(ctx.home, ".claude", "settings.json")).hooks.SessionStart;
     expect(events).toHaveLength(1);
   });
@@ -2934,9 +2994,9 @@ describe("skill install across skills-capable hosts", () => {
   it("copies the packaged skill for claude/codex(~/.agents)/antigravity/cursor/qwen/prime-agent and uninstall removes each", () => {
     const home = mkdtempSync(join(tmpdir(), "hs-inst-skill-"));
     const pkgRoot = mkdtempSync(join(tmpdir(), "hs-pkg-"));
-    mkdirSync(join(pkgRoot, "skill"), { recursive: true });
+    mkdirSync(join(pkgRoot, "skill", "hindsight-coding-agent"), { recursive: true });
     writeFileSync(
-      join(pkgRoot, "skill", "SKILL.md"),
+      join(pkgRoot, "skill", "hindsight-coding-agent", "SKILL.md"),
       "---\nname: hindsight-coding-agent\n---\nbody"
     );
     const ctx = {
@@ -2973,9 +3033,9 @@ describe("skill install across skills-capable hosts", () => {
   it("uninstalling prime-agent leaves the shared ~/.agents copy Codex installed", () => {
     const home = mkdtempSync(join(tmpdir(), "hs-inst-skill-"));
     const pkgRoot = mkdtempSync(join(tmpdir(), "hs-pkg-"));
-    mkdirSync(join(pkgRoot, "skill"), { recursive: true });
+    mkdirSync(join(pkgRoot, "skill", "hindsight-coding-agent"), { recursive: true });
     writeFileSync(
-      join(pkgRoot, "skill", "SKILL.md"),
+      join(pkgRoot, "skill", "hindsight-coding-agent", "SKILL.md"),
       "---\nname: hindsight-coding-agent\n---\nbody"
     );
     const ctx = {
@@ -3187,6 +3247,44 @@ describe("server setup", () => {
     expect(logs.join("\n")).toContain("--import-conversations");
   });
 
+  it("--import-conversations runs the import for the harness, so its harnesses.<name> settings apply (#6970)", () => {
+    // Without --harness, deepen loaded the config without `harnesses.<name>`: e.g. that harness's
+    // retainSessions:false still imported every past session.
+    const ctx = makeCtx();
+    const repo = mkdtempSync(join(tmpdir(), "hindsight-import-repo-"));
+    homes.push(repo);
+    const project = claudeProjectDir(repo, ctx.home);
+    mkdirSync(project, { recursive: true });
+    writeFileSync(
+      join(project, "s1.jsonl"),
+      [
+        { type: "user", cwd: repo, sessionId: "s1", message: { content: "hello" } },
+        { type: "assistant", cwd: repo, sessionId: "s1", message: { content: "hi" } },
+      ]
+        .map((l) => JSON.stringify(l))
+        .join("\n")
+    );
+    // A stand-in deepen that records the arguments it was started with.
+    const dist = mkdtempSync(join(tmpdir(), "hindsight-import-dist-"));
+    homes.push(dist);
+    const argvFile = join(dist, "argv.json");
+    writeFileSync(
+      join(dist, "deepen.js"),
+      `require("fs").writeFileSync(${JSON.stringify(argvFile)}, JSON.stringify(process.argv.slice(2)));`
+    );
+    ctx.dist = dist;
+    vi.stubEnv("HOME", ctx.home); // afterEach unstubs it
+    const cwd = vi.spyOn(process, "cwd").mockReturnValue(repo);
+    try {
+      expect(run(["install", "claude-code", "--import-conversations"], ctx)).toBe(0);
+    } finally {
+      cwd.mockRestore();
+    }
+    const argv: string[] = JSON.parse(readFileSync(argvFile, "utf8"));
+    expect(argv[argv.indexOf("--harness") + 1]).toBe("claude-code");
+    expect(argv[argv.indexOf("--repo") + 1]).toBe(repo);
+  });
+
   it("an explicit --server still overrides what the old plugin used", () => {
     const ctx = makeCtx();
     ctx.readLegacy = () => ({
@@ -3250,16 +3348,23 @@ describe("server setup", () => {
  * the skill actually landed, and require that the self-update refreshes that same copy.
  */
 describe("every installed companion skill is kept current by the session-start self-update", () => {
-  const SKILL_NAME = "hindsight-coding-agent";
+  const [SKILL_NAME] = SKILL_NAMES;
+
+  /** Both packaged skills, each a SKILL.md holding `body`. */
+  function packageSkills(root: string, body: string): void {
+    for (const name of SKILL_NAMES) {
+      mkdirSync(join(root, name), { recursive: true });
+      writeFileSync(join(root, name, "SKILL.md"), body);
+    }
+  }
 
   /** makeCtx's pkgRoot is a synthetic /opt path, so the packaged skill can't be staged in it.
-   *  Build a real temp package root holding a SKILL.md the installer can copy. */
+   *  Build a real temp package root holding the skills the installer can copy. */
   function ctxWithPackagedSkill(body: string): InstallCtx {
     const ctx = makeCtx();
     const pkgRoot = mkdtempSync(join(tmpdir(), "hs-pkg-skillsync-"));
     homes.push(pkgRoot);
-    mkdirSync(join(pkgRoot, "skill"), { recursive: true });
-    writeFileSync(join(pkgRoot, "skill", "SKILL.md"), body);
+    packageSkills(join(pkgRoot, "skill"), body);
     return { ...ctx, pkgRoot, dist: join(pkgRoot, "dist") };
   }
 
@@ -3295,13 +3400,18 @@ describe("every installed companion skill is kept current by the session-start s
         harness
       ).toEqual([SKILL_DIRS[harness]]);
 
-      // And the self-update must actually refresh THIS host's copy when the package moves on.
-      const installed = join(ctx.home, ...copies[0], "SKILL.md");
+      // Both skills land side by side, and the self-update must actually refresh THIS host's
+      // copies when the package moves on.
+      const base = join(ctx.home, ...SKILL_DIRS[harness]);
       const srcDir = mkdtempSync(join(tmpdir(), "hs-pkg-newer-"));
       homes.push(srcDir);
-      writeFileSync(join(srcDir, "SKILL.md"), "packaged v2");
+      packageSkills(srcDir, "packaged v2");
       syncCompanionSkill(harness, { home: ctx.home, srcDir });
-      expect(readFileSync(installed, "utf8"), harness).toBe("packaged v2");
+      for (const name of SKILL_NAMES) {
+        expect(readFileSync(join(base, name, "SKILL.md"), "utf8"), harness).toBe("packaged v2");
+      }
+      run(["uninstall", harness], ctx);
+      for (const name of SKILL_NAMES) expect(existsSync(join(base, name)), harness).toBe(false);
     }
     expect(withoutSkill.sort()).toEqual(NO_SKILL_MECHANISM);
   });
@@ -3311,5 +3421,18 @@ describe("nodeCommand", () => {
   it("quotes the script path only when it contains a space", () => {
     expect(nodeCommand("C:\\Users\\me\\dist\\hook.js")).toBe("node C:\\Users\\me\\dist\\hook.js");
     expect(nodeCommand("/Users/my name/dist/hook.js")).toBe('node "/Users/my name/dist/hook.js"');
+  });
+});
+
+describe("importSkipOriginators (#5507)", () => {
+  it("applies a banks.<id> section, as the Stop hook does", () => {
+    const repo = mkdtempSync(join(tmpdir(), "hs-import-skip-"));
+    const id = deriveBankIdOrSkip(resolveConfig(), repo, "codex");
+    expect(id).toBeTruthy();
+    const cfg = resolveConfig({ banks: { [id!]: { skipOriginators: ["Claude Code"] } } });
+    expect(importSkipOriginators(cfg, "codex", repo)).toEqual(["Claude Code"]);
+    const byPath = resolveConfig({ paths: { [repo]: { skipOriginators: ["Claude Code"] } } });
+    expect(importSkipOriginators(byPath, "codex", repo)).toEqual(["Claude Code"]);
+    expect(importSkipOriginators(resolveConfig(), "codex", repo)).toEqual([]);
   });
 });

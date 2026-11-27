@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { claudeProjectDir, importLocalHistory, piSessionDir } from "./history";
+import { setKeptToolInputs } from "./transcript-util";
 
 let home: string;
 afterEach(() => {
@@ -86,6 +87,27 @@ describe("local history import", () => {
     expect(JSON.stringify(r.sessions)).not.toContain("unrelated");
   });
 
+  it("keeps the replies a keepToolInputs rule names (#6481)", () => {
+    const h = newHome();
+    const repo = "/Users/x/dev/myrepo";
+    const dir = claudeProjectDir(repo, h);
+    mkdirSync(dir, { recursive: true });
+    const reply = JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [{ type: "tool_use", id: "t1", name: "reply", input: { text: "on it" } }],
+      },
+    });
+    writeFileSync(join(dir, "s1.jsonl"), `${claudeLine("user", "bump it", repo)}\n${reply}\n`);
+    setKeptToolInputs({ reply: "text" });
+    try {
+      const turns = importLocalHistory("claude-code", repo, h).sessions[0].turns;
+      expect(turns.map((t) => t.text)).toEqual(["bump it", "on it"]);
+    } finally {
+      setKeptToolInputs({});
+    }
+  });
+
   // Claude Code encodes EVERY non-alphanumeric character as `-`, not just `/` and `.`. Encoding
   // only the separators left whole repositories invisible to `--import-conversations`: the install
   // reported "no past sessions found on disk" while the transcripts sat there under the real name.
@@ -146,6 +168,22 @@ describe("local history import", () => {
     expect(r.sessions).toHaveLength(1);
     expect(JSON.stringify(r.sessions)).toContain("mine");
     expect(JSON.stringify(r.sessions)).not.toContain("theirs");
+  });
+
+  it("skips Codex rollouts whose originator is in skipOriginators (#5507)", () => {
+    const h = newHome();
+    const day = join(h, ".codex", "sessions", "2026", "08", "03");
+    mkdirSync(day, { recursive: true });
+    const rollout = (originator: string, text: string) =>
+      `${JSON.stringify({ type: "session_meta", payload: { id: text, cwd: "/repo/mine", originator } })}\n` +
+      `${JSON.stringify({ type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text }] } })}\n`;
+    writeFileSync(join(day, "delegated.jsonl"), rollout("Claude Code", "delegated"));
+    writeFileSync(join(day, "own.jsonl"), rollout("Codex Desktop", "own"));
+
+    const r = importLocalHistory("codex", "/repo/mine", h, undefined, ["Claude Code"]);
+    expect(JSON.stringify(r.sessions)).toContain("own");
+    expect(JSON.stringify(r.sessions)).not.toContain("delegated");
+    expect(importLocalHistory("codex", "/repo/mine", h).sessions).toHaveLength(2);
   });
 
   it("handles a session_meta header larger than one read chunk", () => {

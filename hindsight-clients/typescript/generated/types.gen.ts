@@ -7144,6 +7144,10 @@ export type RecallResult = {
    * Source Fact Ids
    */
   source_fact_ids?: Array<string> | null;
+  /**
+   * Proof Count
+   */
+  proof_count?: number | null;
   scores?: RecallScores | null;
   /**
    * Attachments
@@ -7864,6 +7868,58 @@ export type SourceFactsIncludeOptions = {
 };
 
 /**
+ * StatsSummaryResponse
+ *
+ * A bank's window summed up in the database: what a year-in-numbers view needs.
+ */
+export type StatsSummaryResponse = {
+  /**
+   * Bank Id
+   */
+  bank_id: string;
+  /**
+   * Start Date
+   */
+  start_date: string;
+  /**
+   * End Date
+   */
+  end_date: string;
+  /**
+   * Hours
+   *
+   * Memories per UTC hour by fact type, on mentioned_at (else created_at). Only hours that have memories, so a client can regroup them into its own time zone's days and hours.
+   */
+  hours?: Array<MemoryTimeseriesBucket>;
+  /**
+   * Documents
+   *
+   * Documents created in the window; null when the store can't say.
+   */
+  documents?: number | null;
+  /**
+   * Harnesses
+   *
+   * Those documents per coding agent (`harness:<id>` tag), most first; null when the store can't say.
+   */
+  harnesses?: Array<SummaryCount> | null;
+  /**
+   * Entities
+   *
+   * The entities most memories in the window mention, most first; null when the store can't say.
+   */
+  entities?: Array<SummaryCount> | null;
+  /**
+   * The window's observation backed by the most facts; null when there is none or the store can't say.
+   */
+  strongest_observation?: SummaryMemory | null;
+  /**
+   * The window's earliest memory; null when there is none or the store can't say.
+   */
+  first_memory?: SummaryMemory | null;
+};
+
+/**
  * StrategyPreview
  *
  * Preview of one strategy, aligned by position with the request.
@@ -7945,6 +8001,46 @@ export type StrategyScopePreview = {
    * Index of the strategy that actually applies to this scope (the first that claims it), or null when no strategy does and Default applies
    */
   handled_by: number | null;
+};
+
+/**
+ * SummaryCount
+ *
+ * A name and how often it appears in the window.
+ */
+export type SummaryCount = {
+  /**
+   * Name
+   */
+  name: string;
+  /**
+   * Count
+   */
+  count: number;
+};
+
+/**
+ * SummaryMemory
+ *
+ * One memory quoted by a stats summary.
+ */
+export type SummaryMemory = {
+  /**
+   * Text
+   */
+  text: string;
+  /**
+   * Time
+   *
+   * When it happened: mentioned_at, else created_at.
+   */
+  time: string;
+  /**
+   * Proof Count
+   *
+   * Facts backing it (observations only).
+   */
+  proof_count?: number | null;
 };
 
 /**
@@ -10343,6 +10439,59 @@ export type GetMemoriesTimeseriesResponses = {
 export type GetMemoriesTimeseriesResponse =
   GetMemoriesTimeseriesResponses[keyof GetMemoriesTimeseriesResponses];
 
+export type GetStatsSummaryData = {
+  body?: never;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+  };
+  query: {
+    /**
+     * Start Date
+     *
+     * ISO-8601, inclusive.
+     */
+    start_date: string;
+    /**
+     * End Date
+     *
+     * ISO-8601, exclusive.
+     */
+    end_date: string;
+  };
+  url: "/v1/default/banks/{bank_id}/stats/summary";
+};
+
+export type GetStatsSummaryErrors = {
+  /**
+   * The bank does not exist.
+   */
+  404: unknown;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetStatsSummaryError = GetStatsSummaryErrors[keyof GetStatsSummaryErrors];
+
+export type GetStatsSummaryResponses = {
+  /**
+   * Successful Response
+   */
+  200: StatsSummaryResponse;
+};
+
+export type GetStatsSummaryResponse = GetStatsSummaryResponses[keyof GetStatsSummaryResponses];
+
 export type ListEntitiesData = {
   body?: never;
   headers?: {
@@ -10676,9 +10825,9 @@ export type ListMentalModelsData = {
     /**
      * Detail
      *
-     * Detail level: 'metadata' (names/tags/staleness — the default), 'content' (adds content/config), 'full' (includes reflect_response). Content is opt-in: it is returned only when explicitly requested.
+     * Detail level: 'basic' (names/tags, no staleness — skips a scan of each model's memories), 'metadata' (names/tags/staleness — the default), 'content' (adds content/config), 'full' (includes reflect_response). Content is opt-in: it is returned only when explicitly requested.
      */
-    detail?: "metadata" | "content" | "full";
+    detail?: "basic" | "metadata" | "content" | "full";
     /**
      * Limit
      *
@@ -10826,9 +10975,9 @@ export type GetMentalModelData = {
     /**
      * Detail
      *
-     * Detail level: 'metadata' (names/tags only), 'content' (adds content/config), 'full' (includes reflect_response)
+     * Detail level: 'basic'/'metadata' (names/tags only), 'content' (adds content/config), 'full' (includes reflect_response and is_stale)
      */
-    detail?: "metadata" | "content" | "full";
+    detail?: "basic" | "metadata" | "content" | "full";
   };
   url: "/v1/default/banks/{bank_id}/mental-models/{mental_model_id}";
 };
@@ -11073,6 +11222,12 @@ export type GetKnowledgeBaseTreeData = {
   };
   query?: {
     /**
+     * Page Tree Detail
+     *
+     * Detail level: 'basic' (no staleness — skips a scan of each page's memories), 'metadata' (adds is_stale — the default).
+     */
+    detail?: "basic" | "metadata";
+    /**
      * Tags
      *
      * Only return pages carrying these tags (matched per `tags_match`, like recall).
@@ -11133,6 +11288,12 @@ export type GetPageTreeData = {
     bank_id: string;
   };
   query?: {
+    /**
+     * Page Tree Detail
+     *
+     * Detail level: 'basic' (no staleness — skips a scan of each page's memories), 'metadata' (adds is_stale — the default).
+     */
+    detail?: "basic" | "metadata";
     /**
      * Tags
      *

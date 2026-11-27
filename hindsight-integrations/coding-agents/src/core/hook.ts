@@ -54,6 +54,7 @@ import {
   type SessionCache,
 } from "./session-cache";
 import { appendJournalTurn, journalPath } from "./turn-journal";
+import { resolveRecallTags } from "./retain-stamp";
 
 export interface HookEventFields {
   prompt?: string;
@@ -94,7 +95,7 @@ export interface HookSpec {
 /** Minimal client shape `buildHookOutput` needs — `HindsightClient` satisfies it structurally. */
 interface HookClient {
   reflect(query: string, opts: { budget?: string; timeoutMs: number }): Promise<string>;
-  listPages(): Promise<unknown>;
+  listPages(opts?: { timeoutMs?: number }): Promise<unknown>;
   searchPages(
     query: string,
     opts?: { limit?: number; timeoutMs?: number }
@@ -250,9 +251,29 @@ export async function buildHookOutput(args: {
   color?: boolean;
 }): Promise<HookOutput> {
   const { harness, prompt, cfg, client, cacheFile } = args;
+  // What page search and recall search with: the first injectQueryMaxChars characters, counted in
+  // code points so a surrogate pair is never split. Their own bounds still apply on top, and
+  // reflect still gets the whole prompt as its goal. A long question let a CPU reranker spend the
+  // whole injectTimeoutMs, so no memory arrived (#5089).
+  const max = cfg.injectQueryMaxChars;
+  const query = max === undefined ? prompt : Array.from(prompt).slice(0, max).join("");
 
   const cached = readSessionCache(cacheFile);
   const turns = (cached.turns ?? 0) + 1;
+
+  // ── page roster (ids + titles only): refreshed on the cadence ────────
+  // Started HERE, alongside the auto-inject below, which it does not depend on, and bounded by
+  // injectTimeoutMs. Run after reflect with no limit, it pushed the hook past the host's 30s
+  // window, which then discarded the whole turn's output (#6167).
+  const cadence = cfg.pageRefreshEveryTurns;
+  const stale = !cached.pages || (cadence > 0 && turns - cached.pages.atTurn >= cadence);
+  const rosterT0 = Date.now();
+  const roster = stale
+    ? client
+        .listPages({ timeoutMs: cfg.injectTimeoutMs })
+        .then((raw) => ({ list: parsePageList(raw), ms: Date.now() - rosterT0 }))
+        .catch((e: unknown) => ({ error: e, ms: Date.now() - rosterT0 }))
+    : undefined;
 
   // ── auto-inject: once per session, on the first prompt ────────────────────────
   // cfg.autoInject picks the source: a reflect synthesis, a page search, or a recall of
@@ -292,7 +313,7 @@ export async function buildHookOutput(args: {
     reflectAttempts++;
     const got = await injectPages(
       harness,
-      prompt,
+      query,
       client,
       cfg.injectTimeoutMs,
       "inject_pages",
@@ -308,7 +329,7 @@ export async function buildHookOutput(args: {
     reflectAttempts++;
     const got = await injectRecall(
       harness,
-      prompt,
+      query,
       client,
       cfg.injectTimeoutMs,
       "inject_recall",
@@ -364,26 +385,23 @@ export async function buildHookOutput(args: {
         query: prompt.slice(0, 80),
       });
       if (e instanceof ReflectError && e.fallbackEligible) {
-        fallback = await reflectFallback(harness, prompt, client, cfg.injectTimeoutMs);
+        fallback = await reflectFallback(harness, query, client, cfg.injectTimeoutMs);
         // The fallback body is cached exactly like a reflect answer: injected once, not retried.
         if (fallback) reflectAnswer = fallback;
       }
     }
   }
 
-  // ── page roster (ids + titles only): refreshed on the cadence ────────
-  const cadence = cfg.pageRefreshEveryTurns;
-  const stale = !cached.pages || (cadence > 0 && turns - cached.pages.atTurn >= cadence);
   let pages = cached.pages?.list ?? [];
-  if (stale) {
-    const t0 = Date.now();
-    try {
-      pages = parsePageList(await client.listPages());
-      diag(harness, "pages_ok", { ms: Date.now() - t0, count: pages.length });
-    } catch (e) {
+  if (roster) {
+    const got = await roster;
+    if ("list" in got) {
+      pages = got.list;
+      diag(harness, "pages_ok", { ms: got.ms, count: pages.length });
+    } else {
       diag(harness, client.pagesSupported === false ? "pages_unavailable" : "pages_failed", {
-        ms: Date.now() - t0,
-        error: describeError(e),
+        ms: got.ms,
+        error: describeError(got.error),
       });
     }
   }
@@ -505,11 +523,20 @@ export async function runHook(
   const client = makeClient({
     apiUrl: cfg.apiUrl,
     apiToken: cfg.apiToken,
+    headers: cfg.apiHeaders,
     bank: bankId,
     maxParallelRetains: cfg.maxParallelRetains,
     observationScopes: cfg.observationScopes,
     pageSearchLimit: cfg.pageSearchLimit,
     recallOptions: cfg.recallOptions,
+    recallTags: resolveRecallTags(cfg.recallTags, {
+      directory: cwd,
+      sessionRoot,
+      harness: spec.harness,
+      bankId,
+      sessionId,
+    }),
+    recallTagsMatch: cfg.recallTagsMatch,
   });
   const cacheFile = sessionCacheFile(spec.harness, sessionId || "no-session");
 

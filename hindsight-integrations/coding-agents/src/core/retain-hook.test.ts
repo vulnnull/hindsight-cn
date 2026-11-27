@@ -8,6 +8,7 @@ import type { TransportTurn } from "./chat";
 import { type RawConfig, resolveConfig } from "./config";
 import type { HindsightClient } from "./hindsight";
 import { buildRetain, replayOrphanedSessions, runRetainHook } from "./retain-hook";
+import { HOOK_HARNESSES } from "../harness/hook-lifecycle";
 import { fingerprintTurns, memoryCursorStore, type RetainCursorStore } from "./retain-cursor";
 import { readClaudeTranscript } from "./transcript";
 import { readCodexTranscript } from "./transcript-codex";
@@ -32,7 +33,13 @@ vi.mock("./config", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./config")>();
   return {
     ...actual,
-    loadConfig: () => actual.resolveConfig({ apiToken: "test-key", ...rawConfig }),
+    // The asking harness's `harnesses.<name>` section layered on top, as the real loader does.
+    loadConfig: (o?: { harness?: string }) =>
+      actual.resolveConfig({
+        apiToken: "test-key",
+        ...rawConfig,
+        ...(o?.harness ? rawConfig.harnesses?.[o.harness] : undefined),
+      }),
   };
 });
 
@@ -295,6 +302,85 @@ describe("buildRetain", () => {
     ]);
   });
 
+  it("a Claude Code session continued under a new id writes back only its own turns (#6960)", async () => {
+    // Claude Code continues session A as B in a new file that starts with a byte-for-byte copy of
+    // A's file (A's ids kept, no requestSessionId). B's first write-back stored all of A again.
+    const line = (sid: string, type: string, content: string) =>
+      JSON.stringify({ type, sessionId: sid, message: { role: type, content } });
+    const retain = vi.fn().mockResolvedValue(undefined);
+    const args = {
+      harness: "claude-code",
+      cursors: memoryCursorStore(),
+      client: { retain, bank: "test-bank", supportsAppendRetain: async () => true },
+    };
+    const fileA = [
+      line("A", "user", "The Atlas connector is amber."),
+      line("A", "assistant", "Noted."),
+    ];
+    writeFileSync(file, fileA.join("\n"));
+    await buildRetain({ ...args, sessionId: "A", transcriptPath: file });
+
+    const fileB = join(root, "b.jsonl");
+    writeFileSync(
+      fileB,
+      [
+        ...fileA,
+        line("B", "user", "The Birch connector is violet."),
+        line("B", "assistant", "Ok."),
+      ].join("\n")
+    );
+    await buildRetain({ ...args, sessionId: "B", transcriptPath: fileB });
+
+    expect(retain).toHaveBeenCalledTimes(2);
+    expect(retain.mock.calls[1][2]).toBe("conversation:B");
+    const written = retain.mock.calls[1][0].split("\n").map((row: string) => JSON.parse(row));
+    // the first write of a document opens with its REF-ID header; then only B's own turns
+    expect(written.filter((t: { role: string }) => t.role !== "system")).toEqual([
+      { role: "user", content: "The Birch connector is violet." },
+      { role: "assistant", content: "Ok." },
+    ]);
+  });
+
+  it("a session already saved twice before #6960 is rewritten with only its own turns", async () => {
+    // A bank written by the old reader holds conversation:B with A's copied turns in it, and B's
+    // cursor counts them. The new reader yields fewer turns than that cursor, which reads as a
+    // rewritten file, so the next write-back REPLACES the document: the duplicates go away.
+    const line = (sid: string, type: string, content: string) =>
+      JSON.stringify({ type, sessionId: sid, message: { role: type, content } });
+    const retain = vi.fn().mockResolvedValue(undefined);
+    const args = {
+      harness: "claude-code",
+      sessionId: "B",
+      transcriptPath: file,
+      cursors: memoryCursorStore(),
+      client: { retain, bank: "test-bank", supportsAppendRetain: async () => true },
+    };
+    writeFileSync(
+      file,
+      [
+        line("A", "user", "The Atlas connector is amber."),
+        line("A", "assistant", "Noted."),
+        line("B", "user", "The Birch connector is violet."),
+        line("B", "assistant", "Ok."),
+      ].join("\n")
+    );
+    // the old behaviour: every line read as B's own
+    const oldReader = (path: string) =>
+      readFileSync(path, "utf8")
+        .split("\n")
+        .map((l) => JSON.parse(l))
+        .map((l) => ({ role: l.type, content: l.message.content }));
+    await buildRetain({ ...args, readTranscript: oldReader });
+    await buildRetain(args);
+
+    expect(retain).toHaveBeenCalledTimes(2);
+    expect(retain.mock.calls[1][5].updateMode).toBeUndefined(); // a replace, not an append
+    const written = retain.mock.calls[1][0].split("\n").map((row: string) => JSON.parse(row));
+    expect(written.filter((t: { role: string }) => t.role !== "system")).toEqual([
+      { role: "user", content: "The Birch connector is violet." },
+      { role: "assistant", content: "Ok." },
+    ]);
+  });
   it("appends a Codex continuation rollout instead of replacing the session document", async () => {
     // Same session_meta id, a NEW rollout file holding only the turns that come next (#4493): the
     // earlier turns live in the earlier file, so replacing would drop them from the document.
@@ -802,6 +888,7 @@ describe("replayOrphanedSessions (#6097)", () => {
       usageCursors: memoryUsageCursorStore(),
     });
     expect(cursors.read(sessionId)?.dirty).toBe(true);
+    return retain;
   };
 
   const replay = (
@@ -818,6 +905,36 @@ describe("replayOrphanedSessions (#6097)", () => {
       cursors,
       orphans: sessionIds.map((sessionId) => ({ sessionId, cursor: cursors.read(sessionId)! })),
     });
+
+  it("never writes an orphan whose originator is in skipOriginators (#5507)", async () => {
+    const cursors = memoryCursorStore();
+    await failedSession(cursors);
+    const client = stubClient();
+
+    await replayOrphanedSessions({
+      harness: "codex",
+      currentSessionId: "new",
+      cfg: resolveConfig({ apiToken: "test-key", skipOriginators: ["Claude Code"] }),
+      makeClient: () => client as unknown as HindsightClient,
+      originator: () => "Claude Code",
+      deadline: Date.now() + 60_000,
+      cursors,
+      orphans: [{ sessionId: "ended", cursor: cursors.read("ended")! }],
+    });
+
+    expect(client.retain).not.toHaveBeenCalled();
+  });
+
+  // The failed save may have reached the server and only its response been lost: the replay must
+  // go out as the SAME operation, or the server extracts the session twice (#6559).
+  it("replays a first save whose response was lost as the same operation", async () => {
+    const cursors = memoryCursorStore();
+    const lost = await failedSession(cursors);
+    const client = stubClient();
+    await replay(cursors, client);
+    const operationId = (call: unknown[]) => (call[5] as { operationId?: string }).operationId;
+    expect(operationId(client.retain.mock.calls[0])).toBe(operationId(lost.mock.calls[0]));
+  });
 
   it("writes the ended session's turns from a later session's Stop, with its own stamp", async () => {
     const cursors = memoryCursorStore();
@@ -882,6 +999,81 @@ describe("replayOrphanedSessions (#6097)", () => {
     await replay(cursors, client, ["a", "b"]);
     expect(client.retain).toHaveBeenCalledTimes(1);
     expect(cursors.read("a")?.dirty).toBe(true);
+  });
+
+  /** A persistent-plugin session owed a write (#6559): its cursor names no transcript file. */
+  describe("an orphan with no transcript file, read back from the host", () => {
+    const owed = (cursors: RetainCursorStore, sessionId: string) =>
+      cursors.write(sessionId, {
+        turns: 0,
+        fingerprint: "",
+        bank: "coding-agent::repo",
+        dirty: true,
+      });
+    const hostTurns = (id: string) => [
+      { role: "user", content: `asked in ${id}` },
+      { role: "assistant", content: "answered" },
+    ];
+    const replayFetched = (
+      cursors: RetainCursorStore,
+      client: ReturnType<typeof stubClient>,
+      sessionIds: string[],
+      extra: Partial<Parameters<typeof replayOrphanedSessions>[0]> = {}
+    ) =>
+      replayOrphanedSessions({
+        harness: "dsh",
+        currentSessionId: "new",
+        cfg: resolveConfig({ apiToken: "test-key" }),
+        makeClient: () => client as unknown as HindsightClient,
+        deadline: Date.now() + 60_000,
+        cursors,
+        orphans: sessionIds.map((sessionId) => ({ sessionId, cursor: cursors.read(sessionId)! })),
+        ...extra,
+      });
+
+    it("logs a session the host cannot return as unavailable, and still writes the next", async () => {
+      vi.stubEnv("HINDSIGHT_DIAG_FILE", join(root, "diag.log"));
+      const cursors = memoryCursorStore();
+      owed(cursors, "gone");
+      owed(cursors, "kept");
+      const client = stubClient();
+      await replayFetched(cursors, client, ["gone", "kept"], {
+        fetchTurns: async (id) => {
+          if (id === "gone") throw new Error("session not found");
+          return hostTurns(id);
+        },
+      });
+      expect(client.retain.mock.calls.map((c) => c[2])).toEqual(["conversation:kept"]);
+      expect(cursors.read("gone")?.dirty).toBe(true); // still owed
+      expect(cursors.read("kept")?.dirty).toBeFalsy();
+      const log = readFileSync(join(root, "diag.log"), "utf8");
+      expect(log).toContain("retain_replay_unavailable");
+      expect(log).not.toContain("retain_replay_failed");
+    });
+
+    it("skips it on a host with no way to read it back", async () => {
+      const cursors = memoryCursorStore();
+      owed(cursors, "gone");
+      const client = stubClient();
+      await replayFetched(cursors, client, ["gone"]);
+      expect(client.retain).not.toHaveBeenCalled();
+    });
+
+    // skipOriginators reads the originator out of a transcript FILE; a fetched session has none,
+    // so the filter does not apply to it (the hosts that fetch record no originator).
+    it("does not apply skipOriginators to it", async () => {
+      const cursors = memoryCursorStore();
+      owed(cursors, "kept");
+      const client = stubClient();
+      const originator = vi.fn(() => "Claude Code");
+      await replayFetched(cursors, client, ["kept"], {
+        cfg: resolveConfig({ apiToken: "test-key", skipOriginators: ["Claude Code"] }),
+        originator,
+        fetchTurns: async (id) => hostTurns(id),
+      });
+      expect(originator).not.toHaveBeenCalled();
+      expect(client.retain).toHaveBeenCalledOnce();
+    });
   });
 });
 
@@ -987,6 +1179,45 @@ describe("runRetainHook honors retainSessions", () => {
     const untouched = stubClient();
     await runRetainHook(spec, untouched.makeClient);
     expect(untouched.retain).toHaveBeenCalledTimes(1);
+  });
+
+  it("skipOriginators: a matching originator is not written back; any other is (#5507)", async () => {
+    rawConfig = { harnesses: { codex: { skipOriginators: ["Claude Code"] } } };
+    const codexSpec = { ...spec, harness: "codex" };
+    const skipped = stubClient();
+    await runRetainHook({ ...codexSpec, originator: () => "Claude Code" }, skipped.makeClient);
+    expect(skipped.retain).not.toHaveBeenCalled();
+    expect(skipped.makeClient).not.toHaveBeenCalled();
+    expect(readFileSync(join(root, "diag.log"), "utf8")).toContain("retain_skipped_originator");
+
+    const kept = stubClient();
+    await runRetainHook({ ...codexSpec, originator: () => "Codex Desktop" }, kept.makeClient);
+    expect(kept.retain).toHaveBeenCalledTimes(1);
+
+    const unknown = stubClient();
+    await runRetainHook({ ...codexSpec, originator: () => undefined }, unknown.makeClient);
+    expect(unknown.retain).toHaveBeenCalledTimes(1);
+  });
+
+  it("the real Codex spec reads the rollout's originator and skips a listed one (#5507)", async () => {
+    const rollout = (originator: string) =>
+      [
+        JSON.stringify({ type: "session_meta", payload: { id: "c1", cwd: root, originator } }),
+        message("user", "we use zod for validation"),
+        message("assistant", "noted"),
+      ].join("\n");
+    rawConfig = { harnesses: { codex: { skipOriginators: ["Claude Code"] } } };
+    const codex = HOOK_HARNESSES.codex.retain;
+
+    writeFileSync(file, rollout("Claude Code"));
+    const skipped = stubClient();
+    await runRetainHook(codex, skipped.makeClient);
+    expect(skipped.retain).not.toHaveBeenCalled();
+
+    writeFileSync(file, rollout("Codex Desktop"));
+    const kept = stubClient();
+    await runRetainHook(codex, kept.makeClient);
+    expect(kept.retain).toHaveBeenCalledTimes(1);
   });
 
   it("a banks.<id> override turns write-back back on under a global opt-out", async () => {

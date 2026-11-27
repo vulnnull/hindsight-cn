@@ -5,10 +5,11 @@
  * cannot silently drift between the runtime and installer.
  */
 import { runHook, type HookSpec } from "../core/hook";
+import { claimPromptMark } from "../core/session-cache";
 import { runRetainHook, type RetainHookSpec } from "../core/retain-hook";
 import { runSessionStartHook, type SessionStartHookSpec } from "../core/session-start";
 import { ensureTraecodeWorkspaceMcp } from "../core/traecode-mcp";
-import { readCodexTranscript } from "../core/transcript-codex";
+import { codexOriginator, readCodexTranscript } from "../core/transcript-codex";
 import { readCursorTranscript } from "../core/transcript-cursor";
 import {
   readAntigravityPromptTurn,
@@ -166,14 +167,19 @@ const antigravityCwd = (ev: Record<string, unknown>): string | undefined =>
 const antigravityPrompt: HookSpec = {
   harness: "antigravity-cli",
   requireCwd: true,
-  parse: (ev) => ({
-    // Antigravity's PreInvocation payload omits the prompt and fires before EVERY planner step in
-    // the agent loop (including after every tool call). Read the transcript's trailing record so
-    // only a genuine user submission returns a prompt and tool-result continuations are suppressed.
-    prompt: readAntigravityPromptTurn(ev.transcriptPath as string | undefined),
-    cwd: antigravityCwd(ev),
-    sessionId: ev.conversationId as string | undefined,
-  }),
+  parse: (ev) => {
+    // PreInvocation carries no prompt and fires before EVERY planner step, tool steps included.
+    // Recall the newest user message once: a follow-up sent mid-turn is picked up on the next
+    // step, and the steps after it stay silent (#6944).
+    // No claim without a workspace: runHook drops that event (requireCwd), and a claimed message
+    // would then never be recalled.
+    const sessionId = ev.conversationId as string | undefined;
+    const cwd = antigravityCwd(ev);
+    const turn = readAntigravityPromptTurn(ev.transcriptPath as string | undefined);
+    const fresh =
+      turn && sessionId && cwd && claimPromptMark("antigravity-cli", sessionId, turn.line);
+    return { prompt: fresh ? turn.prompt : undefined, cwd, sessionId };
+  },
   // `systemMessage` stays in the trajectory, so recall survives the turn's tool calls. agy
   // deprecated `ephemeralMessage`; on agy 1.5.4–1.5.9 it reached only the first model call (#6632).
   emit: (context) => ({
@@ -333,6 +339,7 @@ export const HOOK_HARNESSES: Record<HookHarnessName, HookHarnessSpec> = {
         cwd: ev.cwd as string | undefined,
       }),
       readTranscript: readCodexTranscript,
+      originator: codexOriginator,
     },
   },
   dcode: {
@@ -393,6 +400,9 @@ export const HOOK_HARNESSES: Record<HookHarnessName, HookHarnessSpec> = {
       prompt: { event: "beforeSubmitPrompt", entry: "cursor-hook.js" },
       stop: { event: "stop", entry: "cursor-stop-hook.js", timeout: 30 },
     },
+    // Cursor's sessionStart never fires after a compaction; its preCompact hook resets the session
+    // so the next prompt delivers memory again (#6527). See COMPACTION_EVENTS.
+    additionalHooks: [{ event: "preCompact", entry: "cursor-sessionstart-hook.js", timeout: 30 }],
     sessionStart: {
       harness: "cursor-cli",
       parse: (ev) => ({
@@ -717,6 +727,9 @@ export const HOOK_HARNESSES: Record<HookHarnessName, HookHarnessSpec> = {
       prompt: { event: "UserPromptSubmit", entry: "kimi-hook.js", timeout: 30 },
       stop: { event: "Stop", entry: "kimi-stop-hook.js", timeout: 60 },
     },
+    // Kimi's SessionStart is startup/resume only; PostCompact resets the session so the next
+    // prompt delivers memory again (#6527). See COMPACTION_EVENTS.
+    additionalHooks: [{ event: "PostCompact", entry: "kimi-sessionstart-hook.js", timeout: 30 }],
     sessionStart: {
       harness: "kimi-code",
       parse: (ev) => ({

@@ -700,6 +700,7 @@ from .embeddings import (
 )
 from .interface import BankConfigState, BankTemplateImportWrite, MemoryEngineInterface
 from .memories import sql_memories
+from .memories.base import StatsSummaryAggregates
 from .memories.base import watermark_may_postdate as _may_need_refresh
 from .page_markdown import EMPTY_PAGE_NOTICE
 from .schema import _is_oracle, fq_table
@@ -1959,6 +1960,21 @@ class MemoryTimeseriesBucketData:
         }
 
 
+# A year, leap or not: the stats summary returns one bucket per active hour, so the window is capped.
+_STATS_SUMMARY_MAX_WINDOW = timedelta(days=366)
+
+
+@dataclass
+class StatsSummaryData:
+    """A bank's window summed up (engine-side): per-hour counts plus the store's aggregates."""
+
+    bank_id: str
+    start_date: str
+    end_date: str
+    hours: list[MemoryTimeseriesBucketData]
+    aggregates: StatsSummaryAggregates
+
+
 @dataclass(frozen=True)
 class _ChunkSlot:
     """One rank position in a recall's chunk order: a fact's own chunk, or an observation.
@@ -3044,7 +3060,7 @@ class MemoryEngine(MemoryEngineInterface):
                                 Defaults to decision_model.decision_engine, the shared engine built
                                 from HINDSIGHT_API_DECISION_MODEL_*. Recall's reranker and consolidation
                                 triage are handed this same callable.
-            query_analyzer: Query analyzer implementation. If not provided, uses DateparserQueryAnalyzer.
+            query_analyzer: Query analyzer implementation. If not provided, uses HINDSIGHT_API_QUERY_ANALYZER (text2date by default).
             pool_min_size: Minimum number of connections in the pool. Defaults to HINDSIGHT_API_DB_POOL_MIN_SIZE.
             pool_max_size: Maximum number of connections in the pool. Defaults to HINDSIGHT_API_DB_POOL_MAX_SIZE.
             db_command_timeout: PostgreSQL command timeout in seconds. Defaults to HINDSIGHT_API_DB_COMMAND_TIMEOUT.
@@ -3161,9 +3177,9 @@ class MemoryEngine(MemoryEngineInterface):
         if query_analyzer is not None:
             self.query_analyzer = query_analyzer
         else:
-            from .query_analyzer import DateparserQueryAnalyzer
+            from .query_analyzer import create_query_analyzer
 
-            self.query_analyzer = DateparserQueryAnalyzer(languages=config.query_analyzer_languages)
+            self.query_analyzer = create_query_analyzer(config.query_analyzer, config.query_analyzer_languages)
 
         # Resolve each operation's effective per-request defaults: a per-op override
         # (``HINDSIGHT_API_RETAIN_LLM_TIMEOUT``, ``..._MAX_RETRIES``, ``..._INITIAL_BACKOFF``,
@@ -11565,6 +11581,9 @@ class MemoryEngine(MemoryEngineInterface):
                         chunk_id=r.chunk_id,
                         tags=r.tags,
                         source_fact_ids=source_fact_ids_by_obs.get(r.id) if request.include_source_facts else None,
+                        # The column defaults to 1 on raw facts too, where it counts nothing: only an
+                        # observation has sources, so only an observation reports how many (#6966).
+                        proof_count=r.proof_count if r.fact_type == "observation" else None,
                         scores=scores_by_id.get(r.id),
                         attachment_ids=r.attachment_ids,
                     )
@@ -17735,6 +17754,77 @@ class MemoryEngine(MemoryEngineInterface):
             "time_field": time_field,
             "buckets": [b.as_dict() for b in buckets],
         }
+
+    async def get_stats_summary(
+        self,
+        bank_id: str,
+        *,
+        start: datetime,
+        end: datetime,
+        request_context: "RequestContext",
+        entity_limit: int = 50,
+    ) -> StatsSummaryData:
+        """A bank's ``[start, end)`` summed up in the database.
+
+        Per-hour counts by fact type on UTC hours (only hours that have memories, so a
+        client can place them in its own time zone), plus the store's aggregates: the
+        window's documents and their coding agents, the most mentioned entities, the
+        strongest observation and the first memory. Tag-scoped callers only see what
+        their scope admits. The window is at most a (leap) year: hourly buckets grow with it.
+        """
+        await self._authenticate_tenant(request_context)
+        tag_scope = await self._authorize_bank_read(bank_id, BankReadOperation.GET_STATS_SUMMARY, request_context)
+        await self._require_bank_exists(bank_id)
+        if end <= start:
+            raise ValueError("end_date must be after start_date")
+        if end - start > _STATS_SUMMARY_MAX_WINDOW:
+            raise ValueError(f"The window can span at most {_STATS_SUMMARY_MAX_WINDOW.days} days")
+        from .memories import get_memories
+
+        async with self._store_read_conn(bank_id) as conn:
+            # The hours are the event-time timeseries: every store already answers it.
+            rows = await get_memories().memories_timeseries(
+                conn=conn,
+                fq_table=fq_table,
+                bank_id=bank_id,
+                time_field="mentioned_at",
+                trunc="hour",
+                since=start,
+                tag_groups=tag_scope,
+            )
+            aggregates = await get_memories().stats_summary(
+                conn=conn,
+                fq_table=fq_table,
+                bank_id=bank_id,
+                start=start,
+                end=end,
+                entity_limit=entity_limit,
+                tag_groups=tag_scope,
+            )
+
+        hours: dict[datetime, MemoryTimeseriesBucketData] = {}
+        for row in rows:
+            # Both dialects hand back the UTC hour; one of them without a zone.
+            when: datetime = row["bucket"]
+            bucket = when.replace(tzinfo=timezone.utc) if when.tzinfo is None else when.astimezone(timezone.utc)
+            # ponytail: the timeseries has no end, so a window in the past also reads up to now;
+            # give the store interface an end if past windows become common.
+            if bucket >= end:
+                continue
+            entry = hours.setdefault(bucket, MemoryTimeseriesBucketData(time=bucket.isoformat()))
+            if row["fact_type"] == "world":
+                entry.world += row["count"]
+            elif row["fact_type"] == "experience":
+                entry.experience += row["count"]
+            elif row["fact_type"] == "observation":
+                entry.observation += row["count"]
+        return StatsSummaryData(
+            bank_id=bank_id,
+            start_date=start.isoformat(),
+            end_date=end.isoformat(),
+            hours=[hours[k] for k in sorted(hours)],
+            aggregates=aggregates,
+        )
 
     async def get_entity(
         self,

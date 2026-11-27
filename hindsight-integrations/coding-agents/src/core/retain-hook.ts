@@ -76,6 +76,9 @@ export interface RetainHookSpec {
   readTranscript?: TranscriptReader;
   /** Harness-specific decoder for `lastAssistantMessage`. Defaults to identity. */
   readLastMessage?: LastMessageReader;
+  /** Which client started the session, read from the transcript — gates `skipOriginators`. Only
+   *  Codex records one (core/transcript-codex.ts). */
+  originator?(transcriptPath: string): string | undefined;
   /**
    * Hosts that expose no durable transcript retain from the plugin's OWN per-session journal
    * (core/turn-journal.ts) instead of a host file: the prompt hook has already appended the user
@@ -197,7 +200,9 @@ const ORPHAN_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000;
  * Stop reads it — a session that ended on a failure kept its last turns out of the bank forever.
  * Any later Stop of the same harness now picks it up: the transcript is re-read with this harness's
  * own reader and written exactly as that session's next Stop would have, through the same cursor,
- * so a write that did land collapses into its original operation server-side.
+ * so a write that did land collapses into its original operation server-side. The persistent-plugin
+ * runtime (core/runtime.ts) also runs it after each of its own successful saves, reading an orphan's
+ * turns back from the host through `fetchTurns`, since those sessions have no transcript file (#6559).
  *
  * ponytail: the idle window is the only guard against replaying a session that is still running in
  * another process; a session resumed at the very moment of a replay can race it. A per-session
@@ -209,8 +214,14 @@ export async function replayOrphanedSessions(args: {
   currentSessionId: string;
   /** Config before any bank override: each orphan is resolved against its OWN bank. */
   cfg: Config;
-  makeClient: (opts: ClientOpts) => RetainClient;
+  /** Defaults to a plain client: each orphan's bank is only known here. */
+  makeClient?: (opts: ClientOpts) => RetainClient;
   readTranscript?: TranscriptReader;
+  /** Reads back from the HOST an orphan whose cursor names no transcript file: the persistent-plugin
+   *  runtime holds its turns in memory (core/runtime.ts). Absent, such an orphan is skipped. */
+  fetchTurns?: (sessionId: string) => Promise<TransportTurn[]>;
+  /** The harness's originator reader: an orphan from a `skipOriginators` client stays unwritten. */
+  originator?: RetainHookSpec["originator"];
   deadline: number;
   /** Injectable for tests. */
   orphans?: OrphanedCursor[];
@@ -226,25 +237,37 @@ export async function replayOrphanedSessions(args: {
     if (sessionId === args.currentSessionId) continue;
     // Never start one that cannot finish before the host kills this process.
     if (Date.now() + REQUEST_BUDGET_MS > args.deadline) return;
+    // A cursor with no file is a persistent-plugin session: only its host can give its turns back.
     const transcriptPath = cursor.paths?.at(-1);
-    if (!transcriptPath || !existsSync(transcriptPath)) continue;
+    if (transcriptPath ? !existsSync(transcriptPath) : !args.fetchTurns) continue;
     // Resolved from the bank id alone: the ended session's working folder is not known here, so a
     // folder-scoped (`paths`) override does not apply — a `banks.<id>` section does.
     const { cfg, bankId } = applyBankConfig(args.cfg, cursor.bank);
     if (cfg.disabled || !cfg.retainSessions) continue;
+    if (transcriptPath && cfg.skipOriginators.length) {
+      const originator = args.originator?.(transcriptPath);
+      if (originator && cfg.skipOriginators.includes(originator)) continue;
+    }
     let turns: TransportTurn[];
     try {
       // Guarded: a reader can throw on a damaged file (see transcript-qwen.ts), and one bad old
       // transcript must neither reject this Stop hook nor stop the others from being replayed.
-      turns = readTranscript(transcriptPath);
+      turns = transcriptPath ? readTranscript(transcriptPath) : await args.fetchTurns!(sessionId);
     } catch (e) {
-      diag(harness, "retain_replay_failed", { error: describeError(e), session: sessionId });
+      // A host that no longer has the session (deleted, or another project's) is not a failed
+      // write: say so quietly. The cursor stays owed, so it is asked again — one cheap local read
+      // per save — until the age window drops it. ponytail: clear its owed flags if that shows up.
+      diag(harness, transcriptPath ? "retain_replay_failed" : "retain_replay_unavailable", {
+        error: describeError(e),
+        session: sessionId,
+      });
       continue;
     }
     if (!turns.length) continue;
-    const client = args.makeClient({
+    const client = (args.makeClient ?? ((o) => new HindsightClient(o)))({
       apiUrl: cfg.apiUrl,
       apiToken: cfg.apiToken,
+      headers: cfg.apiHeaders,
       bank: bankId,
       maxParallelRetains: cfg.maxParallelRetains,
       observationScopes: cfg.observationScopes,
@@ -325,8 +348,18 @@ export async function runRetainHook(
   // daemon start below: a session that writes nothing has no reason to bring a server up. It still
   // reads the transcript, because usage is recorded either way — it is a local file (#5391).
   let client: RetainClient | undefined;
+  const originator =
+    cfg.retainSessions && cfg.skipOriginators.length
+      ? spec.originator?.(transcriptPath)
+      : undefined;
   if (!cfg.retainSessions) {
     diag(spec.harness, "retain_disabled", { bank: bankId, session: sessionId });
+  } else if (originator && cfg.skipOriginators.includes(originator)) {
+    diag(spec.harness, "retain_skipped_originator", {
+      bank: bankId,
+      session: sessionId,
+      originator,
+    });
   } else {
     // Last chance to get the daemon up: this is the write path, and a session whose daemon never
     // started would otherwise lose its whole conversation. The Stop hook has the longest budget of
@@ -337,6 +370,7 @@ export async function runRetainHook(
     client = makeClient({
       apiUrl: cfg.apiUrl,
       apiToken: cfg.apiToken,
+      headers: cfg.apiHeaders,
       bank: bankId,
       maxParallelRetains: cfg.maxParallelRetains,
       observationScopes: cfg.observationScopes,
@@ -362,6 +396,9 @@ export async function runRetainHook(
     }),
   });
 
+  // No client means this Stop saves nothing (write-back off, or a skipped originator), so it
+  // deliberately starts no daemon just to retry other sessions' failed saves: the user's own next
+  // Stop, which does save, runs that retry.
   if (client)
     await replayOrphanedSessions({
       harness: spec.harness,
@@ -369,6 +406,7 @@ export async function runRetainHook(
       cfg: baseCfg,
       makeClient,
       readTranscript,
+      originator: spec.originator,
       deadline: hostDeadline,
     });
 }

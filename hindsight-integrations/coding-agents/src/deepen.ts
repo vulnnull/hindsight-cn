@@ -128,6 +128,7 @@ async function main() {
     const client = new HindsightClient({
       apiUrl: API_URL,
       apiToken: API_TOKEN,
+      headers: cfg.apiHeaders,
       bank: FINAL_BANK!,
       // Names the repository in every seeded page's query, so page synthesis can tell this
       // project's decisions from those of a dependency it merely discusses (#3476).
@@ -138,6 +139,7 @@ async function main() {
       // `banks.<id>.bank` rename below it can point many repos at one destination, so a renamed
       // bank is not this repo's either. Undefined gives the shared-bank scope (#4490).
       project: PAGE_PROJECT,
+      pageScope: cfg.pageScope,
       maxParallelRetains: cfg.maxParallelRetains,
       observationScopes: cfg.observationScopes,
       // Nobody waits on a background seed, and a 429 it gives up on is history missing from the
@@ -152,6 +154,8 @@ async function main() {
         harness: HARNESS,
         bankId: FINAL_BANK!,
         sessionId,
+        // Imported history: today's checkout is not where those sessions ran.
+        stampBranch: false,
       });
 
     await client.configureBank({

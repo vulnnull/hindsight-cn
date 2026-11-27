@@ -49,7 +49,7 @@ import { diag } from "../core/diag";
 import { RuntimeCore } from "../core/runtime";
 import type { ToolSpec } from "../core/page-tools";
 import { readOpencode2Messages, type Oc2Message } from "../core/transcript-opencode2";
-import { readPackagedSkill } from "../core/skill-sync";
+import { readPackagedSkills } from "../core/skill-sync";
 import { resolveProjectDirectory } from "./plugin-entry";
 
 /** The v2 SDK exports its plugin surface as a namespace (`export * as Plugin`), so the interface a
@@ -73,10 +73,6 @@ const IDLE_EVENTS = new Set([
   "session.execution.failed",
   "session.execution.interrupted",
 ]);
-
-/** The companion skill's directory name everywhere else (core/skill-dirs.ts), reused as the id and
- *  name this host registers it under so the two routes name the same skill. */
-const SKILL_ID = "hindsight-coding-agent";
 
 /** Structural subset of the v2 event envelope we act on. */
 interface Oc2Event {
@@ -115,7 +111,9 @@ function toOpencode2Tool(spec: ToolSpec) {
 }
 
 /**
- * Publish the packaged companion skill into this host's skill registry.
+ * Publish the packaged companion skills into this host's skill registry, each under its directory
+ * name everywhere else (core/skill-dirs.ts SKILL_NAMES) as id and name, so both routes name the
+ * same skills.
  *
  * Every other skills-capable host gets the skill as a COPY our installer drops in its skills
  * directory (core/skill-dirs.ts). opencode2 has none to drop into: it discovers `~/.claude/skills`
@@ -131,15 +129,13 @@ function toOpencode2Tool(spec: ToolSpec) {
  * carry every field the host requires.
  */
 async function registerCompanionSkill(ctx: Opencode2Context, harness: string): Promise<void> {
-  const skill = readPackagedSkill();
-  if (!skill) return;
-  try {
-    await ctx.skill.transform((draft) =>
-      draft.add({ id: SKILL_ID, name: SKILL_ID, ...skill } as never)
-    );
-    diag(harness, "skill_registered", { id: SKILL_ID });
-  } catch (e) {
-    diag(harness, "skill_register_failed", { error: describeError(e) });
+  for (const { name, ...skill } of readPackagedSkills()) {
+    try {
+      await ctx.skill.transform((draft) => draft.add({ id: name, name, ...skill } as never));
+      diag(harness, "skill_registered", { id: name });
+    } catch (e) {
+      diag(harness, "skill_register_failed", { id: name, error: describeError(e) });
+    }
   }
 }
 
@@ -219,9 +215,14 @@ export async function wireOpencode2Runtime(
   void (async () => {
     for await (const event of ctx.event.subscribe({ signal: events.signal })) {
       const e = event as Oc2Event;
-      if (!e.type || !IDLE_EVENTS.has(e.type)) continue;
       const sessionID = e.data?.sessionID;
       if (!sessionID || !ownSessions.has(sessionID)) continue;
+      // A compaction counts as a new session start (#6527): the next prompt delivers memory again.
+      if (e.type === "session.compaction.ended") {
+        core.onCompacted(sessionID);
+        continue;
+      }
+      if (!e.type || !IDLE_EVENTS.has(e.type)) continue;
       diag(harness, "idle_signal", { signal: e.type, session: sessionID });
       // Deliberately NOT awaited: a retain must never stall delivery of the next event.
       void core.onSessionIdle(sessionID);

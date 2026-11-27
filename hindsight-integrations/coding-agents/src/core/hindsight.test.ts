@@ -10,6 +10,7 @@ import {
   DEFAULT_MAX_PARALLEL_RETAINS,
   DEFAULT_OBSERVATION_SCOPES,
   HindsightClient,
+  isNoAnswerError,
   ReflectError,
   retryAfterMs,
 } from "./hindsight";
@@ -478,6 +479,19 @@ describe("HindsightClient credential refresh", () => {
     expect(ua).toMatch(/^hindsight-coding-agents\/\d+\.\d+\.\d+/);
   });
 
+  it("sends the configured extra headers, keeping its own Authorization (#6651)", async () => {
+    const { fetchMock } = server(() => "key");
+    await new HindsightClient({
+      apiUrl: "http://x",
+      bank: "b",
+      apiToken: "key",
+      headers: { "CF-Access-Client-Id": "id.access", authorization: "Bearer other" },
+    }).req("GET", "http://x/thing");
+    const sent = new Headers(fetchMock.mock.calls[0][1].headers);
+    expect(sent.get("CF-Access-Client-Id")).toBe("id.access");
+    expect(sent.get("Authorization")).toBe("Bearer key");
+  });
+
   it("recovers from a rotated credential without restarting the host", async () => {
     const { calls } = server(() => "new-key");
     let onDisk = "old-key";
@@ -618,7 +632,7 @@ describe("every memory write goes through the one call site that scopes it", () 
   });
 });
 
-describe("every client-building entrypoint forwards observationScopes", () => {
+describe("every client-building entrypoint forwards observationScopes and apiHeaders", () => {
   const SRC = fileURLToPath(new URL("..", import.meta.url));
 
   function sourceFiles(dir: string, prefix = ""): string[] {
@@ -637,6 +651,31 @@ describe("every client-building entrypoint forwards observationScopes", () => {
       // the constructor call itself is the injected default further up the file.
       const buildsClient = src.includes("new HindsightClient({") || src.includes("makeClient({");
       return buildsClient && !src.includes("observationScopes:");
+    });
+    expect(dropped).toEqual([]);
+  });
+
+  // recallTags is what keeps another repo's memories out of a shared bank's answers (#4226). A
+  // site that reads (it forwards recallOptions) but drops it answers from the whole bank.
+  it("has no reading client without the configured recallTags", () => {
+    const dropped = sourceFiles(SRC).filter((rel) => {
+      const src = readFileSync(join(SRC, rel), "utf8");
+      return (
+        src.includes("recallOptions: cfg.recallOptions") &&
+        !src.includes("recallTags: resolveRecallTags(")
+      );
+    });
+    expect(dropped).toEqual([]);
+  });
+
+  // A site that drops `headers` fails HARD for its user — behind Cloudflare Access every request
+  // from it is refused at the edge — but only on the one path that forgot (#6651).
+  it("has no client construction without the configured apiHeaders", () => {
+    const dropped = sourceFiles(SRC).filter((rel) => {
+      const src = readFileSync(join(SRC, rel), "utf8");
+      // A call opens its options on the same line; the doc comments that name it write `({...})`.
+      const builds = (src.match(/(new HindsightClient|makeClient)\(\{\n/g) ?? []).length;
+      return builds > 0 && (src.match(/headers: cfg\.apiHeaders/g) ?? []).length < builds;
     });
     expect(dropped).toEqual([]);
   });
@@ -779,6 +818,70 @@ describe("HindsightClient.recallObservations", () => {
     });
   });
 
+  it("sends recallTags on recall and reflect, over a tags in recallOptions (#4226)", async () => {
+    const fetchMock = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) =>
+      jsonResponse(200, { text: "a", results: [] })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new HindsightClient({
+      apiUrl: "http://x",
+      bank: "b",
+      recallOptions: { tags: ["other"] },
+      recallTags: ["project:app"],
+      recallTagsMatch: "any_strict",
+    });
+    await client.recallObservations("goal", { timeoutMs: 5_000 });
+    await client.reflect("goal", { timeoutMs: 5_000 });
+    for (const [, init] of fetchMock.mock.calls)
+      expect(JSON.parse(String(init?.body))).toMatchObject({
+        tags: ["project:app"],
+        tags_match: "any_strict",
+      });
+  });
+
+  it("sends no tag filter on reflect without recallTags", async () => {
+    const fetchMock = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) =>
+      jsonResponse(200, { text: "a" })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await new HindsightClient({ apiUrl: "http://x", bank: "b" }).reflect("goal", {
+      timeoutMs: 5_000,
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      query: "goal",
+      budget: "high",
+    });
+  });
+
+  it("follows an observation with how many facts back it, when the server sends the count (#5078)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(200, {
+          results: [
+            { text: "Deploys run from the release branch", proof_count: 4 },
+            { text: "A raw fact", proof_count: null },
+            // A server before #6966 sends no count: the line is exactly what it was.
+            { text: "From an older server" },
+          ],
+        })
+      )
+    );
+
+    const out = await new HindsightClient({ apiUrl: "http://x", bank: "b" }).recallObservations(
+      "goal",
+      {
+        timeoutMs: 5_000,
+      }
+    );
+
+    expect(out).toEqual([
+      "Deploys run from the release branch (sources: 4)",
+      "A raw fact",
+      "From an older server",
+    ]);
+  });
+
   it("asks for every fact type when recallOptions sets types to null", async () => {
     const fetchMock = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) =>
       jsonResponse(200, { results: [{ text: "only" }] })
@@ -910,5 +1013,60 @@ describe("HindsightClient rate-limit patience", () => {
     await settled;
     expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
     expect(fetchMock.mock.calls.length).toBeLessThan(6);
+  });
+});
+
+// #6167/#6553: the page list had no limit of its own, so a server that never answered held the
+// prompt hook for the full connect/request timeout.
+describe("HindsightClient.listPages timeout", () => {
+  it("gives up at its own limit against a server that never answers", async () => {
+    const server = createServer(() => {}); // accepts, never responds
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    try {
+      const { port } = server.address() as AddressInfo;
+      const client = new HindsightClient({ apiUrl: `http://127.0.0.1:${port}`, bank: "b" });
+      const t0 = Date.now();
+      const err = await client.listPages({ timeoutMs: 200 }).catch((e: unknown) => e);
+      expect(Date.now() - t0).toBeLessThan(2000);
+      expect(isNoAnswerError(err)).toBe(true);
+    } finally {
+      server.closeAllConnections();
+      await new Promise((r) => server.close(r));
+    }
+  });
+
+  it("caps the connect wait at the request's own deadline, at most 5s", async () => {
+    const server = createServer((_q, res) => res.end("{}"));
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const original = getGlobalDispatcher();
+    // Named `Agent`, like Node's own: the client builds connect-capped siblings from its class.
+    const connectTimeouts: unknown[] = [];
+    class RecordingAgent extends Agent {
+      constructor(opts: { connect?: { timeout?: number } } = {}) {
+        super(opts);
+        connectTimeouts.push(opts.connect?.timeout);
+      }
+    }
+    Object.defineProperty(RecordingAgent, "name", { value: "Agent" });
+    setGlobalDispatcher(new RecordingAgent());
+    try {
+      const { port } = server.address() as AddressInfo;
+      const client = new HindsightClient({ apiUrl: `http://127.0.0.1:${port}`, bank: "b" });
+      await client.listPages({ timeoutMs: 1200 });
+      await client.listPages({ timeoutMs: 60_000 });
+      expect(connectTimeouts.slice(1)).toEqual([2000, 5000]);
+    } finally {
+      setGlobalDispatcher(original);
+      server.close();
+    }
+  });
+
+  it("an error answer is not a missing answer", () => {
+    expect(isNoAnswerError(new Error("GET http://h/x -> 500 boom"))).toBe(false);
+    expect(
+      isNoAnswerError(
+        Object.assign(new TypeError("fetch failed"), { cause: { code: "ENOTFOUND" } })
+      )
+    ).toBe(true);
   });
 });

@@ -762,6 +762,7 @@ class RecallResult(BaseModel):
     source_fact_ids: list[str] | None = (
         None  # IDs of source facts (observation type only, when source_facts is enabled)
     )
+    proof_count: int | None = None  # How many facts back this observation (observation type only)
     scores: RecallScores | None = None  # Per-stage recall scores (final/reranker/semantic/text)
     attachments: list["ChunkAttachment"] | None = Field(
         default=None,
@@ -3357,6 +3358,53 @@ class MemoriesTimeseriesResponse(BaseModel):
     )
 
 
+class SummaryCount(BaseModel):
+    """A name and how often it appears in the window."""
+
+    name: str
+    count: int
+
+
+class SummaryMemory(BaseModel):
+    """One memory quoted by a stats summary."""
+
+    text: str
+    time: datetime = Field(description="When it happened: mentioned_at, else created_at.")
+    proof_count: int | None = Field(default=None, description="Facts backing it (observations only).")
+
+
+class StatsSummaryResponse(BaseModel):
+    """A bank's window summed up in the database: what a year-in-numbers view needs."""
+
+    bank_id: str
+    start_date: str
+    end_date: str
+    hours: list[MemoryTimeseriesBucket] = Field(
+        default_factory=list,
+        description="Memories per UTC hour by fact type, on mentioned_at (else created_at). Only hours that "
+        "have memories, so a client can regroup them into its own time zone's days and hours.",
+    )
+    documents: int | None = Field(
+        default=None, description="Documents created in the window; null when the store can't say."
+    )
+    harnesses: list[SummaryCount] | None = Field(
+        default=None,
+        description="Those documents per coding agent (`harness:<id>` tag), most first; null when the store can't say.",
+    )
+    entities: list[SummaryCount] | None = Field(
+        default=None,
+        description="The entities most memories in the window mention, most first; null when the store can't say.",
+    )
+    strongest_observation: SummaryMemory | None = Field(
+        default=None,
+        description="The window's observation backed by the most facts; null when there is none or the store "
+        "can't say.",
+    )
+    first_memory: SummaryMemory | None = Field(
+        default=None, description="The window's earliest memory; null when there is none or the store can't say."
+    )
+
+
 # Mental Model models
 
 
@@ -5678,6 +5726,7 @@ def _register_routes(app: FastAPI):
                     chunk_id=fact.chunk_id,
                     tags=fact.tags,
                     source_fact_ids=fact.source_fact_ids,
+                    proof_count=fact.proof_count,
                     scores=fact.scores,
                 )
 
@@ -6140,6 +6189,61 @@ def _register_routes(app: FastAPI):
             raise _internal_error(e, f"/v1/default/banks/{bank_id}/stats/memories-timeseries")
 
     @app.get(
+        "/v1/default/banks/{bank_id}/stats/summary",
+        response_model=StatsSummaryResponse,
+        summary="Memories over a window, summed up",
+        description="Aggregates of a bank's memories and documents between two dates, computed in the database: "
+        "counts per UTC hour by fact type, documents and their coding agents, the most mentioned entities, "
+        "the strongest observation and the first memory. No memory list crosses the wire. Every answer but the "
+        "hours is optional: null when the memory store can't give it within bounded work.",
+        operation_id="get_stats_summary",
+        tags=["Banks"],
+        responses=_BANK_NOT_FOUND_RESPONSES,
+    )
+    async def api_stats_summary(
+        bank_id: str,
+        start_date: datetime = Query(description="ISO-8601, inclusive."),
+        end_date: datetime = Query(description="ISO-8601, exclusive."),
+        request_context: RequestContext = Depends(get_request_context),
+    ):
+        try:
+            data = await app.state.memory.get_stats_summary(
+                bank_id,
+                start=start_date if start_date.tzinfo else start_date.replace(tzinfo=timezone.utc),
+                end=end_date if end_date.tzinfo else end_date.replace(tzinfo=timezone.utc),
+                request_context=request_context,
+            )
+            agg = data.aggregates
+            strongest, first = agg.strongest_observation, agg.first_memory
+            return StatsSummaryResponse(
+                bank_id=data.bank_id,
+                start_date=data.start_date,
+                end_date=data.end_date,
+                hours=[MemoryTimeseriesBucket(**h.as_dict()) for h in data.hours],
+                documents=agg.documents,
+                harnesses=None
+                if agg.harnesses is None
+                else [SummaryCount(name=h.name, count=h.count) for h in agg.harnesses],
+                entities=None
+                if agg.entities is None
+                else [SummaryCount(name=e.name, count=e.count) for e in agg.entities],
+                strongest_observation=SummaryMemory(
+                    text=strongest.text, time=strongest.time, proof_count=strongest.proof_count
+                )
+                if strongest
+                else None,
+                first_memory=SummaryMemory(text=first.text, time=first.time) if first else None,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
+        except (AuthenticationError, HTTPException):
+            raise
+        except Exception as e:
+            raise _internal_error(e, f"/v1/default/banks/{bank_id}/stats/summary")
+
+    @app.get(
         "/v1/default/banks/{bank_id}/entities",
         response_model=EntityListResponse,
         summary="List entities",
@@ -6383,10 +6487,11 @@ def _register_routes(app: FastAPI):
         bank_id: str,
         tags_filter: list[str] | None = Query(None, alias="tags", description="Filter by tags"),
         tags_match: Literal["any", "all", "exact"] = Query("any", description="How to match tags"),
-        detail: Literal["metadata", "content", "full"] = Query(
+        detail: Literal["basic", "metadata", "content", "full"] = Query(
             "metadata",
             description=(
-                "Detail level: 'metadata' (names/tags/staleness — the default), "
+                "Detail level: 'basic' (names/tags, no staleness — skips a scan of each model's memories), "
+                "'metadata' (names/tags/staleness — the default), "
                 "'content' (adds content/config), 'full' (includes reflect_response). "
                 "Content is opt-in: it is returned only when explicitly requested."
             ),
@@ -6426,10 +6531,12 @@ def _register_routes(app: FastAPI):
                 bank_id=bank_id,
                 tags=tags_filter,
                 tags_match=tags_match,
-                detail=detail,
+                # 'basic' is 'metadata' minus is_stale: the staleness check scans every
+                # model's scope, which dominates the request on large banks (#6258).
+                detail="metadata" if detail == "basic" else detail,
                 limit=limit,
                 offset=offset,
-                with_staleness=True,
+                with_staleness=detail != "basic",
                 exclude_pages=exclude_pages or exclude_knowledge_pages,
                 request_context=request_context,
             )
@@ -6457,9 +6564,16 @@ def _register_routes(app: FastAPI):
     async def api_get_mental_model(
         bank_id: str,
         mental_model_id: str,
-        detail: Literal["metadata", "content", "full"] = Query(
+        # 'basic' is accepted so both mental-model endpoints share one detail enum:
+        # the Rust client names an inline query enum by its title, so two different
+        # value sets under "Detail" collapse into one type that rejects the other's
+        # values. A single read only checks staleness at 'full', so 'basic' == 'metadata'.
+        detail: Literal["basic", "metadata", "content", "full"] = Query(
             "full",
-            description="Detail level: 'metadata' (names/tags only), 'content' (adds content/config), 'full' (includes reflect_response)",
+            description=(
+                "Detail level: 'basic'/'metadata' (names/tags only), 'content' (adds content/config), "
+                "'full' (includes reflect_response and is_stale)"
+            ),
         ),
         request_context: RequestContext = Depends(get_request_context),
     ):
@@ -6468,7 +6582,7 @@ def _register_routes(app: FastAPI):
             mental_model = await app.state.memory.get_mental_model(
                 bank_id=bank_id,
                 mental_model_id=mental_model_id,
-                detail=detail,
+                detail="metadata" if detail == "basic" else detail,
                 request_context=request_context,
             )
             if mental_model is None:
@@ -6816,12 +6930,25 @@ def _register_routes(app: FastAPI):
     async def api_page_tree(
         bank_id: str,
         tag_filter: PageTagFilter = Depends(_page_tag_filter),
+        # Own title, so generated clients give it its own type rather than merging it
+        # with the mental-model endpoints' wider "Detail" enum.
+        detail: Literal["basic", "metadata"] = Query(
+            "metadata",
+            title="Page Tree Detail",
+            description=(
+                "Detail level: 'basic' (no staleness — skips a scan of each page's memories), "
+                "'metadata' (adds is_stale — the default)."
+            ),
+        ),
         request_context: RequestContext = Depends(get_request_context),
     ):
         """Return the folder/page tree for a bank."""
         try:
             nodes = await app.state.memory.list_page_nodes(
-                bank_id=bank_id, with_staleness=True, tag_filter=tag_filter, request_context=request_context
+                bank_id=bank_id,
+                with_staleness=detail != "basic",
+                tag_filter=tag_filter,
+                request_context=request_context,
             )
             return PageTreeResponse(roots=_build_page_tree(nodes))
         except OperationValidationError as e:

@@ -59,6 +59,9 @@ dependencies = [
     # 1.5.0: search_parse returns (text, date, period) and detection changed;
     # engine/temporal_language_detection.py mirrors that version (#6359).
     "dateparser>=1.5.0",
+    # Recall's default date finder (engine/query_analyzer.py Text2DateQueryAnalyzer): numpy only,
+    # the hs-date-1 model ships inside the wheel. HINDSIGHT_API_QUERY_ANALYZER=dateparser switches back.
+    "text2date>=0.1.0",
     # Transitive via dateparser, pinned here because the floor is load-bearing:
     # 2025.11.3 turns concurrent entry into dateparser's locale caches into a SIGSEGV
     # inside _regex (verified -- exit 139 in seconds, 3/3; the same probe on 2026.9.3
@@ -132,7 +135,7 @@ local-ml = [
     # runtime-dispatched outline-atomics helpers again. See issue #4142.
     "torch>=2.11.0",
     "torchvision>=0.26.0", # EmbeddingGemma 2 image/video processors (knowledge banks)
-    "av>=18.1.0", # PyAV (19 needs Python 3.12): knowledge banks cut and decode audio/video with its bundled ffmpeg libraries, no system ffmpeg
+    "av>=18.1.1", # PyAV (19 needs Python 3.12): knowledge banks cut and decode audio/video with its bundled ffmpeg libraries, no system ffmpeg
     "einops>=0.8.2",
     "flashrank>=0.2.0",
     # Apple Silicon local inference. mlx is Apple's Metal/unified-memory

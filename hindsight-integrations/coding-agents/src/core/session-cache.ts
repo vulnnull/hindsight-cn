@@ -76,6 +76,19 @@ export function writeSessionCache(cacheFile: string, cache: SessionCache): void 
   }
 }
 
+/**
+ * Forget what this session has been shown, as if it had just started (#6527). A compaction drops
+ * the injected memory and the page roster from the model's context, so the next prompt must
+ * deliver both again: with no cache file it is the session's first prompt once more.
+ */
+export function resetSessionCache(cacheFile: string): void {
+  try {
+    rmSync(cacheFile, { force: true });
+  } catch {
+    /* session state is best-effort */
+  }
+}
+
 /** Context a prompt hook could not deliver itself, waiting for the session's next tool hook (see
  *  HookSpec.toolHook). Its own file: `buildHookOutput` rewrites the session cache every turn. */
 function pendingContextFile(harness: string, sessionId: string): string {
@@ -113,6 +126,29 @@ export function takePendingContext(harness: string, sessionId: string): string |
   } finally {
     rmSync(claimed, { force: true });
   }
+}
+
+/**
+ * Claim a user message for recall: true only when `mark` (its transcript position) is past the last
+ * one claimed in this session. For a host whose prompt hook fires on every model step and carries no
+ * prompt (Antigravity), so a step recalls only a user message newer than the last one recalled (#6944).
+ * Its own file, like the pending context: `buildHookOutput` rewrites the session cache every turn.
+ */
+export function claimPromptMark(harness: string, sessionId: string, mark: number): boolean {
+  const path = join(tmpdir(), `hindsight-${harness}`, `${sessionId}.recalled`);
+  let last = -1;
+  try {
+    last = Number(readFileSync(path, "utf8"));
+  } catch {
+    /* nothing recalled yet this session */
+  }
+  if (Number.isFinite(last) && mark <= last) return false;
+  try {
+    writeFileAtomic(path, String(mark));
+  } catch {
+    /* best-effort: a lost mark costs one repeat recall, never a missed one */
+  }
+  return true;
 }
 
 /** The session root's own file, deliberately NOT the shared session cache — see sessionRootDir. */
@@ -241,9 +277,16 @@ export function orphanedCursors(
   return out.sort((a, b) => b.mtime - a.mtime).map((o) => o.found);
 }
 
+const cursorStores = new Map<string, RetainCursorStore>();
+
 /**
- * Retain cursor for the hook harnesses: Stop runs in a fresh process every time, so "what have I
- * already written" cannot live in memory.
+ * Retain cursor for every harness. A hook harness's Stop runs in a fresh process every time, so
+ * "what have I already written" cannot live in memory; a persistent-plugin host keeps it here too, so
+ * a write that failed before the host exited is still owed after it (#6559).
+ *
+ * ONE store per harness per process: core/chat.ts serializes a session's write-backs per store
+ * object, and dsh (a core per workspace) or a replay alongside a live save would otherwise hold two
+ * stores for one session's file and race on its document.
  *
  * It lives in its OWN file rather than a field of the session cache. It shared that file until now,
  * and the prompt hook — which writes a fresh `{turns, reflectAnswer, pages}` object rather than
@@ -257,6 +300,12 @@ export function orphanedCursors(
  * means the next retain replaces the whole document, exactly as it did before appends existed.
  */
 export function fileCursorStore(harness: string): RetainCursorStore {
+  let store = cursorStores.get(harness);
+  if (!store) cursorStores.set(harness, (store = newFileCursorStore(harness)));
+  return store;
+}
+
+function newFileCursorStore(harness: string): RetainCursorStore {
   return {
     read: (sessionId) => {
       try {
